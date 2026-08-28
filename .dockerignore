@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+planesgo
+pasigo
+*.exe
+*.test
+*.out
+.idea
+.vscode
+*.log
