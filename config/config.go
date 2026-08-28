@@ -1,37 +1,35 @@
 package config
 
 import (
-	"fmt"
 	"os"
+	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port int `json:"port"`
 }
 
 type OdooConfig struct {
-	URL      string `yaml:"url"`
-	DB       string `yaml:"db"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	Limit    int    `yaml:"limit"`
+	URL      string `json:"url"`
+	DB       string `json:"db"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Limit    int    `json:"limit"`
 }
 
 type GoogleAuthConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	ClientID      string `yaml:"client_id"`
-	ClientSecret  string `yaml:"client_secret"`
-	RedirectURL   string `yaml:"redirect_url"`
-	AllowedDomain string `yaml:"allowed_domain"` // Opcional: e.g. "planesnet.com"
+	Enabled       bool   `json:"enabled"`
+	ClientID      string `json:"client_id"`
+	ClientSecret  string `json:"client_secret"`
+	RedirectURL   string `json:"redirect_url"`
+	AllowedDomain string `json:"allowed_domain"` // e.g. "planesnet.com"
 }
 
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Odoo       OdooConfig       `yaml:"odoo"`
-	GoogleAuth GoogleAuthConfig `yaml:"google_auth"`
+	Server     ServerConfig     `json:"server"`
+	Odoo       OdooConfig       `json:"odoo"`
+	GoogleAuth GoogleAuthConfig `json:"google_auth"`
 }
 
 // LoadDotEnv lee un archivo .env si existe en la ruta actual y carga las variables en el entorno
@@ -77,33 +75,43 @@ func LoadDotEnv(filename ...string) {
 	}
 }
 
-// LoadConfig lee y valida el archivo de configuración YAML especificado.
-// Si el archivo no existe, utiliza valores por defecto, config.example.yml y variables de entorno / .env.
-func LoadConfig(filename string) (*Config, error) {
+// LoadConfig carga la configuración basándose estrictamente en variables de entorno del sistema y el archivo .env.
+func LoadConfig(envFile ...string) *Config {
 	// Cargar automáticamente .env si existe
-	LoadDotEnv()
+	LoadDotEnv(envFile...)
 
-	var cfg Config
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		// Si no existe filename (p. ej. en contenedor con solo env vars), intentar cargar config.example.yml
-		if exampleData, exErr := os.ReadFile("config.example.yml"); exErr == nil {
-			_ = yaml.Unmarshal(exampleData, &cfg)
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+		},
+		Odoo: OdooConfig{
+			URL:      "https://www.planesnet.com",
+			DB:       "pasi",
+			Username: "",
+			Password: "",
+			Limit:    200,
+		},
+		GoogleAuth: GoogleAuthConfig{
+			Enabled:       false,
+			ClientID:      "",
+			ClientSecret:  "",
+			RedirectURL:   "",
+			AllowedDomain: "planesnet.com",
+		},
+	}
+
+	// 1. Puerto del servidor
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+			cfg.Server.Port = p
 		}
-	} else {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("error al parsear el archivo YAML %s: %w", filename, err)
+	} else if portStr := os.Getenv("SERVER_PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+			cfg.Server.Port = p
 		}
 	}
 
-	// Valores por defecto para Server y Odoo
-	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
-	}
-	if cfg.Odoo.Limit <= 0 {
-		cfg.Odoo.Limit = 200
-	}
-
+	// 2. Parámetros de Odoo
 	if envOdooURL := os.Getenv("ODOO_URL"); envOdooURL != "" {
 		cfg.Odoo.URL = strings.TrimRight(envOdooURL, "/")
 	}
@@ -120,17 +128,13 @@ func LoadConfig(filename string) (*Config, error) {
 	} else if envOdooPass2 := os.Getenv("ODOO_PASS"); envOdooPass2 != "" {
 		cfg.Odoo.Password = envOdooPass2
 	}
-
-	if cfg.Odoo.URL == "" {
-		cfg.Odoo.URL = "https://www.planesnet.com"
-	}
-	if cfg.Odoo.DB == "" {
-		cfg.Odoo.DB = "pasi"
+	if limitStr := os.Getenv("ODOO_LIMIT"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			cfg.Odoo.Limit = l
+		}
 	}
 
-	cfg.Odoo.URL = strings.TrimRight(cfg.Odoo.URL, "/")
-
-	// Variables de entorno para Google Auth si están presentes
+	// 3. Google OAuth 2.0
 	if envClientID := os.Getenv("GOOGLE_CLIENT_ID"); envClientID != "" {
 		cfg.GoogleAuth.ClientID = envClientID
 	}
@@ -144,19 +148,14 @@ func LoadConfig(filename string) (*Config, error) {
 		cfg.GoogleAuth.AllowedDomain = envAllowedDomain
 	}
 
-	// Si hay ClientID configurado, activar por defecto
-	if cfg.GoogleAuth.ClientID != "" {
+	if cfg.GoogleAuth.ClientID != "" && cfg.GoogleAuth.ClientSecret != "" {
 		cfg.GoogleAuth.Enabled = true
 	}
 
-	if cfg.GoogleAuth.RedirectURL == "" {
-		cfg.GoogleAuth.RedirectURL = "http://localhost:8080/auth/google/callback"
-	}
-
-	return &cfg, nil
+	return cfg
 }
 
-// GetGoogleAuthCredentials retorna ClientID y ClientSecret dando prioridad absoluta a las variables de entorno del sistema o fichero .env.
+// GetGoogleAuthCredentials retorna ClientID y ClientSecret dando prioridad a variables de entorno / .env.
 func (c *Config) GetGoogleAuthCredentials() (string, string) {
 	LoadDotEnv()
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
@@ -174,18 +173,4 @@ func (c *Config) GetGoogleAuthCredentials() (string, string) {
 func (c *Config) IsGoogleConfigured() bool {
 	clientID, clientSecret := c.GetGoogleAuthCredentials()
 	return clientID != "" && clientSecret != ""
-}
-
-// SaveConfig guarda la configuración en el archivo YAML especificado.
-func SaveConfig(filename string, cfg *Config) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("error al serializar configuración a YAML: %w", err)
-	}
-
-	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Errorf("error al escribir el archivo %s: %w", filename, err)
-	}
-
-	return nil
 }

@@ -32,35 +32,33 @@ GOOGLE_CLIENT_SECRET='test-secret-env'
 	}
 }
 
-func TestGetGoogleAuthCredentialsPriority(t *testing.T) {
-	cfg := &Config{
-		GoogleAuth: GoogleAuthConfig{
-			ClientID:     "cfg-client-id",
-			ClientSecret: "cfg-secret",
-		},
+func TestLoadConfigFromEnv(t *testing.T) {
+	os.Setenv("PORT", "9090")
+	os.Setenv("ODOO_URL", "https://erp.test.com")
+	os.Setenv("ODOO_DB", "test_db")
+	os.Setenv("GOOGLE_CLIENT_ID", "g-client-123")
+	os.Setenv("GOOGLE_CLIENT_SECRET", "g-secret-456")
+
+	defer func() {
+		os.Unsetenv("PORT")
+		os.Unsetenv("ODOO_URL")
+		os.Unsetenv("ODOO_DB")
+		os.Unsetenv("GOOGLE_CLIENT_ID")
+		os.Unsetenv("GOOGLE_CLIENT_SECRET")
+	}()
+
+	cfg := LoadConfig()
+
+	if cfg.Server.Port != 9090 {
+		t.Errorf("Puerto esperado 9090, obtenido %d", cfg.Server.Port)
 	}
-
-	// 1. Con variables de entorno activas
-	os.Setenv("GOOGLE_CLIENT_ID", "env-client-id")
-	os.Setenv("GOOGLE_CLIENT_SECRET", "env-secret")
-
-	clientID, clientSecret := cfg.GetGoogleAuthCredentials()
-	if clientID != "env-client-id" || clientSecret != "env-secret" {
-		t.Errorf("Variables de entorno no tuvieron prioridad: id=%s, secret=%s", clientID, clientSecret)
+	if cfg.Odoo.URL != "https://erp.test.com" {
+		t.Errorf("Odoo URL esperada https://erp.test.com, obtenida %s", cfg.Odoo.URL)
 	}
-
-	// 2. Sin variables de entorno, usa config
-	os.Unsetenv("GOOGLE_CLIENT_ID")
-	os.Unsetenv("GOOGLE_CLIENT_SECRET")
-
-	clientID, clientSecret = cfg.GetGoogleAuthCredentials()
-	if clientID != "cfg-client-id" || clientSecret != "cfg-secret" {
-		t.Errorf("No cargó de config fallback: id=%s, secret=%s", clientID, clientSecret)
+	if cfg.Odoo.DB != "test_db" {
+		t.Errorf("Odoo DB esperada test_db, obtenida %s", cfg.Odoo.DB)
 	}
-
-	// 3. Variables vacías
-	cfgEmpty := &Config{}
-	if cfgEmpty.IsGoogleConfigured() {
-		t.Errorf("IsGoogleConfigured debería ser false para configuración vacía")
+	if !cfg.IsGoogleConfigured() {
+		t.Errorf("IsGoogleConfigured() debería ser true")
 	}
 }

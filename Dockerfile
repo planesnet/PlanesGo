@@ -31,10 +31,6 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
-COPY --from=builder /app/config.example.yml /app/config.example.yml
-
-# Si no existe config.yml, copiar la plantilla de ejemplo
-RUN cp /app/config.example.yml /app/config.yml
 
 # Permisos
 RUN chown -R appuser:appgroup /app
@@ -43,7 +39,7 @@ USER appuser
 # Puerto por defecto para el servicio
 EXPOSE 8080
 
-# Variables de entorno
+# Variables de entorno por defecto
 ENV PORT=8080
 
 # Comando de inicio

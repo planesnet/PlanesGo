@@ -41,9 +41,8 @@ type SessionData struct {
 }
 
 type AppState struct {
-	mu         sync.RWMutex
-	cfg        *config.Config
-	configPath string
+	mu  sync.RWMutex
+	cfg *config.Config
 }
 
 type PageData struct {
@@ -91,34 +90,19 @@ func decodeSession(cookieVal string) (*SessionData, error) {
 }
 
 func main() {
-	configPath := flag.String("config", "config.yml", "Ruta al archivo de configuración YAML")
+	portFlag := flag.Int("port", 0, "Puerto del servidor HTTP (opcional, sobrescribe PORT de entorno)")
 	flag.Parse()
 
 	log.Printf("Iniciando PlanesGo v%s - Odoo Timesheets & Projects...", Version)
 
-	// Cargar archivo de configuración
-	cfg, err := config.LoadConfig(*configPath)
-	if err != nil {
-		log.Printf("[ADVERTENCIA] No se pudo cargar %s: %v", *configPath, err)
-		cfg = &config.Config{
-			Server: config.ServerConfig{Port: 8080},
-			Odoo: config.OdooConfig{
-				URL:      DefaultOdooURL,
-				DB:       DefaultOdooDB,
-				Username: "",
-				Password: "",
-				Limit:    200,
-			},
-			GoogleAuth: config.GoogleAuthConfig{
-				Enabled:     false,
-				RedirectURL: "http://localhost:8080/auth/google/callback",
-			},
-		}
+	// Cargar configuración desde variables de entorno y .env
+	cfg := config.LoadConfig()
+	if *portFlag > 0 {
+		cfg.Server.Port = *portFlag
 	}
 
 	state := &AppState{
-		cfg:        cfg,
-		configPath: *configPath,
+		cfg: cfg,
 	}
 
 	// 0. Servir archivos estáticos (Logo corporativo, assets)
@@ -320,11 +304,6 @@ func main() {
 
 			state.mu.Lock()
 			state.cfg.Odoo = testCfg
-			if err := config.SaveConfig(state.configPath, state.cfg); err != nil {
-				log.Printf("[ADVERTENCIA] No se pudo actualizar %s: %v", state.configPath, err)
-			} else {
-				log.Printf("[CONFIG] Guardado último login en %s para %s", state.configPath, usernameInput)
-			}
 			state.mu.Unlock()
 
 			sess := SessionData{
@@ -636,11 +615,11 @@ func main() {
 	go func() {
 		log.Printf("=======================================================")
 		log.Printf(" Servidor PlanesGo v%s listo en: http://localhost:%d", Version, cfg.Server.Port)
-		log.Printf(" Archivo de configuración activo: %s", *configPath)
+		log.Printf(" Configuración: Variables de entorno del sistema / .env")
 		if cfg.GoogleAuth.ClientID != "" {
 			log.Printf(" Google OAuth 2.0: ACTIVO (Client ID: %s...)", cfg.GoogleAuth.ClientID[:min(len(cfg.GoogleAuth.ClientID), 12)])
 		} else {
-			log.Printf(" Google OAuth 2.0: Disponible (configurar en config.yml o variables de entorno)")
+			log.Printf(" Google OAuth 2.0: Inactivo (configurar GOOGLE_CLIENT_ID en .env o entorno)")
 		}
 		log.Printf("=======================================================")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
