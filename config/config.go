@@ -104,6 +104,23 @@ func LoadConfig(filename string) (*Config, error) {
 		cfg.Odoo.Limit = 200
 	}
 
+	if envOdooURL := os.Getenv("ODOO_URL"); envOdooURL != "" {
+		cfg.Odoo.URL = strings.TrimRight(envOdooURL, "/")
+	}
+	if envOdooDB := os.Getenv("ODOO_DB"); envOdooDB != "" {
+		cfg.Odoo.DB = envOdooDB
+	}
+	if envOdooUser := os.Getenv("ODOO_USER"); envOdooUser != "" {
+		cfg.Odoo.Username = envOdooUser
+	} else if envOdooUsername := os.Getenv("ODOO_USERNAME"); envOdooUsername != "" {
+		cfg.Odoo.Username = envOdooUsername
+	}
+	if envOdooPass := os.Getenv("ODOO_PASSWORD"); envOdooPass != "" {
+		cfg.Odoo.Password = envOdooPass
+	} else if envOdooPass2 := os.Getenv("ODOO_PASS"); envOdooPass2 != "" {
+		cfg.Odoo.Password = envOdooPass2
+	}
+
 	if cfg.Odoo.URL == "" {
 		cfg.Odoo.URL = "https://www.planesnet.com"
 	}

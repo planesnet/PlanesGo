@@ -77,3 +77,53 @@ func (t *TimesheetEntry) FormattedHours() string {
 	}
 	return fmt.Sprintf("%dh %02dm (%.2fh)", hours, minutes, t.UnitAmount)
 }
+
+// Project representa un proyecto definido en Odoo (project.project).
+type Project struct {
+	ID                int      `json:"id"`
+	Name              string   `json:"name"`
+	DisplayName       string   `json:"display_name"`
+	UserID            Many2One `json:"user_id"`            // Responsable del proyecto
+	PartnerID         Many2One `json:"partner_id"`         // Cliente o contacto asociado
+	TaskCount         int      `json:"task_count"`         // Cantidad de tareas
+	Active            bool     `json:"active"`             // Estado activo / archivado
+	PrivacyVisibility string   `json:"privacy_visibility"` // Visibilidad
+	TotalHours        float64  `json:"total_hours"`        // Horas totales registradas
+	TimesheetCount    int      `json:"timesheet_count"`    // Cantidad de partes de horas
+}
+
+func (p *Project) DisplayNameOrName() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if p.DisplayName != "" {
+		return p.DisplayName
+	}
+	if p.ID > 0 {
+		return fmt.Sprintf("Proyecto #%d", p.ID)
+	}
+	return "Sin nombre"
+}
+
+func (p *Project) DisplayManager() string {
+	if p.UserID.Name != "" {
+		return p.UserID.Name
+	}
+	return "Sin asignar"
+}
+
+func (p *Project) DisplayPartner() string {
+	if p.PartnerID.Name != "" {
+		return p.PartnerID.Name
+	}
+	return "-"
+}
+
+func (p *Project) FormattedTotalHours() string {
+	hours := int(p.TotalHours)
+	minutes := int((p.TotalHours - float64(hours)) * 60)
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh %02dm (%.2fh)", hours, minutes, p.TotalHours)
+}

@@ -185,3 +185,67 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 
 	return entries, nil
 }
+
+// GetProjects consulta los proyectos definidos en Odoo (project.project).
+func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Project, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return nil, fmt.Errorf("no se pudo autenticar antes de consultar proyectos: %w", err)
+		}
+	}
+
+	if domain == nil {
+		domain = []interface{}{}
+	}
+
+	fields := []string{
+		"id",
+		"name",
+		"display_name",
+		"user_id",
+		"partner_id",
+		"task_count",
+		"active",
+		"privacy_visibility",
+	}
+
+	kwargs := map[string]interface{}{
+		"fields": fields,
+		"order":  "name asc, id desc",
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"project.project",
+		"search_read",
+		[]interface{}{domain},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		// Reintento con autenticación si expiró la sesión
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		// Fallback con menos campos si algún campo opcional falló
+		if err != nil {
+			fallbackFields := []string{"id", "name", "display_name", "user_id", "partner_id", "active"}
+			kwargs["fields"] = fallbackFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error al obtener proyectos: %w", err)
+		}
+	}
+
+	var projects []Project
+	if err := json.Unmarshal(resultRaw, &projects); err != nil {
+		return nil, fmt.Errorf("error al parsear proyectos: %w", err)
+	}
+
+	return projects, nil
+}
+

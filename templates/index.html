@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Horas Trabajadas - PlanesGo</title>
+    <title>PlanesGo - Proyectos y Horas Odoo</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         .tabular-nums { font-variant-numeric: tabular-nums; }
@@ -27,7 +27,7 @@
                                 <span class="text-sm font-bold text-white tracking-tight">PlanesGo</span>
                                 <span class="text-[10px] font-semibold text-sky-400 bg-sky-950 px-2 py-0.5 rounded-full border border-sky-800/60">v{{.Version}}</span>
                             </div>
-                            <p class="text-[11px] text-slate-400 font-light">Visor de horas Odoo</p>
+                            <p class="text-[11px] text-slate-400 font-light">Proyectos y Horas Odoo</p>
                         </div>
                     </a>
                 </div>
@@ -55,7 +55,7 @@
                     </div>
 
                     <!-- Botón Recargar -->
-                    <a href="/" title="Recargar datos" class="p-2 text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60">
+                    <a href="/" title="Recargar datos de Odoo" class="p-2 text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
@@ -107,18 +107,37 @@
                 </div>
                 <div class="mt-2 flex items-baseline space-x-1">
                     <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-hours">{{printf "%.2f" .TotalHours}}</span>
-                    <span class="text-xs font-bold text-sky-600">horas</span>
+                    <span class="text-xs font-bold text-sky-600">h</span>
                 </div>
                 <div class="mt-1 flex items-center text-[11px] text-emerald-600 font-medium">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
-                    Calculado en vivo
+                    Calculado de partes
                 </div>
             </div>
 
-            <!-- Total Registros -->
+            <!-- Total Proyectos Odoo -->
+            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm hover:border-indigo-300 transition-all">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Proyectos Odoo</span>
+                    <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="mt-2 flex items-baseline space-x-1">
+                    <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-projects">{{if .Projects}}{{len .Projects}}{{else}}{{.UniqueProjectsCount}}{{end}}</span>
+                    <span class="text-xs font-medium text-indigo-600">en servidor</span>
+                </div>
+                <div class="mt-1 text-[11px] text-slate-500">
+                    {{.UniqueProjectsCount}} con partes de horas
+                </div>
+            </div>
+
+            <!-- Total Registros de Horas -->
             <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm hover:border-slate-300 transition-all">
                 <div class="flex items-center justify-between">
-                    <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Partes / Filas</span>
+                    <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Partes de Horas</span>
                     <div class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -127,33 +146,14 @@
                 </div>
                 <div class="mt-2 flex items-baseline space-x-1">
                     <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-entries">{{len .Entries}}</span>
-                    <span class="text-xs font-medium text-slate-400">ítems</span>
+                    <span class="text-xs font-medium text-slate-400">imputaciones</span>
                 </div>
                 <div class="mt-1 text-[11px] text-slate-400">
                     Límite máx: {{.Config.Odoo.Limit}}
                 </div>
             </div>
 
-            <!-- Proyectos -->
-            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm hover:border-slate-300 transition-all">
-                <div class="flex items-center justify-between">
-                    <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Proyectos</span>
-                    <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        </svg>
-                    </div>
-                </div>
-                <div class="mt-2 flex items-baseline space-x-1">
-                    <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-projects">{{.UniqueProjectsCount}}</span>
-                    <span class="text-xs font-medium text-slate-400">activos</span>
-                </div>
-                <div class="mt-1 text-[11px] text-slate-400">
-                    Con imputaciones
-                </div>
-            </div>
-
-            <!-- Empleados -->
+            <!-- Miembros del Equipo -->
             <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm hover:border-slate-300 transition-all">
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Miembros</span>
@@ -168,147 +168,315 @@
                     <span class="text-xs font-medium text-slate-400">usuarios</span>
                 </div>
                 <div class="mt-1 text-[11px] text-slate-400">
-                    Equipo registrado
+                    Equipo con actividad
                 </div>
             </div>
         </div>
 
-        <!-- Barra de Filtros Minimalista -->
-        <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-sm mb-5">
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-                <!-- Búsqueda rápida -->
-                <div class="relative">
-                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </span>
-                    <input type="text" id="filter-search" placeholder="Buscar descripción, tarea..."
-                           class="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all">
-                </div>
+        <!-- Selector de Pestañas (Tabs) -->
+        <div class="flex items-center space-x-2 border-b border-slate-200/80 mb-5">
+            <button id="tab-btn-timesheets" onclick="switchTab('timesheets')"
+                    class="tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-sky-600 border-b-2 border-sky-600 transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Partes de Horas</span>
+                <span class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-sky-100 text-sky-700">{{len .Entries}}</span>
+            </button>
 
-                <!-- Filtro Proyecto -->
-                <div>
-                    <select id="filter-project"
-                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
-                        <option value="">Todos los Proyectos</option>
-                        {{range .ProjectsList}}
-                        <option value="{{.}}">{{.}}</option>
-                        {{end}}
-                    </select>
-                </div>
-
-                <!-- Filtro Empleado -->
-                <div>
-                    <select id="filter-employee"
-                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
-                        <option value="">Todos los Miembros</option>
-                        {{range .EmployeesList}}
-                        <option value="{{.}}">{{.}}</option>
-                        {{end}}
-                    </select>
-                </div>
-
-                <!-- Botón Reset -->
-                <div class="flex items-center justify-end">
-                    <button id="btn-reset" class="w-full lg:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
-                        Limpiar Filtros
-                    </button>
-                </div>
-            </div>
+            <button id="tab-btn-projects" onclick="switchTab('projects')"
+                    class="tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-700 border-b-2 border-transparent transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <span>Proyectos Odoo</span>
+                <span class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-slate-100 text-slate-600">{{len .Projects}}</span>
+            </button>
         </div>
 
-        <!-- Tabla de Registros -->
-        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">
-                    <thead>
-                        <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                            <th class="py-3 px-4 sm:px-6">Fecha</th>
-                            <th class="py-3 px-4">Miembro</th>
-                            <th class="py-3 px-4">Proyecto</th>
-                            <th class="py-3 px-4">Tarea</th>
-                            <th class="py-3 px-4">Descripción</th>
-                            <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
-                        {{if .Entries}}
-                            {{range .Entries}}
-                            <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
-                                data-date="{{.Date}}"
-                                data-employee="{{.DisplayEmployee}}"
-                                data-project="{{.ProjectID.String}}"
-                                data-task="{{.TaskID.String}}"
-                                data-desc="{{.Name}}"
-                                data-hours="{{.UnitAmount}}">
-                                <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
-                                    <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
-                                </td>
-                                <td class="py-3 px-4 whitespace-nowrap">
-                                    <div class="flex items-center space-x-2">
-                                        <div class="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold text-[10px] flex items-center justify-center uppercase">
-                                            {{slice .DisplayEmployee 0 1}}
-                                        </div>
-                                        <span class="font-medium text-slate-800">{{.DisplayEmployee}}</span>
-                                    </div>
-                                </td>
-                                <td class="py-3 px-4 whitespace-nowrap">
-                                    {{if .ProjectID.Name}}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100">
-                                        {{.ProjectID.Name}}
-                                    </span>
-                                    {{else}}
-                                    <span class="text-slate-400 text-xs">-</span>
-                                    {{end}}
-                                </td>
-                                <td class="py-3 px-4 whitespace-nowrap">
-                                    {{if .TaskID.Name}}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                                        {{.TaskID.Name}}
-                                    </span>
-                                    {{else}}
-                                    <span class="text-slate-400 text-xs">-</span>
-                                    {{end}}
-                                </td>
-                                <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
-                                    {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
-                                </td>
-                                <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
-                                    <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
-                                        {{printf "%.2f" .UnitAmount}} h
-                                    </span>
-                                </td>
-                            </tr>
+        <!-- SECCIÓN 1: PARTES DE HORAS -->
+        <div id="view-timesheets" class="tab-view">
+            <!-- Barra de Filtros Minimalista -->
+            <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-sm mb-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                    <!-- Búsqueda rápida -->
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </span>
+                        <input type="text" id="filter-search" placeholder="Buscar descripción, tarea, proyecto..."
+                               class="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all">
+                    </div>
+
+                    <!-- Filtro Proyecto (Incluye todos los proyectos de Odoo) -->
+                    <div>
+                        <select id="filter-project"
+                                class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
+                            <option value="">Todos los Proyectos ({{len .ProjectsList}})</option>
+                            {{range .ProjectsList}}
+                            <option value="{{.}}">{{.}}</option>
                             {{end}}
-                        {{else}}
-                            <tr id="empty-row">
-                                <td colspan="6" class="py-12 text-center text-slate-400">
-                                    <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <p class="font-semibold text-slate-600">No se encontraron partes de horas registradas</p>
-                                    <p class="text-xs text-slate-400 mt-1">Verifica tus credenciales y permisos en Odoo.</p>
-                                </td>
+                        </select>
+                    </div>
+
+                    <!-- Filtro Empleado -->
+                    <div>
+                        <select id="filter-employee"
+                                class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
+                            <option value="">Todos los Miembros ({{len .EmployeesList}})</option>
+                            {{range .EmployeesList}}
+                            <option value="{{.}}">{{.}}</option>
+                            {{end}}
+                        </select>
+                    </div>
+
+                    <!-- Botón Reset -->
+                    <div class="flex items-center justify-end">
+                        <button id="btn-reset" class="w-full lg:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                            Limpiar Filtros
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Registros de Horas -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">
+                        <thead>
+                            <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                <th class="py-3 px-4 sm:px-6">Fecha</th>
+                                <th class="py-3 px-4">Miembro</th>
+                                <th class="py-3 px-4">Proyecto</th>
+                                <th class="py-3 px-4">Tarea</th>
+                                <th class="py-3 px-4">Descripción</th>
+                                <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
                             </tr>
-                        {{end}}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
+                            {{if .Entries}}
+                                {{range .Entries}}
+                                <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
+                                    data-date="{{.Date}}"
+                                    data-employee="{{.DisplayEmployee}}"
+                                    data-project="{{.ProjectID.String}}"
+                                    data-task="{{.TaskID.String}}"
+                                    data-desc="{{.Name}}"
+                                    data-hours="{{.UnitAmount}}">
+                                    <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+                                        <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
+                                    </td>
+                                    <td class="py-3 px-4 whitespace-nowrap">
+                                        <div class="flex items-center space-x-2">
+                                            <div class="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold text-[10px] flex items-center justify-center uppercase">
+                                                {{slice .DisplayEmployee 0 1}}
+                                            </div>
+                                            <span class="font-medium text-slate-800">{{.DisplayEmployee}}</span>
+                                        </div>
+                                    </td>
+                                    <td class="py-3 px-4 whitespace-nowrap">
+                                        {{if .ProjectID.Name}}
+                                        <button onclick="filterByProjectName('{{.ProjectID.Name}}')"
+                                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                                                title="Filtrar por este proyecto">
+                                            {{.ProjectID.Name}}
+                                        </button>
+                                        {{else}}
+                                        <span class="text-slate-400 text-xs">-</span>
+                                        {{end}}
+                                    </td>
+                                    <td class="py-3 px-4 whitespace-nowrap">
+                                        {{if .TaskID.Name}}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                            {{.TaskID.Name}}
+                                        </span>
+                                        {{else}}
+                                        <span class="text-slate-400 text-xs">-</span>
+                                        {{end}}
+                                    </td>
+                                    <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
+                                        {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
+                                    </td>
+                                    <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+                                        <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
+                                            {{printf "%.2f" .UnitAmount}} h
+                                        </span>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            {{else}}
+                                <tr id="empty-row">
+                                    <td colspan="6" class="py-12 text-center text-slate-400">
+                                        <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <p class="font-semibold text-slate-600">No se encontraron partes de horas registradas</p>
+                                        <p class="text-xs text-slate-400 mt-1">Verifica tus credenciales y permisos en Odoo.</p>
+                                    </td>
+                                </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
+
+        <!-- SECCIÓN 2: PROYECTOS DE ODOO -->
+        <div id="view-projects" class="tab-view hidden">
+            <!-- Barra de Búsqueda y Filtros de Proyectos -->
+            <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-sm mb-5">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                    <div class="relative sm:col-span-2">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </span>
+                        <input type="text" id="project-search-input" placeholder="Buscar proyecto por nombre, responsable o cliente..."
+                               class="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
+                    </div>
+                    <div>
+                        <select id="project-filter-status"
+                                class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-slate-700">
+                            <option value="all">Todos los proyectos ({{len .Projects}})</option>
+                            <option value="with-hours">Con horas imputadas</option>
+                            <option value="without-hours">Sin horas imputadas</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Listado de Proyectos -->
+            {{if .Projects}}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="projects-grid">
+                {{range .Projects}}
+                <div class="project-card bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all flex flex-col justify-between"
+                     data-name="{{.DisplayNameOrName}}"
+                     data-manager="{{.DisplayManager}}"
+                     data-partner="{{.DisplayPartner}}"
+                     data-hours="{{.TotalHours}}">
+                    <div>
+                        <div class="flex items-start justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs flex items-center justify-center">
+                                    #{{.ID}}
+                                </span>
+                                <h3 class="text-sm font-bold text-slate-900 leading-snug">{{.DisplayNameOrName}}</h3>
+                            </div>
+                            {{if .Active}}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                Activo
+                            </span>
+                            {{else}}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+                                Archivado
+                            </span>
+                            {{end}}
+                        </div>
+
+                        <div class="mt-4 space-y-2 text-xs text-slate-600">
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-400">Responsable:</span>
+                                <span class="font-medium text-slate-800">{{.DisplayManager}}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-400">Cliente:</span>
+                                <span class="font-medium text-slate-800 truncate max-w-[170px]" title="{{.DisplayPartner}}">{{.DisplayPartner}}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-400">Tareas en Odoo:</span>
+                                <span class="font-semibold text-slate-700 font-mono">{{.TaskCount}}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+                        <div>
+                            <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Horas Imputadas</div>
+                            <div class="text-base font-extrabold text-slate-900 font-mono">
+                                {{.FormattedTotalHours}} <span class="text-xs font-normal text-slate-500">({{if .TimesheetCount}}{{.TimesheetCount}}{{else}}0{{end}} partes)</span>
+                            </div>
+                        </div>
+                        <button onclick="filterByProjectName('{{.DisplayNameOrName}}')"
+                                class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-100 transition flex items-center space-x-1">
+                            <span>Ver Partes</span>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+            {{else}}
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-12 text-center text-slate-400">
+                <svg class="mx-auto h-12 w-12 text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <p class="font-semibold text-slate-700 text-base">No se encontraron proyectos en el servidor Odoo</p>
+                <p class="text-xs text-slate-400 mt-1">Comprueba que el usuario configurado tiene permisos de lectura sobre el modelo <code>project.project</code>.</p>
+            </div>
+            {{end}}
+        </div>
+
     </main>
 
     <!-- Footer Corporativo Minimalista -->
     <footer class="mt-auto border-t border-slate-200/80 bg-white py-4 text-center text-xs text-slate-400">
         <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between space-y-1 sm:space-y-0">
             <span>PLANES Soluciones Informáticas &bull; PlanesGo v{{.Version}}</span>
-            <span class="font-mono text-[11px] text-slate-400">Conectado a planesnet.com</span>
+            <span class="font-mono text-[11px] text-slate-400">Conectado a {{.Config.Odoo.URL}}</span>
         </div>
     </footer>
 
-    <!-- Script de Filtrado Reactivo -->
+    <!-- Script de Pestañas y Filtrado Reactivo -->
     <script>
+        function switchTab(tabId) {
+            const tabTimesheets = document.getElementById('tab-btn-timesheets');
+            const tabProjects = document.getElementById('tab-btn-projects');
+            const viewTimesheets = document.getElementById('view-timesheets');
+            const viewProjects = document.getElementById('view-projects');
+
+            if (tabId === 'projects') {
+                tabProjects.className = "tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-indigo-600 border-b-2 border-indigo-600 transition-all";
+                tabTimesheets.className = "tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-700 border-b-2 border-transparent transition-all";
+                viewProjects.classList.remove('hidden');
+                viewTimesheets.classList.add('hidden');
+                window.location.hash = 'projects';
+            } else {
+                tabTimesheets.className = "tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-sky-600 border-b-2 border-sky-600 transition-all";
+                tabProjects.className = "tab-button inline-flex items-center space-x-2 px-4 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-700 border-b-2 border-transparent transition-all";
+                viewTimesheets.classList.remove('hidden');
+                viewProjects.classList.add('hidden');
+                window.location.hash = 'timesheets';
+            }
+        }
+
+        function filterByProjectName(projectName) {
+            switchTab('timesheets');
+            const projectSelect = document.getElementById('filter-project');
+            if (projectSelect) {
+                projectSelect.value = projectName;
+                // Si el option exacto no existe, intentar buscar en el input de texto
+                if (projectSelect.value !== projectName) {
+                    projectSelect.value = '';
+                    const searchInput = document.getElementById('filter-search');
+                    if (searchInput) searchInput.value = projectName;
+                }
+                const event = new Event('change');
+                projectSelect.dispatchEvent(event);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
+            // Leer Hash inicial
+            if (window.location.hash === '#projects') {
+                switchTab('projects');
+            }
+
+            // 1. Filtros de Partes de Horas
             const searchInput = document.getElementById('filter-search');
             const projectSelect = document.getElementById('filter-project');
             const employeeSelect = document.getElementById('filter-employee');
@@ -320,7 +488,7 @@
             const kpiProjects = document.getElementById('kpi-total-projects');
             const kpiEmployees = document.getElementById('kpi-total-employees');
 
-            function applyFilters() {
+            function applyTimesheetFilters() {
                 const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
                 const projectVal = (projectSelect ? projectSelect.value : '').toLowerCase().trim();
                 const employeeVal = (employeeSelect ? employeeSelect.value : '').toLowerCase().trim();
@@ -354,22 +522,55 @@
 
                 if (kpiHours) kpiHours.textContent = visibleHours.toFixed(2);
                 if (kpiEntries) kpiEntries.textContent = visibleCount;
-                if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
                 if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
             }
 
-            if (searchInput) searchInput.addEventListener('input', applyFilters);
-            if (projectSelect) projectSelect.addEventListener('change', applyFilters);
-            if (employeeSelect) employeeSelect.addEventListener('change', applyFilters);
+            if (searchInput) searchInput.addEventListener('input', applyTimesheetFilters);
+            if (projectSelect) projectSelect.addEventListener('change', applyTimesheetFilters);
+            if (employeeSelect) employeeSelect.addEventListener('change', applyTimesheetFilters);
 
             if (btnReset) {
                 btnReset.addEventListener('click', () => {
                     if (searchInput) searchInput.value = '';
                     if (projectSelect) projectSelect.value = '';
                     if (employeeSelect) employeeSelect.value = '';
-                    applyFilters();
+                    applyTimesheetFilters();
                 });
             }
+
+            // 2. Filtros de Proyectos
+            const projectSearchInput = document.getElementById('project-search-input');
+            const projectStatusSelect = document.getElementById('project-filter-status');
+            const projectCards = document.querySelectorAll('.project-card');
+
+            function applyProjectFilters() {
+                const q = (projectSearchInput ? projectSearchInput.value : '').toLowerCase().trim();
+                const status = projectStatusSelect ? projectStatusSelect.value : 'all';
+
+                projectCards.forEach(card => {
+                    const name = (card.dataset.name || '').toLowerCase();
+                    const manager = (card.dataset.manager || '').toLowerCase();
+                    const partner = (card.dataset.partner || '').toLowerCase();
+                    const hours = parseFloat(card.dataset.hours) || 0;
+
+                    const matchQuery = !q || name.includes(q) || manager.includes(q) || partner.includes(q);
+                    let matchStatus = true;
+                    if (status === 'with-hours') {
+                        matchStatus = hours > 0;
+                    } else if (status === 'without-hours') {
+                        matchStatus = hours === 0;
+                    }
+
+                    if (matchQuery && matchStatus) {
+                        card.style.display = '';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+            }
+
+            if (projectSearchInput) projectSearchInput.addEventListener('input', applyProjectFilters);
+            if (projectStatusSelect) projectStatusSelect.addEventListener('change', applyProjectFilters);
         });
     </script>
 </body>

@@ -51,7 +51,9 @@ type PageData struct {
 	Config               *config.Config
 	Session              *SessionData
 	Entries              []odoo.TimesheetEntry
+	Projects             []odoo.Project
 	TotalHours           float64
+	TotalProjectsCount   int
 	UniqueProjectsCount  int
 	UniqueEmployeesCount int
 	ProjectsList         []string
@@ -92,7 +94,7 @@ func main() {
 	configPath := flag.String("config", "config.yml", "Ruta al archivo de configuración YAML")
 	flag.Parse()
 
-	log.Printf("Iniciando PlanesGo v%s - Odoo Timesheets...", Version)
+	log.Printf("Iniciando PlanesGo v%s - Odoo Timesheets & Projects...", Version)
 
 	// Cargar archivo de configuración
 	cfg, err := config.LoadConfig(*configPath)
@@ -120,159 +122,101 @@ func main() {
 	}
 
 	// 0. Servir archivos estáticos (Logo corporativo, assets)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	fs := http.FileServer(http.Dir("static"))
+	http.Handle("/static/", http.StripPrefix("/static/", fs))
 
 	// 1. Google OAuth 2.0 Iniciar Flujo
 	http.HandleFunc("/auth/google", func(w http.ResponseWriter, r *http.Request) {
-		state.mu.RLock()
-		currentCfg := *state.cfg
-		state.mu.RUnlock()
-
-		clientID, clientSecret := currentCfg.GetGoogleAuthCredentials()
+		clientID, clientSecret := state.cfg.GetGoogleAuthCredentials()
 		if clientID == "" || clientSecret == "" {
-			missing := []string{}
-			if clientID == "" {
-				missing = append(missing, "GOOGLE_CLIENT_ID")
-			}
-			if clientSecret == "" {
-				missing = append(missing, "GOOGLE_CLIENT_SECRET")
-			}
-			errMsg := fmt.Sprintf("Configuración OAuth no válida. No se han encontrado las variables de entorno %s en el sistema.", strings.Join(missing, " ni "))
-			http.Redirect(w, r, fmt.Sprintf("/login?error=%s", url.QueryEscape(errMsg)), http.StatusSeeOther)
+			http.Error(w, "Google OAuth no configurado. Faltan las credenciales GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET.", http.StatusBadRequest)
 			return
 		}
 
-		googleCfg := currentCfg.GoogleAuth
+		googleCfg := state.cfg.GoogleAuth
 		googleCfg.ClientID = clientID
 		googleCfg.ClientSecret = clientSecret
-
 		googleService := auth.NewGoogleOAuthService(googleCfg)
-		oauthState := auth.GenerateStateToken()
-		redirectURI := googleService.ResolveRedirectURI(r)
 
-		// Guardar state y redirectURI en cookies HttpOnly temporales
+		redirectURI := auth.CalculateRedirectURI(r)
+		stateToken := auth.GenerateStateToken()
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     oauthStateCookieName,
-			Value:    oauthState,
-			Path:     "/",
-			HttpOnly: true,
-			MaxAge:   300, // 5 minutos
-			SameSite: http.SameSiteLaxMode,
-		})
-		http.SetCookie(w, &http.Cookie{
-			Name:     "planesgo_oauth_redirect_uri",
-			Value:    redirectURI,
+			Value:    stateToken,
 			Path:     "/",
 			HttpOnly: true,
 			MaxAge:   300,
 			SameSite: http.SameSiteLaxMode,
 		})
 
-		authURL := googleService.GetAuthURL(oauthState, redirectURI)
-		http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+		url := googleService.GetAuthURL(stateToken, redirectURI)
+		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 	})
 
 	// 2. Google OAuth 2.0 Callback
 	http.HandleFunc("/auth/google/callback", func(w http.ResponseWriter, r *http.Request) {
-		// Validar posible error devuelto por Google
-		if errParam := r.URL.Query().Get("error"); errParam != "" {
-			log.Printf("[GOOGLE_AUTH] Error recibido de Google: %s", errParam)
-			http.Redirect(w, r, "/login?error=Acceso+cancelado+por+el+usuario", http.StatusSeeOther)
-			return
-		}
-
-		// Validar State CSRF
-		stateParam := r.URL.Query().Get("state")
 		stateCookie, err := r.Cookie(oauthStateCookieName)
-		if err != nil || stateCookie.Value == "" || stateCookie.Value != stateParam {
-			log.Printf("[GOOGLE_AUTH] Error de validación CSRF State")
-			http.Redirect(w, r, "/login?error=Error+de+seguridad+CSRF+en+Google+Auth", http.StatusSeeOther)
+		if err != nil || stateCookie.Value == "" {
+			http.Redirect(w, r, "/login?error="+url.QueryEscape("Estado de seguridad no encontrado o sesión expirada."), http.StatusSeeOther)
 			return
 		}
 
-		// Obtener redirectURI usada en la solicitud
-		redirectURI := ""
-		if redirectCookie, err := r.Cookie("planesgo_oauth_redirect_uri"); err == nil && redirectCookie.Value != "" {
-			redirectURI = redirectCookie.Value
+		queryState := r.URL.Query().Get("state")
+		if queryState == "" || queryState != stateCookie.Value {
+			http.Redirect(w, r, "/login?error="+url.QueryEscape("Validación de seguridad OAuth inválida (CSRF detectado)."), http.StatusSeeOther)
+			return
 		}
-
-		// Limpiar cookies de state
-		http.SetCookie(w, &http.Cookie{
-			Name:     oauthStateCookieName,
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			MaxAge:   -1,
-		})
-		http.SetCookie(w, &http.Cookie{
-			Name:     "planesgo_oauth_redirect_uri",
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			MaxAge:   -1,
-		})
 
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			http.Redirect(w, r, "/login?error=Código+de+autorización+no+recibido", http.StatusSeeOther)
+			http.Redirect(w, r, "/login?error="+url.QueryEscape("No se recibió código de autorización de Google."), http.StatusSeeOther)
 			return
 		}
 
-		state.mu.RLock()
-		currentCfg := *state.cfg
-		savedOdooCfg := state.cfg.Odoo
-		state.mu.RUnlock()
-
-		clientID, clientSecret := currentCfg.GetGoogleAuthCredentials()
-		googleCfg := currentCfg.GoogleAuth
+		clientID, clientSecret := state.cfg.GetGoogleAuthCredentials()
+		googleCfg := state.cfg.GoogleAuth
 		googleCfg.ClientID = clientID
 		googleCfg.ClientSecret = clientSecret
-
 		googleService := auth.NewGoogleOAuthService(googleCfg)
-		if redirectURI == "" {
-			redirectURI = googleService.ResolveRedirectURI(r)
-		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		redirectURI := auth.CalculateRedirectURI(r)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
 		tokenResp, err := googleService.ExchangeCode(ctx, code, redirectURI)
 		if err != nil {
-			log.Printf("[GOOGLE_AUTH] Error intercambiando código: %v", err)
-			http.Redirect(w, r, fmt.Sprintf("/login?error=%s", "Error al validar token de Google"), http.StatusSeeOther)
+			log.Printf("[OAUTH] Error al intercambiar código: %v", err)
+			http.Redirect(w, r, "/login?error="+url.QueryEscape("No se pudo intercambiar el token con Google: "+err.Error()), http.StatusSeeOther)
 			return
 		}
 
-		userInfo, err := googleService.GetUserInfo(ctx, tokenResp.AccessToken)
+		googleUser, err := googleService.GetUserInfo(ctx, tokenResp.AccessToken)
 		if err != nil {
-			log.Printf("[GOOGLE_AUTH] Error obteniendo perfil de Google: %v", err)
-			http.Redirect(w, r, fmt.Sprintf("/login?error=%s", "Error al obtener perfil de Google"), http.StatusSeeOther)
+			log.Printf("[OAUTH] Error al obtener info de usuario: %v", err)
+			http.Redirect(w, r, "/login?error="+url.QueryEscape("No se pudo obtener información de Google: "+err.Error()), http.StatusSeeOther)
 			return
 		}
 
-		log.Printf("[GOOGLE_AUTH] Usuario autenticado con éxito vía Google: %s (%s)", userInfo.Name, userInfo.Email)
+		allowedDomain := state.cfg.GoogleAuth.AllowedDomain
+		if allowedDomain != "" && !strings.HasSuffix(strings.ToLower(googleUser.Email), "@"+strings.ToLower(allowedDomain)) {
+			log.Printf("[OAUTH] Dominio no autorizado: %s (requerido: %s)", googleUser.Email, allowedDomain)
+			http.Redirect(w, r, "/login?error="+url.QueryEscape(fmt.Sprintf("Acceso restringido a cuentas del dominio @%s", allowedDomain)), http.StatusSeeOther)
+			return
+		}
 
-		// Crear sesión validada con Google OAuth
+		log.Printf("[OAUTH] Autenticación Google exitosa para: %s (%s)", googleUser.Email, googleUser.Name)
+
 		sess := SessionData{
-			URL:         savedOdooCfg.URL,
-			DB:          savedOdooCfg.DB,
-			Username:    savedOdooCfg.Username,
-			Password:    savedOdooCfg.Password,
+			URL:         DefaultOdooURL,
+			DB:          DefaultOdooDB,
+			Username:    googleUser.Email,
+			Password:    "",
 			AuthMethod:  "google",
-			UserEmail:   userInfo.Email,
-			UserName:    userInfo.Name,
-			UserPicture: userInfo.Picture,
-		}
-
-		// Si no hay usuario de Odoo configurado, usar el email de Google
-		if sess.Username == "" {
-			sess.Username = userInfo.Email
-		}
-		if sess.URL == "" {
-			sess.URL = DefaultOdooURL
-		}
-		if sess.DB == "" {
-			sess.DB = DefaultOdooDB
+			UserEmail:   googleUser.Email,
+			UserName:    googleUser.Name,
+			UserPicture: googleUser.Picture,
 		}
 
 		http.SetCookie(w, &http.Cookie{
@@ -280,7 +224,7 @@ func main() {
 			Value:    encodeSession(sess),
 			Path:     "/",
 			HttpOnly: true,
-			MaxAge:   86400 * 30, // 30 días
+			MaxAge:   86400 * 30,
 			SameSite: http.SameSiteLaxMode,
 		})
 
@@ -289,54 +233,40 @@ func main() {
 
 	// 3. Manejador de la página de Login
 	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		state.mu.RLock()
-		defaultCfg := *state.cfg
-		state.mu.RUnlock()
-
 		tmpl, err := template.ParseFiles("templates/login.html")
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Error cargando plantilla: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Error cargando login.html: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		urlError := r.URL.Query().Get("error")
+		state.mu.RLock()
+		defaultCfg := state.cfg
+		state.mu.RUnlock()
 
-		clientID, clientSecret := defaultCfg.GetGoogleAuthCredentials()
-		isGoogleConfigured := clientID != "" && clientSecret != ""
-		googleConfigError := ""
+		isGoogleConfigured := defaultCfg.IsGoogleConfigured()
+		var googleConfigError string
 		if !isGoogleConfigured {
-			missing := []string{}
-			if clientID == "" {
-				missing = append(missing, "GOOGLE_CLIENT_ID")
-			}
-			if clientSecret == "" {
-				missing = append(missing, "GOOGLE_CLIENT_SECRET")
-			}
-			googleConfigError = fmt.Sprintf("Configuración OAuth no válida. No se han encontrado las variables de entorno %s en el sistema ni en .env.", strings.Join(missing, " ni "))
+			googleConfigError = "Configuración OAuth no válida. No se han encontrado las variables de entorno GOOGLE_CLIENT_ID ni GOOGLE_CLIENT_SECRET en el sistema ni en .env."
 		}
 
 		if r.Method == http.MethodGet {
+			errorQuery := r.URL.Query().Get("error")
 			data := LoginPageData{
 				Version:           Version,
 				URL:               DefaultOdooURL,
 				DB:                DefaultOdooDB,
 				Username:          defaultCfg.Odoo.Username,
-				Password:          defaultCfg.Odoo.Password,
+				Password:          "",
 				GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
 				GoogleConfigured:  isGoogleConfigured,
 				GoogleConfigError: googleConfigError,
-				Error:             urlError,
+				Error:             errorQuery,
 			}
 			tmpl.Execute(w, data)
 			return
 		}
 
 		if r.Method == http.MethodPost {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "Error procesando formulario", http.StatusBadRequest)
-				return
-			}
-
 			usernameInput := strings.TrimSpace(r.FormValue("username"))
 			passwordInput := r.FormValue("password")
 
@@ -350,13 +280,12 @@ func main() {
 					GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
 					GoogleConfigured:  isGoogleConfigured,
 					GoogleConfigError: googleConfigError,
-					Error:             "Por favor, introduce tu usuario y contraseña.",
+					Error:             "Por favor, introduce usuario y contraseña de Odoo.",
 				}
 				tmpl.Execute(w, data)
 				return
 			}
 
-			// Validar contra Odoo
 			testCfg := config.OdooConfig{
 				URL:      DefaultOdooURL,
 				DB:       DefaultOdooDB,
@@ -380,6 +309,7 @@ func main() {
 					Password:          passwordInput,
 					GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
 					GoogleConfigured:  isGoogleConfigured,
+					GoogleConfigError: googleConfigError,
 					Error:             fmt.Sprintf("No se pudo iniciar sesión en Odoo: %v", authErr),
 				}
 				tmpl.Execute(w, data)
@@ -388,7 +318,6 @@ func main() {
 
 			log.Printf("[AUTH] Inicio de sesión exitoso en Odoo para %s (UID: %d)", usernameInput, uid)
 
-			// Guardar siempre el último login en config.yml automáticamente
 			state.mu.Lock()
 			state.cfg.Odoo = testCfg
 			if err := config.SaveConfig(state.configPath, state.cfg); err != nil {
@@ -398,7 +327,6 @@ func main() {
 			}
 			state.mu.Unlock()
 
-			// Establecer cookie de sesión
 			sess := SessionData{
 				URL:        DefaultOdooURL,
 				DB:         DefaultOdooDB,
@@ -413,7 +341,7 @@ func main() {
 				Value:    encodeSession(sess),
 				Path:     "/",
 				HttpOnly: true,
-				MaxAge:   86400 * 30, // 30 días
+				MaxAge:   86400 * 30,
 				SameSite: http.SameSiteLaxMode,
 			})
 
@@ -446,7 +374,6 @@ func main() {
 			session, _ = decodeSession(cookie.Value)
 		}
 
-		// Si no hay sesión en cookie, comprobar si config.yml tiene credenciales de Odoo
 		if session == nil {
 			state.mu.RLock()
 			savedCfg := state.cfg.Odoo
@@ -482,11 +409,20 @@ func main() {
 		}
 
 		currentOdooCfg := config.OdooConfig{
-			URL:      DefaultOdooURL,
-			DB:       DefaultOdooDB,
+			URL:      savedCfg.URL,
+			DB:       savedCfg.DB,
 			Username: odooUser,
 			Password: odooPass,
-			Limit:    200,
+			Limit:    savedCfg.Limit,
+		}
+		if currentOdooCfg.URL == "" {
+			currentOdooCfg.URL = DefaultOdooURL
+		}
+		if currentOdooCfg.DB == "" {
+			currentOdooCfg.DB = DefaultOdooDB
+		}
+		if currentOdooCfg.Limit <= 0 {
+			currentOdooCfg.Limit = 200
 		}
 
 		activeCfg := &config.Config{
@@ -495,24 +431,51 @@ func main() {
 		}
 
 		var entries []odoo.TimesheetEntry
+		var projects []odoo.Project
 		var fetchErr error
 
 		if currentOdooCfg.Password != "" {
 			client := odoo.NewClient(currentOdooCfg)
-			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 			defer cancel()
-			entries, fetchErr = client.GetTimesheets(ctx, nil)
+
+			projList, pErr := client.GetProjects(ctx, nil)
+			if pErr != nil {
+				log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
+			} else {
+				projects = projList
+			}
+
+			tsEntries, tsErr := client.GetTimesheets(ctx, nil)
+			if tsErr != nil {
+				log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
+				if fetchErr == nil && pErr != nil {
+					fetchErr = tsErr
+				}
+			} else {
+				entries = tsEntries
+			}
 		}
 
-		// Calcular métricas
+		projectHoursMap := make(map[int]float64)
+		projectCountMap := make(map[int]int)
+		projectNameHoursMap := make(map[string]float64)
+		projectNameCountMap := make(map[string]int)
+
 		var totalHours float64
 		projectMap := make(map[string]bool)
 		employeeMap := make(map[string]bool)
 
 		for _, entry := range entries {
 			totalHours += entry.UnitAmount
+			if entry.ProjectID.ID > 0 {
+				projectHoursMap[entry.ProjectID.ID] += entry.UnitAmount
+				projectCountMap[entry.ProjectID.ID]++
+			}
 			if entry.ProjectID.Name != "" {
 				projectMap[entry.ProjectID.Name] = true
+				projectNameHoursMap[entry.ProjectID.Name] += entry.UnitAmount
+				projectNameCountMap[entry.ProjectID.Name]++
 			}
 			emp := entry.DisplayEmployee()
 			if emp != "" && emp != "Sin asignar" {
@@ -520,9 +483,25 @@ func main() {
 			}
 		}
 
+		for i := range projects {
+			pName := projects[i].DisplayNameOrName()
+			if pName != "" {
+				projectMap[pName] = true
+			}
+			if h, ok := projectHoursMap[projects[i].ID]; ok {
+				projects[i].TotalHours = h
+				projects[i].TimesheetCount = projectCountMap[projects[i].ID]
+			} else if h, ok := projectNameHoursMap[pName]; ok {
+				projects[i].TotalHours = h
+				projects[i].TimesheetCount = projectNameCountMap[pName]
+			}
+		}
+
 		var projectsList []string
 		for p := range projectMap {
-			projectsList = append(projectsList, p)
+			if p != "" && p != "-" {
+				projectsList = append(projectsList, p)
+			}
 		}
 		sort.Strings(projectsList)
 
@@ -543,7 +522,9 @@ func main() {
 			Config:               activeCfg,
 			Session:              session,
 			Entries:              entries,
+			Projects:             projects,
 			TotalHours:           totalHours,
+			TotalProjectsCount:   len(projects),
 			UniqueProjectsCount:  len(projectMap),
 			UniqueEmployeesCount: len(employeeMap),
 			ProjectsList:         projectsList,
@@ -563,7 +544,7 @@ func main() {
 		}
 	})
 
-	// 6. API JSON
+	// 6. API JSON Partes de horas
 	http.HandleFunc("/api/timesheets", func(w http.ResponseWriter, r *http.Request) {
 		var session *SessionData
 		cookie, err := r.Cookie(sessionCookieName)
@@ -601,6 +582,46 @@ func main() {
 			return
 		}
 		json.NewEncoder(w).Encode(entries)
+	})
+
+	// 7. API JSON Proyectos Odoo
+	http.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		var session *SessionData
+		cookie, err := r.Cookie(sessionCookieName)
+		if err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+		if session == nil {
+			state.mu.RLock()
+			savedCfg := state.cfg.Odoo
+			state.mu.RUnlock()
+			session = &SessionData{
+				URL:      DefaultOdooURL,
+				DB:       DefaultOdooDB,
+				Username: savedCfg.Username,
+				Password: savedCfg.Password,
+			}
+		}
+
+		client := odoo.NewClient(config.OdooConfig{
+			URL:      DefaultOdooURL,
+			DB:       DefaultOdooDB,
+			Username: session.Username,
+			Password: session.Password,
+			Limit:    200,
+		})
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		projects, err := client.GetProjects(ctx, nil)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(projects)
 	})
 
 	// 7. Servidor HTTP
