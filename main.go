@@ -575,7 +575,7 @@ func main() {
 		}
 	})
 
-	// 6. API JSON para Probar Conexión con Odoo
+	// 6. API JSON para Probar Conexión con Odoo (y auto-guardar si tiene éxito)
 	http.HandleFunc("/api/settings/test-connection", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
@@ -629,7 +629,41 @@ func main() {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "uid": uid})
+		// Si la autenticación tuvo éxito y hay sesión activa, auto-guardamos inmediatamente de forma persistente
+		var session *SessionData
+		cookie, cErr := r.Cookie(sessionCookieName)
+		if cErr == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+		if session != nil {
+			userEmail := session.Username
+			if session.UserEmail != "" {
+				userEmail = session.UserEmail
+			}
+			if userEmail != "" && state.userStore != nil {
+				_ = state.userStore.SaveSettings(store.UserSettings{
+					Email:     userEmail,
+					OdooUser:  payload.OdooUser,
+					OdooToken: payload.OdooToken,
+					OdooURL:   payload.OdooURL,
+					OdooDB:    payload.OdooDB,
+					PageLimit: 200,
+				})
+				log.Printf("[SETTINGS] Token auto-guardado tras prueba exitosa para %s", userEmail)
+			}
+			session.Password = payload.OdooToken
+			session.Username = payload.OdooUser
+			http.SetCookie(w, &http.Cookie{
+				Name:     sessionCookieName,
+				Value:    encodeSession(*session),
+				Path:     "/",
+				HttpOnly: true,
+				MaxAge:   86400 * 30,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "uid": uid, "saved": true})
 	})
 
 	// 7. Página Principal (Protegida)
@@ -671,6 +705,7 @@ func main() {
 			projList, pErr := client.GetProjects(ctx, nil)
 			if pErr != nil {
 				log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
+				fetchErr = pErr
 			} else {
 				projects = projList
 			}
@@ -678,7 +713,7 @@ func main() {
 			tsEntries, tsErr := client.GetTimesheets(ctx, nil)
 			if tsErr != nil {
 				log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
-				if fetchErr == nil && pErr != nil {
+				if fetchErr == nil {
 					fetchErr = tsErr
 				}
 			} else {

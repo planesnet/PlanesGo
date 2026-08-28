@@ -55,13 +55,16 @@
         
         <!-- Alertas de Estado -->
         {{if .SuccessMessage}}
-        <div class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 shadow-sm flex items-start justify-between">
+        <div class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div class="flex items-center space-x-3">
                 <svg class="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </svg>
                 <p class="text-sm font-medium">{{.SuccessMessage}}</p>
             </div>
+            <a href="/" class="inline-flex items-center space-x-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex-shrink-0">
+                <span>Ver Proyectos y Horas →</span>
+            </a>
         </div>
         {{end}}
 
@@ -238,6 +241,11 @@
                             <p class="text-[11px] text-slate-400 mt-1.5 font-light">Se guarda de forma segura en tus ajustes personales y se utiliza para conectar vía XML-RPC.</p>
                         </div>
 
+                        <!-- Hidden inputs para preservar valores del servidor -->
+                        <input type="hidden" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}{{.Config.Odoo.URL}}{{end}}">
+                        <input type="hidden" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}">
+                        <input type="hidden" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}">
+
                         <!-- Panel de prueba de conexión en vivo -->
                         <div id="test-connection-result" class="hidden p-4 rounded-2xl text-xs font-medium border transition-all"></div>
 
@@ -247,7 +255,7 @@
                                 <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
-                                <span>Probar Conexión con Odoo</span>
+                                <span>Probar y Validar Conexión</span>
                             </button>
 
                             <button type="submit" class="w-full sm:w-auto px-7 py-2.5 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center space-x-2">
@@ -444,8 +452,24 @@
 
                 const data = await response.json();
                 if (data.success) {
-                    resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-200 block";
-                    resultBox.innerHTML = `✅ <strong>Conexión exitosa:</strong> Autenticado correctamente con Odoo (UID de usuario: ${data.uid}).`;
+                    resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-200 block shadow-sm";
+                    resultBox.innerHTML = `
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div class="flex items-start space-x-2.5">
+                                <span class="p-1 rounded-lg bg-emerald-100 text-emerald-700 flex-shrink-0 mt-0.5">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </span>
+                                <div>
+                                    <div class="font-bold text-emerald-900">¡Conexión exitosa y credenciales guardadas!</div>
+                                    <div class="text-[11px] text-emerald-700 mt-0.5">Autenticado en Odoo (UID: ${data.uid}). Tu token ha sido guardado de forma persistente.</div>
+                                </div>
+                            </div>
+                            <a href="/" class="inline-flex items-center justify-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow flex-shrink-0">
+                                <span>Ver Proyectos y Horas →</span>
+                            </a>
+                        </div>`;
                 } else {
                     resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-red-50 text-red-800 border-red-200 block";
                     resultBox.innerHTML = `❌ <strong>Error de conexión:</strong> ${data.error || 'Credenciales inválidas en Odoo.'}`;
@@ -455,7 +479,7 @@
                 resultBox.innerHTML = `❌ <strong>Error de red:</strong> No se pudo contactar con el servidor: ${err.message}`;
             } finally {
                 testBtn.disabled = false;
-                testBtn.innerHTML = `<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> <span>Probar Conexión con Odoo</span>`;
+                testBtn.innerHTML = `<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> <span>Probar y Validar Conexión</span>`;
             }
         }
     </script>
