@@ -49,12 +49,40 @@ func GenerateStateToken() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
+// ResolveRedirectURI determina la URL de callback adecuada.
+func (s *GoogleOAuthService) ResolveRedirectURI(r *http.Request) string {
+	if s.cfg.RedirectURL != "" && !strings.Contains(s.cfg.RedirectURL, "localhost") {
+		return s.cfg.RedirectURL
+	}
+
+	proto := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.HasPrefix(r.Header.Get("Referer"), "https://") {
+		proto = "https"
+	}
+
+	host := r.Host
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
+	}
+
+	// Si estamos en autopyme o el host es planesgo.autopyme.com, asegurar HTTPS
+	if strings.Contains(host, "autopyme.com") || strings.Contains(host, "planesnet.com") {
+		proto = "https"
+	}
+
+	return fmt.Sprintf("%s://%s/auth/google/callback", proto, host)
+}
+
 // GetAuthURL genera la URL de redirección a la pantalla de consentimiento de Google.
-func (s *GoogleOAuthService) GetAuthURL(state string) string {
+func (s *GoogleOAuthService) GetAuthURL(state, redirectURI string) string {
+	if redirectURI == "" {
+		redirectURI = s.cfg.RedirectURL
+	}
+
 	baseURL := "https://accounts.google.com/o/oauth2/v2/auth"
 	params := url.Values{}
 	params.Set("client_id", s.cfg.ClientID)
-	params.Set("redirect_uri", s.cfg.RedirectURL)
+	params.Set("redirect_uri", redirectURI)
 	params.Set("response_type", "code")
 	params.Set("scope", "openid email profile")
 	params.Set("state", state)
@@ -69,14 +97,18 @@ func (s *GoogleOAuthService) GetAuthURL(state string) string {
 }
 
 // ExchangeCode intercambia el código de autorización por un token de acceso.
-func (s *GoogleOAuthService) ExchangeCode(ctx context.Context, code string) (*GoogleTokenResponse, error) {
+func (s *GoogleOAuthService) ExchangeCode(ctx context.Context, code, redirectURI string) (*GoogleTokenResponse, error) {
+	if redirectURI == "" {
+		redirectURI = s.cfg.RedirectURL
+	}
+
 	tokenURL := "https://oauth2.googleapis.com/token"
 
 	data := url.Values{}
 	data.Set("code", code)
 	data.Set("client_id", s.cfg.ClientID)
 	data.Set("client_secret", s.cfg.ClientSecret)
-	data.Set("redirect_uri", s.cfg.RedirectURL)
+	data.Set("redirect_uri", redirectURI)
 	data.Set("grant_type", "authorization_code")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))

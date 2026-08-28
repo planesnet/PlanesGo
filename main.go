@@ -133,8 +133,9 @@ func main() {
 
 		googleService := auth.NewGoogleOAuthService(googleCfg)
 		oauthState := auth.GenerateStateToken()
+		redirectURI := googleService.ResolveRedirectURI(r)
 
-		// Guardar state en cookie HttpOnly temporal
+		// Guardar state y redirectURI en cookies HttpOnly temporales
 		http.SetCookie(w, &http.Cookie{
 			Name:     oauthStateCookieName,
 			Value:    oauthState,
@@ -143,8 +144,16 @@ func main() {
 			MaxAge:   300, // 5 minutos
 			SameSite: http.SameSiteLaxMode,
 		})
+		http.SetCookie(w, &http.Cookie{
+			Name:     "planesgo_oauth_redirect_uri",
+			Value:    redirectURI,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   300,
+			SameSite: http.SameSiteLaxMode,
+		})
 
-		authURL := googleService.GetAuthURL(oauthState)
+		authURL := googleService.GetAuthURL(oauthState, redirectURI)
 		http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 	})
 
@@ -166,9 +175,22 @@ func main() {
 			return
 		}
 
-		// Limpiar cookie de state
+		// Obtener redirectURI usada en la solicitud
+		redirectURI := ""
+		if redirectCookie, err := r.Cookie("planesgo_oauth_redirect_uri"); err == nil && redirectCookie.Value != "" {
+			redirectURI = redirectCookie.Value
+		}
+
+		// Limpiar cookies de state
 		http.SetCookie(w, &http.Cookie{
 			Name:     oauthStateCookieName,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+		http.SetCookie(w, &http.Cookie{
+			Name:     "planesgo_oauth_redirect_uri",
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
@@ -187,10 +209,14 @@ func main() {
 		state.mu.RUnlock()
 
 		googleService := auth.NewGoogleOAuthService(googleCfg)
+		if redirectURI == "" {
+			redirectURI = googleService.ResolveRedirectURI(r)
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 
-		tokenResp, err := googleService.ExchangeCode(ctx, code)
+		tokenResp, err := googleService.ExchangeCode(ctx, code, redirectURI)
 		if err != nil {
 			log.Printf("[GOOGLE_AUTH] Error intercambiando código: %v", err)
 			http.Redirect(w, r, fmt.Sprintf("/login?error=%s", "Error al validar token de Google"), http.StatusSeeOther)

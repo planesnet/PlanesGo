@@ -32,7 +32,9 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
 COPY --from=builder /app/config.example.yml /app/config.example.yml
-COPY --from=builder /app/config.yml /app/config.yml
+
+# Si no existe config.yml, copiar la plantilla de ejemplo
+RUN cp /app/config.example.yml /app/config.yml
 
 # Permisos
 RUN chown -R appuser:appgroup /app

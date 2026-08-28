@@ -13,6 +13,9 @@ planesgo
 # Output of the go coverage tool
 *.out
 
+# Local config containing secrets
+config.yml
+
 # OS generated
 .DS_Store
 .idea/
