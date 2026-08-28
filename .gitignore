@@ -17,6 +17,7 @@ planesgo
 config.yml
 .env
 .env.*
+!.env.example
 
 # OS generated
 .DS_Store
