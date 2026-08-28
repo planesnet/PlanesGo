@@ -27,28 +27,20 @@
 
         <!-- Tarjeta de Login -->
         <div class="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/80 p-8">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h2 class="text-lg font-bold text-slate-900">Iniciar Sesión</h2>
-                    <p class="text-xs text-slate-500">Introduce tus credenciales de Odoo</p>
-                </div>
-                <div class="text-right">
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
-                        <span class="w-1.5 h-1.5 mr-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                        BD: {{.DB}}
-                    </span>
-                </div>
+            <div class="mb-6">
+                <h2 class="text-lg font-bold text-slate-900">Iniciar Sesión</h2>
+                <p class="text-xs text-slate-500 mt-0.5">Introduce tus credenciales de acceso</p>
             </div>
 
-            <!-- Banner info servidor fijo -->
-            <div class="mb-5 p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between text-xs text-slate-600">
-                <div class="flex items-center space-x-2 truncate">
-                    <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                    </svg>
-                    <span class="truncate font-medium text-slate-700">{{.URL}}</span>
+            <!-- Banner info conexión fija (Servidor y BD fijos) -->
+            <div class="mb-5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span class="font-medium text-slate-700">planesnet.com</span>
                 </div>
-                <button type="button" id="toggle-advanced" class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 ml-2">Cambiar</button>
+                <div class="text-right">
+                    <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-mono text-[11px] font-semibold border border-indigo-100">BD: pasi</span>
+                </div>
             </div>
 
             {{if .Error}}
@@ -64,22 +56,6 @@
             {{end}}
 
             <form method="POST" action="/login" class="space-y-4" id="login-form">
-                <!-- Parámetros avanzados (ocultos por defecto pero editables si se desea) -->
-                <div id="advanced-fields" class="hidden space-y-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                    <div>
-                        <label class="block text-[11px] font-semibold text-slate-600 mb-1" for="url">Servidor Odoo</label>
-                        <input type="url" id="url" name="url" value="{{.URL}}"
-                               placeholder="https://www.planesnet.com"
-                               class="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] font-semibold text-slate-600 mb-1" for="db">Base de Datos</label>
-                        <input type="text" id="db" name="db" value="{{.DB}}"
-                               placeholder="pasi"
-                               class="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    </div>
-                </div>
-
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1.5" for="username">Usuario o Correo</label>
                     <div class="relative">
@@ -89,7 +65,7 @@
                             </svg>
                         </span>
                         <input type="text" id="username" name="username" required autofocus value="{{.Username}}"
-                               placeholder="usuario@planesnet.com"
+                               placeholder="tu_usuario@planesnet.com"
                                class="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
                     </div>
                 </div>
@@ -120,7 +96,7 @@
                 <div class="flex items-center justify-between pt-1">
                     <label class="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer">
                         <input type="checkbox" name="save_config" value="true" checked class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
-                        <span>Guardar en <code class="text-indigo-600 font-mono">config.yml</code></span>
+                        <span>Recordar en <code class="text-indigo-600 font-mono">config.yml</code></span>
                     </label>
                 </div>
 
@@ -137,7 +113,7 @@
         </div>
 
         <p class="text-center text-xs text-slate-400 mt-6">
-            PlanesGo v{{.Version}} &bull; Conector de partes de horas para Odoo
+            PlanesGo v{{.Version}} &bull; Planes Soluciones Informáticas
         </p>
     </div>
 
@@ -148,20 +124,11 @@
         const btnSubmit = document.getElementById('btn-submit');
         const btnSpinner = document.getElementById('btn-spinner');
         const btnText = document.getElementById('btn-text');
-        const toggleAdvBtn = document.getElementById('toggle-advanced');
-        const advFields = document.getElementById('advanced-fields');
 
         if (toggleBtn && passwordField) {
             toggleBtn.addEventListener('click', () => {
                 const type = passwordField.getAttribute('type') === 'password' ? 'text' : 'password';
                 passwordField.setAttribute('type', type);
-            });
-        }
-
-        if (toggleAdvBtn && advFields) {
-            toggleAdvBtn.addEventListener('click', () => {
-                advFields.classList.toggle('hidden');
-                toggleAdvBtn.textContent = advFields.classList.contains('hidden') ? 'Cambiar' : 'Ocultar';
             });
         }
 

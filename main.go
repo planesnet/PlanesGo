@@ -23,6 +23,8 @@ import (
 
 const Version = "1.0.1"
 const sessionCookieName = "planesgo_session"
+const DefaultOdooURL = "https://www.planesnet.com"
+const DefaultOdooDB = "pasi"
 
 type SessionData struct {
 	URL      string `json:"url"`
