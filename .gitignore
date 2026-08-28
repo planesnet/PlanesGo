@@ -1,0 +1,19 @@
+# Binaries
+pasigo
+planesgo
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# OS generated
+.DS_Store
+.idea/
+.vscode/
