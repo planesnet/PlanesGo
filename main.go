@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -66,6 +67,7 @@ type LoginPageData struct {
 	Password          string
 	GoogleAuthEnabled bool
 	GoogleConfigured  bool
+	GoogleConfigError string
 	Error             string
 }
 
@@ -123,13 +125,26 @@ func main() {
 	// 1. Google OAuth 2.0 Iniciar Flujo
 	http.HandleFunc("/auth/google", func(w http.ResponseWriter, r *http.Request) {
 		state.mu.RLock()
-		googleCfg := state.cfg.GoogleAuth
+		currentCfg := *state.cfg
 		state.mu.RUnlock()
 
-		if googleCfg.ClientID == "" || googleCfg.ClientSecret == "" {
-			http.Redirect(w, r, "/login?error=Google+OAuth+no+está+configurado.+Configura+client_id+y+client_secret+en+config.yml", http.StatusSeeOther)
+		clientID, clientSecret := currentCfg.GetGoogleAuthCredentials()
+		if clientID == "" || clientSecret == "" {
+			missing := []string{}
+			if clientID == "" {
+				missing = append(missing, "GOOGLE_CLIENT_ID")
+			}
+			if clientSecret == "" {
+				missing = append(missing, "GOOGLE_CLIENT_SECRET")
+			}
+			errMsg := fmt.Sprintf("Configuración OAuth no válida. No se han encontrado las variables de entorno %s en el sistema.", strings.Join(missing, " ni "))
+			http.Redirect(w, r, fmt.Sprintf("/login?error=%s", url.QueryEscape(errMsg)), http.StatusSeeOther)
 			return
 		}
+
+		googleCfg := currentCfg.GoogleAuth
+		googleCfg.ClientID = clientID
+		googleCfg.ClientSecret = clientSecret
 
 		googleService := auth.NewGoogleOAuthService(googleCfg)
 		oauthState := auth.GenerateStateToken()
@@ -204,9 +219,14 @@ func main() {
 		}
 
 		state.mu.RLock()
-		googleCfg := state.cfg.GoogleAuth
+		currentCfg := *state.cfg
 		savedOdooCfg := state.cfg.Odoo
 		state.mu.RUnlock()
+
+		clientID, clientSecret := currentCfg.GetGoogleAuthCredentials()
+		googleCfg := currentCfg.GoogleAuth
+		googleCfg.ClientID = clientID
+		googleCfg.ClientSecret = clientSecret
 
 		googleService := auth.NewGoogleOAuthService(googleCfg)
 		if redirectURI == "" {
@@ -281,7 +301,19 @@ func main() {
 
 		urlError := r.URL.Query().Get("error")
 
-		isGoogleConfigured := defaultCfg.GoogleAuth.ClientID != "" && defaultCfg.GoogleAuth.ClientSecret != ""
+		clientID, clientSecret := defaultCfg.GetGoogleAuthCredentials()
+		isGoogleConfigured := clientID != "" && clientSecret != ""
+		googleConfigError := ""
+		if !isGoogleConfigured {
+			missing := []string{}
+			if clientID == "" {
+				missing = append(missing, "GOOGLE_CLIENT_ID")
+			}
+			if clientSecret == "" {
+				missing = append(missing, "GOOGLE_CLIENT_SECRET")
+			}
+			googleConfigError = fmt.Sprintf("Configuración OAuth no válida. No se han encontrado las variables de entorno %s en el sistema ni en .env.", strings.Join(missing, " ni "))
+		}
 
 		if r.Method == http.MethodGet {
 			data := LoginPageData{
@@ -292,6 +324,7 @@ func main() {
 				Password:          defaultCfg.Odoo.Password,
 				GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
 				GoogleConfigured:  isGoogleConfigured,
+				GoogleConfigError: googleConfigError,
 				Error:             urlError,
 			}
 			tmpl.Execute(w, data)
@@ -316,6 +349,7 @@ func main() {
 					Password:          passwordInput,
 					GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
 					GoogleConfigured:  isGoogleConfigured,
+					GoogleConfigError: googleConfigError,
 					Error:             "Por favor, introduce tu usuario y contraseña.",
 				}
 				tmpl.Execute(w, data)
