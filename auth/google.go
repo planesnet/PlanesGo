@@ -49,24 +49,31 @@ func GenerateStateToken() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// ResolveRedirectURI determina la URL de callback adecuada.
+// ResolveRedirectURI determina la URL de callback adecuada según el host de la petición.
 func (s *GoogleOAuthService) ResolveRedirectURI(r *http.Request) string {
-	if s.cfg.RedirectURL != "" && !strings.Contains(s.cfg.RedirectURL, "localhost") {
-		return s.cfg.RedirectURL
-	}
-
-	proto := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.HasPrefix(r.Header.Get("Referer"), "https://") {
-		proto = "https"
-	}
-
 	host := r.Host
 	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
 		host = fwdHost
 	}
 
-	// Si estamos en autopyme o el host es planesgo.autopyme.com, asegurar HTTPS
+	// 1. Si la aplicación se ejecuta en localhost / 127.0.0.1, redirigir siempre a localhost
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]") {
+		return fmt.Sprintf("http://%s/auth/google/callback", host)
+	}
+
+	// 2. Si se ejecuta en el dominio de producción autopyme o planesnet, usar HTTPS
 	if strings.Contains(host, "autopyme.com") || strings.Contains(host, "planesnet.com") {
+		return fmt.Sprintf("https://%s/auth/google/callback", host)
+	}
+
+	// 3. Si hay una URL configurada explícitamente en config.yml
+	if s.cfg.RedirectURL != "" {
+		return s.cfg.RedirectURL
+	}
+
+	// 4. Fallback general según cabeceras
+	proto := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.HasPrefix(r.Header.Get("Referer"), "https://") {
 		proto = "https"
 	}
 
