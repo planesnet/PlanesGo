@@ -49,35 +49,51 @@ func GenerateStateToken() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// ResolveRedirectURI determina la URL de callback adecuada según el host de la petición.
-func (s *GoogleOAuthService) ResolveRedirectURI(r *http.Request) string {
+// CalculateRedirectURI calcula de forma 100% dinámica la URL de redirección
+// basándose exclusivamente en la información de la petición HTTP recibida del navegador.
+func CalculateRedirectURI(r *http.Request) string {
+	if r == nil {
+		return "http://localhost:8080/auth/google/callback"
+	}
+
+	// 1. Determinar el host original (cabecera Host o proxy inverso)
 	host := r.Host
 	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
-		host = fwdHost
+		host = strings.TrimSpace(strings.Split(fwdHost, ",")[0])
+	}
+	if host == "" {
+		host = "localhost:8080"
 	}
 
-	// 1. Si la aplicación se ejecuta en localhost / 127.0.0.1, redirigir siempre a localhost
-	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]") {
-		return fmt.Sprintf("http://%s/auth/google/callback", host)
+	// 2. Determinar el esquema/protocolo (http o https)
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	} else if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+	} else if r.Header.Get("X-Forwarded-Ssl") == "on" {
+		scheme = "https"
+	} else if strings.HasPrefix(r.Header.Get("Referer"), "https://") {
+		scheme = "https"
 	}
 
-	// 2. Si se ejecuta en el dominio de producción autopyme o planesnet, usar HTTPS
-	if strings.Contains(host, "autopyme.com") || strings.Contains(host, "planesnet.com") {
-		return fmt.Sprintf("https://%s/auth/google/callback", host)
+	// Si se accede directamente vía localhost sin TLS explícito, asegurar http
+	if (strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")) && r.TLS == nil && r.Header.Get("X-Forwarded-Proto") == "" {
+		scheme = "http"
 	}
 
-	// 3. Si hay una URL configurada explícitamente en config.yml
+	return fmt.Sprintf("%s://%s/auth/google/callback", scheme, host)
+}
+
+// ResolveRedirectURI delega el cálculo de la URL de callback a la petición HTTP.
+func (s *GoogleOAuthService) ResolveRedirectURI(r *http.Request) string {
+	if r != nil {
+		return CalculateRedirectURI(r)
+	}
 	if s.cfg.RedirectURL != "" {
 		return s.cfg.RedirectURL
 	}
-
-	// 4. Fallback general según cabeceras
-	proto := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.HasPrefix(r.Header.Get("Referer"), "https://") {
-		proto = "https"
-	}
-
-	return fmt.Sprintf("%s://%s/auth/google/callback", proto, host)
+	return "http://localhost:8080/auth/google/callback"
 }
 
 // GetAuthURL genera la URL de redirección a la pantalla de consentimiento de Google.
