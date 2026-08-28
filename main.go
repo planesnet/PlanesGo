@@ -158,7 +158,6 @@ func main() {
 
 			usernameInput := strings.TrimSpace(r.FormValue("username"))
 			passwordInput := r.FormValue("password")
-			saveConfig := r.FormValue("save_config") == "true"
 
 			if usernameInput == "" || passwordInput == "" {
 				data := LoginPageData{
@@ -203,15 +202,15 @@ func main() {
 
 			log.Printf("[AUTH] Inicio de sesión exitoso para %s (UID: %d)", usernameInput, uid)
 
-			// Guardar en config.yml si se solicitó
-			if saveConfig {
-				state.mu.Lock()
-				state.cfg.Odoo = testCfg
-				if err := config.SaveConfig(state.configPath, state.cfg); err != nil {
-					log.Printf("[ADVERTENCIA] No se pudo guardar config.yml: %v", err)
-				}
-				state.mu.Unlock()
+			// Guardar siempre el último login en config.yml automáticamente
+			state.mu.Lock()
+			state.cfg.Odoo = testCfg
+			if err := config.SaveConfig(state.configPath, state.cfg); err != nil {
+				log.Printf("[ADVERTENCIA] No se pudo actualizar %s: %v", state.configPath, err)
+			} else {
+				log.Printf("[CONFIG] Guardado último login en %s para %s", state.configPath, usernameInput)
 			}
+			state.mu.Unlock()
 
 			// Establecer cookie de sesión
 			sess := SessionData{
