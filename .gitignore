@@ -19,7 +19,11 @@ config.yml
 .env.*
 !.env.example
 
+# Local user data and persistent settings
+data/
+
 # OS generated
 .DS_Store
 .idea/
 .vscode/
+

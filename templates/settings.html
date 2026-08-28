@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ajustes de Usuario - PlanesGo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="min-h-full flex flex-col text-slate-800 bg-[#F8FAFC] antialiased">
+    <!-- Navbar Corporativo Planes -->
+    <header class="bg-[#0B0F19] border-b border-slate-800 sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo y Branding -->
+                <div class="flex items-center space-x-3 sm:space-x-4">
+                    <a href="/" class="flex items-center space-x-3 group">
+                        <img src="/static/img/logo.png" alt="Planes Soluciones Informáticas" class="h-9 w-auto object-contain">
+                        <div class="hidden sm:block border-l border-slate-700 pl-3">
+                            <div class="flex items-center space-x-1.5">
+                                <span class="text-sm font-bold text-white tracking-tight">PlanesGo</span>
+                                <span class="text-[10px] font-semibold text-sky-400 bg-sky-950 px-2 py-0.5 rounded-full border border-sky-800/60">v{{.Version}}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 font-light">Ajustes y Configuración de Usuario</p>
+                        </div>
+                    </a>
+                </div>
+
+                <!-- Acciones Rápidas -->
+                <div class="flex items-center space-x-2 sm:space-x-3">
+                    <a href="/" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60 shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        <span>Volver al Dashboard</span>
+                    </a>
+
+                    <a href="/logout" title="Cerrar sesión" class="p-2 text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/60 rounded-xl transition border border-red-900/50">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenedor Principal: Layout de 2 Columnas -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Alertas de Estado -->
+        {{if .SuccessMessage}}
+        <div class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 shadow-sm flex items-start justify-between">
+            <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <p class="text-sm font-medium">{{.SuccessMessage}}</p>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .ErrorMessage}}
+        <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-800 shadow-sm flex items-start justify-between">
+            <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="text-sm font-medium">{{.ErrorMessage}}</p>
+            </div>
+        </div>
+        {{end}}
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            <!-- ========================================== -->
+            <!-- PANEL IZQUIERDO: Menú Lateral y Perfil      -->
+            <!-- ========================================== -->
+            <div class="lg:col-span-4 space-y-6">
+                <!-- Tarjeta de Perfil de Usuario -->
+                <div class="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 text-center">
+                    <div class="relative inline-block mx-auto mb-3">
+                        {{if .Session.UserPicture}}
+                        <img src="{{.Session.UserPicture}}" alt="{{.Session.UserName}}" class="w-20 h-20 rounded-full border-2 border-sky-500 object-cover shadow-md mx-auto">
+                        {{else}}
+                        <div class="w-20 h-20 rounded-full bg-slate-900 text-sky-300 text-2xl font-bold flex items-center justify-center uppercase shadow-md mx-auto">
+                            {{slice .Session.Username 0 1}}
+                        </div>
+                        {{end}}
+                        <span class="absolute bottom-0 right-0 w-5 h-5 bg-emerald-500 border-2 border-white rounded-full"></span>
+                    </div>
+
+                    <h2 class="text-base font-bold text-slate-800">{{if .Session.UserName}}{{.Session.UserName}}{{else}}{{.Session.Username}}{{end}}</h2>
+                    <p class="text-xs text-slate-500 font-light mt-0.5">{{.Session.Username}}</p>
+
+                    <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-center space-x-2">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 text-sky-700 border border-sky-200">
+                            {{if eq .Session.AuthMethod "google"}}
+                            <svg class="w-3 h-3 mr-1" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                            </svg>
+                            Google OAuth 2.0
+                            {{else}}
+                            Odoo Directo
+                            {{end}}
+                        </span>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            {{.Settings.OdooDB}}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Menú de Navegación Lateral -->
+                <nav class="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-3 space-y-1">
+                    <button type="button" onclick="switchSettingsTab('tab-odoo-token')" id="btn-tab-odoo-token" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-sky-700 bg-sky-50/80 transition text-left group">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2 rounded-xl bg-sky-600 text-white shadow-sm">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-bold">Token de Acceso Odoo</div>
+                                <div class="text-[10px] text-slate-400 font-normal">Clave de API para consultas</div>
+                            </div>
+                        </div>
+                        <span class="text-sky-600">
+                            {{if .Settings.OdooToken}}
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                            {{else}}
+                            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+                            {{end}}
+                        </span>
+                    </button>
+
+                    <button type="button" onclick="switchSettingsTab('tab-connection')" id="btn-tab-connection" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2 rounded-xl bg-slate-100 text-slate-600 group-hover:bg-slate-200">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-bold">Conexión Odoo</div>
+                                <div class="text-[10px] text-slate-400 font-normal">URL del servidor y Base de Datos</div>
+                            </div>
+                        </div>
+                    </button>
+
+                    <button type="button" onclick="switchSettingsTab('tab-guide')" id="btn-tab-guide" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2 rounded-xl bg-slate-100 text-slate-600 group-hover:bg-slate-200">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-bold">Guía de Ayuda</div>
+                                <div class="text-[10px] text-slate-400 font-normal">Cómo generar clave de API</div>
+                            </div>
+                        </div>
+                    </button>
+                </nav>
+
+                <!-- Estado Rápido -->
+                <div class="bg-gradient-to-br from-slate-900 to-slate-950 rounded-3xl p-5 text-white shadow-xl">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-semibold text-sky-400 uppercase tracking-wider">Estado de Acceso</span>
+                        {{if .Settings.OdooToken}}
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-900/80 text-emerald-300 border border-emerald-700">Listo</span>
+                        {{else}}
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-900/80 text-amber-300 border border-amber-700">Pendiente</span>
+                        {{end}}
+                    </div>
+                    <p class="text-xs text-slate-300 font-light">
+                        {{if .Settings.OdooToken}}
+                        Tu token de Odoo está configurado. Las consultas y partes de horas se recuperan automáticamente con tus permisos.
+                        {{else}}
+                        Ingresa tu Token de acceso / API Key para que PlanesGo pueda consultar tus proyectos y horas en Odoo.
+                        {{end}}
+                    </p>
+                </div>
+            </div>
+
+            <!-- ========================================== -->
+            <!-- PANEL DERECHO: Formulario y Contenido      -->
+            <!-- ========================================== -->
+            <div class="lg:col-span-8">
+                
+                <!-- SECCIÓN 1: Token de Acceso Odoo -->
+                <div id="tab-odoo-token-content" class="settings-content-pane bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
+                    <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
+                        <div>
+                            <h3 class="text-lg font-bold text-slate-900">Credenciales de Acceso Odoo</h3>
+                            <p class="text-xs text-slate-500 mt-1">Configura tu clave de API personal o contraseña de Odoo para sincronizar tus partes de horas.</p>
+                        </div>
+                        <span class="p-3 bg-sky-50 text-sky-600 rounded-2xl">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                        </span>
+                    </div>
+
+                    <form action="/settings" method="POST" class="space-y-6">
+                        <!-- Usuario Odoo -->
+                        <div>
+                            <label for="odoo_user" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Usuario / Email de Odoo
+                            </label>
+                            <input type="text" id="odoo_user" name="odoo_user" value="{{if .Settings.OdooUser}}{{.Settings.OdooUser}}{{else}}{{.Session.Username}}{{end}}" required
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Por lo general coincide con tu correo de Google (@planesnet.com).</p>
+                        </div>
+
+                        <!-- Token de Acceso / API Key Odoo -->
+                        <div>
+                            <label for="odoo_token" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Token de Acceso / Clave de API de Odoo
+                            </label>
+                            <div class="relative">
+                                <input type="password" id="odoo_token" name="odoo_token" value="{{.Settings.OdooToken}}" placeholder="Pega aquí tu API Key de Odoo..." required
+                                       class="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
+                                <button type="button" onclick="togglePasswordVisibility('odoo_token', this)" class="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none">
+                                    <svg class="w-5 h-5 eye-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Se guarda de forma segura en tus ajustes personales y se utiliza para conectar vía XML-RPC.</p>
+                        </div>
+
+                        <!-- Panel de prueba de conexión en vivo -->
+                        <div id="test-connection-result" class="hidden p-4 rounded-2xl text-xs font-medium border transition-all"></div>
+
+                        <!-- Botones de Acción -->
+                        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                            <button type="button" onclick="testOdooConnection()" id="btn-test-conn" class="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-sm flex items-center justify-center space-x-2">
+                                <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                <span>Probar Conexión con Odoo</span>
+                            </button>
+
+                            <button type="submit" class="w-full sm:w-auto px-7 py-2.5 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                                <span>Guardar Ajustes</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- SECCIÓN 2: Configuración de Conexión y Preferencias -->
+                <div id="tab-connection-content" class="settings-content-pane hidden bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
+                    <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
+                        <div>
+                            <h3 class="text-lg font-bold text-slate-900">Parámetros del Servidor Odoo</h3>
+                            <p class="text-xs text-slate-500 mt-1">Valores por defecto del servidor Odoo de la empresa.</p>
+                        </div>
+                        <span class="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                            </svg>
+                        </span>
+                    </div>
+
+                    <form action="/settings" method="POST" class="space-y-6">
+                        <!-- URL Odoo -->
+                        <div>
+                            <label for="odoo_url" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                URL del Servidor Odoo
+                            </label>
+                            <input type="url" id="odoo_url" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}{{.Config.Odoo.URL}}{{end}}" required
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
+                        </div>
+
+                        <!-- Base de Datos -->
+                        <div>
+                            <label for="odoo_db" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Base de Datos Odoo
+                            </label>
+                            <input type="text" id="odoo_db" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}" required
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
+                        </div>
+
+                        <!-- Límite de Registros -->
+                        <div>
+                            <label for="page_limit" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Límite de Partes de Horas a Consultar
+                            </label>
+                            <input type="number" id="page_limit" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}" min="10" max="1000"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Cantidad máxima de registros traídos de <code>account.analytic.line</code>.</p>
+                        </div>
+
+                        <!-- Oculto para preservar token al guardar este formulario -->
+                        <input type="hidden" name="odoo_token" value="{{.Settings.OdooToken}}">
+                        <input type="hidden" name="odoo_user" value="{{if .Settings.OdooUser}}{{.Settings.OdooUser}}{{else}}{{.Session.Username}}{{end}}">
+
+                        <div class="flex justify-end pt-4 border-t border-slate-100">
+                            <button type="submit" class="px-7 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition">
+                                Guardar Parámetros
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- SECCIÓN 3: Guía de Ayuda Paso a Paso -->
+                <div id="tab-guide-content" class="settings-content-pane hidden bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
+                    <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
+                        <div>
+                            <h3 class="text-lg font-bold text-slate-900">¿Cómo generar tu Clave de API en Odoo?</h3>
+                            <p class="text-xs text-slate-500 mt-1">Sigue estos sencillos pasos dentro de tu perfil en Odoo.</p>
+                        </div>
+                        <span class="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                        </span>
+                    </div>
+
+                    <div class="space-y-4 text-xs text-slate-600">
+                        <div class="flex items-start space-x-3 p-4 rounded-2xl bg-slate-50 border border-slate-200/60">
+                            <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">1</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">Accede a Odoo</h4>
+                                <p class="mt-0.5 text-slate-500">Inicia sesión en tu cuenta de Odoo en <a href="https://www.planesnet.com" target="_blank" class="text-sky-600 font-semibold underline">planesnet.com</a>.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-start space-x-3 p-4 rounded-2xl bg-slate-50 border border-slate-200/60">
+                            <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">2</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">Abre tu Perfil / Preferencias</h4>
+                                <p class="mt-0.5 text-slate-500">Haz clic en tu avatar o nombre en la esquina superior derecha de Odoo y selecciona <strong>Preferencias</strong> o <strong>Mi Perfil</strong>.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-start space-x-3 p-4 rounded-2xl bg-slate-50 border border-slate-200/60">
+                            <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">3</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">Pestaña Seguridad de la Cuenta</h4>
+                                <p class="mt-0.5 text-slate-500">Ve a la pestaña <strong>Seguridad de la Cuenta</strong> y en el apartado <strong>Claves de API</strong> pulsa en <strong>"Nueva clave de API"</strong>.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-start space-x-3 p-4 rounded-2xl bg-slate-50 border border-slate-200/60">
+                            <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">4</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">Copia la Clave</h4>
+                                <p class="mt-0.5 text-slate-500">Nombra la clave como <code>PlanesGo</code>, introduce tu contraseña para confirmar y copia el código generado en la pestaña <strong>Token de Acceso Odoo</strong> de esta página.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer Corporativo Minimalista -->
+    <footer class="mt-auto border-t border-slate-200/80 bg-white py-4 text-center text-xs text-slate-400">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between space-y-1 sm:space-y-0">
+            <span>PLANES Soluciones Informáticas &bull; PlanesGo v{{.Version}}</span>
+            <span class="font-mono text-[11px] text-slate-400">Ajustes de Usuario</span>
+        </div>
+    </footer>
+
+    <!-- Scripts de Interacción -->
+    <script>
+        function switchSettingsTab(tabId) {
+            // Ocultar todas las pestañas de contenido
+            document.querySelectorAll('.settings-content-pane').forEach(el => el.classList.add('hidden'));
+
+            // Quitar estilos activos de todos los botones
+            const buttons = [
+                { id: 'btn-tab-odoo-token', tab: 'tab-odoo-token', content: 'tab-odoo-token-content', activeColor: 'text-sky-700 bg-sky-50/80' },
+                { id: 'btn-tab-connection', tab: 'tab-connection', content: 'tab-connection-content', activeColor: 'text-indigo-700 bg-indigo-50/80' },
+                { id: 'btn-tab-guide', tab: 'tab-guide', content: 'tab-guide-content', activeColor: 'text-emerald-700 bg-emerald-50/80' }
+            ];
+
+            buttons.forEach(b => {
+                const btn = document.getElementById(b.id);
+                if (b.tab === tabId) {
+                    btn.className = `w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold ${b.activeColor} transition text-left group`;
+                    const contentEl = document.getElementById(b.content);
+                    if (contentEl) contentEl.classList.remove('hidden');
+                } else {
+                    btn.className = "w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group";
+                }
+            });
+        }
+
+        function togglePasswordVisibility(inputId, btn) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.innerHTML = `<svg class="w-5 h-5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>`;
+            } else {
+                input.type = 'password';
+                btn.innerHTML = `<svg class="w-5 h-5 text-slate-400 hover:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>`;
+            }
+        }
+
+        async function testOdooConnection() {
+            const user = document.getElementById('odoo_user').value;
+            const token = document.getElementById('odoo_token').value;
+            const url = document.getElementById('odoo_url') ? document.getElementById('odoo_url').value : 'https://www.planesnet.com';
+            const db = document.getElementById('odoo_db') ? document.getElementById('odoo_db').value : 'pasi';
+            const resultBox = document.getElementById('test-connection-result');
+            const testBtn = document.getElementById('btn-test-conn');
+
+            if (!token) {
+                resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-amber-50 text-amber-800 border-amber-200 block";
+                resultBox.innerHTML = "⚠️ Por favor, introduce tu Token de acceso / API Key antes de probar la conexión.";
+                return;
+            }
+
+            testBtn.disabled = true;
+            testBtn.innerHTML = `<svg class="animate-spin w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> <span>Probando conexión...</span>`;
+
+            try {
+                const response = await fetch('/api/settings/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        odoo_user: user,
+                        odoo_token: token,
+                        odoo_url: url,
+                        odoo_db: db
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-200 block";
+                    resultBox.innerHTML = `✅ <strong>Conexión exitosa:</strong> Autenticado correctamente con Odoo (UID de usuario: ${data.uid}).`;
+                } else {
+                    resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-red-50 text-red-800 border-red-200 block";
+                    resultBox.innerHTML = `❌ <strong>Error de conexión:</strong> ${data.error || 'Credenciales inválidas en Odoo.'}`;
+                }
+            } catch (err) {
+                resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-red-50 text-red-800 border-red-200 block";
+                resultBox.innerHTML = `❌ <strong>Error de red:</strong> No se pudo contactar con el servidor: ${err.message}`;
+            } finally {
+                testBtn.disabled = false;
+                testBtn.innerHTML = `<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> <span>Probar Conexión con Odoo</span>`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	"pasigo/auth"
 	"pasigo/config"
 	"pasigo/odoo"
+	"pasigo/store"
 )
 
 const Version = "1.0.1"
@@ -41,14 +43,16 @@ type SessionData struct {
 }
 
 type AppState struct {
-	mu  sync.RWMutex
-	cfg *config.Config
+	mu        sync.RWMutex
+	cfg       *config.Config
+	userStore *store.UserSettingsStore
 }
 
 type PageData struct {
 	Version              string
 	Config               *config.Config
 	Session              *SessionData
+	HasOdooToken         bool
 	Entries              []odoo.TimesheetEntry
 	Projects             []odoo.Project
 	TotalHours           float64
@@ -58,6 +62,15 @@ type PageData struct {
 	ProjectsList         []string
 	EmployeesList        []string
 	Error                string
+}
+
+type SettingsPageData struct {
+	Version        string
+	Config         *config.Config
+	Session        *SessionData
+	Settings       store.UserSettings
+	SuccessMessage string
+	ErrorMessage   string
 }
 
 type LoginPageData struct {
@@ -89,6 +102,71 @@ func decodeSession(cookieVal string) (*SessionData, error) {
 	return &data, nil
 }
 
+func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfig {
+	state.mu.RLock()
+	defaultCfg := state.cfg.Odoo
+	state.mu.RUnlock()
+
+	odooCfg := config.OdooConfig{
+		URL:      DefaultOdooURL,
+		DB:       DefaultOdooDB,
+		Username: "",
+		Password: "",
+		Limit:    200,
+	}
+
+	if defaultCfg.URL != "" {
+		odooCfg.URL = defaultCfg.URL
+	}
+	if defaultCfg.DB != "" {
+		odooCfg.DB = defaultCfg.DB
+	}
+
+	if sess != nil {
+		userEmail := sess.Username
+		if sess.UserEmail != "" {
+			userEmail = sess.UserEmail
+		}
+		odooCfg.Username = userEmail
+
+		// 1. Prioridad: Almacén persistente del usuario (independiente de la sesión de Google)
+		if state.userStore != nil && userEmail != "" {
+			if uSettings, ok := state.userStore.GetSettings(userEmail); ok {
+				if uSettings.OdooToken != "" {
+					odooCfg.Password = uSettings.OdooToken
+				}
+				if uSettings.OdooUser != "" {
+					odooCfg.Username = uSettings.OdooUser
+				}
+				if uSettings.OdooURL != "" {
+					odooCfg.URL = uSettings.OdooURL
+				}
+				if uSettings.OdooDB != "" {
+					odooCfg.DB = uSettings.OdooDB
+				}
+				if uSettings.PageLimit > 0 {
+					odooCfg.Limit = uSettings.PageLimit
+				}
+			}
+		}
+
+		// 2. Fallback: Contraseña en sesión de cookie
+		if odooCfg.Password == "" && sess.Password != "" {
+			odooCfg.Password = sess.Password
+		}
+	}
+
+	// 3. Fallback: Variables del sistema si aún estuvieran vacías
+	if odooCfg.Password == "" && defaultCfg.Password != "" {
+		odooCfg.Password = defaultCfg.Password
+		if odooCfg.Username == "" {
+			odooCfg.Username = defaultCfg.Username
+		}
+	}
+
+	return odooCfg
+}
+
 func main() {
 	portFlag := flag.Int("port", 0, "Puerto del servidor HTTP (opcional, sobrescribe PORT de entorno)")
 	flag.Parse()
@@ -101,8 +179,15 @@ func main() {
 		cfg.Server.Port = *portFlag
 	}
 
+	// Inicializar almacén persistente de ajustes de usuario en data/user_settings.json
+	userStore, err := store.NewUserSettingsStore("data/user_settings.json")
+	if err != nil {
+		log.Printf("[ADVERTENCIA] No se pudo inicializar store/user_settings: %v", err)
+	}
+
 	state := &AppState{
-		cfg: cfg,
+		cfg:       cfg,
+		userStore: userStore,
 	}
 
 	// 0. Servir archivos estáticos (Logo corporativo, assets)
@@ -192,11 +277,19 @@ func main() {
 
 		log.Printf("[OAUTH] Autenticación Google exitosa para: %s (%s)", googleUser.Email, googleUser.Name)
 
+		// Recuperar token persistente previo del usuario si existe
+		var savedToken string
+		if state.userStore != nil {
+			if uSettings, ok := state.userStore.GetSettings(googleUser.Email); ok {
+				savedToken = uSettings.OdooToken
+			}
+		}
+
 		sess := SessionData{
 			URL:         DefaultOdooURL,
 			DB:          DefaultOdooDB,
 			Username:    googleUser.Email,
-			Password:    "",
+			Password:    savedToken,
 			AuthMethod:  "google",
 			UserEmail:   googleUser.Email,
 			UserName:    googleUser.Name,
@@ -302,9 +395,17 @@ func main() {
 
 			log.Printf("[AUTH] Inicio de sesión exitoso en Odoo para %s (UID: %d)", usernameInput, uid)
 
-			state.mu.Lock()
-			state.cfg.Odoo = testCfg
-			state.mu.Unlock()
+			// Guardar también en almacén de usuario persistente
+			if state.userStore != nil {
+				_ = state.userStore.SaveSettings(store.UserSettings{
+					Email:     usernameInput,
+					OdooUser:  usernameInput,
+					OdooToken: passwordInput,
+					OdooURL:   DefaultOdooURL,
+					OdooDB:    DefaultOdooDB,
+					PageLimit: 200,
+				})
+			}
 
 			sess := SessionData{
 				URL:        DefaultOdooURL,
@@ -340,7 +441,198 @@ func main() {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
 
-	// 5. Página Principal (Protegida)
+	// 5. Ajustes de Usuario (Layout 2 Columnas)
+	http.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
+		var session *SessionData
+		cookie, err := r.Cookie(sessionCookieName)
+		if err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+
+		if session == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		userEmail := session.Username
+		if session.UserEmail != "" {
+			userEmail = session.UserEmail
+		}
+
+		// Obtener o inicializar ajustes persistentes del usuario
+		var userSettings store.UserSettings
+		if state.userStore != nil {
+			if s, ok := state.userStore.GetSettings(userEmail); ok {
+				userSettings = s
+			}
+		}
+
+		if userSettings.Email == "" {
+			userSettings.Email = userEmail
+		}
+		if userSettings.OdooUser == "" {
+			userSettings.OdooUser = userEmail
+		}
+		if userSettings.OdooURL == "" {
+			userSettings.OdooURL = DefaultOdooURL
+		}
+		if userSettings.OdooDB == "" {
+			userSettings.OdooDB = DefaultOdooDB
+		}
+		if userSettings.PageLimit <= 0 {
+			userSettings.PageLimit = 200
+		}
+		if userSettings.OdooToken == "" && session.Password != "" {
+			userSettings.OdooToken = session.Password
+		}
+
+		tmpl, err := template.ParseFiles("templates/settings.html")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error al cargar plantilla settings.html: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		state.mu.RLock()
+		defaultCfg := state.cfg
+		state.mu.RUnlock()
+
+		if r.Method == http.MethodGet {
+			data := SettingsPageData{
+				Version:  Version,
+				Config:   defaultCfg,
+				Session:  session,
+				Settings: userSettings,
+			}
+			tmpl.Execute(w, data)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			odooUser := strings.TrimSpace(r.FormValue("odoo_user"))
+			odooToken := strings.TrimSpace(r.FormValue("odoo_token"))
+			odooURL := strings.TrimSpace(r.FormValue("odoo_url"))
+			odooDB := strings.TrimSpace(r.FormValue("odoo_db"))
+			limitStr := strings.TrimSpace(r.FormValue("page_limit"))
+
+			if odooUser == "" {
+				odooUser = userEmail
+			}
+			if odooURL == "" {
+				odooURL = userSettings.OdooURL
+			}
+			if odooDB == "" {
+				odooDB = userSettings.OdooDB
+			}
+			limit := userSettings.PageLimit
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
+			}
+
+			updatedSettings := store.UserSettings{
+				Email:     userEmail,
+				OdooUser:  odooUser,
+				OdooToken: odooToken,
+				OdooURL:   odooURL,
+				OdooDB:    odooDB,
+				PageLimit: limit,
+			}
+
+			var errMsg string
+			var successMsg string
+
+			if state.userStore != nil {
+				if err := state.userStore.SaveSettings(updatedSettings); err != nil {
+					errMsg = fmt.Sprintf("Error guardando ajustes: %v", err)
+				} else {
+					successMsg = "Ajustes de usuario y token de Odoo guardados de forma persistente."
+					log.Printf("[SETTINGS] Ajustes actualizados de forma persistente para %s", userEmail)
+				}
+			} else {
+				successMsg = "Ajustes actualizados en la sesión actual."
+			}
+
+			// Actualizar cookie de sesión activa con el nuevo token
+			session.Password = odooToken
+			session.Username = odooUser
+			http.SetCookie(w, &http.Cookie{
+				Name:     sessionCookieName,
+				Value:    encodeSession(*session),
+				Path:     "/",
+				HttpOnly: true,
+				MaxAge:   86400 * 30,
+				SameSite: http.SameSiteLaxMode,
+			})
+
+			data := SettingsPageData{
+				Version:        Version,
+				Config:         defaultCfg,
+				Session:        session,
+				Settings:       updatedSettings,
+				SuccessMessage: successMsg,
+				ErrorMessage:   errMsg,
+			}
+			tmpl.Execute(w, data)
+		}
+	})
+
+	// 6. API JSON para Probar Conexión con Odoo
+	http.HandleFunc("/api/settings/test-connection", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			OdooUser  string `json:"odoo_user"`
+			OdooToken string `json:"odoo_token"`
+			OdooURL   string `json:"odoo_url"`
+			OdooDB    string `json:"odoo_db"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Formato JSON inválido"})
+			return
+		}
+
+		if payload.OdooToken == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "El token de acceso no puede estar vacío."})
+			return
+		}
+
+		if payload.OdooURL == "" {
+			payload.OdooURL = DefaultOdooURL
+		}
+		if payload.OdooDB == "" {
+			payload.OdooDB = DefaultOdooDB
+		}
+
+		testCfg := config.OdooConfig{
+			URL:      payload.OdooURL,
+			DB:       payload.OdooDB,
+			Username: payload.OdooUser,
+			Password: payload.OdooToken,
+			Limit:    10,
+		}
+
+		client := odoo.NewClient(testCfg)
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		uid, err := client.Authenticate(ctx)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "uid": uid})
+	})
+
+	// 7. Página Principal (Protegida)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -354,66 +646,24 @@ func main() {
 		}
 
 		if session == nil {
-			state.mu.RLock()
-			savedCfg := state.cfg.Odoo
-			state.mu.RUnlock()
-			if savedCfg.Username != "" && savedCfg.Password != "" {
-				session = &SessionData{
-					URL:        DefaultOdooURL,
-					DB:         DefaultOdooDB,
-					Username:   savedCfg.Username,
-					Password:   savedCfg.Password,
-					AuthMethod: "odoo",
-					UserName:   savedCfg.Username,
-				}
-			}
-		}
-
-		if session == nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
-		state.mu.RLock()
-		savedCfg := state.cfg.Odoo
-		state.mu.RUnlock()
-
-		odooUser := session.Username
-		odooPass := session.Password
-		if odooPass == "" && savedCfg.Password != "" {
-			odooPass = savedCfg.Password
-			if odooUser == "" {
-				odooUser = savedCfg.Username
-			}
-		}
-
-		currentOdooCfg := config.OdooConfig{
-			URL:      savedCfg.URL,
-			DB:       savedCfg.DB,
-			Username: odooUser,
-			Password: odooPass,
-			Limit:    savedCfg.Limit,
-		}
-		if currentOdooCfg.URL == "" {
-			currentOdooCfg.URL = DefaultOdooURL
-		}
-		if currentOdooCfg.DB == "" {
-			currentOdooCfg.DB = DefaultOdooDB
-		}
-		if currentOdooCfg.Limit <= 0 {
-			currentOdooCfg.Limit = 200
-		}
+		// Resolver credenciales personalizadas de Odoo (persistent store > session > fallback)
+		currentOdooCfg := state.resolveUserOdooConfig(session)
 
 		activeCfg := &config.Config{
-			Server: config.ServerConfig{Port: 8080},
+			Server: config.ServerConfig{Port: cfg.Server.Port},
 			Odoo:   currentOdooCfg,
 		}
 
 		var entries []odoo.TimesheetEntry
 		var projects []odoo.Project
 		var fetchErr error
+		hasOdooToken := (currentOdooCfg.Password != "")
 
-		if currentOdooCfg.Password != "" {
+		if hasOdooToken {
 			client := odoo.NewClient(currentOdooCfg)
 			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 			defer cancel()
@@ -500,6 +750,7 @@ func main() {
 			Version:              Version,
 			Config:               activeCfg,
 			Session:              session,
+			HasOdooToken:         hasOdooToken,
 			Entries:              entries,
 			Projects:             projects,
 			TotalHours:           totalHours,
@@ -523,32 +774,16 @@ func main() {
 		}
 	})
 
-	// 6. API JSON Partes de horas
+	// 8. API JSON Partes de horas
 	http.HandleFunc("/api/timesheets", func(w http.ResponseWriter, r *http.Request) {
 		var session *SessionData
 		cookie, err := r.Cookie(sessionCookieName)
 		if err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
 		}
-		if session == nil {
-			state.mu.RLock()
-			savedCfg := state.cfg.Odoo
-			state.mu.RUnlock()
-			session = &SessionData{
-				URL:      DefaultOdooURL,
-				DB:       DefaultOdooDB,
-				Username: savedCfg.Username,
-				Password: savedCfg.Password,
-			}
-		}
 
-		client := odoo.NewClient(config.OdooConfig{
-			URL:      DefaultOdooURL,
-			DB:       DefaultOdooDB,
-			Username: session.Username,
-			Password: session.Password,
-			Limit:    200,
-		})
+		odooCfg := state.resolveUserOdooConfig(session)
+		client := odoo.NewClient(odooCfg)
 
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
@@ -563,32 +798,16 @@ func main() {
 		json.NewEncoder(w).Encode(entries)
 	})
 
-	// 7. API JSON Proyectos Odoo
+	// 9. API JSON Proyectos Odoo
 	http.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
 		var session *SessionData
 		cookie, err := r.Cookie(sessionCookieName)
 		if err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
 		}
-		if session == nil {
-			state.mu.RLock()
-			savedCfg := state.cfg.Odoo
-			state.mu.RUnlock()
-			session = &SessionData{
-				URL:      DefaultOdooURL,
-				DB:       DefaultOdooDB,
-				Username: savedCfg.Username,
-				Password: savedCfg.Password,
-			}
-		}
 
-		client := odoo.NewClient(config.OdooConfig{
-			URL:      DefaultOdooURL,
-			DB:       DefaultOdooDB,
-			Username: session.Username,
-			Password: session.Password,
-			Limit:    200,
-		})
+		odooCfg := state.resolveUserOdooConfig(session)
+		client := odoo.NewClient(odooCfg)
 
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
@@ -603,7 +822,7 @@ func main() {
 		json.NewEncoder(w).Encode(projects)
 	})
 
-	// 7. Servidor HTTP
+	// 10. Servidor HTTP
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &http.Server{
 		Addr:         addr,
