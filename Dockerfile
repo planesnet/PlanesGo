@@ -30,6 +30,7 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 # Copiar binario y recursos necesarios desde el builder
 COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/templates /app/templates
+COPY --from=builder /app/static /app/static
 COPY --from=builder /app/config.example.yml /app/config.example.yml
 COPY --from=builder /app/config.yml /app/config.yml
 

@@ -7,3 +7,10 @@ odoo:
   username: ""
   password: ""
   limit: 200
+
+google_auth:
+  enabled: true
+  client_id: ""       # Tu Client ID de Google Cloud Console (o variable GOOGLE_CLIENT_ID)
+  client_secret: ""   # Tu Client Secret de Google Cloud Console (o variable GOOGLE_CLIENT_SECRET)
+  redirect_url: "http://localhost:8080/auth/google/callback"
+  allowed_domain: ""  # Opcional: restringir al dominio de empresa, ej: "planesnet.com"

@@ -20,9 +20,18 @@ type OdooConfig struct {
 	Limit    int    `yaml:"limit"`
 }
 
+type GoogleAuthConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	ClientID      string `yaml:"client_id"`
+	ClientSecret  string `yaml:"client_secret"`
+	RedirectURL   string `yaml:"redirect_url"`
+	AllowedDomain string `yaml:"allowed_domain"` // Opcional: e.g. "planesnet.com"
+}
+
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Odoo   OdooConfig   `yaml:"odoo"`
+	Server     ServerConfig     `yaml:"server"`
+	Odoo       OdooConfig       `yaml:"odoo"`
+	GoogleAuth GoogleAuthConfig `yaml:"google_auth"`
 }
 
 // LoadConfig lee y valida el archivo de configuración YAML especificado.
@@ -37,7 +46,7 @@ func LoadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("error al parsear el archivo YAML %s: %w", filename, err)
 	}
 
-	// Valores por defecto
+	// Valores por defecto para Server y Odoo
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
 	}
@@ -53,6 +62,29 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	cfg.Odoo.URL = strings.TrimRight(cfg.Odoo.URL, "/")
+
+	// Variables de entorno para Google Auth si están presentes
+	if envClientID := os.Getenv("GOOGLE_CLIENT_ID"); envClientID != "" {
+		cfg.GoogleAuth.ClientID = envClientID
+	}
+	if envClientSecret := os.Getenv("GOOGLE_CLIENT_SECRET"); envClientSecret != "" {
+		cfg.GoogleAuth.ClientSecret = envClientSecret
+	}
+	if envRedirectURL := os.Getenv("GOOGLE_REDIRECT_URL"); envRedirectURL != "" {
+		cfg.GoogleAuth.RedirectURL = envRedirectURL
+	}
+	if envAllowedDomain := os.Getenv("GOOGLE_ALLOWED_DOMAIN"); envAllowedDomain != "" {
+		cfg.GoogleAuth.AllowedDomain = envAllowedDomain
+	}
+
+	// Si hay ClientID configurado, activar por defecto
+	if cfg.GoogleAuth.ClientID != "" {
+		cfg.GoogleAuth.Enabled = true
+	}
+
+	if cfg.GoogleAuth.RedirectURL == "" {
+		cfg.GoogleAuth.RedirectURL = "http://localhost:8080/auth/google/callback"
+	}
 
 	return &cfg, nil
 }
