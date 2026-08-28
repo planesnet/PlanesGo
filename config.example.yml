@@ -2,13 +2,8 @@ server:
   port: 8080
 
 odoo:
-  # URL de tu instancia de Odoo (ejemplo: https://tu-empresa.odoo.com o http://localhost:8069)
-  url: "https://tu-empresa.odoo.com"
-  # Nombre de la base de datos de Odoo
-  db: "odoo_db"
-  # Usuario o correo electrónico de acceso
-  username: "usuario@ejemplo.com"
-  # Contraseña o API Key de Odoo
-  password: "tu_api_key_o_password"
-  # Límite de registros a recuperar por defecto
+  url: "https://www.planesnet.com"
+  db: "pasi"
+  username: "tu_usuario_o_email"
+  password: "tu_contraseña_o_api_key"
   limit: 200

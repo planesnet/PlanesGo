@@ -89,7 +89,7 @@ func main() {
 			Server: config.ServerConfig{Port: 8080},
 			Odoo: config.OdooConfig{
 				URL:      "https://www.planesnet.com",
-				DB:       "",
+				DB:       "pasi",
 				Username: "",
 				Password: "",
 				Limit:    200,
@@ -139,19 +139,33 @@ func main() {
 			}
 
 			urlInput := strings.TrimRight(strings.TrimSpace(r.FormValue("url")), "/")
+			if urlInput == "" {
+				urlInput = defaultCfg.Odoo.URL
+				if urlInput == "" {
+					urlInput = "https://www.planesnet.com"
+				}
+			}
+
 			dbInput := strings.TrimSpace(r.FormValue("db"))
+			if dbInput == "" {
+				dbInput = defaultCfg.Odoo.DB
+				if dbInput == "" {
+					dbInput = "pasi"
+				}
+			}
+
 			usernameInput := strings.TrimSpace(r.FormValue("username"))
 			passwordInput := r.FormValue("password")
 			saveConfig := r.FormValue("save_config") == "true"
 
-			if urlInput == "" || dbInput == "" || usernameInput == "" || passwordInput == "" {
+			if usernameInput == "" || passwordInput == "" {
 				data := LoginPageData{
 					Version:  Version,
 					URL:      urlInput,
 					DB:       dbInput,
 					Username: usernameInput,
 					Password: passwordInput,
-					Error:    "Todos los campos son obligatorios para iniciar sesión.",
+					Error:    "Por favor, introduce tu usuario y contraseña.",
 				}
 				tmpl.Execute(w, data)
 				return

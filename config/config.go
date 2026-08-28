@@ -45,6 +45,13 @@ func LoadConfig(filename string) (*Config, error) {
 		cfg.Odoo.Limit = 200
 	}
 
+	if cfg.Odoo.URL == "" {
+		cfg.Odoo.URL = "https://www.planesnet.com"
+	}
+	if cfg.Odoo.DB == "" {
+		cfg.Odoo.DB = "pasi"
+	}
+
 	cfg.Odoo.URL = strings.TrimRight(cfg.Odoo.URL, "/")
 
 	return &cfg, nil
