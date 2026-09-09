@@ -47,14 +47,20 @@ func (m Many2One) String() string {
 
 // TimesheetEntry representa un registro de horas de Odoo (account.analytic.line).
 type TimesheetEntry struct {
-	ID          int      `json:"id"`
-	Date        string   `json:"date"`
-	Name        string   `json:"name"`
-	UnitAmount  float64  `json:"unit_amount"`
-	ProjectID   Many2One `json:"project_id"`
-	TaskID      Many2One `json:"task_id"`
-	EmployeeID  Many2One `json:"employee_id"`
-	UserID      Many2One `json:"user_id"`
+	ID                 int      `json:"id"`
+	Date               string   `json:"date"`
+	Name               string   `json:"name"`
+	UnitAmount         float64  `json:"unit_amount"`
+	ProjectID          Many2One `json:"project_id"`
+	TaskID             Many2One `json:"task_id"`
+	EmployeeID         Many2One `json:"employee_id"`
+	UserID             Many2One `json:"user_id"`
+	TimesheetInvoiceID Many2One `json:"timesheet_invoice_id"`
+}
+
+// IsInvoiced indica si la imputación de horas ya ha sido vinculada a una factura de cliente en Odoo.
+func (t *TimesheetEntry) IsInvoiced() bool {
+	return t.TimesheetInvoiceID.ID > 0
 }
 
 // DisplayEmployee obtiene el nombre del empleado o del usuario si no hay empleado asociado.

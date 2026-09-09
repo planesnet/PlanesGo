@@ -278,7 +278,68 @@
             <div class="flex-1 min-w-0 w-full space-y-5">
 
 
-                <!-- Métricas Principales (KPIs) -->
+                <!-- Selector de Semanas -->
+                <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="flex items-center space-x-2">
+                        <!-- Botón Semana Anterior -->
+                        <button type="button" id="btn-prev-week" onclick="navigateWeek(-1)"
+                                class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+                                title="Semana anterior">
+                            <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                            </svg>
+                            <span class="hidden sm:inline">Anterior</span>
+                        </button>
+
+                        <!-- Botón Semana Siguiente -->
+                        <button type="button" id="btn-next-week" onclick="navigateWeek(1)"
+                                class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+                                title="Semana siguiente">
+                            <span class="hidden sm:inline">Siguiente</span>
+                            <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Información Central de la Semana -->
+                    <div class="flex items-center space-x-3">
+                        <div class="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 border border-sky-100">
+                            <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span id="week-title-display" class="text-sm font-bold text-slate-900">
+                                    Semana actual
+                                </span>
+                                <span id="current-week-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/80">
+                                    Semana actual
+                                </span>
+                            </div>
+                            <div id="week-dates-display" class="text-xs font-medium text-slate-500 font-mono mt-0.5">
+                                Cargando fechas...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botones de Acción Rápida de Semanas -->
+                    <div class="flex items-center space-x-2 self-end md:self-auto">
+                        <button type="button" id="btn-current-week" onclick="goToCurrentWeek()"
+                                class="hidden px-3 py-1.5 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 rounded-xl transition cursor-pointer"
+                                title="Volver a la semana en curso">
+                            Semana actual
+                        </button>
+                        <button type="button" id="btn-toggle-all-weeks" onclick="toggleAllWeeksFilter()"
+                                class="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                                title="Alternar entre filtrar por semana y ver todas las fechas">
+                            <span id="btn-toggle-all-weeks-text">Ver todas las semanas</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Métricas Principales (KPIs de la semana seleccionada) -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <!-- Total Horas -->
                     <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm hover:border-sky-300 transition-all">
@@ -294,9 +355,9 @@
                             <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-hours">{{printf "%.2f" .TotalHours}}</span>
                             <span class="text-xs font-bold text-sky-600">h</span>
                         </div>
-                        <div class="mt-1 flex items-center text-[11px] text-emerald-600 font-medium">
+                        <div class="mt-1 flex items-center text-[11px] text-emerald-600 font-medium" id="kpi-hours-sub">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
-                            Calculado de partes
+                            En semana seleccionada
                         </div>
                     </div>
 
@@ -312,10 +373,10 @@
                         </div>
                         <div class="mt-2 flex items-baseline space-x-1">
                             <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-projects">{{if .Projects}}{{len .Projects}}{{else}}{{.UniqueProjectsCount}}{{end}}</span>
-                            <span class="text-xs font-medium text-indigo-600">en servidor</span>
+                            <span class="text-xs font-medium text-indigo-600">activos</span>
                         </div>
-                        <div class="mt-1 text-[11px] text-slate-500">
-                            {{.UniqueProjectsCount}} con partes de horas
+                        <div class="mt-1 text-[11px] text-slate-500" id="kpi-projects-sub">
+                            con partes esta semana
                         </div>
                     </div>
 
@@ -333,8 +394,8 @@
                             <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-entries">{{len .Entries}}</span>
                             <span class="text-xs font-medium text-slate-400">imputaciones</span>
                         </div>
-                        <div class="mt-1 text-[11px] text-slate-400">
-                            Límite máx: {{.Config.Odoo.Limit}}
+                        <div class="mt-1 text-[11px] text-slate-400" id="kpi-entries-sub">
+                            esta semana
                         </div>
                     </div>
 
@@ -352,15 +413,15 @@
                             <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" id="kpi-total-employees">{{.UniqueEmployeesCount}}</span>
                             <span class="text-xs font-medium text-slate-400">usuarios</span>
                         </div>
-                        <div class="mt-1 text-[11px] text-slate-400">
-                            Equipo con actividad
+                        <div class="mt-1 text-[11px] text-slate-400" id="kpi-employees-sub">
+                            con actividad esta semana
                         </div>
                     </div>
                 </div>
 
-                <!-- Barra de Filtros Minimalista de Partes de Horas -->
+                <!-- Barra de Filtros Minimalista de Partes de Horas y Selector de Vistas -->
                 <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-sm">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-3 items-center">
                         <!-- Búsqueda rápida -->
                         <div class="relative">
                             <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
@@ -394,128 +455,237 @@
                             </select>
                         </div>
 
-                        <!-- Botón Reset y Botón Imputar Horas -->
-                        <div class="flex items-center justify-end space-x-2">
-                            <button id="btn-reset" class="w-full lg:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
-                                Limpiar Filtros
-                            </button>
+                        <!-- Selector de Vista (Lista / Calendario / Gantt) y Botón Imputar Horas -->
+                        <div class="flex items-center justify-between xl:justify-end space-x-2">
+                            <!-- Botonera estilo Odoo con tipos de vista -->
+                            <div class="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs" role="group" aria-label="Selector de vistas">
+                                <!-- Botón Vista Lista -->
+                                <button type="button" id="btn-view-list" onclick="switchView('list')"
+                                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70 transition-all cursor-pointer flex items-center space-x-1.5"
+                                        title="Vista Lista de Partes de Horas">
+                                    <svg class="w-3.5 h-3.5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                    </svg>
+                                    <span class="text-[11px]">Lista</span>
+                                </button>
+                                <!-- Botón Vista Calendario (Semanal) -->
+                                <button type="button" id="btn-view-calendar" onclick="switchView('calendar')"
+                                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                                        title="Vista Calendario Semanal">
+                                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
+                                    </svg>
+                                    <span class="text-[11px]">Calendario</span>
+                                </button>
+                                <!-- Botón Vista Gantt -->
+                                <button type="button" id="btn-view-gantt" onclick="switchView('gantt')"
+                                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                                        title="Vista Gantt (Timeline semanal de tareas)">
+                                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M3 8h10M3 12h14M3 16h6M3 20h12" />
+                                    </svg>
+                                    <span class="text-[11px]">Gantt</span>
+                                </button>
+                            </div>
+
+                            <!-- Botón Imputar Horas -->
                             <button type="button" id="btn-open-timesheet-modal" onclick="openCreateTimesheetModal()"
-                                    class="w-full lg:w-auto px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer"
+                                    class="px-3.5 py-2 text-xs sm:text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
                                     title="Registrar horas en tarea de proyecto">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                                 </svg>
                                 <span id="btn-imputar-label">Imputar Horas</span>
-                            </button>
+<!-- VISTA 1: Lista (Tabla de Registros de Horas) -->
+                <div id="view-container-list" class="space-y-4">
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">
+                                <thead>
+                                    <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                        <th class="py-3 px-4 sm:px-6">Fecha</th>
+                                        <th class="py-3 px-4">Miembro</th>
+                                        <th class="py-3 px-4">Proyecto</th>
+                                        <th class="py-3 px-4">Tarea</th>
+                                        <th class="py-3 px-4">Descripción</th>
+                                        <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
+                                        <th class="py-3 px-3 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
+                                    {{if .Entries}}
+                                        {{range .Entries}}
+                                         <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
+                                            data-id="{{.ID}}"
+                                            data-date="{{.Date}}"
+                                            data-employee="{{.DisplayEmployee}}"
+                                            data-project="{{.ProjectID.String}}"
+                                            data-project-name="{{.ProjectID.Name}}"
+                                            data-project-id="{{.ProjectID.ID}}"
+                                            data-task="{{.TaskID.String}}"
+                                            data-task-id="{{.TaskID.ID}}"
+                                            data-task-name="{{.TaskID.Name}}"
+                                            data-desc="{{.Name}}"
+                                            data-hours="{{.UnitAmount}}"
+                                            data-invoiced="{{if .IsInvoiced}}true{{else}}false{{end}}">
+                                            <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+                                                <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
+                                            </td>
+                                            <td class="py-3 px-4 whitespace-nowrap">
+                                                <div class="flex items-center space-x-2">
+                                                    <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[10px] shrink-0">
+                                                        {{slice .DisplayEmployee 0 1}}
+                                                    </div>
+                                                    <span class="font-medium text-slate-800">{{.DisplayEmployee}}</span>
+                                                </div>
+                                            </td>
+                                            <td class="py-3 px-4 whitespace-nowrap">
+                                                {{if .ProjectID.Name}}
+                                                <button type="button"
+                                                        onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
+                                                        data-project-name="{{.ProjectID.Name}}"
+                                                        data-project-id="{{.ProjectID.ID}}"
+                                                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                                                        title="Filtrar por este proyecto">
+                                                    {{.ProjectID.Name}}
+                                                </button>
+                                                {{else}}
+                                                <span class="text-slate-400 text-xs">-</span>
+                                                {{end}}
+                                            </td>
+                                            <td class="py-3 px-4 whitespace-nowrap">
+                                                {{if .TaskID.Name}}
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                                    {{.TaskID.Name}}
+                                                </span>
+                                                {{else}}
+                                                <span class="text-slate-400 text-xs">-</span>
+                                                {{end}}
+                                            </td>
+                                            <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
+                                                {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
+                                            </td>
+                                            <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+                                                <div class="inline-flex items-center justify-end space-x-1.5">
+                                                    {{if .IsInvoiced}}
+                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80" title="Factura: {{if .TimesheetInvoiceID.Name}}{{.TimesheetInvoiceID.Name}}{{else}}#{{.TimesheetInvoiceID.ID}}{{end}}">
+                                                        <svg class="w-2.5 h-2.5 mr-1 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                                        </svg>
+                                                        Facturado
+                                                    </span>
+                                                    {{end}}
+                                                    <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
+                                                        {{printf "%.2f" .UnitAmount}} h
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td class="py-3 px-3 text-right whitespace-nowrap">
+                                                <div class="inline-flex items-center justify-end space-x-1">
+                                                    <button type="button"
+                                                            onclick="openEditTimesheetModal(this)"
+                                                            data-id="{{.ID}}"
+                                                            data-date="{{.Date}}"
+                                                            data-project-id="{{.ProjectID.ID}}"
+                                                            data-project-name="{{.ProjectID.Name}}"
+                                                            data-task-id="{{.TaskID.ID}}"
+                                                            data-task-name="{{.TaskID.Name}}"
+                                                            data-name="{{.Name}}"
+                                                            data-hours="{{.UnitAmount}}"
+                                                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
+                                                            title="Editar este parte de horas">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                        </svg>
+                                                    </button>
+
+                                                    {{if .IsInvoiced}}
+                                                    <span class="inline-flex items-center justify-center w-7 h-7 text-slate-300 rounded-lg cursor-not-allowed"
+                                                          title="No se puede borrar: Imputación ya facturada en Odoo (Factura {{if .TimesheetInvoiceID.Name}}{{.TimesheetInvoiceID.Name}}{{else}}#{{.TimesheetInvoiceID.ID}}{{end}})">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                                        </svg>
+                                                    </span>
+                                                    {{else}}
+                                                    <button type="button"
+                                                            onclick="openDeleteTimesheetModal(this)"
+                                                            data-id="{{.ID}}"
+                                                            data-date="{{.Date}}"
+                                                            data-project-name="{{.ProjectID.Name}}"
+                                                            data-task-name="{{.TaskID.Name}}"
+                                                            data-hours="{{printf "%.2f" .UnitAmount}}"
+                                                            data-desc="{{.Name}}"
+                                                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                                            title="Eliminar este parte de horas">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    </button>
+                                                    {{end}}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {{end}}
+                                    {{else}}
+                                        <tr id="empty-row">
+                                            <td colspan="7" class="py-12 text-center text-slate-400">
+                                                <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                <p class="font-semibold text-slate-600">No se encontraron partes de horas registradas</p>
+                                                <p class="text-xs text-slate-400 mt-1">Verifica tus credenciales y permisos en Odoo.</p>
+                                            </td>
+                                        </tr>
+                                    {{end}}
+                                    <tr id="empty-filter-row" class="hidden">
+                                        <td colspan="7" class="py-12 text-center text-slate-400">
+                                            <svg class="mx-auto h-9 w-9 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/>
+                                            </svg>
+                                            <p class="font-semibold text-slate-600">No hay partes de horas para la semana o filtros seleccionados</p>
+                                            <p class="text-xs text-slate-400 mt-1">Navega a otra semana con las flechas o ajusta los filtros.</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
-                <!-- Tabla de Registros de Horas -->
-                <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">
-                            <thead>
-                                <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                    <th class="py-3 px-4 sm:px-6">Fecha</th>
-                                    <th class="py-3 px-4">Miembro</th>
-                                    <th class="py-3 px-4">Proyecto</th>
-                                    <th class="py-3 px-4">Tarea</th>
-                                    <th class="py-3 px-4">Descripción</th>
-                                    <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
-                                    <th class="py-3 px-3 text-right">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
-                                {{if .Entries}}
-                                    {{range .Entries}}
-                                     <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
-                                        data-id="{{.ID}}"
-                                        data-date="{{.Date}}"
-                                        data-employee="{{.DisplayEmployee}}"
-                                        data-project="{{.ProjectID.String}}"
-                                        data-project-name="{{.ProjectID.Name}}"
-                                        data-project-id="{{.ProjectID.ID}}"
-                                        data-task="{{.TaskID.String}}"
-                                        data-task-id="{{.TaskID.ID}}"
-                                        data-task-name="{{.TaskID.Name}}"
-                                        data-desc="{{.Name}}"
-                                        data-hours="{{.UnitAmount}}">
-                                        <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
-                                            <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
-                                        </td>
-                                        <td class="py-3 px-4 whitespace-nowrap">
-                                            <div class="flex items-center space-x-2">
-                                                <div class="w-5 h-5 rounded-full bg-sky-100 text-sky-700 font-bold text-[10px] flex items-center justify-center uppercase">
-                                                    {{slice .DisplayEmployee 0 1}}
-                                                </div>
-                                                <span class="font-medium text-slate-800">{{.DisplayEmployee}}</span>
-                                            </div>
-                                        </td>
-                                        <td class="py-3 px-4 whitespace-nowrap">
-                                            {{if .ProjectID.Name}}
-                                            <button type="button"
-                                                    onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
-                                                    data-project-name="{{.ProjectID.Name}}"
-                                                    data-project-id="{{.ProjectID.ID}}"
-                                                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
-                                                    title="Filtrar por este proyecto">
-                                                {{.ProjectID.Name}}
-                                            </button>
-                                            {{else}}
-                                            <span class="text-slate-400 text-xs">-</span>
-                                            {{end}}
-                                        </td>
-                                        <td class="py-3 px-4 whitespace-nowrap">
-                                            {{if .TaskID.Name}}
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                                                {{.TaskID.Name}}
-                                            </span>
-                                            {{else}}
-                                            <span class="text-slate-400 text-xs">-</span>
-                                            {{end}}
-                                        </td>
-                                        <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
-                                            {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
-                                        </td>
-                                        <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
-                                                {{printf "%.2f" .UnitAmount}} h
-                                            </span>
-                                        </td>
-                                        <td class="py-3 px-3 text-right whitespace-nowrap">
-                                            <button type="button"
-                                                    onclick="openEditTimesheetModal(this)"
-                                                    data-id="{{.ID}}"
-                                                    data-date="{{.Date}}"
-                                                    data-project-id="{{.ProjectID.ID}}"
-                                                    data-project-name="{{.ProjectID.Name}}"
-                                                    data-task-id="{{.TaskID.ID}}"
-                                                    data-task-name="{{.TaskID.Name}}"
-                                                    data-name="{{.Name}}"
-                                                    data-hours="{{.UnitAmount}}"
-                                                    class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
-                                                    title="Editar este parte de horas">
-                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                                </svg>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                    {{end}}
-                                {{else}}
-                                    <tr id="empty-row">
-                                        <td colspan="7" class="py-12 text-center text-slate-400">
-                                            <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            <p class="font-semibold text-slate-600">No se encontraron partes de horas registradas</p>
-                                            <p class="text-xs text-slate-400 mt-1">Verifica tus credenciales y permisos en Odoo.</p>
-                                        </td>
-                                    </tr>
-                                {{end}}
-                            </tbody>
-                        </table>
+                <!-- VISTA 2: Calendario (Semanal) -->
+                <div id="view-container-calendar" class="hidden space-y-4">
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5 overflow-hidden">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-4 border-b border-slate-100">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-slate-800 text-sm">Vista Semanal</span>
+                                <span id="calendar-week-range" class="text-xs text-slate-500 font-medium"></span>
+                            </div>
+                            <div class="text-xs font-semibold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100 self-start sm:self-auto">
+                                Total Semana: <span id="calendar-week-total" class="font-bold">0.00</span> h
+                            </div>
+                        </div>
+                        <!-- Grid de 7 días (Lunes a Domingo) -->
+                        <div class="grid grid-cols-1 md:grid-cols-7 gap-3 min-h-[360px]" id="calendar-grid-days">
+                            <!-- Los 7 días se generan dinámicamente -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- VISTA 3: Gantt (Timeline semanal) -->
+                <div id="view-container-gantt" class="hidden space-y-4">
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5 overflow-hidden">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-4 border-b border-slate-100">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-slate-800 text-sm">Timeline Gantt Semanal</span>
+                                <span class="text-xs text-slate-400 font-medium hidden sm:inline">• Distribución de horas por proyecto</span>
+                            </div>
+                            <div class="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 self-start sm:self-auto">
+                                Total Gantt: <span id="gantt-week-total" class="font-bold">0.00</span> h
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto" id="gantt-table-container">
+                            <!-- El diagrama Gantt se genera dinámicamente -->
+                        </div>
                     </div>
                 </div>
 
@@ -666,6 +836,64 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Modal Confirmar Eliminación de Horas -->
+        <div id="delete-timesheet-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 hidden">
+            <div class="bg-white rounded-2xl shadow-2xl border border-slate-200/90 w-full max-w-md overflow-hidden transform transition-all duration-200 scale-95 opacity-0" id="delete-modal-container">
+                <div class="p-6">
+                    <div class="flex items-start space-x-4">
+                        <div class="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-bold text-slate-800">Eliminar parte de horas</h3>
+                            <p class="text-xs text-slate-500 mt-1">¿Estás seguro de que deseas eliminar este registro de horas en Odoo? Esta acción no se puede deshacer.</p>
+                            
+                            <div class="mt-3 bg-slate-50 rounded-xl p-3 border border-slate-200/70 text-xs space-y-1">
+                                <input type="hidden" id="delete-timesheet-id" value="">
+                                <div class="flex justify-between text-slate-600">
+                                    <span class="font-medium text-slate-500">Fecha:</span>
+                                    <span id="delete-info-date" class="font-mono font-medium text-slate-800">-</span>
+                                </div>
+                                <div class="flex justify-between text-slate-600">
+                                    <span class="font-medium text-slate-500">Proyecto:</span>
+                                    <span id="delete-info-project" class="font-medium text-slate-800 truncate max-w-[200px]">-</span>
+                                </div>
+                                <div class="flex justify-between text-slate-600">
+                                    <span class="font-medium text-slate-500">Tiempo:</span>
+                                    <span id="delete-info-hours" class="font-bold text-sky-700 font-mono">-</span>
+                                </div>
+                                <div class="text-slate-600 pt-1 border-t border-slate-200/50">
+                                    <span class="font-medium text-slate-500 block mb-0.5">Descripción:</span>
+                                    <span id="delete-info-desc" class="italic text-slate-700 block truncate">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mensaje de feedback / error en el modal de eliminación -->
+                    <div id="delete-feedback" class="hidden mt-4 p-3 rounded-xl text-xs font-medium"></div>
+
+                    <!-- Botones de Acción -->
+                    <div class="mt-6 flex items-center justify-end space-x-2">
+                        <button type="button" onclick="closeDeleteModal()"
+                                class="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
+                            Cancelar
+                        </button>
+                        <button type="button" id="btn-confirm-delete" onclick="executeDeleteTimesheet()"
+                                class="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 rounded-xl shadow-xs transition flex items-center space-x-2 cursor-pointer">
+                            <span id="btn-confirm-delete-text">Eliminar</span>
+                            <svg id="btn-confirm-delete-spinner" class="animate-spin -mr-1 ml-1 h-3.5 w-3.5 text-white hidden" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -973,12 +1201,236 @@
             highlightSidebarProject(activeSidebarProjectName, activeSidebarProjectId);
         }
 
-        // Función global para filtrar partes de horas
+        // ==============================================================
+        // --- MANEJO DE SEMANAS Y CALENDARIO (LUNES A DOMINGO) ---
+        // ==============================================================
+        function parseISODate(dateStr) {
+            if (!dateStr) return null;
+            const parts = dateStr.split('-');
+            if (parts.length < 3) return null;
+            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        }
+
+        function formatISODate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function getMonday(d) {
+            const date = new Date(d);
+            const day = date.getDay();
+            const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+            const monday = new Date(date.setDate(diff));
+            monday.setHours(0, 0, 0, 0);
+            return monday;
+        }
+
+        function getSunday(monday) {
+            const sunday = new Date(monday);
+            sunday.setDate(sunday.getDate() + 6);
+            sunday.setHours(23, 59, 59, 999);
+            return sunday;
+        }
+
+        function getISOWeekNumber(d) {
+            const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            const dayNum = date.getUTCDay() || 7;
+            date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+            return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+        }
+
+        function isSameDay(d1, d2) {
+            return d1.getFullYear() === d2.getFullYear() &&
+                   d1.getMonth() === d2.getMonth() &&
+                   d1.getDate() === d2.getDate();
+        }
+
+        function isSameWeek(m1, m2) {
+            return isSameDay(m1, m2);
+        }
+
+        const currentMonday = getMonday(new Date());
+        let selectedWeekMonday = new Date(currentMonday);
+        let isWeekFilterActive = true;
+        let currentView = 'list';
+
+        function navigateWeek(delta) {
+            isWeekFilterActive = true;
+            selectedWeekMonday.setDate(selectedWeekMonday.getDate() + delta * 7);
+            updateWeekControls();
+            applyTimesheetFilters();
+        }
+
+        function goToCurrentWeek() {
+            isWeekFilterActive = true;
+            selectedWeekMonday = new Date(currentMonday);
+            updateWeekControls();
+            applyTimesheetFilters();
+        }
+
+        function toggleAllWeeksFilter() {
+            isWeekFilterActive = !isWeekFilterActive;
+            updateWeekControls();
+            applyTimesheetFilters();
+        }
+
+        function updateWeekControls() {
+            const titleEl = document.getElementById('week-title-display');
+            const datesEl = document.getElementById('week-dates-display');
+            const currentBadge = document.getElementById('current-week-badge');
+            const btnCurrent = document.getElementById('btn-current-week');
+            const btnToggleText = document.getElementById('btn-toggle-all-weeks-text');
+            const btnPrev = document.getElementById('btn-prev-week');
+            const btnNext = document.getElementById('btn-next-week');
+
+            const kpiHoursSub = document.getElementById('kpi-hours-sub');
+            const kpiProjectsSub = document.getElementById('kpi-projects-sub');
+            const kpiEntriesSub = document.getElementById('kpi-entries-sub');
+            const kpiEmployeesSub = document.getElementById('kpi-employees-sub');
+
+            // Determinar viabilidad de botones según fechas existentes en las imputaciones
+            const rows = document.querySelectorAll('.timesheet-row');
+            let minMonday = null;
+            let maxMonday = null;
+
+            rows.forEach(r => {
+                const dStr = r.dataset.date;
+                if (dStr) {
+                    const d = parseISODate(dStr);
+                    if (d) {
+                        const mon = getMonday(d);
+                        if (!minMonday || mon < minMonday) minMonday = mon;
+                        if (!maxMonday || mon > maxMonday) maxMonday = mon;
+                    }
+                }
+            });
+
+            let prevViable = false;
+            let nextViable = false;
+
+            if (isWeekFilterActive) {
+                if (minMonday && selectedWeekMonday.getTime() > minMonday.getTime()) {
+                    prevViable = true;
+                }
+                // Siguiente es viable si estamos antes de la semana actual o si hay registros futuros
+                if (selectedWeekMonday.getTime() < currentMonday.getTime() || (maxMonday && selectedWeekMonday.getTime() < maxMonday.getTime())) {
+                    nextViable = true;
+                }
+            }
+
+            if (btnPrev) {
+                btnPrev.disabled = !prevViable;
+                if (prevViable) {
+                    btnPrev.classList.remove('opacity-40', 'cursor-not-allowed', 'pointer-events-none');
+                } else {
+                    btnPrev.classList.add('opacity-40', 'cursor-not-allowed', 'pointer-events-none');
+                }
+            }
+
+            if (btnNext) {
+                btnNext.disabled = !nextViable;
+                if (nextViable) {
+                    btnNext.classList.remove('opacity-40', 'cursor-not-allowed', 'pointer-events-none');
+                } else {
+                    btnNext.classList.add('opacity-40', 'cursor-not-allowed', 'pointer-events-none');
+                }
+            }
+
+            const isCurrent = isSameWeek(selectedWeekMonday, currentMonday);
+            const sunday = getSunday(selectedWeekMonday);
+
+            if (isWeekFilterActive) {
+                const weekNum = getISOWeekNumber(selectedWeekMonday);
+                if (titleEl) titleEl.textContent = `Semana ${weekNum}`;
+                
+                const monStr = selectedWeekMonday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+                const sunStr = sunday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+                if (datesEl) datesEl.textContent = `${monStr} – ${sunStr}`;
+
+                if (currentBadge) {
+                    if (isCurrent) currentBadge.classList.remove('hidden');
+                    else currentBadge.classList.add('hidden');
+                }
+
+                if (btnCurrent) {
+                    if (!isCurrent) btnCurrent.classList.remove('hidden');
+                    else btnCurrent.classList.add('hidden');
+                }
+
+                if (btnToggleText) btnToggleText.textContent = 'Ver todas las semanas';
+
+                if (kpiHoursSub) kpiHoursSub.textContent = 'En semana seleccionada';
+                if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes esta semana';
+                if (kpiEntriesSub) kpiEntriesSub.textContent = 'imputaciones esta semana';
+                if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad esta semana';
+            } else {
+                if (titleEl) titleEl.textContent = 'Todas las semanas';
+                if (datesEl) datesEl.textContent = 'Mostrando todo el historial de imputaciones sin restricción semanal';
+                if (currentBadge) currentBadge.classList.add('hidden');
+                if (btnCurrent) btnCurrent.classList.remove('hidden');
+                if (btnToggleText) btnToggleText.textContent = 'Ver solo semana actual';
+
+                if (kpiHoursSub) kpiHoursSub.textContent = 'En todo el histórico';
+                if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes en total';
+                if (kpiEntriesSub) kpiEntriesSub.textContent = 'imputaciones totales';
+                if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad total';
+            }
+        }
+
+        // ==============================================================
+        // --- SELECTOR DE VISTAS ESTILO ODOO (LISTA / CALENDARIO / GANTT) ---
+        // ==============================================================
+        function switchView(viewName) {
+            currentView = viewName;
+
+            const btnList = document.getElementById('btn-view-list');
+            const btnCal = document.getElementById('btn-view-calendar');
+            const btnGantt = document.getElementById('btn-view-gantt');
+
+            const containerList = document.getElementById('view-container-list');
+            const containerCal = document.getElementById('view-container-calendar');
+            const containerGantt = document.getElementById('view-container-gantt');
+
+            const activeClasses = ['bg-white', 'text-sky-700', 'shadow-2xs', 'border-slate-200/80', 'font-bold'];
+            const inactiveClasses = ['text-slate-600', 'hover:text-slate-900', 'hover:bg-slate-200/50', 'border-transparent', 'font-medium'];
+
+            function applyBtnStyle(btn, isActive) {
+                if (!btn) return;
+                const icon = btn.querySelector('svg');
+                if (isActive) {
+                    btn.classList.add(...activeClasses);
+                    btn.classList.remove(...inactiveClasses);
+                    if (icon) icon.className = 'w-3.5 h-3.5 text-sky-600';
+                } else {
+                    btn.classList.remove(...activeClasses);
+                    btn.classList.add(...inactiveClasses);
+                    if (icon) icon.className = 'w-3.5 h-3.5 text-slate-500';
+                }
+            }
+
+            applyBtnStyle(btnList, viewName === 'list');
+            applyBtnStyle(btnCal, viewName === 'calendar');
+            applyBtnStyle(btnGantt, viewName === 'gantt');
+
+            if (containerList) containerList.classList.toggle('hidden', viewName !== 'list');
+            if (containerCal) containerCal.classList.toggle('hidden', viewName !== 'calendar');
+            if (containerGantt) containerGantt.classList.toggle('hidden', viewName !== 'gantt');
+
+            applyTimesheetFilters();
+        }
+
+        // ==============================================================
+        // --- FILTRADO GLOBAL Y ACTUALIZACIÓN REACTIVA DE KPIS ---
+        // ==============================================================
         function applyTimesheetFilters() {
             const searchInput = document.getElementById('filter-search');
             const projectSelect = document.getElementById('filter-project');
             const employeeSelect = document.getElementById('filter-employee');
             const rows = document.querySelectorAll('.timesheet-row');
+            const emptyFilterRow = document.getElementById('empty-filter-row');
             
             const kpiHours = document.getElementById('kpi-total-hours');
             const kpiEntries = document.getElementById('kpi-total-entries');
@@ -996,6 +1448,9 @@
             let visibleCount = 0;
             const visibleProjects = new Set();
             const visibleEmployees = new Set();
+            const matchingRows = [];
+
+            const selectedWeekSunday = getSunday(selectedWeekMonday);
 
             rows.forEach(row => {
                 const desc = (row.dataset.desc || '').toLowerCase();
@@ -1005,6 +1460,7 @@
                 const rowProjectId = (row.dataset.projectId || '').trim();
                 const employee = (row.dataset.employee || '').toLowerCase();
                 const hours = parseFloat(row.dataset.hours) || 0;
+                const rowDateStr = row.dataset.date || '';
 
                 const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal);
 
@@ -1017,31 +1473,527 @@
 
                 const matchEmployee = !employeeVal || employee.includes(employeeVal);
 
-                if (matchSearch && matchProject && matchEmployee) {
+                let matchWeek = true;
+                if (isWeekFilterActive && rowDateStr) {
+                    const rowDate = parseISODate(rowDateStr);
+                    if (rowDate) {
+                        matchWeek = (rowDate >= selectedWeekMonday && rowDate <= selectedWeekSunday);
+                    } else {
+                        matchWeek = false;
+                    }
+                }
+
+                if (matchSearch && matchProject && matchEmployee && matchWeek) {
                     row.style.display = '';
                     visibleHours += hours;
                     visibleCount++;
                     if (row.dataset.project) visibleProjects.add(row.dataset.project);
                     if (row.dataset.employee) visibleEmployees.add(row.dataset.employee);
+
+                    matchingRows.push({
+                        id: row.dataset.id,
+                        date: row.dataset.date,
+                        hours: hours,
+                        hoursFormatted: row.dataset.hoursFormatted || `${hours.toFixed(2)}h`,
+                        project: row.dataset.project || '',
+                        projectName: row.dataset.projectName || row.dataset.project || '',
+                        projectId: row.dataset.projectId || '',
+                        task: row.dataset.task || '',
+                        taskId: row.dataset.taskId || '',
+                        desc: row.dataset.desc || '',
+                        employee: row.dataset.employee || '',
+                        invoiced: row.dataset.invoiced === 'true',
+                        invoiceId: row.dataset.invoiceId || '',
+                        invoiceName: row.dataset.invoiceName || ''
+                    });
                 } else {
                     row.style.display = 'none';
                 }
             });
 
+            // Fila de tabla vacía en vista Lista
+            if (emptyFilterRow) {
+                if (visibleCount === 0 && rows.length > 0) {
+                    emptyFilterRow.classList.remove('hidden');
+                } else {
+                    emptyFilterRow.classList.add('hidden');
+                }
+            }
+
+            // Actualizar paneles generales de métricas (KPIs)
             if (kpiHours) kpiHours.textContent = visibleHours.toFixed(2);
             if (kpiEntries) kpiEntries.textContent = visibleCount;
             if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
             if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
 
             highlightSidebarProject(targetProjectName, targetProjectId);
+            updateWeekControls();
+
+            // Sincronizar vistas Calendario y Gantt
+            if (currentView === 'calendar') {
+                renderCalendarView(matchingRows);
+            } else if (currentView === 'gantt') {
+                renderGanttView(matchingRows);
+            }
         }
 
+        // ==============================================================
+        // --- RENDERIZADORES DE VISTAS: CALENDARIO SEMANAL Y GANTT ---
+        // ==============================================================
+        function renderCalendarView(matchingRows) {
+            const container = document.getElementById('calendar-grid-days');
+            if (!container) return;
+
+            const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+            const today = new Date();
+
+            let html = '';
+            for (let i = 0; i < 7; i++) {
+                const dayDate = new Date(selectedWeekMonday);
+                dayDate.setDate(dayDate.getDate() + i);
+                const dayISO = formatISODate(dayDate);
+                const isToday = isSameDay(dayDate, today);
+
+                const dayEntries = matchingRows.filter(r => r.date === dayISO);
+                const dayTotalHours = dayEntries.reduce((sum, r) => sum + r.hours, 0);
+
+                const dayFormatted = dayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+
+                html += `
+                <div class="bg-slate-50/70 rounded-2xl border ${isToday ? 'border-sky-400 ring-2 ring-sky-100 bg-sky-50/20' : 'border-slate-200/80'} p-3 flex flex-col justify-between min-h-[300px] transition-all">
+                    <div>
+                        <!-- Cabecera de Día -->
+                        <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b ${isToday ? 'border-sky-200' : 'border-slate-200/70'}">
+                            <div>
+                                <span class="text-xs font-bold ${isToday ? 'text-sky-700' : 'text-slate-800'} block">
+                                    ${dayNames[i]}
+                                </span>
+                                <span class="text-[11px] text-slate-400 font-medium">
+                                    ${dayFormatted}
+                                </span>
+                            </div>
+                            <div class="flex items-center space-x-1">
+                                ${isToday ? '<span class="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-sky-500 text-white tracking-wider">Hoy</span>' : ''}
+                                <span class="text-[11px] font-mono font-bold ${dayTotalHours > 0 ? 'text-indigo-700 bg-indigo-50 border border-indigo-100' : 'text-slate-400 bg-slate-100'} px-1.5 py-0.5 rounded-md">
+                                    ${dayTotalHours.toFixed(2)}h
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Lista de Partes de Horas del Día -->
+                        <div class="space-y-2">
+                `;
+
+                if (dayEntries.length === 0) {
+                    html += `
+                        <div class="py-6 text-center text-slate-300">
+                            <span class="text-[11px] font-medium block">Sin horas</span>
+                        </div>
+                    `;
+                } else {
+                    dayEntries.forEach(r => {
+                        const safeDesc = escapeHtml(r.desc);
+                        const safeTask = escapeHtml(r.task);
+                        const safeProject = escapeHtml(r.projectName);
+                        const safeEmployee = escapeHtml(r.employee);
+
+                        html += `
+                        <div class="bg-white rounded-xl p-2.5 border border-slate-200/80 shadow-2xs hover:shadow-xs transition group relative">
+                            <div class="flex items-start justify-between gap-1 mb-1">
+                                <span class="text-[10px] font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-100 truncate max-w-[120px]" title="${safeProject}">
+                                    ${safeProject}
+                                </span>
+                                <span class="text-[11px] font-mono font-extrabold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                    ${r.hoursFormatted}
+                                </span>
+                            </div>
+                            ${safeTask ? `
+                            <p class="text-[11px] font-semibold text-slate-800 truncate" title="${safeTask}">
+                                ↳ ${safeTask}
+                            </p>
+                            ` : ''}
+                            ${safeDesc ? `
+                            <p class="text-[10px] text-slate-500 line-clamp-2 mt-0.5" title="${safeDesc}">
+                                ${safeDesc}
+                            </p>
+                            ` : ''}
+                            
+                            <div class="flex items-center justify-between pt-2 mt-1.5 border-t border-slate-100 text-[10px] text-slate-400">
+                                <span class="truncate max-w-[90px]" title="${safeEmployee}">
+                                    ${safeEmployee}
+                                </span>
+                                <div class="flex items-center space-x-1">
+                                    ${r.invoiced ? `
+                                    <span title="Parte Facturado en Odoo (No se puede eliminar)" class="p-1 text-slate-400 cursor-not-allowed">
+                                        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                        </svg>
+                                    </span>
+                                    ` : `
+                                    <button type="button" onclick="openDeleteTimesheetModalFromData('${r.id}', '${r.date}', '${escapeAttr(r.projectName)}', '${escapeAttr(r.task)}', '${r.hours}', '${escapeAttr(r.desc)}')"
+                                            class="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer" title="Eliminar parte no facturado">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                    `}
+                                    <button type="button" onclick="openEditTimesheetModalFromRowData('${r.id}', '${r.date}', '${r.projectId}', '${r.taskId}', '${escapeAttr(r.desc)}', '${r.hours}')"
+                                            class="p-1 text-slate-400 hover:text-sky-600 rounded transition cursor-pointer" title="Editar parte">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    });
+                }
+
+                html += `
+                        </div>
+                    </div>
+
+                    <!-- Botón rápido para imputar en este día concreto -->
+                    <button type="button" onclick="openCreateTimesheetModal('', '', '${dayISO}')"
+                            class="w-full mt-3 py-1.5 px-2 bg-white hover:bg-sky-50 text-slate-600 hover:text-sky-700 text-[11px] font-semibold rounded-xl border border-slate-200/80 hover:border-sky-300 transition flex items-center justify-center space-x-1 shadow-2xs cursor-pointer">
+                        <svg class="w-3 h-3 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                        <span>Imputar</span>
+                    </button>
+                </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderGanttView(matchingRows) {
+            const tableContainer = document.getElementById('gantt-table-container');
+            const totalEl = document.getElementById('gantt-week-total');
+            if (!tableContainer) return;
+
+            const dayNamesShort = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            const today = new Date();
+
+            const weekDays = [];
+            for (let i = 0; i < 7; i++) {
+                const dayDate = new Date(selectedWeekMonday);
+                dayDate.setDate(dayDate.getDate() + i);
+                weekDays.push({
+                    index: i,
+                    date: dayDate,
+                    iso: formatISODate(dayDate),
+                    name: dayNamesShort[i],
+                    formatted: dayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' }),
+                    isToday: isSameDay(dayDate, today)
+                });
+            }
+
+            let totalHours = 0;
+
+            // Agrupar por Proyecto y dentro por Tarea
+            const projectsMap = new Map();
+            matchingRows.forEach(r => {
+                totalHours += r.hours;
+                const pKey = r.projectId || r.projectName || 'sin_proyecto';
+                if (!projectsMap.has(pKey)) {
+                    projectsMap.set(pKey, {
+                        projectId: r.projectId,
+                        projectName: r.projectName || 'Proyecto General',
+                        totalHours: 0,
+                        tasks: new Map()
+                    });
+                }
+                const p = projectsMap.get(pKey);
+                p.totalHours += r.hours;
+
+                const tKey = r.taskId || r.task || 'sin_tarea';
+                if (!p.tasks.has(tKey)) {
+                    p.tasks.set(tKey, {
+                        taskId: r.taskId,
+                        taskName: r.task || 'Actividad general sin tarea',
+                        totalHours: 0,
+                        days: {}
+                    });
+                }
+                const t = p.tasks.get(tKey);
+                t.totalHours += r.hours;
+                if (!t.days[r.date]) {
+                    t.days[r.date] = { hours: 0, entries: [] };
+                }
+                t.days[r.date].hours += r.hours;
+                t.days[r.date].entries.push(r);
+            });
+
+            if (totalEl) totalEl.textContent = totalHours.toFixed(2);
+
+            if (projectsMap.size === 0) {
+                tableContainer.innerHTML = `
+                    <div class="py-12 text-center text-slate-400">
+                        <svg class="w-10 h-10 mx-auto text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <p class="text-xs font-semibold text-slate-600">No hay imputaciones registradas para el período y filtros actuales</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Usa el selector de semanas o selecciona otro proyecto</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <table class="w-full min-w-[700px] border-collapse text-left">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600">
+                            <th class="py-2.5 px-3 w-64">Proyecto / Tarea</th>
+            `;
+
+            weekDays.forEach(wd => {
+                html += `
+                    <th class="py-2.5 px-2 text-center w-24 ${wd.isToday ? 'bg-sky-100/50 text-sky-800' : ''}">
+                        <div>${wd.name}</div>
+                        <div class="text-[10px] font-mono font-normal ${wd.isToday ? 'text-sky-600 font-bold' : 'text-slate-400'}">${wd.formatted}</div>
+                    </th>
+                `;
+            });
+
+            html += `
+                            <th class="py-2.5 px-3 text-right w-20">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-xs">
+            `;
+
+            projectsMap.forEach(proj => {
+                const safeProjName = escapeHtml(proj.projectName);
+                html += `
+                    <tr class="bg-slate-100/70 font-bold text-slate-800">
+                        <td class="py-2 px-3 flex items-center space-x-2">
+                            <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                            <span class="truncate max-w-[240px]" title="${safeProjName}">${safeProjName}</span>
+                        </td>
+                `;
+
+                weekDays.forEach(wd => {
+                    let projDayHours = 0;
+                    proj.tasks.forEach(t => {
+                        if (t.days[wd.iso]) projDayHours += t.days[wd.iso].hours;
+                    });
+
+                    html += `
+                        <td class="py-2 px-2 text-center font-mono text-[11px] ${wd.isToday ? 'bg-sky-50/40' : ''}">
+                            ${projDayHours > 0 ? `<span class="font-extrabold text-sky-700">${projDayHours.toFixed(1)}h</span>` : `<span class="text-slate-300">-</span>`}
+                        </td>
+                    `;
+                });
+
+                html += `
+                        <td class="py-2 px-3 text-right font-mono font-extrabold text-indigo-700">
+                            ${proj.totalHours.toFixed(2)}h
+                        </td>
+                    </tr>
+                `;
+
+                proj.tasks.forEach(task => {
+                    const safeTaskName = escapeHtml(task.taskName);
+                    html += `
+                        <tr class="hover:bg-slate-50/60 transition">
+                            <td class="py-2 px-3 pl-7 text-slate-600">
+                                <span class="truncate block max-w-[220px]" title="${safeTaskName}">↳ ${safeTaskName}</span>
+                            </td>
+                    `;
+
+                    weekDays.forEach(wd => {
+                        const dayData = task.days[wd.iso];
+                        html += `
+                            <td class="py-2 px-2 text-center ${wd.isToday ? 'bg-sky-50/20' : ''}">
+                        `;
+
+                        if (dayData && dayData.hours > 0) {
+                            const entriesDesc = dayData.entries.map(e => `${e.employee}: ${e.hoursFormatted} - ${escapeAttr(e.desc || 'Sin desc.')}`).join('\n');
+                            html += `
+                                <div class="bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-mono text-[10px] font-bold py-1 px-1.5 rounded-lg shadow-2xs hover:opacity-90 transition cursor-help truncate"
+                                     title="${entriesDesc}">
+                                    ${dayData.hours.toFixed(1)}h
+                                </div>
+                            `;
+                        } else {
+                            html += `<span class="text-slate-200">·</span>`;
+                        }
+
+                        html += `</td>`;
+                    });
+
+                    html += `
+                            <td class="py-2 px-3 text-right font-mono font-semibold text-slate-700">
+                                ${task.totalHours.toFixed(2)}h
+                            </td>
+                        </tr>
+                    `;
+                });
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            tableContainer.innerHTML = html;
+        }
+
+        // ==============================================================
+        // --- FUNCIONES AUXILIARES DE ESCAPADO Y APERTURA DE MODALES ---
+        // ==============================================================
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function escapeAttr(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '&quot;')
+                .replace(/\n/g, ' ');
+        }
+
+        function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, hours) {
+            const fakeBtn = {
+                dataset: {
+                    id: id,
+                    date: date,
+                    projectId: projectId,
+                    taskId: taskId,
+                    name: desc,
+                    hours: hours
+                }
+            };
+            openEditTimesheetModal(fakeBtn);
+        }
+
+        function openDeleteTimesheetModalFromData(id, date, projectName, taskName, hours, desc) {
+            const fakeBtn = {
+                dataset: {
+                    id: id,
+                    date: date,
+                    projectName: projectName,
+                    taskName: taskName,
+                    hours: hours,
+                    desc: desc
+                }
+            };
+            openDeleteTimesheetModal(fakeBtn);
+        }
+
+        // ==============================================================
+        // --- FUNCIONES DEL MODAL DE BORRADO DE PARTES DE HORAS ---
+        // ==============================================================
+        let pendingDeleteId = null;
+
+        function openDeleteTimesheetModal(btn) {
+            if (!btn) return;
+            pendingDeleteId = btn.dataset.id;
+            const date = btn.dataset.date || '';
+            const proj = btn.dataset.projectName || 'Sin proyecto';
+            const task = btn.dataset.taskName || 'Sin tarea específica';
+            const hours = btn.dataset.hours || '0';
+            const desc = btn.dataset.desc || '';
+
+            const dateEl = document.getElementById('del-modal-date');
+            const projEl = document.getElementById('del-modal-project');
+            const taskEl = document.getElementById('del-modal-task');
+            const hoursEl = document.getElementById('del-modal-hours');
+            const descEl = document.getElementById('del-modal-desc');
+
+            if (dateEl) dateEl.textContent = date;
+            if (projEl) projEl.textContent = proj;
+            if (taskEl) taskEl.textContent = task;
+            if (hoursEl) hoursEl.textContent = `${hours} h`;
+            if (descEl) descEl.textContent = desc || '(Sin descripción)';
+
+            const feedback = document.getElementById('delete-modal-feedback');
+            if (feedback) feedback.className = 'hidden';
+
+            const modal = document.getElementById('delete-timesheet-modal');
+            const container = document.getElementById('delete-modal-container');
+            if (modal && container) {
+                modal.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    container.classList.remove('scale-95', 'opacity-0');
+                    container.classList.add('scale-100', 'opacity-100');
+                });
+            }
+        }
+
+        function closeDeleteModal() {
+            pendingDeleteId = null;
+            const modal = document.getElementById('delete-timesheet-modal');
+            const container = document.getElementById('delete-modal-container');
+            if (!modal || !container) return;
+
+            container.classList.remove('scale-100', 'opacity-100');
+            container.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 150);
+        }
+
+        function executeDeleteTimesheet() {
+            if (!pendingDeleteId) return;
+
+            const submitBtn = document.getElementById('btn-confirm-delete');
+            const spinner = document.getElementById('btn-delete-spinner');
+            const feedback = document.getElementById('delete-modal-feedback');
+
+            if (submitBtn) submitBtn.disabled = true;
+            if (spinner) spinner.classList.remove('hidden');
+            if (feedback) feedback.className = 'hidden';
+
+            fetch('/api/timesheets/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: parseInt(pendingDeleteId, 10) })
+            })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.error || `Error HTTP ${res.status}`);
+                }
+                return data;
+            })
+            .then(data => {
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 block';
+                    feedback.innerText = '✓ Parte de horas eliminado correctamente de Odoo. Recargando...';
+                }
+                setTimeout(() => {
+                    window.location.reload();
+                }, 750);
+            })
+            .catch(err => {
+                if (submitBtn) submitBtn.disabled = false;
+                if (spinner) spinner.classList.add('hidden');
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+                    feedback.innerText = '⚠️ ' + err.message;
+                }
+            });
+        }
+
+        // ==============================================================
+        // --- INICIALIZACIÓN DE EVENTOS EN DOMContentLoaded ---
+        // ==============================================================
         document.addEventListener('DOMContentLoaded', () => {
             const searchInput = document.getElementById('filter-search');
             const projectSelect = document.getElementById('filter-project');
             const employeeSelect = document.getElementById('filter-employee');
             const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
-            const btnReset = document.getElementById('btn-reset');
 
             if (searchInput) searchInput.addEventListener('input', applyTimesheetFilters);
             if (projectSelect) {
@@ -1082,23 +2034,6 @@
                 });
             }
 
-            if (btnReset) {
-                btnReset.addEventListener('click', () => {
-                    if (searchInput) searchInput.value = '';
-                    if (projectSelect) projectSelect.value = '';
-                    if (employeeSelect) employeeSelect.value = '';
-                    if (sidebarEmployeeSelect) sidebarEmployeeSelect.value = '';
-                    activeSidebarProjectName = '';
-                    activeSidebarProjectId = '';
-                    activeSidebarProject = '';
-                    const btnLabel = document.getElementById('btn-imputar-label');
-                    if (btnLabel) btnLabel.innerText = 'Imputar Horas';
-                    highlightSidebarProject('', '');
-                    rebuildSidebarProjects('');
-                    applyTimesheetFilters();
-                });
-            }
-
             // Buscador en tiempo real dentro del panel lateral de proyectos
             const sidebarSearch = document.getElementById('sidebar-project-search');
             if (sidebarSearch) {
@@ -1127,7 +2062,7 @@
                 });
             }
 
-            // Cerrar modal al hacer clic en el backdrop
+            // Cerrar modal de imputación al hacer clic en el backdrop
             const modalEl = document.getElementById('timesheet-modal');
             if (modalEl) {
                 modalEl.addEventListener('click', (e) => {
@@ -1137,10 +2072,21 @@
                 });
             }
 
-            // Cerrar modal con la tecla Escape
+            // Cerrar modal de borrado al hacer clic en el backdrop
+            const delModalEl = document.getElementById('delete-timesheet-modal');
+            if (delModalEl) {
+                delModalEl.addEventListener('click', (e) => {
+                    if (e.target.id === 'delete-timesheet-modal') {
+                        closeDeleteModal();
+                    }
+                });
+            }
+
+            // Cerrar modales con la tecla Escape
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     closeTimesheetModal();
+                    closeDeleteModal();
                 }
             });
 
@@ -1173,7 +2119,8 @@
                 });
             }
 
-            // Aplicar filtros iniciales
+            // Inicializar controles de semana y filtros iniciales
+            updateWeekControls();
             applyTimesheetFilters();
         });
 
@@ -1272,7 +2219,7 @@
             addModalTimeMinutes(Math.round(amount * 60));
         }
 
-        function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName) {
+        function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate) {
             const modal = document.getElementById('timesheet-modal');
             const container = document.getElementById('timesheet-modal-container');
             const title = document.getElementById('modal-title');
@@ -1296,12 +2243,16 @@
                 feedback.innerText = '';
             }
 
-            // Fecha por defecto: hoy (YYYY-MM-DD)
-            const today = new Date();
-            const yyyy = today.getFullYear();
-            const mm = String(today.getMonth() + 1).padStart(2, '0');
-            const dd = String(today.getDate()).padStart(2, '0');
-            dateInput.value = `${yyyy}-${mm}-${dd}`;
+            // Fecha por defecto: initialDate o hoy (YYYY-MM-DD)
+            if (initialDate) {
+                dateInput.value = initialDate;
+            } else {
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                dateInput.value = `${yyyy}-${mm}-${dd}`;
+            }
 
             hoursInput.value = '';
             descInput.value = '';

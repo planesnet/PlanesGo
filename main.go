@@ -1124,7 +1124,73 @@ func main() {
 		})
 	})
 
-	// 8c. API JSON Tareas de Odoo (GET: listar por project_id, POST: crear)
+	// 8c. API JSON Eliminar parte de horas (POST /api/timesheets/delete)
+	http.HandleFunc("/api/timesheets/delete", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+			return
+		}
+
+		var session *SessionData
+		cookie, err := r.Cookie(sessionCookieName)
+		if err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+
+		odooCfg := state.resolveUserOdooConfig(session)
+		if odooCfg.Password == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "No has configurado tu clave API o sesión de Odoo."})
+			return
+		}
+
+		var req struct {
+			ID int `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Cuerpo de solicitud inválido: " + err.Error()})
+			return
+		}
+
+		if req.ID <= 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "El ID del registro de horas a eliminar es obligatorio."})
+			return
+		}
+
+		client := odoo.NewClient(odooCfg)
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		if err := client.DeleteTimesheet(ctx, req.ID); err != nil {
+			errMsg := err.Error()
+			if strings.Contains(strings.ToLower(errMsg), "factura") {
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{"error": errMsg})
+				return
+			}
+			if strings.Contains(strings.ToLower(errMsg), "access") ||
+				strings.Contains(strings.ToLower(errMsg), "denied") ||
+				strings.Contains(strings.ToLower(errMsg), "permis") {
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{"error": "No tienes permisos en Odoo para eliminar este parte de horas."})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Error al eliminar parte de horas en Odoo: " + errMsg})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Parte de horas eliminado correctamente de Odoo.",
+		})
+	})
+
+	// 8d. API JSON Tareas de Odoo (GET: listar por project_id, POST: crear)
 	http.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var session *SessionData

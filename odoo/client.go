@@ -149,6 +149,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"task_id",
 		"employee_id",
 		"user_id",
+		"timesheet_invoice_id",
 	}
 
 	kwargs := map[string]interface{}{
@@ -469,4 +470,87 @@ func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date stri
 
 	return nil
 }
+
+// DeleteTimesheet elimina un registro de horas (account.analytic.line) en Odoo,
+// siempre y cuando dicho parte de horas no haya sido facturado.
+func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
+	if timesheetID <= 0 {
+		return errors.New("el ID del parte de horas debe ser mayor a 0")
+	}
+
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return fmt.Errorf("no se pudo autenticar antes de eliminar horas: %w", err)
+		}
+	}
+
+	// 1. Verificar si la línea existe y si está facturada antes de intentar borrar
+	readArgs := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"account.analytic.line",
+		"read",
+		[]interface{}{
+			[]int{timesheetID},
+			[]string{"id", "timesheet_invoice_id"},
+		},
+	}
+
+	readRaw, err := c.call(ctx, "object", "execute_kw", readArgs, nil)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			readArgs[1] = c.uid
+			readRaw, err = c.call(ctx, "object", "execute_kw", readArgs, nil)
+		}
+		if err != nil {
+			return fmt.Errorf("error al verificar estado del parte de horas en Odoo: %w", err)
+		}
+	}
+
+	var records []struct {
+		ID                 int      `json:"id"`
+		TimesheetInvoiceID Many2One `json:"timesheet_invoice_id"`
+	}
+	if err := json.Unmarshal(readRaw, &records); err == nil && len(records) > 0 {
+		if records[0].TimesheetInvoiceID.ID > 0 {
+			invName := records[0].TimesheetInvoiceID.Name
+			if invName == "" {
+				invName = fmt.Sprintf("#%d", records[0].TimesheetInvoiceID.ID)
+			}
+			return fmt.Errorf("no se puede eliminar la imputación de horas porque ya ha sido facturada (Factura %s)", invName)
+		}
+	}
+
+	// 2. Ejecutar borrado (unlink) en Odoo
+	unlinkArgs := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"account.analytic.line",
+		"unlink",
+		[]interface{}{
+			[]int{timesheetID},
+		},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", unlinkArgs, nil)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			unlinkArgs[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", unlinkArgs, nil)
+		}
+		if err != nil {
+			return fmt.Errorf("error de Odoo al eliminar parte de horas: %w", err)
+		}
+	}
+
+	var ok bool
+	if err := json.Unmarshal(resultRaw, &ok); err != nil || !ok {
+		return fmt.Errorf("no se pudo confirmar la eliminación en Odoo: %s", string(resultRaw))
+	}
+
+	return nil
+}
+
 
