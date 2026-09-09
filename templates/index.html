@@ -288,20 +288,6 @@
             <!-- COLUMNA PRINCIPAL DERECHA (100% ANCHO RESTANTE) -->
             <div class="flex-1 min-w-0 w-full space-y-5">
 
-                <!-- Banner Informativo de Filtro por Proyecto Activo -->
-                <div id="active-project-banner" class="hidden p-3 sm:p-3.5 bg-sky-50 border border-sky-200 rounded-2xl flex items-center justify-between text-xs text-sky-900 shadow-2xs transition-all">
-                    <div class="flex items-center space-x-2 min-w-0">
-                        <span class="w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse flex-shrink-0"></span>
-                        <span class="truncate">Filtrando por proyecto: <strong id="active-project-name" class="font-bold text-sky-800"></strong></span>
-                    </div>
-                    <button type="button" onclick="clearSidebarProjectFilter()"
-                            class="inline-flex items-center space-x-1.5 px-3 py-1 text-xs font-semibold text-sky-700 bg-white hover:bg-sky-100 rounded-xl border border-sky-200 shadow-2xs transition flex-shrink-0 ml-3 cursor-pointer">
-                        <span>Mostrar todos</span>
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
 
                 <!-- Métricas Principales (KPIs) -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -564,8 +550,6 @@
             const recentItems = document.querySelectorAll('.sidebar-project-item');
             const allItems = document.querySelectorAll('.sidebar-all-project-item');
             const clearBtn = document.getElementById('sidebar-clear-project');
-            const banner = document.getElementById('active-project-banner');
-            const bannerName = document.getElementById('active-project-name');
 
             const targetId = projectId ? String(projectId) : '';
             const targetName = projectName ? projectName.toLowerCase().trim() : '';
@@ -599,15 +583,6 @@
                     clearBtn.classList.remove('hidden');
                 } else {
                     clearBtn.classList.add('hidden');
-                }
-            }
-
-            if (banner && bannerName) {
-                if (hasActive) {
-                    bannerName.textContent = projectName || `Proyecto #${projectId}`;
-                    banner.classList.remove('hidden');
-                } else {
-                    banner.classList.add('hidden');
                 }
             }
         }
