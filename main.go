@@ -25,7 +25,7 @@ import (
 	"pasigo/store"
 )
 
-const Version = "1.1.0"
+var Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
 const DefaultOdooURL = "https://www.planesnet.com"
@@ -201,7 +201,14 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 
 func main() {
 	portFlag := flag.Int("port", 0, "Puerto del servidor HTTP (opcional, sobrescribe PORT de entorno)")
+	versionFlag := flag.Bool("version", false, "Muestra la versión de la aplicación y termina")
+	vFlag := flag.Bool("v", false, "Muestra la versión de la aplicación y termina")
 	flag.Parse()
+
+	if *versionFlag || *vFlag {
+		fmt.Printf("PlanesGo v%s\n", Version)
+		return
+	}
 
 	log.Printf("Iniciando PlanesGo v%s - Odoo Timesheets & Projects...", Version)
 

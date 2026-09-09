@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Compilar binario estático optimizado
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o planesgo .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w -X main.Version=1.1.0" -o planesgo .
 
 # --- Etapa 2: Imagen Final Ultraligera ---
 FROM alpine:3.20
@@ -29,6 +29,7 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Copiar binario y recursos necesarios desde el builder
 COPY --from=builder /app/planesgo /app/planesgo
+COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
 
