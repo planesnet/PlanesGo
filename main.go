@@ -977,6 +977,9 @@ func main() {
 			http.Error(w, fmt.Sprintf("Error al cargar plantilla: %v", err), http.StatusInternalServerError)
 			return
 		}
+		if _, err := tmpl.ParseGlob("templates/partials/*.html"); err != nil {
+			log.Printf("[WARN] Error cargando plantillas parciales: %v", err)
+		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {

@@ -1,0 +1,9 @@
+{{ define "footer" }}
+<!-- Footer Corporativo Minimalista (100% ancho) -->
+<footer class="mt-auto border-t border-slate-200/80 bg-white py-4 text-center text-xs text-slate-400">
+    <div class="w-full px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between space-y-1 sm:space-y-0">
+        <span>PLANES Soluciones Informáticas &bull; PlanesGo v{{.Version}}</span>
+        <span class="font-mono text-[11px] text-slate-400">Conectado a {{.Config.Odoo.URL}}</span>
+    </div>
+</footer>
+{{ end }}

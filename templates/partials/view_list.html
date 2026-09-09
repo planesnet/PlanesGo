@@ -1,0 +1,157 @@
+{{ define "view_list" }}
+<!-- VISTA 1: Lista (Tabla de Registros de Horas) -->
+<div id="view-container-list" class="space-y-4">
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">
+                <thead>
+                    <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        <th class="py-3 px-4 sm:px-6">Fecha</th>
+                        <th class="py-3 px-4">Miembro</th>
+                        <th class="py-3 px-4">Proyecto</th>
+                        <th class="py-3 px-4">Tarea</th>
+                        <th class="py-3 px-4">Descripción</th>
+                        <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
+                        <th class="py-3 px-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
+                    {{if .Entries}}
+                        {{range .Entries}}
+                         <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
+                            data-id="{{.ID}}"
+                            data-date="{{.Date}}"
+                            data-employee="{{.DisplayEmployee}}"
+                            data-project="{{.ProjectID.String}}"
+                            data-project-name="{{.ProjectID.Name}}"
+                            data-project-id="{{.ProjectID.ID}}"
+                            data-task="{{.TaskID.String}}"
+                            data-task-id="{{.TaskID.ID}}"
+                            data-task-name="{{.TaskID.Name}}"
+                            data-desc="{{.Name}}"
+                            data-hours="{{.UnitAmount}}"
+                            data-invoiced="{{if .IsInvoiced}}true{{else}}false{{end}}">
+                            <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+                                <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
+                            </td>
+                            <td class="py-3 px-4 whitespace-nowrap">
+                                <div class="flex items-center space-x-2">
+                                    <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[10px] shrink-0">
+                                        {{slice .DisplayEmployee 0 1}}
+                                    </div>
+                                    <span class="font-medium text-slate-800">{{.DisplayEmployee}}</span>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4 whitespace-nowrap">
+                                {{if .ProjectID.Name}}
+                                <button type="button"
+                                        onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
+                                        data-project-name="{{.ProjectID.Name}}"
+                                        data-project-id="{{.ProjectID.ID}}"
+                                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                                        title="Filtrar por este proyecto">
+                                    {{.ProjectID.Name}}
+                                </button>
+                                {{else}}
+                                <span class="text-slate-400 text-xs">-</span>
+                                {{end}}
+                            </td>
+                            <td class="py-3 px-4 whitespace-nowrap">
+                                {{if .TaskID.Name}}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                    {{.TaskID.Name}}
+                                </span>
+                                {{else}}
+                                <span class="text-slate-400 text-xs">-</span>
+                                {{end}}
+                            </td>
+                            <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
+                                {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
+                            </td>
+                            <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+                                <div class="inline-flex items-center justify-end space-x-1.5">
+                                    {{if .IsInvoiced}}
+                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80" title="Factura: {{if .TimesheetInvoiceID.Name}}{{.TimesheetInvoiceID.Name}}{{else}}#{{.TimesheetInvoiceID.ID}}{{end}}">
+                                        <svg class="w-2.5 h-2.5 mr-1 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                        </svg>
+                                        Facturado
+                                    </span>
+                                    {{end}}
+                                    <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
+                                        {{printf "%.2f" .UnitAmount}} h
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="py-3 px-3 text-right whitespace-nowrap">
+                                <div class="inline-flex items-center justify-end space-x-1">
+                                    <button type="button"
+                                            onclick="openEditTimesheetModal(this)"
+                                            data-id="{{.ID}}"
+                                            data-date="{{.Date}}"
+                                            data-project-id="{{.ProjectID.ID}}"
+                                            data-project-name="{{.ProjectID.Name}}"
+                                            data-task-id="{{.TaskID.ID}}"
+                                            data-task-name="{{.TaskID.Name}}"
+                                            data-name="{{.Name}}"
+                                            data-hours="{{.UnitAmount}}"
+                                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
+                                            title="Editar este parte de horas">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                    </button>
+
+                                    {{if .IsInvoiced}}
+                                    <span class="inline-flex items-center justify-center w-7 h-7 text-slate-300 rounded-lg cursor-not-allowed"
+                                          title="No se puede borrar: Imputación ya facturada en Odoo (Factura {{if .TimesheetInvoiceID.Name}}{{.TimesheetInvoiceID.Name}}{{else}}#{{.TimesheetInvoiceID.ID}}{{end}})">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                        </svg>
+                                    </span>
+                                    {{else}}
+                                    <button type="button"
+                                            onclick="openDeleteTimesheetModal(this)"
+                                            data-id="{{.ID}}"
+                                            data-date="{{.Date}}"
+                                            data-project-name="{{.ProjectID.Name}}"
+                                            data-task-name="{{.TaskID.Name}}"
+                                            data-hours="{{printf "%.2f" .UnitAmount}}"
+                                            data-desc="{{.Name}}"
+                                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                            title="Eliminar este parte de horas">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                    {{end}}
+                                </div>
+                            </td>
+                        </tr>
+                        {{end}}
+                    {{else}}
+                        <tr id="empty-row">
+                            <td colspan="7" class="py-12 text-center text-slate-400">
+                                <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <p class="font-semibold text-slate-600">No se encontraron partes de horas registradas</p>
+                                <p class="text-xs text-slate-400 mt-1">Verifica tus credenciales y permisos en Odoo.</p>
+                            </td>
+                        </tr>
+                    {{end}}
+                    <tr id="empty-filter-row" class="hidden">
+                        <td colspan="7" class="py-12 text-center text-slate-400">
+                            <svg class="mx-auto h-9 w-9 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            <p class="font-semibold text-slate-600">No hay partes de horas para la semana o filtros seleccionados</p>
+                            <p class="text-xs text-slate-400 mt-1">Navega a otra semana con las flechas o ajusta los filtros.</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{ end }}
