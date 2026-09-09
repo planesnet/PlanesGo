@@ -6,25 +6,10 @@
 
 const currentMonday = getMonday(new Date());
 let selectedWeekMonday = new Date(currentMonday);
-let isWeekFilterActive = true;
 let currentView = 'list';
 
 function navigateWeek(delta) {
-    isWeekFilterActive = true;
     selectedWeekMonday.setDate(selectedWeekMonday.getDate() + delta * 7);
-    updateWeekControls();
-    applyTimesheetFilters();
-}
-
-function goToCurrentWeek() {
-    isWeekFilterActive = true;
-    selectedWeekMonday = new Date(currentMonday);
-    updateWeekControls();
-    applyTimesheetFilters();
-}
-
-function toggleAllWeeksFilter() {
-    isWeekFilterActive = !isWeekFilterActive;
     updateWeekControls();
     applyTimesheetFilters();
 }
@@ -33,8 +18,6 @@ function updateWeekControls() {
     const titleEl = document.getElementById('week-title-display');
     const datesEl = document.getElementById('week-dates-display');
     const currentBadge = document.getElementById('current-week-badge');
-    const btnCurrent = document.getElementById('btn-current-week');
-    const btnToggleText = document.getElementById('btn-toggle-all-weeks-text');
     const btnPrev = document.getElementById('btn-prev-week');
     const btnNext = document.getElementById('btn-next-week');
 
@@ -63,14 +46,12 @@ function updateWeekControls() {
     let prevViable = false;
     let nextViable = false;
 
-    if (isWeekFilterActive) {
-        if (minMonday && selectedWeekMonday.getTime() > minMonday.getTime()) {
-            prevViable = true;
-        }
-        // Siguiente es viable si estamos antes de la semana actual o si hay registros futuros
-        if (selectedWeekMonday.getTime() < currentMonday.getTime() || (maxMonday && selectedWeekMonday.getTime() < maxMonday.getTime())) {
-            nextViable = true;
-        }
+    if (minMonday && selectedWeekMonday.getTime() > minMonday.getTime()) {
+        prevViable = true;
+    }
+    // Siguiente es viable si estamos antes de la semana actual o si hay registros futuros
+    if (selectedWeekMonday.getTime() < currentMonday.getTime() || (maxMonday && selectedWeekMonday.getTime() < maxMonday.getTime())) {
+        nextViable = true;
     }
 
     if (btnPrev) {
@@ -93,43 +74,25 @@ function updateWeekControls() {
 
     const isCurrent = isSameWeek(selectedWeekMonday, currentMonday);
     const sunday = getSunday(selectedWeekMonday);
+    const weekNum = getISOWeekNumber(selectedWeekMonday);
 
-    if (isWeekFilterActive) {
-        const weekNum = getISOWeekNumber(selectedWeekMonday);
-        if (titleEl) titleEl.textContent = `Semana ${weekNum}`;
-        
-        const monStr = selectedWeekMonday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-        const sunStr = sunday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-        if (datesEl) datesEl.textContent = `${monStr} – ${sunStr}`;
-
-        if (currentBadge) {
-            if (isCurrent) currentBadge.classList.remove('hidden');
-            else currentBadge.classList.add('hidden');
-        }
-
-        if (btnCurrent) {
-            if (!isCurrent) btnCurrent.classList.remove('hidden');
-            else btnCurrent.classList.add('hidden');
-        }
-
-        if (btnToggleText) btnToggleText.textContent = 'Ver todas las semanas';
-
-        if (kpiHoursSub) kpiHoursSub.textContent = 'En semana seleccionada';
-        if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes esta semana';
-        if (kpiEntriesSub) kpiEntriesSub.textContent = 'imputaciones esta semana';
-        if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad esta semana';
-    } else {
-        if (titleEl) titleEl.textContent = 'Todas las semanas';
-        if (datesEl) datesEl.textContent = 'Mostrando todo el historial de imputaciones sin restricción semanal';
-        if (currentBadge) currentBadge.classList.add('hidden');
-        if (btnCurrent) btnCurrent.classList.remove('hidden');
-        if (btnToggleText) btnToggleText.textContent = 'Ver solo semana actual';
-
-        if (kpiHoursSub) kpiHoursSub.textContent = 'En todo el histórico';
-        if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes en total';
-        if (kpiEntriesSub) kpiEntriesSub.textContent = 'imputaciones totales';
-        if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad total';
+    if (titleEl) {
+        titleEl.textContent = isCurrent ? `Semana actual (S${weekNum})` : `Semana ${weekNum}`;
     }
+    
+    const monStr = selectedWeekMonday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+    const sunStr = sunday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+    if (datesEl) datesEl.textContent = `${monStr} – ${sunStr}`;
+
+    if (currentBadge) {
+        if (isCurrent) currentBadge.classList.remove('hidden');
+        else currentBadge.classList.add('hidden');
+    }
+
+    if (kpiHoursSub) kpiHoursSub.textContent = 'En semana seleccionada';
+    if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes esta semana';
+    if (kpiEntriesSub) kpiEntriesSub.textContent = 'imputaciones esta semana';
+    if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad esta semana';
 }
 
 function switchView(viewName) {
@@ -219,13 +182,11 @@ function applyTimesheetFilters() {
 
         const matchEmployee = !employeeVal || employee.includes(employeeVal);
 
-        let matchWeek = true;
-        if (isWeekFilterActive && rowDateStr) {
+        let matchWeek = false;
+        if (rowDateStr) {
             const rowDate = parseISODate(rowDateStr);
             if (rowDate) {
                 matchWeek = (rowDate >= selectedWeekMonday && rowDate <= selectedWeekSunday);
-            } else {
-                matchWeek = false;
             }
         }
 
