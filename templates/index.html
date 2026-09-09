@@ -623,20 +623,30 @@
                         </div>
                     </div>
 
-                    <!-- Tiempo Dedicado (Horas) -->
+                    <!-- Tiempo Dedicado (Horas:Minutos) -->
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1" for="modal-hours-input">
-                            Tiempo dedicado (Horas) <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="flex items-center space-x-2">
-                            <input type="number" id="modal-hours-input" step="0.25" min="0.05" max="24" required placeholder="1.50"
-                                   class="w-32 px-3 py-2 text-xs sm:text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-900 font-mono">
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs font-bold text-slate-700" for="modal-hours-input">
+                                Tiempo dedicado (Horas:Minutos) <span class="text-rose-500">*</span>
+                            </label>
+                            <span id="modal-hours-preview" class="text-[11px] font-mono text-sky-700 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-md font-semibold hidden">
+                                0.00 h
+                            </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="relative w-36">
+                                <input type="text" id="modal-hours-input" required placeholder="1:30"
+                                       class="w-full pl-3 pr-12 py-2 text-xs sm:text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-900 font-mono text-center tracking-wider">
+                                <span class="absolute right-2.5 top-2.5 text-[11px] font-semibold text-slate-400 pointer-events-none">hh:mm</span>
+                            </div>
                             <div class="flex items-center space-x-1">
-                                <button type="button" onclick="addModalHours(0.5)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+0.5h</button>
-                                <button type="button" onclick="addModalHours(1.0)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+1h</button>
-                                <button type="button" onclick="addModalHours(2.0)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+2h</button>
+                                <button type="button" onclick="addModalTimeMinutes(15)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer" title="Añadir 15 minutos">+15m</button>
+                                <button type="button" onclick="addModalTimeMinutes(30)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer" title="Añadir 30 minutos">+30m</button>
+                                <button type="button" onclick="addModalTimeMinutes(60)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer" title="Añadir 1 hora">+1h</button>
+                                <button type="button" onclick="addModalTimeMinutes(120)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer" title="Añadir 2 horas">+2h</button>
                             </div>
                         </div>
+                        <p class="text-[10px] text-slate-400 mt-1">Formato <span class="font-mono text-slate-600 font-medium">horas:minutos</span> (ej: <strong class="text-slate-600">1:30</strong> = 1h 30m, <strong class="text-slate-600">0:45</strong> = 45m, <strong class="text-slate-600">2:00</strong> = 2h). Pulsa <strong>Enter</strong> para Aceptar.</p>
                     </div>
 
                     <!-- Descripción / Trabajo realizado -->
@@ -1155,6 +1165,35 @@
                 }
             });
 
+            // Input y visualización dinámica de horas:minutos
+            const hoursInputEl = document.getElementById('modal-hours-input');
+            if (hoursInputEl) {
+                hoursInputEl.addEventListener('input', () => {
+                    updateModalTimeBadge();
+                });
+                hoursInputEl.addEventListener('blur', () => {
+                    normalizeModalTimeInput();
+                });
+            }
+
+            // Al pulsar Enter en el modal se considera Aceptar
+            const timesheetFormEl = document.getElementById('timesheet-form');
+            if (timesheetFormEl) {
+                timesheetFormEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        // Si está en el campo de crear tarea inline, crear la tarea en vez del envío general
+                        if (e.target && e.target.id === 'inline-task-name') {
+                            e.preventDefault();
+                            submitInlineCreateTask();
+                            return;
+                        }
+                        // En inputs y selects, Enter equivale a Aceptar
+                        e.preventDefault();
+                        submitTimesheetForm(e);
+                    }
+                });
+            }
+
             // Aplicar filtros iniciales
             applyTimesheetFilters();
         });
@@ -1162,6 +1201,97 @@
         // ==============================================================
         // --- FUNCIONES DEL MODAL DE IMPUTACIÓN Y EDICIÓN DE HORAS ---
         // ==============================================================
+
+        // --- FUNCIONES AUXILIARES DE TIEMPO (HORAS:MINUTOS / DECIMAL) ---
+        function parseTimeToDecimal(val) {
+            if (!val) return 0;
+            val = String(val).trim().toLowerCase();
+            if (!val) return 0;
+
+            // Caso 1: Horas:Minutos (ej: "1:30", "01:30", "0:45", ":30", "2:00")
+            if (val.includes(':')) {
+                const parts = val.split(':');
+                const h = parts[0] === '' ? 0 : parseInt(parts[0], 10);
+                const m = parts[1] === '' ? 0 : parseInt(parts[1], 10);
+                if (isNaN(h) || isNaN(m) || m < 0) return NaN;
+                return Math.round((h + m / 60) * 100) / 100;
+            }
+
+            // Caso 2: Formato texto estilo "1h 30m", "1h", "45m"
+            if (val.includes('h') || val.includes('m')) {
+                let hours = 0;
+                let mins = 0;
+                const hMatch = val.match(/(\d+(?:[.,]\d+)?)\s*h/);
+                const mMatch = val.match(/(\d+)\s*m/);
+                if (hMatch) hours = parseFloat(hMatch[1].replace(',', '.'));
+                if (mMatch) mins = parseInt(mMatch[1], 10);
+                if (!hMatch && !mMatch) return NaN;
+                return Math.round((hours + mins / 60) * 100) / 100;
+            }
+
+            // Caso 3: Número decimal o entero (ej: "1.5", "1,5", "2")
+            val = val.replace(',', '.');
+            const num = parseFloat(val);
+            return isNaN(num) ? NaN : (Math.round(num * 100) / 100);
+        }
+
+        function formatDecimalToTime(decimalHours) {
+            if (decimalHours === null || decimalHours === undefined || isNaN(decimalHours) || decimalHours <= 0) return '0:00';
+            const totalMinutes = Math.round(decimalHours * 60);
+            const h = Math.floor(totalMinutes / 60);
+            const m = totalMinutes % 60;
+            return `${h}:${String(m).padStart(2, '0')}`;
+        }
+
+        function updateModalTimeBadge() {
+            const input = document.getElementById('modal-hours-input');
+            const preview = document.getElementById('modal-hours-preview');
+            if (!input || !preview) return;
+
+            const raw = input.value.trim();
+            if (!raw) {
+                preview.classList.add('hidden');
+                return;
+            }
+
+            const dec = parseTimeToDecimal(raw);
+            if (isNaN(dec) || dec <= 0) {
+                preview.className = 'text-[11px] font-mono text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md font-semibold';
+                preview.innerText = '⚠️ Formato inválido (ej: 1:30)';
+                preview.classList.remove('hidden');
+            } else {
+                preview.className = 'text-[11px] font-mono text-sky-700 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-md font-semibold';
+                preview.innerText = `≈ ${dec.toFixed(2)} h`;
+                preview.classList.remove('hidden');
+            }
+        }
+
+        function normalizeModalTimeInput() {
+            const input = document.getElementById('modal-hours-input');
+            if (!input) return;
+            const raw = input.value.trim();
+            if (!raw) return;
+            const dec = parseTimeToDecimal(raw);
+            if (!isNaN(dec) && dec > 0) {
+                input.value = formatDecimalToTime(dec);
+                updateModalTimeBadge();
+            }
+        }
+
+        function addModalTimeMinutes(minutesToAdd) {
+            const input = document.getElementById('modal-hours-input');
+            if (!input) return;
+            const currentDecimal = parseTimeToDecimal(input.value) || 0;
+            const currentMinutes = Math.round(currentDecimal * 60);
+            const newMinutes = Math.max(0, currentMinutes + minutesToAdd);
+            input.value = formatDecimalToTime(newMinutes / 60);
+            updateModalTimeBadge();
+            input.focus();
+        }
+
+        function addModalHours(amount) {
+            addModalTimeMinutes(Math.round(amount * 60));
+        }
 
         function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName) {
             const modal = document.getElementById('timesheet-modal');
@@ -1196,6 +1326,7 @@
 
             hoursInput.value = '';
             descInput.value = '';
+            updateModalTimeBadge();
 
             // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
             let targetProjectId = preselectedProjectId || activeSidebarProjectId;
@@ -1223,6 +1354,12 @@
             requestAnimationFrame(() => {
                 container.classList.remove('scale-95', 'opacity-0');
                 container.classList.add('scale-100', 'opacity-100');
+                // Foco inteligente: si ya hay proyecto, enfocar tiempo para escribir y pulsar Enter
+                if (targetProjectId && hoursInput) {
+                    setTimeout(() => hoursInput.focus(), 100);
+                } else if (projectSelect) {
+                    setTimeout(() => projectSelect.focus(), 100);
+                }
             });
         }
 
@@ -1257,8 +1394,9 @@
             }
 
             dateInput.value = date || '';
-            hoursInput.value = hours ? parseFloat(hours).toFixed(2) : '';
+            hoursInput.value = hours ? formatDecimalToTime(parseFloat(hours)) : '';
             descInput.value = desc || '';
+            updateModalTimeBadge();
 
             if (projectSelect && projectId) {
                 projectSelect.value = projectId;
@@ -1274,6 +1412,12 @@
             requestAnimationFrame(() => {
                 container.classList.remove('scale-95', 'opacity-0');
                 container.classList.add('scale-100', 'opacity-100');
+                if (hoursInput) {
+                    setTimeout(() => {
+                        hoursInput.focus();
+                        hoursInput.select();
+                    }, 100);
+                }
             });
         }
 
@@ -1286,14 +1430,8 @@
             container.classList.add('scale-95', 'opacity-0');
             setTimeout(() => {
                 modal.classList.add('hidden');
+                updateModalTimeBadge();
             }, 150);
-        }
-
-        function addModalHours(amount) {
-            const input = document.getElementById('modal-hours-input');
-            if (!input) return;
-            const current = parseFloat(input.value) || 0;
-            input.value = (Math.round((current + amount) * 100) / 100).toFixed(2);
         }
 
         function onModalProjectChange(projectId) {
@@ -1427,7 +1565,9 @@
 
                 setTimeout(() => {
                     toggleInlineCreateTask(false);
-                }, 1200);
+                    const hoursInput = document.getElementById('modal-hours-input');
+                    if (hoursInput) hoursInput.focus();
+                }, 800);
             })
             .catch(err => {
                 if (submitBtn) submitBtn.disabled = false;
@@ -1440,14 +1580,15 @@
         }
 
         function submitTimesheetForm(event) {
-            event.preventDefault();
+            if (event && event.preventDefault) event.preventDefault();
 
             const entryId = document.getElementById('modal-entry-id').value;
             const projectId = document.getElementById('modal-project-select').value;
             const taskSelect = document.getElementById('modal-task-select');
             const taskId = taskSelect ? taskSelect.value : '';
             const date = document.getElementById('modal-date-input').value;
-            const hours = parseFloat(document.getElementById('modal-hours-input').value);
+            const hoursRaw = document.getElementById('modal-hours-input').value;
+            const hours = parseTimeToDecimal(hoursRaw);
             const desc = document.getElementById('modal-desc-input').value.trim();
 
             const feedback = document.getElementById('modal-feedback');
@@ -1459,6 +1600,8 @@
                     feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
                     feedback.innerText = 'Debes seleccionar un proyecto.';
                 }
+                const projSelect = document.getElementById('modal-project-select');
+                if (projSelect) projSelect.focus();
                 return;
             }
 
@@ -1467,13 +1610,20 @@
                     feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
                     feedback.innerText = 'Debes especificar una fecha válida.';
                 }
+                const dateInp = document.getElementById('modal-date-input');
+                if (dateInp) dateInp.focus();
                 return;
             }
 
             if (isNaN(hours) || hours <= 0) {
                 if (feedback) {
                     feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
-                    feedback.innerText = 'Introduce un número de horas mayor que cero (ej: 1.5).';
+                    feedback.innerText = 'Introduce un tiempo válido en formato horas:minutos (ej: 1:30 para 1h y 30m, 0:45 para 45m).';
+                }
+                const hoursInp = document.getElementById('modal-hours-input');
+                if (hoursInp) {
+                    hoursInp.focus();
+                    hoursInp.select();
                 }
                 return;
             }
