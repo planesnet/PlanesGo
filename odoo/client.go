@@ -249,3 +249,224 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 	return projects, nil
 }
 
+// GetTasks consulta las tareas de un proyecto en Odoo (project.task).
+func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return nil, fmt.Errorf("no se pudo autenticar antes de consultar tareas: %w", err)
+		}
+	}
+
+	domain := []interface{}{}
+	if projectID > 0 {
+		domain = append(domain, []interface{}{"project_id", "=", projectID})
+	}
+
+	fields := []string{
+		"id",
+		"name",
+		"display_name",
+		"project_id",
+		"active",
+	}
+
+	kwargs := map[string]interface{}{
+		"fields": fields,
+		"order":  "name asc, id desc",
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"project.task",
+		"search_read",
+		[]interface{}{domain},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error al obtener tareas del proyecto: %w", err)
+		}
+	}
+
+	var tasks []Task
+	if err := json.Unmarshal(resultRaw, &tasks); err != nil {
+		return nil, fmt.Errorf("error al parsear tareas: %w", err)
+	}
+
+	return tasks, nil
+}
+
+// CreateTask crea una nueva tarea en un proyecto en Odoo (project.task).
+func (c *Client) CreateTask(ctx context.Context, projectID int, name string) (int, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return 0, fmt.Errorf("no se pudo autenticar antes de crear tarea: %w", err)
+		}
+	}
+
+	if projectID <= 0 {
+		return 0, errors.New("el ID de proyecto es obligatorio")
+	}
+	if name == "" {
+		return 0, errors.New("el nombre de la tarea es obligatorio")
+	}
+
+	vals := map[string]interface{}{
+		"name":       name,
+		"project_id": projectID,
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"project.task",
+		"create",
+		[]interface{}{vals},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("error al crear tarea en Odoo: %w", err)
+		}
+	}
+
+	var newID int
+	if err := json.Unmarshal(resultRaw, &newID); err != nil || newID == 0 {
+		return 0, fmt.Errorf("respuesta inválida al crear tarea: %s", string(resultRaw))
+	}
+
+	return newID, nil
+}
+
+// CreateTimesheet crea un nuevo parte de horas (account.analytic.line) en Odoo.
+func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int, taskID int, unitAmount float64, description string) (int, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return 0, fmt.Errorf("no se pudo autenticar antes de crear parte de horas: %w", err)
+		}
+	}
+
+	if projectID <= 0 {
+		return 0, errors.New("el ID de proyecto es obligatorio")
+	}
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	if description == "" {
+		description = "Horas registradas desde PlanesGo"
+	}
+
+	vals := map[string]interface{}{
+		"name":        description,
+		"date":        date,
+		"project_id":  projectID,
+		"unit_amount": unitAmount,
+	}
+	if taskID > 0 {
+		vals["task_id"] = taskID
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"account.analytic.line",
+		"create",
+		[]interface{}{vals},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("error al registrar parte de horas en Odoo: %w", err)
+		}
+	}
+
+	var newID int
+	if err := json.Unmarshal(resultRaw, &newID); err != nil || newID == 0 {
+		return 0, fmt.Errorf("respuesta inválida al crear parte de horas: %s", string(resultRaw))
+	}
+
+	return newID, nil
+}
+
+// UpdateTimesheet actualiza un registro de horas existente en Odoo (account.analytic.line).
+func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date string, taskID int, unitAmount float64, description string) error {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return fmt.Errorf("no se pudo autenticar antes de actualizar parte de horas: %w", err)
+		}
+	}
+
+	if timesheetID <= 0 {
+		return errors.New("el ID del registro de horas es obligatorio")
+	}
+
+	vals := map[string]interface{}{}
+	if date != "" {
+		vals["date"] = date
+	}
+	if unitAmount > 0 {
+		vals["unit_amount"] = unitAmount
+	}
+	if description != "" {
+		vals["name"] = description
+	}
+	if taskID > 0 {
+		vals["task_id"] = taskID
+	} else if taskID == -1 {
+		vals["task_id"] = false
+	}
+
+	if len(vals) == 0 {
+		return nil
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"account.analytic.line",
+		"write",
+		[]interface{}{
+			[]int{timesheetID},
+			vals,
+		},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil {
+			return fmt.Errorf("error al actualizar parte de horas en Odoo: %w", err)
+		}
+	}
+
+	var ok bool
+	if err := json.Unmarshal(resultRaw, &ok); err != nil || !ok {
+		return fmt.Errorf("no se pudo confirmar la actualización en Odoo: %s", string(resultRaw))
+	}
+
+	return nil
+}
+

@@ -405,10 +405,18 @@
                             </select>
                         </div>
 
-                        <!-- Botón Reset -->
-                        <div class="flex items-center justify-end">
-                            <button id="btn-reset" class="w-full lg:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                        <!-- Botón Reset y Botón Imputar Horas -->
+                        <div class="flex items-center justify-end space-x-2">
+                            <button id="btn-reset" class="w-full lg:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
                                 Limpiar Filtros
+                            </button>
+                            <button type="button" id="btn-open-timesheet-modal" onclick="openCreateTimesheetModal()"
+                                    class="w-full lg:w-auto px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer"
+                                    title="Registrar horas en tarea de proyecto">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                                <span id="btn-imputar-label">Imputar Horas</span>
                             </button>
                         </div>
                     </div>
@@ -426,18 +434,22 @@
                                     <th class="py-3 px-4">Tarea</th>
                                     <th class="py-3 px-4">Descripción</th>
                                     <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
+                                    <th class="py-3 px-3 text-right">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
                                 {{if .Entries}}
                                     {{range .Entries}}
                                      <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
+                                        data-id="{{.ID}}"
                                         data-date="{{.Date}}"
                                         data-employee="{{.DisplayEmployee}}"
                                         data-project="{{.ProjectID.String}}"
                                         data-project-name="{{.ProjectID.Name}}"
                                         data-project-id="{{.ProjectID.ID}}"
                                         data-task="{{.TaskID.String}}"
+                                        data-task-id="{{.TaskID.ID}}"
+                                        data-task-name="{{.TaskID.Name}}"
                                         data-desc="{{.Name}}"
                                         data-hours="{{.UnitAmount}}">
                                         <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
@@ -482,11 +494,29 @@
                                                 {{printf "%.2f" .UnitAmount}} h
                                             </span>
                                         </td>
+                                        <td class="py-3 px-3 text-right whitespace-nowrap">
+                                            <button type="button"
+                                                    onclick="openEditTimesheetModal(this)"
+                                                    data-id="{{.ID}}"
+                                                    data-date="{{.Date}}"
+                                                    data-project-id="{{.ProjectID.ID}}"
+                                                    data-project-name="{{.ProjectID.Name}}"
+                                                    data-task-id="{{.TaskID.ID}}"
+                                                    data-task-name="{{.TaskID.Name}}"
+                                                    data-name="{{.Name}}"
+                                                    data-hours="{{.UnitAmount}}"
+                                                    class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
+                                                    title="Editar este parte de horas">
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                </svg>
+                                            </button>
+                                        </td>
                                     </tr>
                                     {{end}}
                                 {{else}}
                                     <tr id="empty-row">
-                                        <td colspan="6" class="py-12 text-center text-slate-400">
+                                        <td colspan="7" class="py-12 text-center text-slate-400">
                                             <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
@@ -502,6 +532,143 @@
 
             </div> <!-- Cierre Columna Principal Derecha -->
         </div> <!-- Cierre Disposición 2 Columnas -->
+
+        <!-- Modal Registrar / Editar Horas -->
+        <div id="timesheet-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 hidden">
+            <div class="bg-white rounded-2xl shadow-2xl border border-slate-200/90 w-full max-w-lg overflow-hidden transform transition-all duration-200 scale-95 opacity-0" id="timesheet-modal-container">
+                <!-- Cabecera del Modal -->
+                <div class="px-6 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-800" id="modal-title">Registrar Horas</h3>
+                            <p class="text-[11px] text-slate-400">Imputación de tiempo en tareas de Odoo</p>
+                        </div>
+                    </div>
+                    <button type="button" onclick="closeTimesheetModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200/60 transition cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Formulario del Modal -->
+                <form id="timesheet-form" onsubmit="submitTimesheetForm(event)" class="p-6 space-y-4">
+                    <input type="hidden" id="modal-entry-id" value="">
+
+                    <!-- Proyecto -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="modal-project-select">
+                            Proyecto <span class="text-rose-500">*</span>
+                        </label>
+                        <select id="modal-project-select" onchange="onModalProjectChange(this.value)" required
+                                class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-800">
+                            <option value="">-- Selecciona un proyecto --</option>
+                            {{range .Projects}}
+                            <option value="{{.ID}}">{{.Name}}</option>
+                            {{end}}
+                        </select>
+                    </div>
+
+                    <!-- Fecha -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="modal-date-input">
+                            Fecha <span class="text-rose-500">*</span>
+                        </label>
+                        <input type="date" id="modal-date-input" required
+                               class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-800">
+                        <p class="text-[10px] text-slate-400 mt-1">Por defecto la fecha actual. Puedes modificarla si es necesario.</p>
+                    </div>
+
+                    <!-- Tarea y Crear Tarea Inline -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs font-bold text-slate-700" for="modal-task-select">
+                                Tarea en el Proyecto
+                            </label>
+                            <button type="button" id="btn-toggle-inline-task" onclick="toggleInlineCreateTask()"
+                                    class="text-[11px] font-semibold text-sky-600 hover:text-sky-700 hover:underline flex items-center space-x-1 cursor-pointer">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                                <span>Crear nueva tarea</span>
+                            </button>
+                        </div>
+
+                        <select id="modal-task-select"
+                                class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-800">
+                            <option value="">-- Sin tarea específica asignada --</option>
+                        </select>
+
+                        <!-- Caja de creación rápida de tarea -->
+                        <div id="inline-task-box" class="hidden mt-2 p-3 bg-sky-50/70 border border-sky-100 rounded-xl space-y-2">
+                            <div class="text-[11px] font-bold text-sky-900">Nueva tarea en este proyecto:</div>
+                            <div class="flex space-x-2">
+                                <input type="text" id="inline-task-name" placeholder="Ej: Revisión de base de datos"
+                                       class="flex-1 px-2.5 py-1.5 text-xs bg-white border border-sky-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800">
+                                <button type="button" id="btn-submit-inline-task" onclick="submitInlineCreateTask()"
+                                        class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs rounded-lg transition flex items-center space-x-1 cursor-pointer">
+                                    <span id="btn-submit-inline-task-label">Añadir</span>
+                                </button>
+                                <button type="button" onclick="toggleInlineCreateTask(false)"
+                                        class="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg transition cursor-pointer">
+                                    ✕
+                                </button>
+                            </div>
+                            <div id="inline-task-msg" class="text-[11px] font-medium hidden"></div>
+                        </div>
+                    </div>
+
+                    <!-- Tiempo Dedicado (Horas) -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="modal-hours-input">
+                            Tiempo dedicado (Horas) <span class="text-rose-500">*</span>
+                        </label>
+                        <div class="flex items-center space-x-2">
+                            <input type="number" id="modal-hours-input" step="0.25" min="0.05" max="24" required placeholder="1.50"
+                                   class="w-32 px-3 py-2 text-xs sm:text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-900 font-mono">
+                            <div class="flex items-center space-x-1">
+                                <button type="button" onclick="addModalHours(0.5)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+0.5h</button>
+                                <button type="button" onclick="addModalHours(1.0)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+1h</button>
+                                <button type="button" onclick="addModalHours(2.0)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">+2h</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Descripción / Trabajo realizado -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="modal-desc-input">
+                            Descripción del trabajo realizado
+                        </label>
+                        <input type="text" id="modal-desc-input" placeholder="Ej: Desarrollo de funcionalidad, corrección de bugs..."
+                               class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-800">
+                    </div>
+
+                    <!-- Mensaje de feedback en el modal -->
+                    <div id="modal-feedback" class="hidden p-3 rounded-xl text-xs font-medium"></div>
+
+                    <!-- Botones de Acción -->
+                    <div class="pt-2 flex items-center justify-end space-x-2">
+                        <button type="button" onclick="closeTimesheetModal()"
+                                class="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
+                            Cancelar
+                        </button>
+                        <button type="submit" id="btn-submit-timesheet"
+                                class="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl shadow-xs transition flex items-center space-x-2 cursor-pointer">
+                            <span id="btn-submit-timesheet-text">Guardar</span>
+                            <svg id="btn-submit-timesheet-spinner" class="animate-spin -mr-1 ml-1 h-3.5 w-3.5 text-white hidden" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
     </main>
 
@@ -651,6 +818,11 @@
                 }
             }
 
+            const btnLabel = document.getElementById('btn-imputar-label');
+            if (btnLabel) {
+                btnLabel.innerText = pName ? `Imputar en ${pName.length > 15 ? pName.slice(0, 14) + '...' : pName}` : 'Imputar Horas';
+            }
+
             applyTimesheetFilters();
         }
 
@@ -658,6 +830,9 @@
             activeSidebarProjectName = '';
             activeSidebarProjectId = '';
             activeSidebarProject = '';
+
+            const btnLabel = document.getElementById('btn-imputar-label');
+            if (btnLabel) btnLabel.innerText = 'Imputar Horas';
 
             const projectSelect = document.getElementById('filter-project');
             if (projectSelect) projectSelect.value = '';
@@ -927,6 +1102,8 @@
                     activeSidebarProjectName = '';
                     activeSidebarProjectId = '';
                     activeSidebarProject = '';
+                    const btnLabel = document.getElementById('btn-imputar-label');
+                    if (btnLabel) btnLabel.innerText = 'Imputar Horas';
                     highlightSidebarProject('', '');
                     rebuildSidebarProjects('');
                     applyTimesheetFilters();
@@ -961,9 +1138,397 @@
                 });
             }
 
+            // Cerrar modal al hacer clic en el backdrop
+            const modalEl = document.getElementById('timesheet-modal');
+            if (modalEl) {
+                modalEl.addEventListener('click', (e) => {
+                    if (e.target.id === 'timesheet-modal') {
+                        closeTimesheetModal();
+                    }
+                });
+            }
+
+            // Cerrar modal con la tecla Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeTimesheetModal();
+                }
+            });
+
             // Aplicar filtros iniciales
             applyTimesheetFilters();
         });
+
+        // ==============================================================
+        // --- FUNCIONES DEL MODAL DE IMPUTACIÓN Y EDICIÓN DE HORAS ---
+        // ==============================================================
+
+        function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName) {
+            const modal = document.getElementById('timesheet-modal');
+            const container = document.getElementById('timesheet-modal-container');
+            const title = document.getElementById('modal-title');
+            const entryIdInput = document.getElementById('modal-entry-id');
+            const projectSelect = document.getElementById('modal-project-select');
+            const dateInput = document.getElementById('modal-date-input');
+            const hoursInput = document.getElementById('modal-hours-input');
+            const descInput = document.getElementById('modal-desc-input');
+            const submitBtnText = document.getElementById('btn-submit-timesheet-text');
+            const feedback = document.getElementById('modal-feedback');
+
+            if (!modal) return;
+
+            // Reset estado
+            entryIdInput.value = '';
+            title.innerText = 'Registrar Horas';
+            submitBtnText.innerText = 'Guardar';
+            toggleInlineCreateTask(false);
+            if (feedback) {
+                feedback.className = 'hidden p-3 rounded-xl text-xs font-medium';
+                feedback.innerText = '';
+            }
+
+            // Fecha por defecto: hoy (YYYY-MM-DD)
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            dateInput.value = `${yyyy}-${mm}-${dd}`;
+
+            hoursInput.value = '';
+            descInput.value = '';
+
+            // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
+            let targetProjectId = preselectedProjectId || activeSidebarProjectId;
+            if (!targetProjectId && activeSidebarProjectName && projectSelect) {
+                for (let i = 0; i < projectSelect.options.length; i++) {
+                    if (projectSelect.options[i].text.toLowerCase().includes(activeSidebarProjectName.toLowerCase())) {
+                        targetProjectId = projectSelect.options[i].value;
+                        break;
+                    }
+                }
+            }
+
+            if (targetProjectId && projectSelect) {
+                projectSelect.value = targetProjectId;
+                loadTasksForProject(targetProjectId);
+            } else {
+                if (projectSelect) projectSelect.value = '';
+                const taskSelect = document.getElementById('modal-task-select');
+                if (taskSelect) {
+                    taskSelect.innerHTML = '<option value="">-- Sin tarea asignada --</option>';
+                }
+            }
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                container.classList.remove('scale-95', 'opacity-0');
+                container.classList.add('scale-100', 'opacity-100');
+            });
+        }
+
+        function openEditTimesheetModal(btn) {
+            const modal = document.getElementById('timesheet-modal');
+            const container = document.getElementById('timesheet-modal-container');
+            const title = document.getElementById('modal-title');
+            const entryIdInput = document.getElementById('modal-entry-id');
+            const projectSelect = document.getElementById('modal-project-select');
+            const dateInput = document.getElementById('modal-date-input');
+            const hoursInput = document.getElementById('modal-hours-input');
+            const descInput = document.getElementById('modal-desc-input');
+            const submitBtnText = document.getElementById('btn-submit-timesheet-text');
+            const feedback = document.getElementById('modal-feedback');
+
+            if (!modal || !btn) return;
+
+            const id = btn.dataset.id;
+            const date = btn.dataset.date;
+            const projectId = btn.dataset.projectId;
+            const taskId = btn.dataset.taskId;
+            const desc = btn.dataset.name;
+            const hours = btn.dataset.hours;
+
+            entryIdInput.value = id || '';
+            title.innerText = `Editar Parte de Horas #${id}`;
+            submitBtnText.innerText = 'Actualizar';
+            toggleInlineCreateTask(false);
+            if (feedback) {
+                feedback.className = 'hidden p-3 rounded-xl text-xs font-medium';
+                feedback.innerText = '';
+            }
+
+            dateInput.value = date || '';
+            hoursInput.value = hours ? parseFloat(hours).toFixed(2) : '';
+            descInput.value = desc || '';
+
+            if (projectSelect && projectId) {
+                projectSelect.value = projectId;
+                loadTasksForProject(projectId, taskId);
+            } else {
+                const taskSelect = document.getElementById('modal-task-select');
+                if (taskSelect) {
+                    taskSelect.innerHTML = '<option value="">-- Sin tarea asignada --</option>';
+                }
+            }
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                container.classList.remove('scale-95', 'opacity-0');
+                container.classList.add('scale-100', 'opacity-100');
+            });
+        }
+
+        function closeTimesheetModal() {
+            const modal = document.getElementById('timesheet-modal');
+            const container = document.getElementById('timesheet-modal-container');
+            if (!modal) return;
+
+            container.classList.remove('scale-100', 'opacity-100');
+            container.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 150);
+        }
+
+        function addModalHours(amount) {
+            const input = document.getElementById('modal-hours-input');
+            if (!input) return;
+            const current = parseFloat(input.value) || 0;
+            input.value = (Math.round((current + amount) * 100) / 100).toFixed(2);
+        }
+
+        function onModalProjectChange(projectId) {
+            toggleInlineCreateTask(false);
+            loadTasksForProject(projectId);
+        }
+
+        function loadTasksForProject(projectId, preselectedTaskId) {
+            const taskSelect = document.getElementById('modal-task-select');
+            if (!taskSelect) return;
+
+            if (!projectId) {
+                taskSelect.innerHTML = '<option value="">-- Sin tarea asignada --</option>';
+                return;
+            }
+
+            taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
+            taskSelect.disabled = true;
+
+            fetch(`/api/tasks?project_id=${projectId}`)
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                })
+                .then(tasks => {
+                    taskSelect.disabled = false;
+                    let html = '<option value="">-- Sin tarea específica asignada --</option>';
+                    if (Array.isArray(tasks) && tasks.length > 0) {
+                        tasks.forEach(t => {
+                            const selected = (preselectedTaskId && String(t.id) === String(preselectedTaskId)) ? 'selected' : '';
+                            html += `<option value="${t.id}" ${selected}>${t.name || ('Tarea #' + t.id)}</option>`;
+                        });
+                    } else {
+                        html += '<option value="" disabled>(No hay tareas creadas aún)</option>';
+                    }
+                    taskSelect.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error('Error cargando tareas:', err);
+                    taskSelect.disabled = false;
+                    taskSelect.innerHTML = '<option value="">-- Sin tarea asignada (error al cargar) --</option>';
+                });
+        }
+
+        function toggleInlineCreateTask(forceState) {
+            const box = document.getElementById('inline-task-box');
+            const input = document.getElementById('inline-task-name');
+            const msg = document.getElementById('inline-task-msg');
+            if (!box) return;
+
+            const shouldShow = (typeof forceState === 'boolean') ? forceState : box.classList.contains('hidden');
+            if (shouldShow) {
+                box.classList.remove('hidden');
+                if (input) {
+                    input.value = '';
+                    input.focus();
+                }
+                if (msg) msg.className = 'hidden';
+            } else {
+                box.classList.add('hidden');
+                if (msg) msg.className = 'hidden';
+            }
+        }
+
+        function submitInlineCreateTask() {
+            const projectSelect = document.getElementById('modal-project-select');
+            const projectId = projectSelect ? projectSelect.value : '';
+            const nameInput = document.getElementById('inline-task-name');
+            const taskName = nameInput ? nameInput.value.trim() : '';
+            const msg = document.getElementById('inline-task-msg');
+            const submitBtn = document.getElementById('btn-submit-inline-task');
+            const submitBtnLabel = document.getElementById('btn-submit-inline-task-label');
+
+            if (!projectId) {
+                if (msg) {
+                    msg.className = 'text-[11px] font-semibold text-rose-600 block';
+                    msg.innerText = 'Debes seleccionar un proyecto antes de crear una tarea.';
+                }
+                return;
+            }
+
+            if (!taskName) {
+                if (msg) {
+                    msg.className = 'text-[11px] font-semibold text-rose-600 block';
+                    msg.innerText = 'Por favor, introduce el nombre o título de la tarea.';
+                }
+                if (nameInput) nameInput.focus();
+                return;
+            }
+
+            if (submitBtn) submitBtn.disabled = true;
+            if (submitBtnLabel) submitBtnLabel.innerText = 'Creando...';
+            if (msg) {
+                msg.className = 'text-[11px] font-semibold text-sky-700 block';
+                msg.innerText = 'Creando tarea en Odoo...';
+            }
+
+            fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    project_id: parseInt(projectId, 10),
+                    name: taskName
+                })
+            })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const errorMsg = data.error || (res.status === 403 ? 'No tienes permisos en Odoo para crear tareas en este proyecto.' : `Error HTTP ${res.status}`);
+                    throw new Error(errorMsg);
+                }
+                return data;
+            })
+            .then(data => {
+                if (submitBtn) submitBtn.disabled = false;
+                if (submitBtnLabel) submitBtnLabel.innerText = 'Añadir';
+                if (msg) {
+                    msg.className = 'text-[11px] font-semibold text-emerald-600 block';
+                    msg.innerText = '✓ Tarea creada correctamente.';
+                }
+
+                // Añadir al selector y seleccionar
+                const taskSelect = document.getElementById('modal-task-select');
+                if (taskSelect) {
+                    const opt = document.createElement('option');
+                    opt.value = data.id;
+                    opt.text = data.name || taskName;
+                    opt.selected = true;
+                    taskSelect.appendChild(opt);
+                }
+
+                setTimeout(() => {
+                    toggleInlineCreateTask(false);
+                }, 1200);
+            })
+            .catch(err => {
+                if (submitBtn) submitBtn.disabled = false;
+                if (submitBtnLabel) submitBtnLabel.innerText = 'Añadir';
+                if (msg) {
+                    msg.className = 'text-[11px] font-semibold text-rose-600 block';
+                    msg.innerText = '⚠️ ' + err.message;
+                }
+            });
+        }
+
+        function submitTimesheetForm(event) {
+            event.preventDefault();
+
+            const entryId = document.getElementById('modal-entry-id').value;
+            const projectId = document.getElementById('modal-project-select').value;
+            const taskSelect = document.getElementById('modal-task-select');
+            const taskId = taskSelect ? taskSelect.value : '';
+            const date = document.getElementById('modal-date-input').value;
+            const hours = parseFloat(document.getElementById('modal-hours-input').value);
+            const desc = document.getElementById('modal-desc-input').value.trim();
+
+            const feedback = document.getElementById('modal-feedback');
+            const submitBtn = document.getElementById('btn-submit-timesheet');
+            const spinner = document.getElementById('btn-submit-timesheet-spinner');
+
+            if (!projectId && !entryId) {
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+                    feedback.innerText = 'Debes seleccionar un proyecto.';
+                }
+                return;
+            }
+
+            if (!date) {
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+                    feedback.innerText = 'Debes especificar una fecha válida.';
+                }
+                return;
+            }
+
+            if (isNaN(hours) || hours <= 0) {
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+                    feedback.innerText = 'Introduce un número de horas mayor que cero (ej: 1.5).';
+                }
+                return;
+            }
+
+            // Iniciar loading
+            if (submitBtn) submitBtn.disabled = true;
+            if (spinner) spinner.classList.remove('hidden');
+            if (feedback) feedback.className = 'hidden';
+
+            const isEdit = Boolean(entryId);
+            const url = isEdit ? '/api/timesheets/update' : '/api/timesheets';
+            const payload = isEdit ? {
+                id: parseInt(entryId, 10),
+                date: date,
+                task_id: taskId ? parseInt(taskId, 10) : 0,
+                unit_amount: hours,
+                description: desc
+            } : {
+                date: date,
+                project_id: parseInt(projectId, 10),
+                task_id: taskId ? parseInt(taskId, 10) : 0,
+                unit_amount: hours,
+                description: desc
+            };
+
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.error || `Error HTTP ${res.status}`);
+                }
+                return data;
+            })
+            .then(data => {
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 block';
+                    feedback.innerText = isEdit ? '✓ Parte de horas actualizado con éxito. Recargando...' : '✓ Horas imputadas con éxito en Odoo. Recargando...';
+                }
+                setTimeout(() => {
+                    window.location.reload();
+                }, 800);
+            })
+            .catch(err => {
+                if (submitBtn) submitBtn.disabled = false;
+                if (spinner) spinner.classList.add('hidden');
+                if (feedback) {
+                    feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+                    feedback.innerText = '⚠️ ' + err.message;
+                }
+            });
+        }
     </script>
 </body>
 </html>

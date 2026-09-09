@@ -127,3 +127,25 @@ func (p *Project) FormattedTotalHours() string {
 	}
 	return fmt.Sprintf("%dh %02dm (%.2fh)", hours, minutes, p.TotalHours)
 }
+
+// Task representa una tarea de un proyecto en Odoo (project.task).
+type Task struct {
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name"`
+	ProjectID   Many2One `json:"project_id"`
+	Active      bool     `json:"active"`
+}
+
+func (t *Task) DisplayNameOrName() string {
+	if t.Name != "" {
+		return t.Name
+	}
+	if t.DisplayName != "" {
+		return t.DisplayName
+	}
+	if t.ID > 0 {
+		return fmt.Sprintf("Tarea #%d", t.ID)
+	}
+	return "Sin nombre"
+}
