@@ -271,17 +271,6 @@
                             </div>
                         {{end}}
                     </div>
-
-                    <!-- Botón para limpiar filtro de proyecto seleccionado en sidebar -->
-                    <div id="sidebar-clear-project" class="hidden mt-3 pt-3 border-t border-slate-100">
-                        <button type="button" onclick="clearSidebarProjectFilter()"
-                                class="w-full py-1.5 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center space-x-1.5 cursor-pointer">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                            <span>Mostrar todos los proyectos</span>
-                        </button>
-                    </div>
                 </div>
             </aside>
 
@@ -726,7 +715,6 @@
         function highlightSidebarProject(projectName, projectId) {
             const recentItems = document.querySelectorAll('.sidebar-project-item');
             const allItems = document.querySelectorAll('.sidebar-all-project-item');
-            const clearBtn = document.getElementById('sidebar-clear-project');
 
             const targetId = projectId ? String(projectId) : '';
             const targetName = projectName ? projectName.toLowerCase().trim() : '';
@@ -753,15 +741,6 @@
 
             recentItems.forEach(btn => applyHighlight(btn, false));
             allItems.forEach(btn => applyHighlight(btn, true));
-
-            const hasActive = Boolean(projectName || projectId);
-            if (clearBtn) {
-                if (hasActive) {
-                    clearBtn.classList.remove('hidden');
-                } else {
-                    clearBtn.classList.add('hidden');
-                }
-            }
         }
 
         function selectSidebarProject(projectName, projectId) {
