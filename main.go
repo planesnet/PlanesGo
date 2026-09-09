@@ -25,7 +25,7 @@ import (
 	"pasigo/store"
 )
 
-const Version = "1.0.1"
+const Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
 const DefaultOdooURL = "https://www.planesnet.com"

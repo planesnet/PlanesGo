@@ -1,11 +1,13 @@
 # Binaries
 pasigo
 planesgo
+Migrar1
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.db
 
 # Test binaries
 *.test
