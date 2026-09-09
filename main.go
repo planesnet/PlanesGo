@@ -48,6 +48,36 @@ type AppState struct {
 	userStore *store.UserSettingsStore
 }
 
+type WorkerRecentProject struct {
+	ID         int     `json:"id"`
+	Name       string  `json:"name"`
+	LastDate   string  `json:"last_date"`
+	TotalHours float64 `json:"total_hours"`
+	EntryCount int     `json:"entry_count"`
+	LastTask   string  `json:"last_task"`
+	Employee   string  `json:"employee"`
+}
+
+func (r WorkerRecentProject) FormattedHours() string {
+	hours := int(r.TotalHours)
+	minutes := int((r.TotalHours - float64(hours)) * 60)
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh %02dm", hours, minutes)
+}
+
+func (r WorkerRecentProject) FormattedDate() string {
+	if r.LastDate == "" {
+		return "-"
+	}
+	t, err := time.Parse("2006-01-02", r.LastDate)
+	if err != nil {
+		return r.LastDate
+	}
+	return t.Format("02/01/2006")
+}
+
 type PageData struct {
 	Version              string
 	Config               *config.Config
@@ -61,6 +91,8 @@ type PageData struct {
 	UniqueEmployeesCount int
 	ProjectsList         []string
 	EmployeesList        []string
+	CurrentWorker        string
+	RecentProjects       []WorkerRecentProject
 	Error                string
 }
 
@@ -775,6 +807,140 @@ func main() {
 		}
 		sort.Strings(employeesList)
 
+		// Determinar trabajador actual asociado a la sesión
+		currentWorker := ""
+		if session != nil {
+			if session.UserName != "" {
+				for _, emp := range employeesList {
+					if strings.EqualFold(emp, session.UserName) {
+						currentWorker = emp
+						break
+					}
+				}
+				if currentWorker == "" {
+					sLower := strings.ToLower(session.UserName)
+					for _, emp := range employeesList {
+						eLower := strings.ToLower(emp)
+						if strings.Contains(sLower, eLower) || strings.Contains(eLower, sLower) {
+							currentWorker = emp
+							break
+						}
+					}
+				}
+			}
+			if currentWorker == "" {
+				email := session.UserEmail
+				if email == "" {
+					email = session.Username
+				}
+				if email != "" {
+					userPart := strings.ToLower(strings.Split(email, "@")[0])
+					for _, emp := range employeesList {
+						if strings.Contains(strings.ToLower(emp), userPart) {
+							currentWorker = emp
+							break
+						}
+					}
+				}
+			}
+		}
+		if currentWorker == "" && len(employeesList) == 1 {
+			currentWorker = employeesList[0]
+		}
+		if currentWorker == "" && len(employeesList) > 0 {
+			currentWorker = employeesList[0]
+		}
+
+		// Calcular los últimos proyectos utilizados por el trabajador
+		type projAccumulator struct {
+			project WorkerRecentProject
+		}
+		recentProjectsMap := make(map[string]*projAccumulator)
+		var recentProjectsOrder []string
+
+		for _, entry := range entries {
+			if currentWorker != "" && entry.DisplayEmployee() != currentWorker {
+				continue
+			}
+
+			pName := entry.ProjectID.String()
+			if pName == "" || pName == "-" {
+				continue
+			}
+
+			if acc, exists := recentProjectsMap[pName]; exists {
+				acc.project.TotalHours += entry.UnitAmount
+				acc.project.EntryCount++
+			} else {
+				taskName := ""
+				if entry.TaskID.Name != "" {
+					taskName = entry.TaskID.Name
+				}
+				acc := &projAccumulator{
+					project: WorkerRecentProject{
+						ID:         entry.ProjectID.ID,
+						Name:       pName,
+						LastDate:   entry.Date,
+						TotalHours: entry.UnitAmount,
+						EntryCount: 1,
+						LastTask:   taskName,
+						Employee:   entry.DisplayEmployee(),
+					},
+				}
+				recentProjectsMap[pName] = acc
+				recentProjectsOrder = append(recentProjectsOrder, pName)
+			}
+		}
+
+		// Si no hay proyectos para el trabajador seleccionado pero hay partes en total, seleccionar primer trabajador con actividad
+		if len(recentProjectsOrder) == 0 && len(entries) > 0 {
+			for _, entry := range entries {
+				emp := entry.DisplayEmployee()
+				if emp != "" && emp != "Sin asignar" {
+					currentWorker = emp
+					break
+				}
+			}
+			if currentWorker != "" {
+				for _, entry := range entries {
+					if entry.DisplayEmployee() != currentWorker {
+						continue
+					}
+					pName := entry.ProjectID.String()
+					if pName == "" || pName == "-" {
+						continue
+					}
+					if acc, exists := recentProjectsMap[pName]; exists {
+						acc.project.TotalHours += entry.UnitAmount
+						acc.project.EntryCount++
+					} else {
+						taskName := ""
+						if entry.TaskID.Name != "" {
+							taskName = entry.TaskID.Name
+						}
+						acc := &projAccumulator{
+							project: WorkerRecentProject{
+								ID:         entry.ProjectID.ID,
+								Name:       pName,
+								LastDate:   entry.Date,
+								TotalHours: entry.UnitAmount,
+								EntryCount: 1,
+								LastTask:   taskName,
+								Employee:   entry.DisplayEmployee(),
+							},
+						}
+						recentProjectsMap[pName] = acc
+						recentProjectsOrder = append(recentProjectsOrder, pName)
+					}
+				}
+			}
+		}
+
+		var recentProjects []WorkerRecentProject
+		for _, pName := range recentProjectsOrder {
+			recentProjects = append(recentProjects, recentProjectsMap[pName].project)
+		}
+
 		errMsg := ""
 		if fetchErr != nil {
 			errMsg = fetchErr.Error()
@@ -794,6 +960,8 @@ func main() {
 			UniqueEmployeesCount: len(employeeMap),
 			ProjectsList:         projectsList,
 			EmployeesList:        employeesList,
+			CurrentWorker:        currentWorker,
+			RecentProjects:       recentProjects,
 			Error:                errMsg,
 		}
 
