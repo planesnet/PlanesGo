@@ -1,83 +1,45 @@
 {{ define "filters_bar" }}
-<!-- Barra de Filtros Minimalista de Partes de Horas y Selector de Vistas -->
-<div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-sm">
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-3 items-center">
-        <!-- Búsqueda rápida -->
-        <div class="relative">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-            </span>
-            <input type="text" id="filter-search" placeholder="Buscar descripción, tarea, proyecto..."
-                   class="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all">
-        </div>
-
-        <!-- Filtro Proyecto (Incluye todos los proyectos de Odoo) -->
-        <div>
-            <select id="filter-project"
-                    class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
-                <option value="">Todos los Proyectos ({{len .ProjectsList}})</option>
-                {{range .ProjectsList}}
-                <option value="{{.}}">{{.}}</option>
-                {{end}}
-            </select>
-        </div>
-
-        <!-- Filtro Empleado -->
-        <div>
-            <select id="filter-employee"
-                    class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all text-slate-700">
-                <option value="">Todos los Miembros ({{len .EmployeesList}})</option>
-                {{range .EmployeesList}}
-                <option value="{{.}}">{{.}}</option>
-                {{end}}
-            </select>
-        </div>
-
-        <!-- Selector de Vista (Lista / Calendario / Gantt) y Botón Imputar Horas -->
-        <div class="flex items-center justify-between xl:justify-end space-x-2">
-            <!-- Botonera estilo Odoo con tipos de vista -->
-            <div class="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs" role="group" aria-label="Selector de vistas">
-                <!-- Botón Vista Lista -->
-                <button type="button" id="btn-view-list" onclick="switchView('list')"
-                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70 transition-all cursor-pointer flex items-center space-x-1.5"
-                        title="Vista Lista de Partes de Horas">
-                    <svg class="w-3.5 h-3.5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                    </svg>
-                    <span class="text-[11px]">Lista</span>
-                </button>
-                <!-- Botón Vista Calendario (Semanal) -->
-                <button type="button" id="btn-view-calendar" onclick="switchView('calendar')"
-                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
-                        title="Vista Calendario Semanal">
-                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
-                    </svg>
-                    <span class="text-[11px]">Calendario</span>
-                </button>
-                <!-- Botón Vista Gantt -->
-                <button type="button" id="btn-view-gantt" onclick="switchView('gantt')"
-                        class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
-                        title="Vista Gantt (Timeline semanal de tareas)">
-                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M3 8h10M3 12h14M3 16h6M3 20h12" />
-                    </svg>
-                    <span class="text-[11px]">Gantt</span>
-                </button>
-            </div>
-
-            <!-- Botón Imputar Horas -->
-            <button type="button" id="btn-open-timesheet-modal" onclick="openCreateTimesheetModal()"
-                    class="px-3.5 py-2 text-xs sm:text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
-                    title="Registrar horas en tarea de proyecto">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span id="btn-imputar-label">Imputar Horas</span>
-            </button>
-        </div>
+<!-- Barra de Acciones: Selector de Vistas y Botón Imputar Horas -->
+<div class="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-end space-x-2.5 sm:space-x-3">
+    <!-- Botonera estilo Odoo con tipos de vista -->
+    <div class="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs" role="group" aria-label="Selector de vistas">
+        <!-- Botón Vista Lista -->
+        <button type="button" id="btn-view-list" onclick="switchView('list')"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70 transition-all cursor-pointer flex items-center space-x-1.5"
+                title="Vista Lista de Partes de Horas">
+            <svg class="w-3.5 h-3.5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+            <span class="text-[11px]">Lista</span>
+        </button>
+        <!-- Botón Vista Calendario (Semanal) -->
+        <button type="button" id="btn-view-calendar" onclick="switchView('calendar')"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                title="Vista Calendario Semanal">
+            <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            <span class="text-[11px]">Calendario</span>
+        </button>
+        <!-- Botón Vista Gantt -->
+        <button type="button" id="btn-view-gantt" onclick="switchView('gantt')"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                title="Vista Gantt (Timeline semanal de tareas)">
+            <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M3 8h10M3 12h14M3 16h6M3 20h12" />
+            </svg>
+            <span class="text-[11px]">Gantt</span>
+        </button>
     </div>
+
+    <!-- Botón Imputar Horas -->
+    <button type="button" id="btn-open-timesheet-modal" onclick="openCreateTimesheetModal()"
+            class="px-3.5 py-2 text-xs sm:text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
+            title="Registrar horas en tarea de proyecto">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        <span id="btn-imputar-label">Imputar Horas</span>
+    </button>
 </div>
 {{ end }}

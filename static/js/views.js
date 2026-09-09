@@ -138,6 +138,7 @@ function applyTimesheetFilters() {
     const searchInput = document.getElementById('filter-search');
     const projectSelect = document.getElementById('filter-project');
     const employeeSelect = document.getElementById('filter-employee');
+    const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
     const rows = document.querySelectorAll('.timesheet-row');
     const emptyFilterRow = document.getElementById('empty-filter-row');
     
@@ -148,7 +149,7 @@ function applyTimesheetFilters() {
 
     const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
     const projectVal = (projectSelect ? projectSelect.value : '').toLowerCase().trim();
-    const employeeVal = (employeeSelect ? employeeSelect.value : '').toLowerCase().trim();
+    const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : '')).toLowerCase().trim();
 
     const targetProjectId = activeSidebarProjectId;
     const targetProjectName = (projectVal || activeSidebarProjectName).toLowerCase().trim();
