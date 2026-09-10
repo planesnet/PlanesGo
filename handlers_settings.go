@@ -77,9 +77,6 @@ func (state *AppState) handleSettings(w http.ResponseWriter, r *http.Request) {
 			userSettings.OdooURL = DefaultOdooURL
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(userSettings.OdooDB), "pasi") {
-		userSettings.OdooDB = ""
-	}
 	if userSettings.OdooDB == "" {
 		if defaultCfg.Odoo.DB != "" && !strings.EqualFold(strings.TrimSpace(defaultCfg.Odoo.DB), "pasi") {
 			userSettings.OdooDB = defaultCfg.Odoo.DB
@@ -87,8 +84,8 @@ func (state *AppState) handleSettings(w http.ResponseWriter, r *http.Request) {
 			userSettings.OdooDB = state.userStore.GetSharedOdooDB()
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(userSettings.OdooDB), "pasi") {
-		userSettings.OdooDB = ""
+	if strings.EqualFold(strings.TrimSpace(userSettings.OdooDB), "pasi") || userSettings.OdooDB == "" {
+		userSettings.OdooDB = DefaultOdooDB
 	}
 	if userSettings.PageLimit <= 0 {
 		userSettings.PageLimit = 200

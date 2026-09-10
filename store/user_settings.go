@@ -158,6 +158,7 @@ func (s *UserSettingsStore) GetSharedOdooDB() string {
 }
 
 // GetSharedOdooURL busca si existe alguna URL configurada en los ajustes guardados.
+// Si no hay ninguna persistida, devuelve la URL oficial por defecto.
 func (s *UserSettingsStore) GetSharedOdooURL() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -167,6 +168,6 @@ func (s *UserSettingsStore) GetSharedOdooURL() string {
 			return strings.TrimSpace(val.OdooURL)
 		}
 	}
-	return ""
+	return "https://planesnet.autopyme.com"
 }
 

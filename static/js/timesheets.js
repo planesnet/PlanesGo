@@ -291,10 +291,16 @@ function loadTasksForProject(projectId, preselectedTaskId) {
         return;
     }
 
-    taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
+    taskSelect.innerHTML = '<option value="">Cargando tareas actualizadas...</option>';
     taskSelect.disabled = true;
 
-    fetch(`/api/tasks?project_id=${projectId}`)
+    fetch(`/api/tasks?project_id=${projectId}&_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+        }
+    })
         .then(res => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
@@ -317,6 +323,21 @@ function loadTasksForProject(projectId, preselectedTaskId) {
             taskSelect.disabled = false;
             taskSelect.innerHTML = '<option value="">-- Sin tarea asignada (error al cargar) --</option>';
         });
+}
+
+function refreshModalTasks() {
+    const projectSelect = document.getElementById('modal-project-select');
+    const taskSelect = document.getElementById('modal-task-select');
+    const currentTaskId = taskSelect ? taskSelect.value : '';
+    const projectId = projectSelect ? projectSelect.value : '';
+    if (projectId) {
+        const icon = document.getElementById('modal-refresh-tasks-icon');
+        if (icon) icon.classList.add('animate-spin');
+        loadTasksForProject(projectId, currentTaskId);
+        setTimeout(() => {
+            if (icon) icon.classList.remove('animate-spin');
+        }, 600);
+    }
 }
 
 function toggleInlineCreateTask(forceState) {

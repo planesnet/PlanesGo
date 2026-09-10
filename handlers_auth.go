@@ -116,8 +116,8 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 	if savedDB == "" && state.cfg.Odoo.DB != "" && !strings.EqualFold(strings.TrimSpace(state.cfg.Odoo.DB), "pasi") {
 		savedDB = state.cfg.Odoo.DB
 	}
-	if strings.EqualFold(strings.TrimSpace(savedDB), "pasi") {
-		savedDB = ""
+	if strings.EqualFold(strings.TrimSpace(savedDB), "pasi") || savedDB == "" {
+		savedDB = DefaultOdooDB
 	}
 
 	sess := SessionData{
@@ -168,8 +168,8 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if loginDB == "" && defaultCfg.Odoo.DB != "" && !strings.EqualFold(strings.TrimSpace(defaultCfg.Odoo.DB), "pasi") {
 		loginDB = defaultCfg.Odoo.DB
 	}
-	if strings.EqualFold(strings.TrimSpace(loginDB), "pasi") {
-		loginDB = ""
+	if strings.EqualFold(strings.TrimSpace(loginDB), "pasi") || loginDB == "" {
+		loginDB = DefaultOdooDB
 	}
 
 	if r.Method == http.MethodGet {

@@ -699,8 +699,9 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 	return uid, nil
 }
 
-// GetTasks consulta las tareas de un proyecto en Odoo (project.task).
-// Si userUID > 0, filtra únicamente las tareas asignadas a ese trabajador/usuario.
+// GetTasks consulta las tareas de un proyecto en Odoo (project.task) en tiempo real.
+// Devuelve todas las tareas activas del proyecto, ordenadas priorizando aquellas
+// asignadas al usuario actual.
 func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Task, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
@@ -710,9 +711,6 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 	domain := []interface{}{}
 	if projectID > 0 {
 		domain = append(domain, []interface{}{"project_id", "=", projectID})
-	}
-	if userUID > 0 {
-		domain = append(domain, []interface{}{"user_id", "=", userUID})
 	}
 
 	fields := []string{
@@ -744,18 +742,6 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
-		if err != nil && userUID > 0 {
-			// Fallback para Odoo 15+ donde el campo es user_ids
-			domain15 := []interface{}{}
-			if projectID > 0 {
-				domain15 = append(domain15, []interface{}{"project_id", "=", projectID})
-			}
-			domain15 = append(domain15, []interface{}{"user_ids", "in", []int{userUID}})
-			fallbackFields := []string{"id", "name", "display_name", "project_id", "active"}
-			kwargs["fields"] = fallbackFields
-			args[5] = []interface{}{domain15}
-			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
-		}
 		if err != nil {
 			return nil, fmt.Errorf("error al obtener tareas del proyecto: %w", err)
 		}
@@ -766,15 +752,18 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 		return nil, fmt.Errorf("error al parsear tareas: %w", err)
 	}
 
-	// Filtrado de seguridad en memoria si userUID > 0 y la tarea tiene UserID poblado
-	if userUID > 0 {
-		filtered := make([]Task, 0, len(tasks))
+	// Si hay userUID especificado, ordenar priorizando las tareas asignadas a dicho usuario
+	if userUID > 0 && len(tasks) > 1 {
+		userTasks := make([]Task, 0, len(tasks))
+		otherTasks := make([]Task, 0, len(tasks))
 		for _, t := range tasks {
-			if t.UserID.ID == 0 || t.UserID.ID == userUID {
-				filtered = append(filtered, t)
+			if t.UserID.ID == userUID {
+				userTasks = append(userTasks, t)
+			} else {
+				otherTasks = append(otherTasks, t)
 			}
 		}
-		return filtered, nil
+		tasks = append(userTasks, otherTasks...)
 	}
 
 	return tasks, nil

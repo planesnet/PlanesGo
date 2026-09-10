@@ -17,6 +17,7 @@ const (
 	sessionCookieName    = "planesgo_session"
 	oauthStateCookieName = "planesgo_oauth_state"
 	DefaultOdooURL       = "https://planesnet.autopyme.com"
+	DefaultOdooDB        = "ap113"
 )
 
 type SessionData struct {
@@ -182,14 +183,14 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		}
 
 		// 2. Si no tiene base de datos en su configuración individual, recuperar la configurada globalmente en los ajustes guardados
-		if odooCfg.DB == "" && state.userStore != nil {
+		if (odooCfg.DB == "" || strings.EqualFold(strings.TrimSpace(odooCfg.DB), "pasi")) && state.userStore != nil {
 			if sharedDB := state.userStore.GetSharedOdooDB(); sharedDB != "" && !strings.EqualFold(strings.TrimSpace(sharedDB), "pasi") {
 				odooCfg.DB = sharedDB
 			}
 		}
 
 		// 3. Fallback: Base de datos o contraseña en sesión de cookie
-		if odooCfg.DB == "" && sess.DB != "" && !strings.EqualFold(strings.TrimSpace(sess.DB), "pasi") {
+		if (odooCfg.DB == "" || strings.EqualFold(strings.TrimSpace(odooCfg.DB), "pasi")) && sess.DB != "" && !strings.EqualFold(strings.TrimSpace(sess.DB), "pasi") {
 			odooCfg.DB = sess.DB
 		}
 		if odooCfg.Password == "" && sess.Password != "" {
@@ -197,7 +198,7 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		}
 	} else {
 		// Sesión anónima: comprobar si hay base de datos guardada en los ajustes
-		if odooCfg.DB == "" && state.userStore != nil {
+		if (odooCfg.DB == "" || strings.EqualFold(strings.TrimSpace(odooCfg.DB), "pasi")) && state.userStore != nil {
 			if sharedDB := state.userStore.GetSharedOdooDB(); sharedDB != "" && !strings.EqualFold(strings.TrimSpace(sharedDB), "pasi") {
 				odooCfg.DB = sharedDB
 			}

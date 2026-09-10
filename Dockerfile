@@ -32,9 +32,10 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
+COPY --from=builder /app/data /app/data
 
-# Permisos
-RUN chown -R appuser:appgroup /app
+# Permisos para el usuario de la aplicación
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 USER appuser
 
 # Puerto por defecto para el servicio
@@ -42,6 +43,8 @@ EXPOSE 8080
 
 # Variables de entorno por defecto
 ENV PORT=8080
+ENV ODOO_URL=https://planesnet.autopyme.com
+ENV ODOO_DB=ap113
 
 # Comando de inicio
 ENTRYPOINT ["/app/planesgo"]

@@ -254,6 +254,10 @@ func (state *AppState) handleAPITasks(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
 		projectIDStr := r.URL.Query().Get("project_id")
 		projectID, _ := strconv.Atoi(projectIDStr)
 

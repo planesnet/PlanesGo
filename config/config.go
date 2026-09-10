@@ -75,7 +75,12 @@ func LoadDotEnv(filename ...string) {
 	}
 }
 
-// LoadConfig carga la configuración basándose estrictamente en variables de entorno del sistema y el archivo .env.
+const (
+	DefaultOdooURL = "https://planesnet.autopyme.com"
+	DefaultOdooDB  = "ap113"
+)
+
+// LoadConfig lee las variables de entorno y construye la configuración global
 func LoadConfig(envFile ...string) *Config {
 	// Cargar automáticamente .env si existe
 	LoadDotEnv(envFile...)
@@ -85,7 +90,7 @@ func LoadConfig(envFile ...string) *Config {
 			Port: 8080,
 		},
 		Odoo: OdooConfig{
-			URL:      "https://planesnet.autopyme.com",
+			URL:      DefaultOdooURL,
 			DB:       "",
 			Username: "",
 			Password: "",
