@@ -114,3 +114,15 @@ func (s *UserSettingsStore) SaveSettings(settings UserSettings) error {
 
 	return s.save()
 }
+
+// GetAllSettings devuelve una copia de todos los ajustes guardados.
+func (s *UserSettingsStore) GetAllSettings() []UserSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]UserSettings, 0, len(s.settings))
+	for _, val := range s.settings {
+		result = append(result, val)
+	}
+	return result
+}

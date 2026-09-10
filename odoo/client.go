@@ -21,7 +21,7 @@ func NewClient(cfg config.OdooConfig) *Client {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: 8 * time.Second,
 		},
 	}
 }

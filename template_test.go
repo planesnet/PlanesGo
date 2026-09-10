@@ -69,3 +69,62 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 		t.Fatalf("El contenido renderizado está vacío")
 	}
 }
+
+func TestSettingsTemplateRendering(t *testing.T) {
+	tmpl, err := template.ParseFiles("templates/settings.html")
+	if err != nil {
+		t.Fatalf("Error al parsear templates/settings.html: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Odoo.DB = "ap113"
+	cfg.Odoo.URL = "https://planesnet.autopyme.com"
+
+	// Probar renderizado con sesión anónima (cuando Odoo no conecta y el usuario no ha iniciado sesión)
+	anonSession := &SessionData{
+		Username:   "Configuración",
+		UserEmail:  "",
+		URL:        "https://planesnet.autopyme.com",
+		DB:         "ap113",
+		AuthMethod: "local",
+	}
+
+	dataAnon := SettingsPageData{
+		Version: "1.1.0",
+		Config:  cfg,
+		Session: anonSession,
+	}
+
+	var bufAnon bytes.Buffer
+	if err := tmpl.Execute(&bufAnon, dataAnon); err != nil {
+		t.Fatalf("Error al renderizar settings con sesión anónima: %v", err)
+	}
+	if bufAnon.Len() == 0 {
+		t.Fatalf("El contenido renderizado para sesión anónima está vacío")
+	}
+
+	// Probar renderizado con sesión normal
+	userSession := &SessionData{
+		Username:   "luis@planesnet.com",
+		UserEmail:  "luis@planesnet.com",
+		Password:   "secret-token",
+		URL:        "https://planesnet.autopyme.com",
+		DB:         "ap113",
+		AuthMethod: "local",
+	}
+
+	dataUser := SettingsPageData{
+		Version: "1.1.0",
+		Config:  cfg,
+		Session: userSession,
+	}
+
+	var bufUser bytes.Buffer
+	if err := tmpl.Execute(&bufUser, dataUser); err != nil {
+		t.Fatalf("Error al renderizar settings con sesión de usuario: %v", err)
+	}
+	if bufUser.Len() == 0 {
+		t.Fatalf("El contenido renderizado para usuario está vacío")
+	}
+}
+

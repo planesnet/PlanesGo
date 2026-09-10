@@ -492,35 +492,67 @@ func main() {
 			session, _ = decodeSession(cookie.Value)
 		}
 
+		isAnonymous := false
 		if session == nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
+			isAnonymous = true
+			session = &SessionData{
+				Username:   "Configuración",
+				UserEmail:  "",
+				URL:        DefaultOdooURL,
+				DB:         DefaultOdooDB,
+				AuthMethod: "local",
+			}
 		}
 
 		userEmail := session.Username
 		if session.UserEmail != "" {
 			userEmail = session.UserEmail
 		}
+		if isAnonymous {
+			userEmail = "default"
+		}
+
+		state.mu.RLock()
+		defaultCfg := state.cfg
+		state.mu.RUnlock()
 
 		// Obtener o inicializar ajustes persistentes del usuario
 		var userSettings store.UserSettings
 		if state.userStore != nil {
 			if s, ok := state.userStore.GetSettings(userEmail); ok {
 				userSettings = s
+			} else if isAnonymous {
+				// Buscar si hay algún usuario guardado previamente para cargar su configuración de servidor
+				allSettings := state.userStore.GetAllSettings()
+				for _, s := range allSettings {
+					if s.OdooURL != "" || s.OdooDB != "" {
+						userSettings = s
+						userSettings.Email = "default"
+						break
+					}
+				}
 			}
 		}
 
 		if userSettings.Email == "" {
 			userSettings.Email = userEmail
 		}
-		if userSettings.OdooUser == "" {
+		if userSettings.OdooUser == "" && !isAnonymous {
 			userSettings.OdooUser = userEmail
 		}
 		if userSettings.OdooURL == "" || userSettings.OdooURL == "https://www.planesnet.com" {
-			userSettings.OdooURL = DefaultOdooURL
+			if defaultCfg.Odoo.URL != "" && defaultCfg.Odoo.URL != "https://www.planesnet.com" {
+				userSettings.OdooURL = defaultCfg.Odoo.URL
+			} else {
+				userSettings.OdooURL = DefaultOdooURL
+			}
 		}
 		if userSettings.OdooDB == "" {
-			userSettings.OdooDB = DefaultOdooDB
+			if defaultCfg.Odoo.DB != "" {
+				userSettings.OdooDB = defaultCfg.Odoo.DB
+			} else {
+				userSettings.OdooDB = DefaultOdooDB
+			}
 		}
 		if userSettings.PageLimit <= 0 {
 			userSettings.PageLimit = 200
@@ -534,10 +566,6 @@ func main() {
 			http.Error(w, fmt.Sprintf("Error al cargar plantilla settings.html: %v", err), http.StatusInternalServerError)
 			return
 		}
-
-		state.mu.RLock()
-		defaultCfg := state.cfg
-		state.mu.RUnlock()
 
 		if r.Method == http.MethodGet {
 			data := SettingsPageData{
@@ -557,26 +585,37 @@ func main() {
 			odooDB := strings.TrimSpace(r.FormValue("odoo_db"))
 			limitStr := strings.TrimSpace(r.FormValue("page_limit"))
 
-			if odooUser == "" {
+			if odooUser == "" && !isAnonymous {
 				odooUser = userEmail
 			}
 			if odooURL == "" || odooURL == "https://www.planesnet.com" {
-				if userSettings.OdooURL != "" && userSettings.OdooURL != "https://www.planesnet.com" {
-					odooURL = userSettings.OdooURL
-				} else {
-					odooURL = DefaultOdooURL
-				}
+				odooURL = DefaultOdooURL
 			}
 			if odooDB == "" {
-				odooDB = userSettings.OdooDB
+				odooDB = DefaultOdooDB
 			}
 			limit := userSettings.PageLimit
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 				limit = l
 			}
 
+			// Actualizar en memoria la configuración por defecto de Odoo
+			state.mu.Lock()
+			state.cfg.Odoo.URL = odooURL
+			state.cfg.Odoo.DB = odooDB
+			state.mu.Unlock()
+
+			targetEmail := userEmail
+			if targetEmail == "" || targetEmail == "default" {
+				if odooUser != "" {
+					targetEmail = odooUser
+				} else {
+					targetEmail = "default"
+				}
+			}
+
 			updatedSettings := store.UserSettings{
-				Email:     userEmail,
+				Email:     targetEmail,
 				OdooUser:  odooUser,
 				OdooToken: odooToken,
 				OdooURL:   odooURL,
@@ -591,28 +630,40 @@ func main() {
 				if err := state.userStore.SaveSettings(updatedSettings); err != nil {
 					errMsg = fmt.Sprintf("Error guardando ajustes: %v", err)
 				} else {
-					successMsg = "Ajustes de usuario y token de Odoo guardados de forma persistente."
-					log.Printf("[SETTINGS] Ajustes actualizados de forma persistente para %s", userEmail)
+					successMsg = "Ajustes de servidor Odoo guardados correctamente."
+					log.Printf("[SETTINGS] Ajustes actualizados de forma persistente para %s (%s / %s)", targetEmail, odooURL, odooDB)
 				}
 			} else {
 				successMsg = "Ajustes actualizados en la sesión actual."
 			}
 
-			// Actualizar cookie de sesión activa con el nuevo token
-			session.Password = odooToken
-			session.Username = odooUser
-			http.SetCookie(w, &http.Cookie{
-				Name:     sessionCookieName,
-				Value:    encodeSession(*session),
-				Path:     "/",
-				HttpOnly: true,
-				MaxAge:   86400 * 30,
-				SameSite: http.SameSiteLaxMode,
-			})
+			// Si el usuario proporcionó usuario y token, actualizar la sesión activa
+			if odooUser != "" || !isAnonymous {
+				session.Password = odooToken
+				if odooUser != "" {
+					session.Username = odooUser
+					session.UserEmail = odooUser
+				}
+				session.URL = odooURL
+				session.DB = odooDB
+				session.AuthMethod = "local"
+				http.SetCookie(w, &http.Cookie{
+					Name:     sessionCookieName,
+					Value:    encodeSession(*session),
+					Path:     "/",
+					HttpOnly: true,
+					MaxAge:   86400 * 30,
+					SameSite: http.SameSiteLaxMode,
+				})
+			}
+
+			state.mu.RLock()
+			currentCfg := state.cfg
+			state.mu.RUnlock()
 
 			data := SettingsPageData{
 				Version:        Version,
-				Config:         defaultCfg,
+				Config:         currentCfg,
 				Session:        session,
 				Settings:       updatedSettings,
 				SuccessMessage: successMsg,
@@ -753,7 +804,7 @@ func main() {
 
 		if hasOdooToken {
 			client := odoo.NewClient(currentOdooCfg)
-			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 			defer cancel()
 
 			projList, pErr := client.GetProjects(ctx, nil)
@@ -762,16 +813,13 @@ func main() {
 				fetchErr = pErr
 			} else {
 				projects = projList
-			}
-
-			tsEntries, tsErr := client.GetTimesheets(ctx, nil)
-			if tsErr != nil {
-				log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
-				if fetchErr == nil {
+				tsEntries, tsErr := client.GetTimesheets(ctx, nil)
+				if tsErr != nil {
+					log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
 					fetchErr = tsErr
+				} else {
+					entries = tsEntries
 				}
-			} else {
-				entries = tsEntries
 			}
 		}
 
