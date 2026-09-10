@@ -132,8 +132,8 @@
                                 </svg>
                             </div>
                             <div>
-                                <div class="font-bold">Credenciales y Servidor</div>
-                                <div class="text-[10px] text-slate-400 font-normal">URL, Base de Datos y Clave API</div>
+                                <div class="font-bold">Conexión Odoo</div>
+                                <div class="text-[10px] text-slate-400 font-normal">Servidor, Base de Datos y Credenciales</div>
                             </div>
                         </div>
                         <span class="text-sky-600">
@@ -143,20 +143,6 @@
                             <span class="w-2 h-2 rounded-full bg-amber-400 inline-block" title="Token pendiente"></span>
                             {{end}}
                         </span>
-                    </button>
-
-                    <button type="button" onclick="switchSettingsTab('tab-connection')" id="btn-tab-connection" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
-                        <div class="flex items-center space-x-3">
-                            <div class="p-2 rounded-xl bg-slate-100 text-slate-600 group-hover:bg-slate-200">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                                </svg>
-                            </div>
-                            <div>
-                                <div class="font-bold">Conexión Odoo</div>
-                                <div class="text-[10px] text-slate-400 font-normal">URL del servidor y Base de Datos</div>
-                            </div>
-                        </div>
                     </button>
 
                     <button type="button" onclick="switchSettingsTab('tab-guide')" id="btn-tab-guide" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
@@ -275,8 +261,15 @@
                             <p class="text-[11px] text-slate-400 mt-1.5 font-light">Se guarda de forma segura en tus ajustes personales y se utiliza para conectar vía JSON-RPC con Odoo 14.0.</p>
                         </div>
 
-                        <!-- Hidden input para preservar límite de registros al guardar este formulario -->
-                        <input type="hidden" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}">
+                        <!-- Límite de Registros -->
+                        <div>
+                            <label for="page_limit" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Límite de Partes de Horas a Consultar
+                            </label>
+                            <input type="number" id="page_limit" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}" min="10" max="1000"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Cantidad máxima de registros traídos de <code>account.analytic.line</code> (por defecto 200).</p>
+                        </div>
 
                         <!-- Panel de prueba de conexión en vivo -->
                         <div id="test-connection-result" class="hidden p-4 rounded-2xl text-xs font-medium border transition-all"></div>
@@ -295,63 +288,6 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
                                 <span>Guardar Ajustes</span>
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- SECCIÓN 2: Configuración de Conexión y Preferencias -->
-                <div id="tab-connection-content" class="settings-content-pane hidden bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
-                    <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
-                        <div>
-                            <h3 class="text-lg font-bold text-slate-900">Parámetros del Servidor Odoo</h3>
-                            <p class="text-xs text-slate-500 mt-1">Valores por defecto del servidor Odoo de la empresa (Odoo v14.0).</p>
-                        </div>
-                        <span class="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-                            </svg>
-                        </span>
-                    </div>
-
-                    <form action="/settings" method="POST" class="space-y-6">
-                        <!-- URL Odoo -->
-                        <div>
-                            <label for="odoo_url_params" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                                URL del Servidor Odoo
-                            </label>
-                            <input type="url" id="odoo_url_params" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}https://planesnet.autopyme.com{{end}}" required
-                                   placeholder="https://planesnet.autopyme.com"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
-                        </div>
-
-                        <!-- Base de Datos -->
-                        <div>
-                            <label for="odoo_db_params" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                                Base de Datos Odoo
-                            </label>
-                            <input type="text" id="odoo_db_params" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}" required
-                                   placeholder="ap113"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
-                        </div>
-
-                        <!-- Límite de Registros -->
-                        <div>
-                            <label for="page_limit" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                                Límite de Partes de Horas a Consultar
-                            </label>
-                            <input type="number" id="page_limit" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}" min="10" max="1000"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
-                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Cantidad máxima de registros traídos de <code>account.analytic.line</code>.</p>
-                        </div>
-
-                        <!-- Oculto para preservar token al guardar este formulario -->
-                        <input type="hidden" name="odoo_token" value="{{.Settings.OdooToken}}">
-                        <input type="hidden" name="odoo_user" value="{{if .Settings.OdooUser}}{{.Settings.OdooUser}}{{else}}{{.Session.Username}}{{end}}">
-
-                        <div class="flex justify-end pt-4 border-t border-slate-100">
-                            <button type="submit" class="px-7 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition">
-                                Guardar Parámetros
                             </button>
                         </div>
                     </form>
@@ -428,7 +364,6 @@
             // Quitar estilos activos de todos los botones
             const buttons = [
                 { id: 'btn-tab-odoo-token', tab: 'tab-odoo-token', content: 'tab-odoo-token-content', activeColor: 'text-sky-700 bg-sky-50/80' },
-                { id: 'btn-tab-connection', tab: 'tab-connection', content: 'tab-connection-content', activeColor: 'text-indigo-700 bg-indigo-50/80' },
                 { id: 'btn-tab-guide', tab: 'tab-guide', content: 'tab-guide-content', activeColor: 'text-emerald-700 bg-emerald-50/80' }
             ];
 
