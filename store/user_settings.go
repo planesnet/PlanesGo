@@ -126,3 +126,30 @@ func (s *UserSettingsStore) GetAllSettings() []UserSettings {
 	}
 	return result
 }
+
+// GetSharedOdooDB busca si existe alguna base de datos configurada en los ajustes guardados.
+func (s *UserSettingsStore) GetSharedOdooDB() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, val := range s.settings {
+		if strings.TrimSpace(val.OdooDB) != "" {
+			return strings.TrimSpace(val.OdooDB)
+		}
+	}
+	return ""
+}
+
+// GetSharedOdooURL busca si existe alguna URL configurada en los ajustes guardados.
+func (s *UserSettingsStore) GetSharedOdooURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, val := range s.settings {
+		if strings.TrimSpace(val.OdooURL) != "" {
+			return strings.TrimSpace(val.OdooURL)
+		}
+	}
+	return ""
+}
+

@@ -86,7 +86,7 @@ func LoadConfig(envFile ...string) *Config {
 		},
 		Odoo: OdooConfig{
 			URL:      "https://planesnet.autopyme.com",
-			DB:       "ap113",
+			DB:       "",
 			Username: "",
 			Password: "",
 			Limit:    200,

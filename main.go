@@ -29,7 +29,6 @@ var Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
 const DefaultOdooURL = "https://planesnet.autopyme.com"
-const DefaultOdooDB = "ap113"
 
 type SessionData struct {
 	URL         string `json:"url"`
@@ -141,7 +140,7 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 
 	odooCfg := config.OdooConfig{
 		URL:      DefaultOdooURL,
-		DB:       DefaultOdooDB,
+		DB:       "",
 		Username: "",
 		Password: "",
 		Limit:    200,
@@ -186,13 +185,30 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 			}
 		}
 
-		// 2. Fallback: Contraseña en sesión de cookie
+		// 2. Si no tiene base de datos en su configuración individual, recuperar la configurada globalmente en los ajustes guardados
+		if odooCfg.DB == "" && state.userStore != nil {
+			if sharedDB := state.userStore.GetSharedOdooDB(); sharedDB != "" {
+				odooCfg.DB = sharedDB
+			}
+		}
+
+		// 3. Fallback: Base de datos o contraseña en sesión de cookie
+		if odooCfg.DB == "" && sess.DB != "" {
+			odooCfg.DB = sess.DB
+		}
 		if odooCfg.Password == "" && sess.Password != "" {
 			odooCfg.Password = sess.Password
 		}
+	} else {
+		// Sesión anónima: comprobar si hay base de datos guardada en los ajustes
+		if odooCfg.DB == "" && state.userStore != nil {
+			if sharedDB := state.userStore.GetSharedOdooDB(); sharedDB != "" {
+				odooCfg.DB = sharedDB
+			}
+		}
 	}
 
-	// 3. Fallback: Variables del sistema si aún estuvieran vacías
+	// 4. Fallback: Variables del sistema si aún estuvieran vacías
 	if odooCfg.Password == "" && defaultCfg.Password != "" {
 		odooCfg.Password = defaultCfg.Password
 		if odooCfg.Username == "" {
@@ -320,17 +336,25 @@ func main() {
 
 		log.Printf("[OAUTH] Autenticación Google exitosa para: %s (%s)", googleUser.Email, googleUser.Name)
 
-		// Recuperar token persistente previo del usuario si existe
+		// Recuperar ajustes persistentes previos del usuario si existen
 		var savedToken string
+		var savedDB string
 		if state.userStore != nil {
 			if uSettings, ok := state.userStore.GetSettings(googleUser.Email); ok {
 				savedToken = uSettings.OdooToken
+				savedDB = uSettings.OdooDB
 			}
+			if savedDB == "" {
+				savedDB = state.userStore.GetSharedOdooDB()
+			}
+		}
+		if savedDB == "" && state.cfg.Odoo.DB != "" {
+			savedDB = state.cfg.Odoo.DB
 		}
 
 		sess := SessionData{
 			URL:         DefaultOdooURL,
-			DB:          DefaultOdooDB,
+			DB:          savedDB,
 			Username:    googleUser.Email,
 			Password:    savedToken,
 			AuthMethod:  "google",
@@ -369,12 +393,20 @@ func main() {
 			googleConfigError = "Configuración OAuth no válida. No se han encontrado las variables de entorno GOOGLE_CLIENT_ID ni GOOGLE_CLIENT_SECRET en el sistema ni en .env."
 		}
 
+		loginDB := ""
+		if state.userStore != nil {
+			loginDB = state.userStore.GetSharedOdooDB()
+		}
+		if loginDB == "" && defaultCfg.Odoo.DB != "" {
+			loginDB = defaultCfg.Odoo.DB
+		}
+
 		if r.Method == http.MethodGet {
 			errorQuery := r.URL.Query().Get("error")
 			data := LoginPageData{
 				Version:           Version,
 				URL:               DefaultOdooURL,
-				DB:                DefaultOdooDB,
+				DB:                loginDB,
 				Username:          defaultCfg.Odoo.Username,
 				Password:          "",
 				GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
@@ -390,11 +422,18 @@ func main() {
 			usernameInput := strings.TrimSpace(r.FormValue("username"))
 			passwordInput := r.FormValue("password")
 
+			userDB := loginDB
+			if state.userStore != nil {
+				if uSettings, ok := state.userStore.GetSettings(usernameInput); ok && uSettings.OdooDB != "" {
+					userDB = uSettings.OdooDB
+				}
+			}
+
 			if usernameInput == "" || passwordInput == "" {
 				data := LoginPageData{
 					Version:           Version,
 					URL:               DefaultOdooURL,
-					DB:                DefaultOdooDB,
+					DB:                userDB,
 					Username:          usernameInput,
 					Password:          passwordInput,
 					GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
@@ -408,7 +447,7 @@ func main() {
 
 			testCfg := config.OdooConfig{
 				URL:      DefaultOdooURL,
-				DB:       DefaultOdooDB,
+				DB:       userDB,
 				Username: usernameInput,
 				Password: passwordInput,
 				Limit:    200,
@@ -424,7 +463,7 @@ func main() {
 				data := LoginPageData{
 					Version:           Version,
 					URL:               DefaultOdooURL,
-					DB:                DefaultOdooDB,
+					DB:                userDB,
 					Username:          usernameInput,
 					Password:          passwordInput,
 					GoogleAuthEnabled: defaultCfg.GoogleAuth.Enabled || isGoogleConfigured,
@@ -440,19 +479,24 @@ func main() {
 
 			// Guardar también en almacén de usuario persistente
 			if state.userStore != nil {
+				existing, _ := state.userStore.GetSettings(usernameInput)
+				dbToSave := userDB
+				if existing.OdooDB != "" {
+					dbToSave = existing.OdooDB
+				}
 				_ = state.userStore.SaveSettings(store.UserSettings{
 					Email:     usernameInput,
 					OdooUser:  usernameInput,
 					OdooToken: passwordInput,
 					OdooURL:   DefaultOdooURL,
-					OdooDB:    DefaultOdooDB,
+					OdooDB:    dbToSave,
 					PageLimit: 200,
 				})
 			}
 
 			sess := SessionData{
 				URL:        DefaultOdooURL,
-				DB:         DefaultOdooDB,
+				DB:         userDB,
 				Username:   usernameInput,
 				Password:   passwordInput,
 				AuthMethod: "odoo",
@@ -499,7 +543,7 @@ func main() {
 				Username:   "Configuración",
 				UserEmail:  "",
 				URL:        DefaultOdooURL,
-				DB:         DefaultOdooDB,
+				DB:         "",
 				AuthMethod: "local",
 			}
 		}
@@ -521,15 +565,13 @@ func main() {
 		if state.userStore != nil {
 			if s, ok := state.userStore.GetSettings(userEmail); ok {
 				userSettings = s
-			} else if isAnonymous {
-				// Buscar si hay algún usuario guardado previamente para cargar su configuración de servidor
-				allSettings := state.userStore.GetAllSettings()
-				for _, s := range allSettings {
-					if s.OdooURL != "" || s.OdooDB != "" {
-						userSettings = s
-						userSettings.Email = "default"
-						break
-					}
+			} else {
+				// Cargar configuración de servidor previamente guardada en el almacén de ajustes
+				if sharedURL := state.userStore.GetSharedOdooURL(); sharedURL != "" {
+					userSettings.OdooURL = sharedURL
+				}
+				if sharedDB := state.userStore.GetSharedOdooDB(); sharedDB != "" {
+					userSettings.OdooDB = sharedDB
 				}
 			}
 		}
@@ -550,8 +592,8 @@ func main() {
 		if userSettings.OdooDB == "" {
 			if defaultCfg.Odoo.DB != "" {
 				userSettings.OdooDB = defaultCfg.Odoo.DB
-			} else {
-				userSettings.OdooDB = DefaultOdooDB
+			} else if state.userStore != nil {
+				userSettings.OdooDB = state.userStore.GetSharedOdooDB()
 			}
 		}
 		if userSettings.PageLimit <= 0 {
@@ -592,7 +634,11 @@ func main() {
 				odooURL = DefaultOdooURL
 			}
 			if odooDB == "" {
-				odooDB = DefaultOdooDB
+				if userSettings.OdooDB != "" {
+					odooDB = userSettings.OdooDB
+				} else if state.userStore != nil {
+					odooDB = state.userStore.GetSharedOdooDB()
+				}
 			}
 			limit := userSettings.PageLimit
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -704,8 +750,17 @@ func main() {
 		if payload.OdooURL == "" || payload.OdooURL == "https://www.planesnet.com" {
 			payload.OdooURL = DefaultOdooURL
 		}
+		if payload.OdooDB == "" && state.userStore != nil {
+			payload.OdooDB = state.userStore.GetSharedOdooDB()
+		}
 		if payload.OdooDB == "" {
-			payload.OdooDB = DefaultOdooDB
+			payload.OdooDB = state.cfg.Odoo.DB
+		}
+		if payload.OdooDB == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "La base de datos de Odoo no puede estar vacía. Por favor, indícala en los ajustes."})
+			return
 		}
 
 		testCfg := config.OdooConfig{
@@ -801,7 +856,10 @@ func main() {
 		var projects []odoo.Project
 		var activeEmployees []odoo.Employee
 		var fetchErr error
-		hasOdooToken := (currentOdooCfg.Password != "")
+		hasOdooToken := (currentOdooCfg.Password != "" && currentOdooCfg.DB != "")
+		if currentOdooCfg.Password != "" && currentOdooCfg.DB == "" {
+			fetchErr = fmt.Errorf("Base de datos de Odoo no configurada. Por favor, ve a Ajustes para especificarla.")
+		}
 
 		if hasOdooToken {
 			client := odoo.NewClient(currentOdooCfg)

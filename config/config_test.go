@@ -62,3 +62,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		t.Errorf("IsGoogleConfigured() debería ser true")
 	}
 }
+
+func TestLoadConfigNoDefaultDB(t *testing.T) {
+	os.Unsetenv("ODOO_DB")
+	cfg := LoadConfig()
+	if cfg.Odoo.DB != "" {
+		t.Errorf("Odoo DB debería estar vacía por defecto (sin valor por defecto), obtenida '%s'", cfg.Odoo.DB)
+	}
+}
+

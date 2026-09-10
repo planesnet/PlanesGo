@@ -19,7 +19,7 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Odoo.DB = "pasi"
+	cfg.Odoo.DB = "ap113"
 	cfg.Odoo.URL = "https://planesnet.autopyme.com"
 
 	data := PageData{
