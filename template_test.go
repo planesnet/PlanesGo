@@ -72,6 +72,12 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 	if !bytes.Contains([]byte(rendered), []byte("Test User")) {
 		t.Fatalf("El trabajador 'Test User' debería estar presente en el HTML renderizado")
 	}
+	if !bytes.Contains([]byte(rendered), []byte("col-project-header")) {
+		t.Fatalf("La cabecera de la columna proyecto debe contener la clase 'col-project-header'")
+	}
+	if !bytes.Contains([]byte(rendered), []byte("col-project-cell")) {
+		t.Fatalf("La celda de la columna proyecto debe contener la clase 'col-project-cell'")
+	}
 }
 
 func TestSettingsTemplateRendering(t *testing.T) {

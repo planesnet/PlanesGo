@@ -1384,12 +1384,27 @@ func main() {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
+		userEmail := ""
+		if session != nil {
+			userEmail = session.UserEmail
+			if userEmail == "" {
+				userEmail = session.Username
+			}
+		}
+		userUID := 0
+		if userEmail != "" {
+			userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+		}
+		if userUID == 0 {
+			userUID = client.UID()
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			projectIDStr := r.URL.Query().Get("project_id")
 			projectID, _ := strconv.Atoi(projectIDStr)
 
-			tasks, err := client.GetTasks(ctx, projectID)
+			tasks, err := client.GetTasks(ctx, projectID, userUID)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Error al obtener tareas: " + err.Error()})
@@ -1415,7 +1430,7 @@ func main() {
 				return
 			}
 
-			newID, err := client.CreateTask(ctx, req.ProjectID, req.Name)
+			newID, err := client.CreateTask(ctx, req.ProjectID, req.Name, userUID)
 			if err != nil {
 				errMsg := err.Error()
 				if strings.Contains(strings.ToLower(errMsg), "access") ||
@@ -1458,7 +1473,17 @@ func main() {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		projects, err := client.GetProjects(ctx, nil)
+		query := strings.TrimSpace(r.URL.Query().Get("search"))
+		if query == "" {
+			query = strings.TrimSpace(r.URL.Query().Get("q"))
+		}
+
+		var domain []interface{}
+		if query != "" {
+			domain = append(domain, []interface{}{"name", "ilike", query})
+		}
+
+		projects, err := client.GetProjects(ctx, domain)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

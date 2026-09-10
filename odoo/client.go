@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"pasigo/config"
+	"strings"
 	"time"
 )
 
@@ -348,8 +349,88 @@ func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Empl
 	return employees, nil
 }
 
+// UID devuelve el UID del usuario autenticado en Odoo.
+func (c *Client) UID() int {
+	return c.uid
+}
+
+// ResolveUserUIDByEmail busca el ID de usuario en res.users por email o login.
+// Si no lo encuentra, devuelve el UID autenticado del cliente como fallback.
+func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return 0, err
+		}
+	}
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return c.uid, nil
+	}
+
+	domain := []interface{}{
+		"|",
+		[]interface{}{"login", "=", email},
+		[]interface{}{"email", "=", email},
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"res.users",
+		"search_read",
+		[]interface{}{domain},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "login", "name"},
+		"limit":  1,
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err == nil {
+		var users []struct {
+			ID int `json:"id"`
+		}
+		if json.Unmarshal(resultRaw, &users) == nil && len(users) > 0 && users[0].ID > 0 {
+			return users[0].ID, nil
+		}
+	}
+
+	// Buscar en hr.employee por si el login no coincide pero el work_email sí
+	empDomain := []interface{}{
+		"|",
+		[]interface{}{"work_email", "=", email},
+		[]interface{}{"name", "=", email},
+	}
+	empArgs := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"hr.employee",
+		"search_read",
+		[]interface{}{empDomain},
+	}
+	empKwargs := map[string]interface{}{
+		"fields": []string{"id", "name", "user_id"},
+		"limit":  1,
+	}
+	resultEmp, errEmp := c.call(ctx, "object", "execute_kw", empArgs, empKwargs)
+	if errEmp == nil {
+		var emps []struct {
+			ID     int      `json:"id"`
+			UserID Many2One `json:"user_id"`
+		}
+		if json.Unmarshal(resultEmp, &emps) == nil && len(emps) > 0 && emps[0].UserID.ID > 0 {
+			return emps[0].UserID.ID, nil
+		}
+	}
+
+	return c.uid, nil
+}
+
 // GetTasks consulta las tareas de un proyecto en Odoo (project.task).
-func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
+// Si userUID > 0, filtra únicamente las tareas asignadas a ese trabajador/usuario.
+func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Task, error) {
 	if c.uid == 0 {
 		if _, err := c.Authenticate(ctx); err != nil {
 			return nil, fmt.Errorf("no se pudo autenticar antes de consultar tareas: %w", err)
@@ -360,12 +441,16 @@ func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
 	if projectID > 0 {
 		domain = append(domain, []interface{}{"project_id", "=", projectID})
 	}
+	if userUID > 0 {
+		domain = append(domain, []interface{}{"user_id", "=", userUID})
+	}
 
 	fields := []string{
 		"id",
 		"name",
 		"display_name",
 		"project_id",
+		"user_id",
 		"active",
 	}
 
@@ -389,6 +474,18 @@ func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
 			args[1] = c.uid
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
+		if err != nil && userUID > 0 {
+			// Fallback para Odoo 15+ donde el campo es user_ids
+			domain15 := []interface{}{}
+			if projectID > 0 {
+				domain15 = append(domain15, []interface{}{"project_id", "=", projectID})
+			}
+			domain15 = append(domain15, []interface{}{"user_ids", "in", []int{userUID}})
+			fallbackFields := []string{"id", "name", "display_name", "project_id", "active"}
+			kwargs["fields"] = fallbackFields
+			args[5] = []interface{}{domain15}
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error al obtener tareas del proyecto: %w", err)
 		}
@@ -399,11 +496,22 @@ func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
 		return nil, fmt.Errorf("error al parsear tareas: %w", err)
 	}
 
+	// Filtrado de seguridad en memoria si userUID > 0 y la tarea tiene UserID poblado
+	if userUID > 0 {
+		filtered := make([]Task, 0, len(tasks))
+		for _, t := range tasks {
+			if t.UserID.ID == 0 || t.UserID.ID == userUID {
+				filtered = append(filtered, t)
+			}
+		}
+		return filtered, nil
+	}
+
 	return tasks, nil
 }
 
-// CreateTask crea una nueva tarea en un proyecto en Odoo (project.task).
-func (c *Client) CreateTask(ctx context.Context, projectID int, name string) (int, error) {
+// CreateTask crea una nueva tarea en un proyecto en Odoo (project.task) asignada al trabajador.
+func (c *Client) CreateTask(ctx context.Context, projectID int, name string, userUID int) (int, error) {
 	if c.uid == 0 {
 		if _, err := c.Authenticate(ctx); err != nil {
 			return 0, fmt.Errorf("no se pudo autenticar antes de crear tarea: %w", err)
@@ -421,6 +529,9 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string) (in
 		"name":       name,
 		"project_id": projectID,
 	}
+	if userUID > 0 {
+		vals["user_id"] = userUID
+	}
 
 	args := []interface{}{
 		c.config.DB,
@@ -435,6 +546,13 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string) (in
 	if err != nil {
 		if _, authErr := c.Authenticate(ctx); authErr == nil {
 			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil && userUID > 0 {
+			// Fallback para Odoo 15+ donde el campo es user_ids
+			delete(vals, "user_id")
+			vals["user_ids"] = []interface{}{[]interface{}{6, 0, []int{userUID}}}
+			args[5] = []interface{}{vals}
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {

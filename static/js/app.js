@@ -48,8 +48,84 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Buscador en tiempo real dentro del panel lateral de proyectos
+    // Buscador en tiempo real dentro del panel lateral de proyectos con recarga desde Odoo
     const sidebarSearch = document.getElementById('sidebar-project-search');
+    let searchDebounceTimer = null;
+
+    async function searchOdooProjects(query) {
+        if (!query) return;
+        try {
+            const resp = await fetch(`/api/projects?search=${encodeURIComponent(query)}`);
+            if (!resp.ok) return;
+            const projects = await resp.json();
+            if (!Array.isArray(projects) || projects.length === 0) return;
+
+            const allListContainer = document.getElementById('sidebar-all-projects-list');
+            const modalSelect = document.getElementById('modal-project-select');
+            const filterSelect = document.getElementById('filter-project');
+
+            projects.forEach(p => {
+                const pId = String(p.id);
+                const pName = p.display_name || p.name || `Proyecto #${p.id}`;
+                const pPartner = (p.partner_id && p.partner_id.name) ? p.partner_id.name : '';
+
+                // Añadir a la lista "Todos los proyectos" del sidebar si es nuevo
+                if (allListContainer) {
+                    let existing = allListContainer.querySelector(`.sidebar-all-project-item[data-project-id="${pId}"]`);
+                    if (!existing) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.setAttribute('onclick', 'selectSidebarProject(this.dataset.projectName, this.dataset.projectId)');
+                        btn.dataset.projectName = pName;
+                        btn.dataset.projectId = pId;
+                        btn.className = 'sidebar-all-project-item group w-full text-left p-2.5 rounded-xl border border-slate-200/80 hover:border-indigo-400 hover:bg-indigo-50/60 bg-slate-50/50 transition-all flex flex-col space-y-1 relative cursor-pointer';
+                        btn.innerHTML = `
+                            <div class="flex items-start justify-between gap-1.5">
+                                <span class="text-xs font-bold text-slate-800 group-hover:text-indigo-700 line-clamp-2 leading-tight">
+                                    ${escapeHTML(pName)}
+                                </span>
+                            </div>
+                            <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                                <span class="truncate max-w-[150px]" title="${escapeHTML(pPartner)}">
+                                    ${escapeHTML(pPartner)}
+                                </span>
+                                <span class="font-mono text-slate-400">#${pId}</span>
+                            </div>
+                        `;
+                        allListContainer.appendChild(btn);
+                        existing = btn;
+                    }
+                    if (existing) {
+                        const curQuery = (sidebarSearch ? sidebarSearch.value : '').toLowerCase().trim();
+                        existing.style.display = (!curQuery || pName.toLowerCase().includes(curQuery)) ? '' : 'none';
+                    }
+                }
+
+                // Añadir a los selectores si no existe
+                if (modalSelect && !modalSelect.querySelector(`option[value="${pId}"]`)) {
+                    const opt = document.createElement('option');
+                    opt.value = pId;
+                    opt.textContent = pName;
+                    modalSelect.appendChild(opt);
+                }
+                if (filterSelect && !filterSelect.querySelector(`option[value="${pId}"]`)) {
+                    const opt = document.createElement('option');
+                    opt.value = pId;
+                    opt.textContent = pName;
+                    filterSelect.appendChild(opt);
+                }
+            });
+
+            // Si hay resultados y el usuario sigue buscando, asegurar que se muestre en la pestaña "Todos"
+            const curQuery = (sidebarSearch ? sidebarSearch.value : '').trim();
+            if (curQuery && typeof switchProjectTab === 'function') {
+                switchProjectTab('all');
+            }
+        } catch (err) {
+            console.warn('Error al buscar proyectos en Odoo:', err);
+        }
+    }
+
     if (sidebarSearch) {
         sidebarSearch.addEventListener('input', () => {
             const query = sidebarSearch.value.toLowerCase().trim();
@@ -73,6 +149,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     item.style.display = 'none';
                 }
             });
+
+            // Recargar proyectos desde Odoo con debounce para incorporar proyectos recién creados
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            if (query.length >= 2) {
+                searchDebounceTimer = setTimeout(() => {
+                    searchOdooProjects(query);
+                }, 300);
+            }
         });
     }
 

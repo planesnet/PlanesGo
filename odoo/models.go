@@ -140,6 +140,7 @@ type Task struct {
 	Name        string   `json:"name"`
 	DisplayName string   `json:"display_name"`
 	ProjectID   Many2One `json:"project_id"`
+	UserID      Many2One `json:"user_id"`
 	Active      bool     `json:"active"`
 }
 

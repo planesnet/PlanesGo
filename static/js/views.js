@@ -222,12 +222,34 @@ function applyTimesheetFilters() {
         }
     }
 
-    // Actualizar paneles generales de métricas (KPIs)
+    // Ocultar columna Proyecto si hay un proyecto seleccionado; mostrarla si no hay proyecto seleccionado
+    const hasActiveProject = Boolean(targetProjectId || targetProjectName);
+    const colProjectHeaders = document.querySelectorAll('.col-project-header');
+    const colProjectCells = document.querySelectorAll('.col-project-cell');
+    colProjectHeaders.forEach(th => {
+        th.style.display = hasActiveProject ? 'none' : '';
+    });
+    colProjectCells.forEach(td => {
+        td.style.display = hasActiveProject ? 'none' : '';
+    });
+
+    const emptyRow = document.getElementById('empty-row');
+    if (emptyFilterRow) {
+        const td = emptyFilterRow.querySelector('td');
+        if (td) td.colSpan = hasActiveProject ? 6 : 7;
+    }
+    if (emptyRow) {
+        const td = emptyRow.querySelector('td');
+        if (td) td.colSpan = hasActiveProject ? 6 : 7;
+    }
+
+    // Actualizar KPIs superiores
     if (kpiHours) kpiHours.textContent = visibleHours.toFixed(2);
     if (kpiEntries) kpiEntries.textContent = visibleCount;
     if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
     if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
 
+    // Resaltar proyecto en el sidebar
     highlightSidebarProject(targetProjectName, targetProjectId);
     updateWeekControls();
 
