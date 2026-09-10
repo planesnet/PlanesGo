@@ -65,8 +65,12 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("Error al ejecutar plantilla index: %v", err)
 	}
-	if buf.Len() == 0 {
-		t.Fatalf("El contenido renderizado está vacío")
+	rendered := buf.String()
+	if bytes.Contains([]byte(rendered), []byte("Todos los trabajadores")) {
+		t.Fatalf("La opción 'Todos los trabajadores' no debe estar presente en la lista de trabajadores")
+	}
+	if !bytes.Contains([]byte(rendered), []byte("Test User")) {
+		t.Fatalf("El trabajador 'Test User' debería estar presente en el HTML renderizado")
 	}
 }
 

@@ -101,34 +101,6 @@ function selectSidebarProject(projectName, projectId) {
         }
     }
 
-    // Si el empleado filtrado no tiene partes en este proyecto, reiniciar filtro de empleado
-    const employeeSelect = document.getElementById('filter-employee');
-    const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
-    if (employeeSelect && employeeSelect.value) {
-        const currentEmp = employeeSelect.value.toLowerCase().trim();
-        const rows = document.querySelectorAll('.timesheet-row');
-        let hasEntriesForEmp = false;
-        rows.forEach(r => {
-            const rowEmp = (r.dataset.employee || '').toLowerCase().trim();
-            const rowPId = r.dataset.projectId || '';
-            const rowPName = (r.dataset.projectName || r.dataset.project || '').toLowerCase().trim();
-            let match = false;
-            if (pId && rowPId && pId !== '0' && rowPId !== '0') {
-                match = (rowPId === pId);
-            } else if (pName && rowPName) {
-                match = (rowPName === pName.toLowerCase() || rowPName.includes(pName.toLowerCase()));
-            }
-            if (match && rowEmp === currentEmp) {
-                hasEntriesForEmp = true;
-            }
-        });
-        if (!hasEntriesForEmp) {
-            employeeSelect.value = '';
-            if (sidebarEmployeeSelect) sidebarEmployeeSelect.value = '';
-            rebuildSidebarProjects('');
-        }
-    }
-
     const btnLabel = document.getElementById('btn-imputar-label');
     if (btnLabel) {
         btnLabel.innerText = pName ? `Imputar en ${pName.length > 15 ? pName.slice(0, 14) + '...' : pName}` : 'Imputar Horas';
@@ -162,8 +134,8 @@ function rebuildSidebarProjects(workerName) {
     const workerLabel = document.getElementById('sidebar-worker-name');
 
     if (workerLabel) {
-        workerLabel.textContent = workerName ? workerName : 'Todos';
-        workerLabel.title = workerName ? workerName : 'Todos';
+        workerLabel.textContent = workerName ? workerName : 'Trabajador';
+        workerLabel.title = workerName ? workerName : 'Trabajador';
     }
 
     if (!container) return;
