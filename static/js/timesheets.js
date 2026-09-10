@@ -337,15 +337,26 @@ function openEditTimesheetModal(btn) {
 function closeTimesheetModal() {
     const modal = document.getElementById('timesheet-modal');
     const container = document.getElementById('timesheet-modal-container');
+    const submitBtn = document.getElementById('btn-submit-timesheet');
+    const spinner = document.getElementById('btn-submit-timesheet-spinner');
+    if (submitBtn) submitBtn.disabled = false;
+    if (spinner) spinner.classList.add('hidden');
+
     if (!modal) return;
 
-    container.classList.remove('scale-100', 'opacity-100');
-    container.classList.add('scale-95', 'opacity-0');
+    if (container) {
+        container.classList.remove('scale-100', 'opacity-100');
+        container.classList.add('scale-95', 'opacity-0');
+    }
     setTimeout(() => {
         modal.classList.add('hidden');
         updateModalTimeBadge();
     }, 150);
 }
+
+// Alias de seguridad para evitar errores si algún script o componente lo llama por su nombre alternativo
+window.closeTimesheetModal = closeTimesheetModal;
+window.closeCreateTimesheetModal = closeTimesheetModal;
 
 function onModalProjectChange(projectId) {
     toggleInlineCreateTask(false);
@@ -513,13 +524,178 @@ function submitInlineCreateTask() {
     });
 }
 
+/**
+ * Inserta de forma optimista una nueva fila de parte de horas en el DOM
+ */
+function insertOptimisticTimesheetRow(data) {
+    const tbody = document.querySelector('#timesheet-table tbody');
+    if (!tbody) return null;
+
+    // Eliminar fila vacía ("No hay partes de horas") si existe
+    const emptyRow = tbody.querySelector('#empty-row') || tbody.querySelector('tr td[colspan]');
+    if (emptyRow) {
+        const trEmpty = emptyRow.closest('tr');
+        if (trEmpty) trEmpty.remove();
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = (data.date === todayStr);
+    const workerName = data.employeeName || 'Yo';
+    const workerInitial = workerName.charAt(0).toUpperCase() || 'U';
+    const hoursFormatted = parseFloat(data.hours).toFixed(2);
+
+    const tr = document.createElement('tr');
+    tr.className = 'timesheet-row hover:bg-slate-50/80 transition-colors bg-emerald-100/80';
+    tr.dataset.id = data.id;
+    tr.dataset.date = data.date;
+    tr.dataset.timerRunning = 'false';
+    tr.dataset.employee = workerName;
+    tr.dataset.project = data.projectName;
+    tr.dataset.projectName = data.projectName;
+    tr.dataset.projectId = data.projectId;
+    tr.dataset.task = data.taskName || '';
+    tr.dataset.taskId = data.taskId || '';
+    tr.dataset.taskName = data.taskName || '';
+    tr.dataset.desc = data.desc || '';
+    tr.dataset.hours = hoursFormatted;
+    tr.dataset.invoiced = 'false';
+
+    tr.innerHTML = `
+        <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+            <span class="font-medium text-slate-900 font-mono text-xs">${data.date}</span>
+        </td>
+        <td class="py-3 px-4 whitespace-nowrap">
+            <div class="flex items-center space-x-2">
+                <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[10px] shrink-0">
+                    ${workerInitial}
+                </div>
+                <span class="font-medium text-slate-800">${workerName}</span>
+            </div>
+        </td>
+        <td class="py-3 px-4 whitespace-nowrap col-project-cell">
+            ${data.projectName ? `
+            <button type="button"
+                    onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
+                    data-project-name="${data.projectName}"
+                    data-project-id="${data.projectId}"
+                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                    title="Filtrar por este proyecto">
+                ${data.projectName}
+            </button>` : `<span class="text-slate-400 text-xs">-</span>`}
+        </td>
+        <td class="py-3 px-4 whitespace-nowrap">
+            ${data.taskName ? `
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                ${data.taskName}
+            </span>` : `<span class="text-slate-400 text-xs">-</span>`}
+        </td>
+        <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${data.desc || ''}">
+            ${data.desc ? data.desc : `<span class="italic text-slate-400">Sin descripción</span>`}
+        </td>
+        <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+            <div class="inline-flex items-center justify-end space-x-1.5">
+                <span class="timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
+                    ${hoursFormatted} h
+                </span>
+            </div>
+        </td>
+        <td class="py-3 px-3 text-right whitespace-nowrap">
+            <div class="inline-flex items-center justify-end space-x-1">
+                ${isToday ? `
+                <button type="button"
+                        onclick="toggleTimesheetRowTimer(this)"
+                        data-id="${data.id}"
+                        data-date="${data.date}"
+                        data-project-id="${data.projectId}"
+                        data-project-name="${data.projectName}"
+                        data-task-id="${data.taskId || ''}"
+                        data-task-name="${data.taskName || ''}"
+                        data-hours="${hoursFormatted}"
+                        data-desc="${data.desc || ''}"
+                        class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
+                        title="Activar o reanudar cronómetro en esta imputación">
+                    <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                    </svg>
+                    <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+                <button type="button"
+                        onclick="finalizeActiveTimer()"
+                        class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer hidden"
+                        title="Detener y consolidar cronómetro en Odoo">
+                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                    </svg>
+                </button>` : ''}
+
+                <button type="button"
+                        onclick="openEditTimesheetModal(this)"
+                        data-id="${data.id}"
+                        data-date="${data.date}"
+                        data-project-id="${data.projectId}"
+                        data-project-name="${data.projectName}"
+                        data-task-id="${data.taskId || ''}"
+                        data-task-name="${data.taskName || ''}"
+                        data-name="${data.desc || ''}"
+                        data-hours="${hoursFormatted}"
+                        class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
+                        title="Editar este parte de horas">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                </button>
+
+                <button type="button"
+                        onclick="openDeleteTimesheetModal(this)"
+                        data-id="${data.id}"
+                        data-date="${data.date}"
+                        data-project-name="${data.projectName}"
+                        data-task-name="${data.taskName || ''}"
+                        data-hours="${hoursFormatted}"
+                        data-desc="${data.desc || ''}"
+                        class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Eliminar este parte de horas">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </button>
+            </div>
+        </td>
+    `;
+
+    // Insertar en la posición ordenada por fecha descendente
+    const existingRows = Array.from(tbody.querySelectorAll('.timesheet-row'));
+    let inserted = false;
+    for (const r of existingRows) {
+        if ((r.dataset.date || '') < data.date) {
+            tbody.insertBefore(tr, r);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) {
+        tbody.appendChild(tr);
+    }
+
+    setTimeout(() => {
+        tr.classList.remove('bg-emerald-100/80');
+    }, 1500);
+
+    return tr;
+}
+
 function submitTimesheetForm(event) {
     if (event && event.preventDefault) event.preventDefault();
 
     const entryId = document.getElementById('modal-entry-id').value;
-    const projectId = document.getElementById('modal-project-select').value;
+    const projectSelect = document.getElementById('modal-project-select');
+    const projectId = projectSelect ? projectSelect.value : '';
+    const projectName = (projectSelect && projectSelect.selectedIndex >= 0) ? projectSelect.options[projectSelect.selectedIndex].text.trim() : '';
     const taskSelect = document.getElementById('modal-task-select');
     const taskId = taskSelect ? taskSelect.value : '';
+    const taskName = (taskSelect && taskSelect.selectedIndex > 0) ? taskSelect.options[taskSelect.selectedIndex].text.trim() : '';
     const date = document.getElementById('modal-date-input').value;
     const hoursRaw = document.getElementById('modal-hours-input').value;
     const hours = parseTimeToDecimal(hoursRaw);
@@ -534,8 +710,7 @@ function submitTimesheetForm(event) {
             feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
             feedback.innerText = 'Debes seleccionar un proyecto.';
         }
-        const projSelect = document.getElementById('modal-project-select');
-        if (projSelect) projSelect.focus();
+        if (projectSelect) projectSelect.focus();
         return;
     }
 
@@ -583,6 +758,8 @@ function submitTimesheetForm(event) {
         description: desc
     };
 
+    let tempRow = null;
+
     // Actualización optimista ultra-rápida si es edición existente
     if (isEdit) {
         const row = document.querySelector(`.timesheet-row[data-id="${entryId}"]`);
@@ -591,8 +768,7 @@ function submitTimesheetForm(event) {
             row.dataset.desc = desc;
             row.dataset.hours = hours.toFixed(2);
             row.dataset.taskId = taskId || '';
-            const tName = (taskSelect && taskSelect.selectedIndex > 0) ? taskSelect.options[taskSelect.selectedIndex].text.trim() : '';
-            row.dataset.taskName = tName;
+            row.dataset.taskName = taskName;
 
             // Actualizar celda de fecha
             const dateSpan = row.querySelector('td:nth-child(1) span');
@@ -601,8 +777,8 @@ function submitTimesheetForm(event) {
             // Actualizar celda de tarea
             const taskCell = row.querySelector('td:nth-child(4)');
             if (taskCell) {
-                if (tName) {
-                    taskCell.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${tName}</span>`;
+                if (taskName) {
+                    taskCell.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${taskName}</span>`;
                 } else {
                     taskCell.innerHTML = `<span class="text-slate-400 text-xs">-</span>`;
                 }
@@ -621,20 +797,27 @@ function submitTimesheetForm(event) {
                 hoursBadge.textContent = `${hours.toFixed(2)} h`;
             }
 
-            // Actualizar data-* en botones de editar y play
+            // Actualizar data-* en botones de editar, borrar y play
             const editBtn = row.querySelector('button[onclick*="openEditTimesheetModal"]');
             if (editBtn) {
                 editBtn.dataset.date = date;
                 editBtn.dataset.taskId = taskId || '';
-                editBtn.dataset.taskName = tName;
+                editBtn.dataset.taskName = taskName;
                 editBtn.dataset.name = desc;
                 editBtn.dataset.hours = hours.toFixed(2);
+            }
+            const delBtn = row.querySelector('button[onclick*="openDeleteTimesheetModal"]');
+            if (delBtn) {
+                delBtn.dataset.date = date;
+                delBtn.dataset.taskName = taskName;
+                delBtn.dataset.desc = desc;
+                delBtn.dataset.hours = hours.toFixed(2);
             }
             const playBtn = row.querySelector('.btn-row-timer-play');
             if (playBtn) {
                 playBtn.dataset.date = date;
                 playBtn.dataset.taskId = taskId || '';
-                playBtn.dataset.taskName = tName;
+                playBtn.dataset.taskName = taskName;
                 playBtn.dataset.desc = desc;
                 playBtn.dataset.hours = hours.toFixed(2);
             }
@@ -644,14 +827,44 @@ function submitTimesheetForm(event) {
             setTimeout(() => {
                 row.classList.remove('bg-emerald-100/80');
             }, 1200);
-        }
 
-        // Cerrar modal de inmediato sin esperar a Odoo
-        closeCreateTimesheetModal();
+            // Recalcular métricas reactivas
+            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+            if (typeof updateWeekControls === 'function') updateWeekControls();
+            if (typeof rebuildSidebarProjects === 'function') {
+                const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+                rebuildSidebarProjects(workerVal);
+            }
+        }
     } else {
-        // En creación nueva, cerrar modal y dar feedback inmediato
-        closeCreateTimesheetModal();
+        // En creación nueva: inserción optimista instantánea en el DOM
+        const workerBadge = document.querySelector('.timesheet-row[data-employee]');
+        const employeeName = workerBadge ? workerBadge.dataset.employee : (document.body.dataset.currentWorker || document.getElementById('sidebar-worker-name')?.textContent?.trim() || 'Yo');
+
+        const tempId = 'temp-' + Date.now();
+        tempRow = insertOptimisticTimesheetRow({
+            id: tempId,
+            date: date,
+            projectId: projectId,
+            projectName: projectName,
+            taskId: taskId,
+            taskName: taskName,
+            hours: hours,
+            desc: desc,
+            employeeName: employeeName
+        });
+
+        // Recalcular métricas y vistas al instante
+        if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+        if (typeof updateWeekControls === 'function') updateWeekControls();
+        if (typeof rebuildSidebarProjects === 'function') {
+            const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+            rebuildSidebarProjects(workerVal);
+        }
     }
+
+    // Cerrar modal de inmediato (0 ms de espera para el usuario)
+    closeTimesheetModal();
 
     // Enviar a Odoo en segundo plano
     fetch(url, {
@@ -670,14 +883,28 @@ function submitTimesheetForm(event) {
         if (typeof clearTimer === 'function') {
             clearTimer();
         }
-        if (!isEdit) {
-            // Si era un nuevo registro, recargar la vista para incluirlo con todos sus datos y relaciones de Odoo
-            window.location.reload();
+
+        // Si era una nueva inserción, actualizar el ID temporal con el ID real retornado por Odoo
+        if (!isEdit && tempRow && data.id) {
+            tempRow.dataset.id = data.id;
+            tempRow.querySelectorAll('[data-id]').forEach(el => {
+                el.dataset.id = data.id;
+            });
         }
     })
     .catch(err => {
         console.error('[PlanesGo] Error guardando imputación en Odoo:', err);
-        alert('Error al guardar en Odoo: ' + err.message);
+        // Si fue una nueva inserción optimista que falló, remover la fila temporal
+        if (!isEdit && tempRow) {
+            tempRow.remove();
+            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+            if (typeof updateWeekControls === 'function') updateWeekControls();
+            if (typeof rebuildSidebarProjects === 'function') {
+                const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+                rebuildSidebarProjects(workerVal);
+            }
+        }
+        alert('⚠️ No se pudo guardar en Odoo: ' + err.message);
     });
 }
 

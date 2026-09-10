@@ -1,4 +1,4 @@
-# PlanesGo (v1.2.3)
+# PlanesGo (v1.2.4)
 
 Aplicación moderna, minimalista y de alto rendimiento en Go para consultar y visualizar de forma interactiva los partes de horas trabajadas (timesheets / `account.analytic.line`) y proyectos (`project.project`) de Odoo.
 

@@ -159,7 +159,9 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err));
 
     // Cerrar modal de imputación si estaba abierto
-    if (typeof closeCreateTimesheetModal === 'function') {
+    if (typeof closeTimesheetModal === 'function') {
+        closeTimesheetModal();
+    } else if (typeof closeCreateTimesheetModal === 'function') {
         closeCreateTimesheetModal();
     }
 
