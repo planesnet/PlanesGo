@@ -3,6 +3,8 @@ package odoo
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 )
 
 // Many2One representa un campo Many2one de Odoo (que puede ser [id, "Nombre"] o false).
@@ -54,13 +56,32 @@ type TimesheetEntry struct {
 	ProjectID          Many2One `json:"project_id"`
 	TaskID             Many2One `json:"task_id"`
 	EmployeeID         Many2One `json:"employee_id"`
-	UserID             Many2One `json:"user_id"`
-	TimesheetInvoiceID Many2One `json:"timesheet_invoice_id"`
+	UserID             Many2One    `json:"user_id"`
+	TimesheetInvoiceID Many2One    `json:"timesheet_invoice_id"`
+	BillingRef         interface{} `json:"billing_ref"` // Indica si está facturado en Odoo 14
 }
 
-// IsInvoiced indica si la imputación de horas ya ha sido vinculada a una factura de cliente en Odoo.
+// IsInvoiced indica si la imputación de horas ya ha sido facturada en Odoo.
 func (t *TimesheetEntry) IsInvoiced() bool {
-	return t.TimesheetInvoiceID.ID > 0
+	if t.TimesheetInvoiceID.ID > 0 {
+		return true
+	}
+	if t.BillingRef != nil {
+		switch v := t.BillingRef.(type) {
+		case bool:
+			return v
+		case string:
+			s := strings.TrimSpace(v)
+			return s != "" && s != "false" && s != "-" && s != "0"
+		case float64:
+			return v > 0
+		case int:
+			return v > 0
+		case []interface{}:
+			return len(v) > 0
+		}
+	}
+	return false
 }
 
 // DisplayEmployee obtiene el nombre del empleado o del usuario si no hay empleado asociado.
@@ -95,7 +116,20 @@ type Project struct {
 	Active            bool     `json:"active"`             // Estado activo / archivado
 	PrivacyVisibility string   `json:"privacy_visibility"` // Visibilidad
 	TotalHours        float64  `json:"total_hours"`        // Horas totales registradas
-	TimesheetCount    int      `json:"timesheet_count"`    // Cantidad de partes de horas
+	TimesheetCount    int      `json:"timesheet_count,omitempty"` // Número de partes de horas registrados
+	LastDate          string   `json:"last_date,omitempty"` // Fecha de última imputación (YYYY-MM-DD)
+	LastTask          string   `json:"last_task,omitempty"` // Última tarea imputada
+}
+
+func (p *Project) FormattedLastDate() string {
+	if p.LastDate == "" {
+		return ""
+	}
+	t, err := time.Parse("2006-01-02", p.LastDate)
+	if err != nil {
+		return p.LastDate
+	}
+	return t.Format("02/01/2006")
 }
 
 func (p *Project) DisplayNameOrName() string {
@@ -165,4 +199,62 @@ type Employee struct {
 	UserID    Many2One `json:"user_id"`
 	Active    bool     `json:"active"`
 }
+
+// Ticket representa un ticket de soporte/helpdesk en Odoo (helpdesk.ticket).
+type Ticket struct {
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	TicketRef   string   `json:"ticket_ref,omitempty"`
+	StageID     Many2One `json:"stage_id"`
+	UserID      Many2One `json:"user_id"`
+	PartnerID   Many2One `json:"partner_id"`
+	ProjectID   Many2One `json:"project_id"`
+	Priority    string   `json:"priority,omitempty"`
+	CreateDate  string   `json:"create_date,omitempty"`
+	CloseDate   string   `json:"close_date,omitempty"`
+	KanbanState string   `json:"kanban_state,omitempty"`
+}
+
+func (t *Ticket) DisplayTitle() string {
+	if t.TicketRef != "" && !strings.Contains(t.Name, t.TicketRef) {
+		return fmt.Sprintf("[%s] %s", t.TicketRef, t.Name)
+	}
+	if t.Name != "" {
+		return t.Name
+	}
+	return fmt.Sprintf("Ticket #%d", t.ID)
+}
+
+func (t *Ticket) StageName() string {
+	if t.StageID.Name != "" {
+		return t.StageID.Name
+	}
+	return "Pendiente"
+}
+
+func (t *Ticket) PartnerName() string {
+	if t.PartnerID.Name != "" {
+		return t.PartnerID.Name
+	}
+	return "-"
+}
+
+func (t *Ticket) ProjectName() string {
+	if t.ProjectID.Name != "" {
+		return t.ProjectID.Name
+	}
+	return ""
+}
+
+func (t *Ticket) ProjectIDValue() int {
+	return t.ProjectID.ID
+}
+
+func (t *Ticket) FormattedDate() string {
+	if len(t.CreateDate) >= 10 {
+		return t.CreateDate[:10]
+	}
+	return t.CreateDate
+}
+
 

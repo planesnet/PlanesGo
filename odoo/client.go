@@ -57,6 +57,8 @@ type Client struct {
 	projectsCachedAt  time.Time
 	employeesCache    []Employee
 	employeesCachedAt time.Time
+	ticketsCache      []Ticket
+	ticketsCachedAt   time.Time
 	userUIDCache      map[string]int
 }
 
@@ -189,6 +191,33 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 	return rpcResp.Result, nil
 }
 
+// ExecuteKW ejecuta una llamada genérica al modelo especificado en Odoo.
+func (c *Client) ExecuteKW(ctx context.Context, model, method string, args []interface{}, kwargs map[string]interface{}) (json.RawMessage, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if kwargs == nil {
+		kwargs = map[string]interface{}{}
+	}
+	callArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		model,
+		method,
+		args,
+	}
+	res, err := c.call(ctx, "object", "execute_kw", callArgs, kwargs)
+	if err != nil {
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			callArgs[1] = newUID
+			res, err = c.call(ctx, "object", "execute_kw", callArgs, kwargs)
+		}
+	}
+	return res, err
+}
+
 // Authenticate autentica contra el endpoint común de Odoo y devuelve el UID.
 // Si el cliente ya tiene un UID autenticado previamente, lo devuelve de inmediato sin llamadas de red.
 func (c *Client) Authenticate(ctx context.Context) (int, error) {
@@ -257,6 +286,14 @@ func (c *Client) InvalidateUserUIDCache() {
 	c.mu.Unlock()
 }
 
+// InvalidateTicketsCache limpia la caché en memoria de tickets.
+func (c *Client) InvalidateTicketsCache() {
+	c.mu.Lock()
+	c.ticketsCache = nil
+	c.ticketsCachedAt = time.Time{}
+	c.mu.Unlock()
+}
+
 // GetTimesheets consulta los registros de horas trabajadas (account.analytic.line).
 func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]TimesheetEntry, error) {
 	uid, err := c.Authenticate(ctx)
@@ -291,7 +328,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		limit = 200
 	}
 
-	// Campos base estándar 100% compatibles con Odoo 14 hr_timesheet
+	// Campos base estándar + campos de facturación en Odoo 14
 	fields := []string{
 		"id",
 		"date",
@@ -301,6 +338,8 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"task_id",
 		"employee_id",
 		"user_id",
+		"timesheet_invoice_id",
+		"billing_ref",
 	}
 
 	kwargs := map[string]interface{}{
@@ -326,6 +365,37 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
+			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado
+			fallbackFields := []string{
+				"id",
+				"date",
+				"name",
+				"unit_amount",
+				"project_id",
+				"task_id",
+				"employee_id",
+				"user_id",
+				"timesheet_invoice_id",
+			}
+			kwargs["fields"] = fallbackFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
+			// Fallback 2: campos mínimos estándar
+			minimalFields := []string{
+				"id",
+				"date",
+				"name",
+				"unit_amount",
+				"project_id",
+				"task_id",
+				"employee_id",
+				"user_id",
+			}
+			kwargs["fields"] = minimalFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("error al obtener partes de horas: %w", err)
 		}
 	}
@@ -335,7 +405,15 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		return nil, fmt.Errorf("error al parsear partes de horas: %w", err)
 	}
 
-	return entries, nil
+	// Únicamente mostrar partes de horas que NO están facturados (billing_ref vacío/false y sin factura)
+	unInvoiced := make([]TimesheetEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsInvoiced() {
+			unInvoiced = append(unInvoiced, entry)
+		}
+	}
+
+	return unInvoiced, nil
 }
 
 // GetProjects consulta los proyectos definidos en Odoo (project.project).
@@ -700,6 +778,121 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 	}
 
 	return tasks, nil
+}
+
+// GetPendingTickets consulta los tickets de soporte pendientes de un usuario en Odoo (helpdesk.ticket).
+func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar tickets: %w", err)
+	}
+
+	targetUID := userUID
+	if targetUID <= 0 {
+		targetUID = uid
+	}
+
+	c.mu.RLock()
+	if len(c.ticketsCache) > 0 && time.Since(c.ticketsCachedAt) < 30*time.Second {
+		cached := make([]Ticket, len(c.ticketsCache))
+		copy(cached, c.ticketsCache)
+		c.mu.RUnlock()
+		return cached, nil
+	}
+	c.mu.RUnlock()
+
+	// 1. Dominio principal: tickets asignados al usuario y no cerrados
+	domain := []interface{}{
+		[]interface{}{"user_id", "=", targetUID},
+		[]interface{}{"close_date", "=", false},
+	}
+
+	fields := []string{
+		"id",
+		"name",
+		"ticket_ref",
+		"stage_id",
+		"user_id",
+		"partner_id",
+		"project_id",
+		"priority",
+		"create_date",
+		"close_date",
+		"kanban_state",
+	}
+
+	kwargs := map[string]interface{}{
+		"fields": fields,
+		"order":  "priority desc, create_date desc, id desc",
+		"limit":  50,
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"search_read",
+		[]interface{}{domain},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		// Fallback 1: Si falla close_date en el dominio, intentar solo con user_id
+		if err != nil {
+			fallbackDomain := []interface{}{
+				[]interface{}{"user_id", "=", targetUID},
+			}
+			fallbackFields := []string{"id", "name", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date"}
+			kwargs["fields"] = fallbackFields
+			args[5] = []interface{}{fallbackDomain}
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		// Fallback 2: Si el modelo helpdesk.ticket no existe o no hay permisos, retornar vacío sin error fatal
+		if err != nil {
+			log.Printf("[ODOO INFO] Modelo helpdesk.ticket no disponible o sin tickets: %v", err)
+			return []Ticket{}, nil
+		}
+	}
+
+	var tickets []Ticket
+	if err := json.Unmarshal(resultRaw, &tickets); err != nil {
+		log.Printf("[ODOO WARN] Error al parsear tickets: %v", err)
+		return []Ticket{}, nil
+	}
+
+	// Filtrar en memoria por seguridad cualquier ticket cerrado
+	pending := make([]Ticket, 0, len(tickets))
+	closedKeywords := []string{"cerrad", "solucion", "cancel", "done", "closed", "solved", "resuelto"}
+	for _, t := range tickets {
+		if t.CloseDate != "" && t.CloseDate != "false" {
+			continue
+		}
+		sName := strings.ToLower(t.StageName())
+		isClosed := false
+		for _, kw := range closedKeywords {
+			if strings.Contains(sName, kw) {
+				isClosed = true
+				break
+			}
+		}
+		if isClosed {
+			continue
+		}
+		pending = append(pending, t)
+	}
+
+	c.mu.Lock()
+	c.ticketsCache = make([]Ticket, len(pending))
+	copy(c.ticketsCache, pending)
+	c.ticketsCachedAt = time.Now()
+	c.mu.Unlock()
+
+	return pending, nil
 }
 
 // CreateTask crea una nueva tarea en un proyecto en Odoo (project.task) asignada al trabajador.

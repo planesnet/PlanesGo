@@ -49,6 +49,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	var entries []odoo.TimesheetEntry
 	var projects []odoo.Project
 	var activeEmployees []odoo.Employee
+	var pendingTickets []odoo.Ticket
 	var fetchErr error
 	hasOdooToken := (currentOdooCfg.Password != "" && currentOdooCfg.DB != "")
 	if currentOdooCfg.Password != "" && currentOdooCfg.DB == "" {
@@ -71,12 +72,13 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("[INDEX OK] Autenticado en Odoo en %v con UID=%d", time.Since(authStart), uid)
 			var wg sync.WaitGroup
-			var pErr, tsErr, empErr error
+			var pErr, tsErr, empErr, tkErr error
 			var projList []odoo.Project
 			var tsEntries []odoo.TimesheetEntry
 			var empList []odoo.Employee
+			var tkList []odoo.Ticket
 
-			wg.Add(3)
+			wg.Add(4)
 
 			// 1. Obtener proyectos concurrentemente
 			go func() {
@@ -108,6 +110,22 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[INDEX-GOROUTINE] GetEmployees completado en %v (items: %d, err: %v)", time.Since(empStart), len(empList), empErr)
 			}()
 
+			// 4. Obtener tickets pendientes asignados al usuario concurrentemente
+			go func() {
+				defer wg.Done()
+				tkStart := time.Now()
+				ctxTk, cancelTk := context.WithTimeout(r.Context(), 15*time.Second)
+				defer cancelTk()
+				targetUID := uid
+				if session != nil && session.UserEmail != "" {
+					if resUID, rErr := client.ResolveUserUIDByEmail(ctxTk, session.UserEmail); rErr == nil && resUID > 0 {
+						targetUID = resUID
+					}
+				}
+				tkList, tkErr = client.GetPendingTickets(ctxTk, targetUID)
+				log.Printf("[INDEX-GOROUTINE] GetPendingTickets completado en %v (items: %d, err: %v)", time.Since(tkStart), len(tkList), tkErr)
+			}()
+
 			wg.Wait()
 			log.Printf("[INDEX] Todas las consultas paralelas de Odoo han finalizado.")
 
@@ -132,13 +150,24 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			} else {
 				activeEmployees = empList
 			}
+
+			if tkErr != nil {
+				log.Printf("[INFO] Tickets pendientes no disponibles: %v", tkErr)
+			} else {
+				pendingTickets = tkList
+			}
 		}
 	}
 
 	projectHoursMap := make(map[int]float64)
 	projectCountMap := make(map[int]int)
+	projectLastDateMap := make(map[int]string)
+	projectLastTaskMap := make(map[int]string)
+
 	projectNameHoursMap := make(map[string]float64)
 	projectNameCountMap := make(map[string]int)
+	projectNameLastDateMap := make(map[string]string)
+	projectNameLastTaskMap := make(map[string]string)
 
 	var totalHours float64
 	projectMap := make(map[string]bool)
@@ -149,11 +178,23 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		if entry.ProjectID.ID > 0 {
 			projectHoursMap[entry.ProjectID.ID] += entry.UnitAmount
 			projectCountMap[entry.ProjectID.ID]++
+			if _, exists := projectLastDateMap[entry.ProjectID.ID]; !exists && entry.Date != "" {
+				projectLastDateMap[entry.ProjectID.ID] = entry.Date
+				if entry.TaskID.Name != "" {
+					projectLastTaskMap[entry.ProjectID.ID] = entry.TaskID.Name
+				}
+			}
 		}
 		if entry.ProjectID.Name != "" {
 			projectMap[entry.ProjectID.Name] = true
 			projectNameHoursMap[entry.ProjectID.Name] += entry.UnitAmount
 			projectNameCountMap[entry.ProjectID.Name]++
+			if _, exists := projectNameLastDateMap[entry.ProjectID.Name]; !exists && entry.Date != "" {
+				projectNameLastDateMap[entry.ProjectID.Name] = entry.Date
+				if entry.TaskID.Name != "" {
+					projectNameLastTaskMap[entry.ProjectID.Name] = entry.TaskID.Name
+				}
+			}
 		}
 		emp := entry.DisplayEmployee()
 		if emp != "" && emp != "Sin asignar" {
@@ -173,7 +214,34 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			projects[i].TotalHours = h
 			projects[i].TimesheetCount = projectNameCountMap[pName]
 		}
+
+		if d, ok := projectLastDateMap[projects[i].ID]; ok {
+			projects[i].LastDate = d
+			projects[i].LastTask = projectLastTaskMap[projects[i].ID]
+		} else if d, ok := projectNameLastDateMap[pName]; ok {
+			projects[i].LastDate = d
+			projects[i].LastTask = projectNameLastTaskMap[pName]
+		}
 	}
+
+	// Ordenar la lista completa de proyectos: los proyectos con imputaciones más recientes primero
+	sort.SliceStable(projects, func(i, j int) bool {
+		dI := projects[i].LastDate
+		dJ := projects[j].LastDate
+		if dI != "" && dJ != "" {
+			if dI != dJ {
+				return dI > dJ // Fecha más reciente primero
+			}
+			return projects[i].TotalHours > projects[j].TotalHours
+		}
+		if dI != "" && dJ == "" {
+			return true // Proyectos con horas imputadas van antes
+		}
+		if dI == "" && dJ != "" {
+			return false
+		}
+		return strings.ToLower(projects[i].DisplayNameOrName()) < strings.ToLower(projects[j].DisplayNameOrName())
+	})
 
 	var projectsList []string
 	for p := range projectMap {
@@ -367,6 +435,9 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		HasOdooToken:         hasOdooToken,
 		Entries:              entries,
 		Projects:             projects,
+		PendingTickets:       pendingTickets,
+		PendingTicketsCount:  len(pendingTickets),
+		OdooURL:              strings.TrimRight(currentOdooCfg.URL, "/"),
 		TotalHours:           totalHours,
 		TotalProjectsCount:   len(projects),
 		UniqueProjectsCount:  len(projectMap),

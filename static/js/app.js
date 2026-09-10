@@ -96,8 +96,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         existing = btn;
                     }
                     if (existing) {
-                        const curQuery = (sidebarSearch ? sidebarSearch.value : '').toLowerCase().trim();
-                        existing.style.display = (!curQuery || pName.toLowerCase().includes(curQuery)) ? '' : 'none';
+                        const curNorm = normalizeSearchText(sidebarSearch ? sidebarSearch.value : '');
+                        const itemNorm = normalizeSearchText(pName);
+                        existing.style.display = (!curNorm || itemNorm.includes(curNorm)) ? '' : 'none';
                     }
                 }
 
@@ -118,23 +119,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Si hay resultados y el usuario sigue buscando, asegurar que se muestre en la pestaña "Todos"
             const curQuery = (sidebarSearch ? sidebarSearch.value : '').trim();
-            if (curQuery && typeof switchProjectTab === 'function') {
-                switchProjectTab('all');
+            if (curQuery && typeof switchSidebarTab === 'function') {
+                switchSidebarTab('all');
             }
         } catch (err) {
             console.warn('Error al buscar proyectos en Odoo:', err);
         }
     }
 
+    // Función auxiliar para normalizar texto de búsqueda (quita tildes, mayúsculas, espacios y símbolos)
+    function normalizeSearchText(str) {
+        if (!str) return '';
+        return str.toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]/g, "");
+    }
+
     if (sidebarSearch) {
         sidebarSearch.addEventListener('input', () => {
-            const query = sidebarSearch.value.toLowerCase().trim();
+            const rawQuery = sidebarSearch.value.trim();
+            const normQuery = normalizeSearchText(rawQuery);
             const recentItems = document.querySelectorAll('.sidebar-project-item');
             const allItems = document.querySelectorAll('.sidebar-all-project-item');
 
+            // Si el usuario escribe una búsqueda, conmutar a la pestaña "Todos" para mostrar todos los proyectos coincidentes
+            if (normQuery.length > 0 && typeof switchSidebarTab === 'function') {
+                switchSidebarTab('all');
+            }
+
             recentItems.forEach(item => {
-                const name = (item.dataset.projectName || '').toLowerCase();
-                if (!query || name.includes(query)) {
+                const normName = normalizeSearchText(item.dataset.projectName || '');
+                if (!normQuery || normName.includes(normQuery)) {
                     item.style.display = '';
                 } else {
                     item.style.display = 'none';
@@ -142,19 +158,19 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             allItems.forEach(item => {
-                const name = (item.dataset.projectName || '').toLowerCase();
-                if (!query || name.includes(query)) {
+                const normName = normalizeSearchText(item.dataset.projectName || '');
+                if (!normQuery || normName.includes(normQuery)) {
                     item.style.display = '';
                 } else {
                     item.style.display = 'none';
                 }
             });
 
-            // Recargar proyectos desde Odoo con debounce para incorporar proyectos recién creados
+            // Recargar proyectos desde Odoo con debounce para incorporar proyectos recién creados o remotos
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-            if (query.length >= 2) {
+            if (rawQuery.length >= 2) {
                 searchDebounceTimer = setTimeout(() => {
-                    searchOdooProjects(query);
+                    searchOdooProjects(rawQuery);
                 }, 300);
             }
         });

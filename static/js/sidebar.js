@@ -242,8 +242,6 @@ function rebuildSidebarProjects(workerName) {
         const safeTask = escapeHTML(p.lastTask);
         const safeId = escapeHTML(p.id || '');
         const formattedHours = formatHoursJS(p.totalHours);
-        const formattedDate = formatDateJS(p.lastDate);
-        const partesLabel = p.entryCount === 1 ? 'parte' : 'partes';
 
         html += `
             <button type="button"
@@ -255,20 +253,10 @@ function rebuildSidebarProjects(workerName) {
                     <span class="text-xs font-bold text-slate-800 group-hover:text-sky-700 line-clamp-2 leading-tight">
                         ${safeName}
                     </span>
+                    ${p.totalHours > 0 ? `
                     <span class="text-[10px] font-extrabold text-sky-700 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs font-mono flex-shrink-0">
                         ${formattedHours}
-                    </span>
-                </div>
-                <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
-                    <span class="flex items-center space-x-1">
-                        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
-                        </svg>
-                        <span>${formattedDate}</span>
-                    </span>
-                    <span class="font-medium">
-                        ${p.entryCount} ${partesLabel}
-                    </span>
+                    </span>` : ''}
                 </div>
                 ${safeTask ? `
                 <div class="text-[10px] text-slate-500 truncate bg-slate-100/80 px-1.5 py-0.5 rounded font-mono">

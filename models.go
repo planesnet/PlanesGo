@@ -81,6 +81,9 @@ type PageData struct {
 	EmployeesList        []string
 	CurrentWorker        string
 	RecentProjects       []WorkerRecentProject
+	PendingTickets       []odoo.Ticket
+	PendingTicketsCount  int
+	OdooURL              string
 	Error                string
 }
 

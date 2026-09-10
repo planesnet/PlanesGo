@@ -312,7 +312,34 @@ func (state *AppState) handleAPITasks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAPIProjects lista proyectos de Odoo con soporte para búsqueda y refresco
+// normalizeProjectSearch normaliza una cadena quitando tildes, espacios y caracteres especiales
+func normalizeProjectSearch(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case 'á', 'à', 'ä':
+			b.WriteRune('a')
+		case 'é', 'è', 'ë':
+			b.WriteRune('e')
+		case 'í', 'ì', 'ï':
+			b.WriteRune('i')
+		case 'ó', 'ò', 'ö':
+			b.WriteRune('o')
+		case 'ú', 'ù', 'ü':
+			b.WriteRune('u')
+		case 'ñ':
+			b.WriteRune('n')
+		default:
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+// handleAPIProjects lista proyectos de Odoo con soporte para búsqueda flexible y refresco
 func (state *AppState) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 	var session *SessionData
 	cookie, err := r.Cookie(sessionCookieName)
@@ -323,7 +350,7 @@ func (state *AppState) handleAPIProjects(w http.ResponseWriter, r *http.Request)
 	odooCfg := state.resolveUserOdooConfig(session)
 	client := odoo.NewClient(odooCfg)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	query := strings.TrimSpace(r.URL.Query().Get("search"))
@@ -337,18 +364,96 @@ func (state *AppState) handleAPIProjects(w http.ResponseWriter, r *http.Request)
 
 	var domain []interface{}
 	if query != "" {
-		domain = append(domain, []interface{}{"name", "ilike", query})
+		wildcard := "%" + query + "%"
+		domain = append(domain, "|",
+			[]interface{}{"name", "ilike", wildcard},
+			[]interface{}{"display_name", "ilike", wildcard},
+		)
 		client.InvalidateProjectsCache()
 	}
 
 	projects, err := client.GetProjects(ctx, domain)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
+		// Reintento con dominio simple si falló la disyunción
+		if query != "" {
+			projects, err = client.GetProjects(ctx, []interface{}{[]interface{}{"name", "ilike", "%" + query + "%"}})
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	// Si la búsqueda directa en Odoo no encontró coincidencias (ej: "PLANESGO" vs "Planes Go"),
+	// consultar todos los proyectos y aplicar coincidencia normalizada en memoria
+	if query != "" && len(projects) == 0 {
+		normQ := normalizeProjectSearch(query)
+		if normQ != "" {
+			allProjects, allErr := client.GetProjects(ctx, nil)
+			if allErr == nil && len(allProjects) > 0 {
+				var matched []odoo.Project
+				for _, p := range allProjects {
+					normName := normalizeProjectSearch(p.Name)
+					normDisp := normalizeProjectSearch(p.DisplayName)
+					if strings.Contains(normName, normQ) || strings.Contains(normDisp, normQ) {
+						matched = append(matched, p)
+					}
+				}
+				projects = matched
+			}
+		}
+	}
+
+	json.NewEncoder(w).Encode(projects)
+}
+
+// handleAPITickets consulta los tickets de soporte pendientes asignados al usuario en Odoo
+func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+
+	var session *SessionData
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	client := odoo.NewClient(odooCfg)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if r.URL.Query().Get("refresh") == "true" {
+		client.InvalidateTicketsCache()
+	}
+
+	uid, err := client.Authenticate(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	targetUID := uid
+	if session != nil && session.UserEmail != "" {
+		if resUID, rErr := client.ResolveUserUIDByEmail(ctx, session.UserEmail); rErr == nil && resUID > 0 {
+			targetUID = resUID
+		}
+	}
+
+	tickets, err := client.GetPendingTickets(ctx, targetUID)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(projects)
+	json.NewEncoder(w).Encode(tickets)
 }
 
 // handleHealth retorna el estado del servidor

@@ -41,6 +41,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/api/timesheets/delete", state.handleAPITimesheetsDelete)
 	mux.HandleFunc("/api/tasks", state.handleAPITasks)
 	mux.HandleFunc("/api/projects", state.handleAPIProjects)
+	mux.HandleFunc("/api/tickets", state.handleAPITickets)
 
 	// Health check y ping
 	mux.HandleFunc("/health", state.handleHealth)
