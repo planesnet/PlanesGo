@@ -34,8 +34,8 @@
                     <h3 class="text-base font-bold text-slate-800 leading-6">
                         ¿Sigues trabajando en este proyecto?
                     </h3>
-                    <p class="text-xs text-slate-500">
-                        Han pasado 15 minutos de trabajo. Si no confirmas en 5 minutos, el cronómetro se detendrá fijado en los 15 minutos.
+                    <p id="confirm-modal-desc" class="text-xs text-slate-500">
+                        Han pasado 5 minutos de trabajo. Si no confirmas en 5 minutos, el cronómetro se detendrá fijado en los 5 minutos.
                     </p>
                 </div>
             </div>
@@ -52,18 +52,18 @@
                 </div>
                 <div class="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
                     <span class="text-slate-500 font-medium">Tiempo acumulado:</span>
-                    <span id="confirm-modal-time" class="font-mono font-bold text-sky-600 text-sm">00:15:00</span>
+                    <span id="confirm-modal-time" class="font-mono font-bold text-sky-600 text-sm">00:05:00</span>
                 </div>
             </div>
 
             <!-- Acciones de confirmación -->
             <div class="flex flex-col space-y-2 sm:space-y-0 sm:flex-row-reverse sm:gap-2">
-                <button type="button" onclick="confirmContinueTimer()"
-                        class="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm shadow-emerald-600/30 transition flex items-center justify-center space-x-1.5 cursor-pointer">
+                <button type="button" id="confirm-modal-continue-btn" onclick="confirmContinueTimer()"
+                        class="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 rounded-xl shadow-sm shadow-emerald-600/30 transition flex items-center justify-center space-x-1.5 cursor-pointer">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span>Sí, continuar</span>
+                    <span>Sí, continuar (Intro)</span>
                 </button>
 
                 <button type="button" onclick="confirmPauseTimer()"

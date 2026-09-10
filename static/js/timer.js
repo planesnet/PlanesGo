@@ -4,8 +4,10 @@
  */
 
 const PLANESGO_TIMER_KEY = 'planesgo_active_timer';
-const TIMER_PROMPT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutos en milisegundos
-const TIMER_UNCONFIRMED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos sin confirmación para auto-pausar fijando el tiempo en 15 minutos
+const TIMER_PROMPT_MINUTES = 5; // Temporalmente 5 minutos para pruebas (luego volver a 15)
+const TIMER_PROMPT_INTERVAL_MS = TIMER_PROMPT_MINUTES * 60 * 1000;
+const TIMER_UNCONFIRMED_TIMEOUT_MINUTES = 5; // 5 minutos sin confirmación para auto-pausar
+const TIMER_UNCONFIRMED_TIMEOUT_MS = TIMER_UNCONFIRMED_TIMEOUT_MINUTES * 60 * 1000;
 
 let timerIntervalId = null;
 let titleFlashIntervalId = null;
@@ -17,7 +19,26 @@ document.addEventListener('DOMContentLoaded', function () {
     originalDocumentTitle = document.title;
     initTimerFromStorage();
     setupGlobalTimerKeyboardShortcut();
+    setupConfirmModalKeyboardListener();
 });
+
+/**
+ * Atajo Intro (Enter) y Escape para el diálogo de confirmación
+ */
+function setupConfirmModalKeyboardListener() {
+    document.addEventListener('keydown', function (e) {
+        const modal = document.getElementById('timer-confirm-modal');
+        if (modal && !modal.classList.contains('hidden')) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmContinueTimer();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                hideTimerConfirmModal();
+            }
+        }
+    });
+}
 
 /**
  * Obtiene el estado del temporizador desde localStorage
@@ -442,15 +463,15 @@ function updateTimerTick() {
 }
 
 /**
- * Auto-pausa el cronómetro si el usuario no confirmó tras 5 minutos de la alerta,
- * fijando el tiempo registrado exactamente en los 15 minutos en que sonó la alerta.
+ * Auto-pausa el cronómetro si el usuario no confirmó tras el tiempo límite de la alerta,
+ * fijando el tiempo registrado exactamente en los minutos en que sonó la alerta.
  */
 function autoStopTimerDueToInactivity(state) {
     if (!state || state.status !== 'running') return;
 
-    console.warn('[PlanesGo Timer] 5 minutos sin confirmar alerta de 15 minutos. Auto-pausando y fijando en 15 minutos.');
+    console.warn(`[PlanesGo Timer] ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos sin confirmar alerta de ${TIMER_PROMPT_MINUTES} minutos. Auto-pausando y fijando en ${TIMER_PROMPT_MINUTES} minutos.`);
 
-    // 1. Fijar tiempo acumulado exactamente en el snapshot de los 15 minutos
+    // 1. Fijar tiempo acumulado exactamente en el snapshot de los minutos de la alerta
     const snapshotMs = (typeof state.promptSnapshotMs === 'number') ? state.promptSnapshotMs : (state.accumulatedMs || 0);
     state.accumulatedMs = snapshotMs;
     state.status = 'paused';
@@ -487,13 +508,13 @@ function autoStopTimerDueToInactivity(state) {
             hoursBadge.innerHTML = `
                 <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                 <span class="font-mono font-bold text-amber-900">${formatElapsedMs(snapshotMs)}</span>
-                <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado a los 15m)</span>
+                <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado a los ${TIMER_PROMPT_MINUTES}m)</span>
             `;
         }
     }
     updateAllRowTimerButtonStates();
 
-    // 4. Notificar a Odoo para pausar y registrar las unidades ajustadas a los 15 minutos
+    // 4. Notificar a Odoo para pausar y registrar las unidades ajustadas
     const hoursFloat = parseFloat(hoursDecimal);
     fetch('/api/timer/pause', {
         method: 'POST',
@@ -505,21 +526,21 @@ function autoStopTimerDueToInactivity(state) {
         })
     }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando auto-pausa con Odoo:', err));
 
-    // 5. Notificación estándar del sistema informando que se detuvo fijado en los 15 minutos
+    // 5. Notificación estándar del sistema informando que se detuvo
     triggerSystemNotification(
         'PlanesGo: Cronómetro parado por inactividad',
-        `No se confirmó en los últimos 5 minutos. El cronómetro se ha pausado fijado en los 15 minutos (${hoursDecimal}h).`
+        `No se confirmó en los últimos ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos. El cronómetro se ha pausado fijado en los ${TIMER_PROMPT_MINUTES} minutos (${hoursDecimal}h).`
     );
 
     // 6. Mensaje emergente en pantalla
-    showNotificationToast(`Cronómetro pausado por inactividad a los 15 minutos (${hoursDecimal}h)`);
+    showNotificationToast(`Cronómetro pausado por inactividad a los ${TIMER_PROMPT_MINUTES} minutos (${hoursDecimal}h)`);
 }
 
 /**
- * Dispara la alerta de 15 minutos (sonido, notificación estándar del sistema y modal)
+ * Dispara la alerta periódica (sonido, notificación estándar del sistema y modal)
  */
 function trigger15MinuteReminder(state, currentTotalMs) {
-    // Fijar el snapshot exacto de los 15 minutos y la marca de activación
+    // Fijar el snapshot exacto de la alerta y la marca de activación
     state.promptTriggeredAt = Date.now();
     state.promptSnapshotMs = currentTotalMs;
     saveTimerState(state);
@@ -527,10 +548,10 @@ function trigger15MinuteReminder(state, currentTotalMs) {
     // 1. Reproducir sonido suave de aviso (Web Audio API)
     playChimeSound();
 
-    // 2. Disparar notificación estándar del sistema operativo con soporte de click para reconfirmar
+    // 2. Disparar notificación estándar del sistema operativo con clic para abrir diálogo
     triggerSystemNotification(
         `⏱️ PlanesGo: ¿Sigues en "${state.projectName}"?`,
-        `Han transcurrido 15 minutos de trabajo. Haz clic aquí para confirmar que sigues con este trabajo (se detendrá si no se confirma en 5 min).`
+        `Han transcurrido ${TIMER_PROMPT_MINUTES} minutos de trabajo. Haz clic aquí para confirmar que sigues con este trabajo (se detendrá si no se confirma en ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} min).`
     );
 
     // 3. Parpadeo del título de la pestaña
@@ -541,7 +562,7 @@ function trigger15MinuteReminder(state, currentTotalMs) {
 }
 
 /**
- * Muestra el modal de confirmación de 15 minutos
+ * Muestra el modal de confirmación con el botón Continuar enfocado por defecto
  */
 function showTimerConfirmModal(state, totalMs) {
     if (!state) state = getTimerState();
@@ -566,7 +587,20 @@ function showTimerConfirmModal(state, totalMs) {
     const timeEl = document.getElementById('confirm-modal-time');
     if (timeEl) timeEl.textContent = formatElapsedMs(totalMs);
 
+    const descEl = document.getElementById('confirm-modal-desc');
+    if (descEl) {
+        descEl.textContent = `Han pasado ${TIMER_PROMPT_MINUTES} minutos de trabajo. Si no confirmas en ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos, el cronómetro se detendrá fijado en los ${TIMER_PROMPT_MINUTES} minutos.`;
+    }
+
     modal.classList.remove('hidden');
+
+    // Botón Continuar como botón por defecto enfocado
+    const continueBtn = document.getElementById('confirm-modal-continue-btn');
+    if (continueBtn) {
+        setTimeout(() => {
+            continueBtn.focus();
+        }, 80);
+    }
 }
 
 /**
@@ -697,8 +731,8 @@ async function initTimerFromStorage() {
         await syncActiveTimerFromOdoo();
     }
 
-    // Sincronización periódica cada 15 minutos con Odoo (sin reactivar al foco)
-    setInterval(syncActiveTimerFromOdoo, 15 * 60 * 1000);
+    // Sincronización periódica con Odoo (sin reactivar al foco)
+    setInterval(syncActiveTimerFromOdoo, TIMER_PROMPT_INTERVAL_MS);
     requestNotificationPermission();
 }
 
@@ -834,8 +868,8 @@ function triggerSystemNotification(title, body) {
                     window.focus();
                 } catch (e) {}
 
-                // Al hacer clic en la notificación del sistema, reconfirmar automáticamente el trabajo en curso
-                confirmContinueTimer();
+                // Al hacer clic en la notificación, abrir el diálogo del parte de horas con el botón Continuar por defecto
+                showTimerConfirmModal();
                 try { notif.close(); } catch (e) {}
                 activeSystemNotification = null;
             };
