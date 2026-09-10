@@ -526,6 +526,9 @@ function submitTimesheetForm(event) {
         return data;
     })
     .then(data => {
+        if (typeof clearTimer === 'function') {
+            clearTimer();
+        }
         if (feedback) {
             feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 block';
             feedback.innerText = isEdit ? '✓ Parte de horas actualizado con éxito. Recargando...' : '✓ Horas imputadas con éxito en Odoo. Recargando...';
@@ -543,3 +546,41 @@ function submitTimesheetForm(event) {
         }
     });
 }
+
+/**
+ * Inicia el temporizador de trabajo desde los datos seleccionados en el modal de imputación
+ */
+function startTimerFromModal() {
+    const projectSelect = document.getElementById('modal-project-select');
+    const taskSelect = document.getElementById('modal-task-select');
+    const descInput = document.getElementById('modal-desc-input');
+
+    const projectId = projectSelect ? projectSelect.value : '';
+    let projectName = '';
+    if (projectSelect && projectSelect.selectedIndex >= 0) {
+        projectName = projectSelect.options[projectSelect.selectedIndex].text.trim();
+    }
+
+    const taskId = taskSelect ? taskSelect.value : '';
+    let taskName = '';
+    if (taskSelect && taskSelect.selectedIndex > 0) {
+        taskName = taskSelect.options[taskSelect.selectedIndex].text.trim();
+    }
+
+    const description = descInput ? descInput.value.trim() : '';
+
+    if (!projectId) {
+        const feedback = document.getElementById('modal-feedback');
+        if (feedback) {
+            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+            feedback.innerText = 'Debes seleccionar un proyecto para iniciar el trabajo.';
+        }
+        if (projectSelect) projectSelect.focus();
+        return;
+    }
+
+    if (typeof startWorkTimer === 'function') {
+        startWorkTimer(projectId, projectName, taskId, taskName, description);
+    }
+}
+window.startTimerFromModal = startTimerFromModal;

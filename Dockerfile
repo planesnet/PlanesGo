@@ -32,9 +32,8 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
-COPY --from=builder /app/data /app/data
 
-# Permisos para el usuario de la aplicación
+# Crear directorio de datos persistentes y asignar permisos
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 USER appuser
 

@@ -51,6 +51,9 @@
         <!-- Banners informativos y avisos -->
         {{ template "alerts" . }}
 
+        <!-- Barra de Temporizador de Trabajo Activo -->
+        {{ template "timer_bar" . }}
+
         <!-- Disposición a 2 Columnas -->
         <div class="flex flex-col lg:flex-row gap-6 items-start">
             <!-- Panel Lateral Izquierdo: Explorador de Proyectos -->
@@ -81,6 +84,7 @@
 
     <!-- Scripts Modularizados de la Aplicación -->
     <script src="/static/js/utils.js"></script>
+    <script src="/static/js/timer.js"></script>
     <script src="/static/js/sidebar.js"></script>
     <script src="/static/js/views.js"></script>
     <script src="/static/js/timesheets.js"></script>

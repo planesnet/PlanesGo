@@ -475,3 +475,230 @@ func (state *AppState) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte("pong\n"))
 }
+
+// handleAPITimerActive consulta si el usuario tiene una imputación o tarea activa en Odoo
+func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{"active": nil})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+
+	timer, err := client.GetActiveTimer(ctx, userUID)
+	if err != nil || timer == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"active": nil})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"active": timer,
+	})
+}
+
+// handleAPITimerStart inicia un trabajo en Odoo (action_timer_start / is_timer_running=true)
+func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión de Odoo no configurada"})
+		return
+	}
+
+	var req struct {
+		ProjectID   int    `json:"project_id"`
+		TaskID      int    `json:"task_id"`
+		TimesheetID int    `json:"timesheet_id"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.TaskID, req.TimesheetID, req.Description)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(activeTimer)
+}
+
+// handleAPITimerPause pausa el trabajo activo en Odoo
+func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión de Odoo no configurada"})
+		return
+	}
+
+	var req struct {
+		TimesheetID int     `json:"timesheet_id"`
+		TaskID      int     `json:"task_id"`
+		UnitAmount  float64 `json:"unit_amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if err := client.PauseTimer(ctx, req.TimesheetID, req.TaskID, req.UnitAmount); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleAPITimerResume reanuda el trabajo en Odoo
+func (state *AppState) handleAPITimerResume(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión de Odoo no configurada"})
+		return
+	}
+
+	var req struct {
+		TimesheetID int `json:"timesheet_id"`
+		TaskID      int `json:"task_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if err := client.ResumeTimer(ctx, req.TimesheetID, req.TaskID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleAPITimerStop detiene y finaliza el trabajo en Odoo
+func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión de Odoo no configurada"})
+		return
+	}
+
+	var req struct {
+		TimesheetID int     `json:"timesheet_id"`
+		TaskID      int     `json:"task_id"`
+		UnitAmount  float64 `json:"unit_amount"`
+		Description string  `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if err := client.StopTimer(ctx, req.TimesheetID, req.TaskID, req.UnitAmount, req.Description); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}

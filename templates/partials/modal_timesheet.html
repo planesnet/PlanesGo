@@ -139,19 +139,31 @@
             <div id="modal-feedback" class="hidden p-3 rounded-xl text-xs font-medium"></div>
 
             <!-- Botones de Acción -->
-            <div class="pt-2 flex items-center justify-end space-x-2">
-                <button type="button" onclick="closeTimesheetModal()"
-                        class="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
-                    Cancelar
-                </button>
-                <button type="submit" id="btn-submit-timesheet"
-                        class="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl shadow-xs transition flex items-center space-x-2 cursor-pointer">
-                    <span id="btn-submit-timesheet-text">Guardar</span>
-                    <svg id="btn-submit-timesheet-spinner" class="animate-spin -mr-1 ml-1 h-3.5 w-3.5 text-white hidden" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            <div class="pt-2 flex items-center justify-between space-x-2">
+                <!-- Botón para Iniciar Cronómetro en Vivo -->
+                <button type="button" onclick="startTimerFromModal()"
+                        title="Iniciar el trabajo con cronómetro en tiempo real"
+                        class="px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 cursor-pointer">
+                    <svg class="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
                     </svg>
+                    <span>Iniciar Trabajo</span>
                 </button>
+
+                <div class="flex items-center space-x-2">
+                    <button type="button" onclick="closeTimesheetModal()"
+                            class="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer">
+                        Cancelar
+                    </button>
+                    <button type="submit" id="btn-submit-timesheet"
+                            class="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-xl shadow-xs transition flex items-center space-x-2 cursor-pointer">
+                        <span id="btn-submit-timesheet-text">Guardar</span>
+                        <svg id="btn-submit-timesheet-spinner" class="animate-spin -mr-1 ml-1 h-3.5 w-3.5 text-white hidden" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </form>
     </div>

@@ -1174,3 +1174,362 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 	}
 	return info.ServerSerie, nil
 }
+
+// StartTimer inicia un temporizador de trabajo en Odoo llamando a action_timer_start en account.analytic.line o project.task,
+// o marcando is_timer_running = true. Si no existe una imputación para el trabajo actual, la crea de inmediato en Odoo.
+func (c *Client) StartTimer(ctx context.Context, projectID int, taskID int, timesheetID int, description string) (*ActiveTimer, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de iniciar cronómetro: %w", err)
+	}
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	if description == "" {
+		description = "Trabajo en curso"
+	}
+
+	actualTimesheetID := timesheetID
+
+	// 1. Si no hay timesheetID proporcionado, crear la imputación de inicio en account.analytic.line
+	if actualTimesheetID <= 0 {
+		vals := map[string]interface{}{
+			"name":        description,
+			"date":        today,
+			"project_id":  projectID,
+			"unit_amount": 0.0,
+		}
+		if taskID > 0 {
+			vals["task_id"] = taskID
+		}
+
+		createArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"create",
+			[]interface{}{vals},
+		}
+
+		resultRaw, createErr := c.call(ctx, "object", "execute_kw", createArgs, nil)
+		if createErr == nil {
+			var newID int
+			if json.Unmarshal(resultRaw, &newID) == nil && newID > 0 {
+				actualTimesheetID = newID
+			}
+		}
+	}
+
+	// 2. Invocar acción nativa de Odoo action_timer_start en account.analytic.line
+	if actualTimesheetID > 0 {
+		startArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"action_timer_start",
+			[]interface{}{[]int{actualTimesheetID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", startArgs, nil)
+
+		// Asegurar que is_timer_running quede activado en Odoo
+		writeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"write",
+			[]interface{}{
+				[]int{actualTimesheetID},
+				map[string]interface{}{
+					"is_timer_running": true,
+				},
+			},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	}
+
+	// 3. Si hay tarea asignada, invocar también action_timer_start en project.task
+	if taskID > 0 {
+		taskStartArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.task",
+			"action_timer_start",
+			[]interface{}{[]int{taskID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", taskStartArgs, nil)
+	}
+
+	return &ActiveTimer{
+		TimesheetID:   actualTimesheetID,
+		TaskID:        taskID,
+		ProjectID:     projectID,
+		Description:   description,
+		IsRunning:     true,
+		StartedAt:     now.UnixMilli(),
+		AccumulatedMs: 0,
+		UnitAmount:    0.0,
+	}, nil
+}
+
+// PauseTimer pausa el cronómetro activo en Odoo ejecutando action_timer_pause / action_timer_stop o escribiendo is_timer_running=false
+func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, unitAmount float64) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+
+	if timesheetID > 0 {
+		pauseArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"action_timer_pause",
+			[]interface{}{[]int{timesheetID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", pauseArgs, nil)
+
+		vals := map[string]interface{}{
+			"is_timer_running": false,
+		}
+		if unitAmount > 0 {
+			vals["unit_amount"] = unitAmount
+		}
+		writeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"write",
+			[]interface{}{
+				[]int{timesheetID},
+				vals,
+			},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	}
+
+	if taskID > 0 {
+		taskPauseArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.task",
+			"action_timer_pause",
+			[]interface{}{[]int{taskID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", taskPauseArgs, nil)
+	}
+
+	return nil
+}
+
+// ResumeTimer reanuda el cronómetro activo en Odoo ejecutando action_timer_resume / action_timer_start o escribiendo is_timer_running=true
+func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+
+	if timesheetID > 0 {
+		resumeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"action_timer_resume",
+			[]interface{}{[]int{timesheetID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", resumeArgs, nil)
+
+		writeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"write",
+			[]interface{}{
+				[]int{timesheetID},
+				map[string]interface{}{
+					"is_timer_running": true,
+				},
+			},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	}
+
+	if taskID > 0 {
+		taskResumeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.task",
+			"action_timer_resume",
+			[]interface{}{[]int{taskID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", taskResumeArgs, nil)
+	}
+
+	return nil
+}
+
+// StopTimer detiene y finaliza el cronómetro en Odoo actualizando la imputación con la duración total y descripción
+func (c *Client) StopTimer(ctx context.Context, timesheetID int, taskID int, unitAmount float64, description string) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+
+	if timesheetID > 0 {
+		stopArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"action_timer_stop",
+			[]interface{}{[]int{timesheetID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", stopArgs, nil)
+
+		vals := map[string]interface{}{
+			"is_timer_running": false,
+		}
+		if unitAmount > 0 {
+			vals["unit_amount"] = unitAmount
+		}
+		if description != "" {
+			vals["name"] = description
+		}
+		writeArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"write",
+			[]interface{}{
+				[]int{timesheetID},
+				vals,
+			},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	}
+
+	if taskID > 0 {
+		taskStopArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.task",
+			"action_timer_stop",
+			[]interface{}{[]int{taskID}},
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", taskStopArgs, nil)
+	}
+
+	return nil
+}
+
+// GetActiveTimer busca en Odoo si el usuario actual tiene una imputación o tarea con el cronómetro activo (is_timer_running=true)
+func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	effectiveUID := uid
+	if userUID > 0 {
+		effectiveUID = userUID
+	}
+
+	// 1. Buscar en account.analytic.line
+	domain := []interface{}{
+		[]interface{}{"user_id", "=", effectiveUID},
+		[]interface{}{"is_timer_running", "=", true},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "name", "project_id", "task_id", "unit_amount", "date", "write_date"},
+		"limit":  1,
+		"order":  "write_date desc, id desc",
+	}
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"account.analytic.line",
+		"search_read",
+		[]interface{}{domain},
+	}
+
+	resultRaw, searchErr := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if searchErr == nil {
+		var lines []struct {
+			ID         int      `json:"id"`
+			Name       string   `json:"name"`
+			ProjectID  Many2One `json:"project_id"`
+			TaskID     Many2One `json:"task_id"`
+			UnitAmount float64  `json:"unit_amount"`
+			WriteDate  string   `json:"write_date"`
+		}
+		if json.Unmarshal(resultRaw, &lines) == nil && len(lines) > 0 {
+			l := lines[0]
+			accumulatedMs := int64(l.UnitAmount * 3600 * 1000)
+			return &ActiveTimer{
+				TimesheetID:   l.ID,
+				ProjectID:     l.ProjectID.ID,
+				ProjectName:   l.ProjectID.Name,
+				TaskID:        l.TaskID.ID,
+				TaskName:      l.TaskID.Name,
+				Description:   l.Name,
+				IsRunning:     true,
+				StartedAt:     time.Now().UnixMilli() - accumulatedMs,
+				AccumulatedMs: accumulatedMs,
+				UnitAmount:    l.UnitAmount,
+			}, nil
+		}
+	}
+
+	// 2. Si no se encontró en account.analytic.line, verificar en project.task
+	taskDomain := []interface{}{
+		[]interface{}{"user_id", "=", effectiveUID},
+		[]interface{}{"is_timer_running", "=", true},
+	}
+	taskKwargs := map[string]interface{}{
+		"fields": []string{"id", "name", "project_id"},
+		"limit":  1,
+	}
+	taskArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.task",
+		"search_read",
+		[]interface{}{taskDomain},
+	}
+	taskRaw, taskErr := c.call(ctx, "object", "execute_kw", taskArgs, taskKwargs)
+	if taskErr == nil {
+		var tasks []struct {
+			ID        int      `json:"id"`
+			Name      string   `json:"name"`
+			ProjectID Many2One `json:"project_id"`
+		}
+		if json.Unmarshal(taskRaw, &tasks) == nil && len(tasks) > 0 {
+			t := tasks[0]
+			return &ActiveTimer{
+				TimesheetID: 0,
+				TaskID:      t.ID,
+				TaskName:    t.Name,
+				ProjectID:   t.ProjectID.ID,
+				ProjectName: t.ProjectID.Name,
+				Description: "Trabajo en " + t.Name,
+				IsRunning:   true,
+				StartedAt:   time.Now().UnixMilli(),
+			}, nil
+		}
+	}
+
+	return nil, nil
+}

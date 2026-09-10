@@ -257,4 +257,16 @@ func (t *Ticket) FormattedDate() string {
 	return t.CreateDate
 }
 
-
+// ActiveTimer representa el estado del cronómetro de trabajo en vivo sincronizado con Odoo.
+type ActiveTimer struct {
+	TimesheetID   int      `json:"timesheet_id"`
+	TaskID        int      `json:"task_id"`
+	ProjectID     int      `json:"project_id"`
+	ProjectName   string   `json:"project_name"`
+	TaskName      string   `json:"task_name"`
+	Description   string   `json:"description"`
+	IsRunning     bool     `json:"is_running"`
+	StartedAt     int64    `json:"started_at"`      // Timestamp unix en milisegundos
+	AccumulatedMs int64    `json:"accumulated_ms"`  // Milisegundos acumulados
+	UnitAmount    float64  `json:"unit_amount"`     // Horas calculadas en decimal
+}

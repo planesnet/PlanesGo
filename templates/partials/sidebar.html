@@ -51,14 +51,22 @@
                     </div>
                     {{if .ProjectName}}
                     <div class="flex items-center justify-between pt-1 border-t border-slate-100/80">
-                        <span class="text-[10px] text-slate-500 truncate max-w-[180px]">
+                        <span class="text-[10px] text-slate-500 truncate max-w-[130px]">
                             📁 {{.ProjectName}}
                         </span>
-                        <button type="button"
-                                onclick="openCreateTimesheetModal('{{.ProjectIDValue}}', '{{.ProjectName}}')"
-                                class="text-[9px] font-semibold text-sky-600 hover:text-sky-800 hover:underline cursor-pointer">
-                            Imputar horas →
-                        </button>
+                        <div class="flex items-center space-x-1.5">
+                            <button type="button"
+                                    onclick="startWorkTimer('{{.ProjectIDValue}}', '{{.ProjectName}}', null, '', 'Ticket: {{.Name}}')"
+                                    title="Iniciar cronómetro de trabajo en este ticket"
+                                    class="text-[9px] font-bold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded cursor-pointer transition">
+                                ▶ Iniciar
+                            </button>
+                            <button type="button"
+                                    onclick="openCreateTimesheetModal('{{.ProjectIDValue}}', '{{.ProjectName}}')"
+                                    class="text-[9px] font-semibold text-sky-600 hover:text-sky-800 hover:underline cursor-pointer">
+                                Imputar →
+                            </button>
+                        </div>
                     </div>
                     {{end}}
                 </div>
