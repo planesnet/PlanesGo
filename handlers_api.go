@@ -188,7 +188,7 @@ func (state *AppState) handleAPITimesheetsDelete(w http.ResponseWriter, r *http.
 		return
 	}
 
-	client := odoo.NewClient(odooCfg)
+	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 

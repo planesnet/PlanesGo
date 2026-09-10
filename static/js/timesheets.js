@@ -15,24 +15,42 @@ function openDeleteTimesheetModal(btn) {
     pendingDeleteId = btn.dataset.id;
     const date = btn.dataset.date || '';
     const proj = btn.dataset.projectName || 'Sin proyecto';
-    const task = btn.dataset.taskName || 'Sin tarea específica';
+    const task = btn.dataset.taskName || '';
     const hours = btn.dataset.hours || '0';
     const desc = btn.dataset.desc || '';
 
-    const dateEl = document.getElementById('del-modal-date');
-    const projEl = document.getElementById('del-modal-project');
-    const taskEl = document.getElementById('del-modal-task');
-    const hoursEl = document.getElementById('del-modal-hours');
-    const descEl = document.getElementById('del-modal-desc');
+    const idInput = document.getElementById('delete-timesheet-id');
+    const dateEl = document.getElementById('delete-info-date') || document.getElementById('del-modal-date');
+    const projEl = document.getElementById('delete-info-project') || document.getElementById('del-modal-project');
+    const taskEl = document.getElementById('delete-info-task') || document.getElementById('del-modal-task');
+    const taskRow = document.getElementById('delete-info-task-row');
+    const hoursEl = document.getElementById('delete-info-hours') || document.getElementById('del-modal-hours');
+    const descEl = document.getElementById('delete-info-desc') || document.getElementById('del-modal-desc');
 
+    if (idInput) idInput.value = pendingDeleteId;
     if (dateEl) dateEl.textContent = date;
     if (projEl) projEl.textContent = proj;
-    if (taskEl) taskEl.textContent = task;
+    if (taskEl) taskEl.textContent = task || '(Sin tarea asignada)';
+    if (taskRow) {
+        if (task) {
+            taskRow.classList.remove('hidden');
+        } else {
+            taskRow.classList.add('hidden');
+        }
+    }
     if (hoursEl) hoursEl.textContent = `${hours} h`;
     if (descEl) descEl.textContent = desc || '(Sin descripción)';
 
-    const feedback = document.getElementById('delete-modal-feedback');
-    if (feedback) feedback.className = 'hidden';
+    const feedback = document.getElementById('delete-feedback') || document.getElementById('delete-modal-feedback');
+    if (feedback) {
+        feedback.className = 'hidden';
+        feedback.textContent = '';
+    }
+
+    const submitBtn = document.getElementById('btn-confirm-delete');
+    const spinner = document.getElementById('btn-confirm-delete-spinner') || document.getElementById('btn-delete-spinner');
+    if (submitBtn) submitBtn.disabled = false;
+    if (spinner) spinner.classList.add('hidden');
 
     const modal = document.getElementById('delete-timesheet-modal');
     const container = document.getElementById('delete-modal-container');
@@ -63,6 +81,11 @@ function closeDeleteModal() {
     pendingDeleteId = null;
     const modal = document.getElementById('delete-timesheet-modal');
     const container = document.getElementById('delete-modal-container');
+    const submitBtn = document.getElementById('btn-confirm-delete');
+    const spinner = document.getElementById('btn-confirm-delete-spinner') || document.getElementById('btn-delete-spinner');
+    if (submitBtn) submitBtn.disabled = false;
+    if (spinner) spinner.classList.add('hidden');
+
     if (!modal || !container) return;
 
     container.classList.remove('scale-100', 'opacity-100');
@@ -75,18 +98,23 @@ function closeDeleteModal() {
 function executeDeleteTimesheet() {
     if (!pendingDeleteId) return;
 
+    const targetId = pendingDeleteId;
     const submitBtn = document.getElementById('btn-confirm-delete');
-    const spinner = document.getElementById('btn-delete-spinner');
-    const feedback = document.getElementById('delete-modal-feedback');
+    const spinner = document.getElementById('btn-confirm-delete-spinner') || document.getElementById('btn-delete-spinner');
+    const feedback = document.getElementById('delete-feedback') || document.getElementById('delete-modal-feedback');
 
     if (submitBtn) submitBtn.disabled = true;
     if (spinner) spinner.classList.remove('hidden');
-    if (feedback) feedback.className = 'hidden';
+    if (feedback) {
+        feedback.className = 'hidden';
+        feedback.textContent = '';
+    }
 
+    // 1. Enviar petición para borrar en Odoo
     fetch('/api/timesheets/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: parseInt(pendingDeleteId, 10) })
+        body: JSON.stringify({ id: parseInt(targetId, 10) })
     })
     .then(async res => {
         const data = await res.json().catch(() => ({}));
@@ -96,19 +124,61 @@ function executeDeleteTimesheet() {
         return data;
     })
     .then(data => {
-        if (feedback) {
-            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 block';
-            feedback.innerText = '✓ Parte de horas eliminado correctamente de Odoo. Recargando...';
+        // 2. Cerrar el modal de confirmación inmediatamente
+        closeDeleteModal();
+
+        // 3. Si el cronómetro en activo correspondía a este parte de horas, limpiarlo
+        if (typeof getTimerState === 'function') {
+            const currentTimer = getTimerState();
+            if (currentTimer && String(currentTimer.timesheetId) === String(targetId)) {
+                if (typeof clearTimer === 'function') {
+                    clearTimer();
+                }
+            }
         }
-        setTimeout(() => {
-            window.location.reload();
-        }, 750);
+
+        // 4. Quitar la fila del DOM con transición suave sin recargar la página entera
+        const rows = document.querySelectorAll(`.timesheet-row[data-id="${targetId}"]`);
+        if (rows.length > 0) {
+            rows.forEach(row => {
+                row.style.transition = 'all 0.25s ease-out';
+                row.style.opacity = '0';
+                row.style.transform = 'translateX(20px)';
+                setTimeout(() => {
+                    row.remove();
+
+                    // Recalcular filtros, métricas reactivas y vistas
+                    if (typeof applyTimesheetFilters === 'function') {
+                        applyTimesheetFilters();
+                    }
+                    if (typeof updateWeekControls === 'function') {
+                        updateWeekControls();
+                    }
+                    if (typeof rebuildSidebarProjects === 'function') {
+                        const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+                        rebuildSidebarProjects(workerVal);
+                    }
+
+                    // Si no quedan partes en la tabla, mostrar el mensaje de tabla vacía
+                    const remainingRows = document.querySelectorAll('.timesheet-row');
+                    if (remainingRows.length === 0) {
+                        const emptyRow = document.getElementById('empty-row');
+                        if (emptyRow) emptyRow.classList.remove('hidden');
+                    }
+                }, 250);
+            });
+        } else {
+            // Si no estaba visible en la tabla actual (ej. eliminado desde otra vista)
+            if (typeof applyTimesheetFilters === 'function') {
+                applyTimesheetFilters();
+            }
+        }
     })
     .catch(err => {
         if (submitBtn) submitBtn.disabled = false;
         if (spinner) spinner.classList.add('hidden');
         if (feedback) {
-            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+            feedback.className = 'mt-4 p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
             feedback.innerText = '⚠️ ' + err.message;
         }
     });
