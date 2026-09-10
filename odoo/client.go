@@ -3,28 +3,103 @@ package odoo
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"pasigo/config"
 	"strings"
+	"sync"
 	"time"
+)
+
+var (
+	// sharedTransport mantiene un pool de conexiones TCP/TLS persistentes con Odoo (Keep-Alive)
+	// evitando renegociar TLS y TCP en cada petición HTTP.
+	sharedTransport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 25,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+		},
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// sharedHTTPClient cliente HTTP compartido global con transporte optimizado
+	sharedHTTPClient = &http.Client{
+		Transport: sharedTransport,
+		Timeout:   35 * time.Second,
+	}
+
+	clientPoolMu sync.RWMutex
+	clientPool   = make(map[string]*Client)
 )
 
 type Client struct {
 	config     config.OdooConfig
 	httpClient *http.Client
 	uid        int
+	mu         sync.RWMutex
+
+	// Caché en memoria para datos maestros poco volátiles
+	projectsCache     []Project
+	projectsCachedAt  time.Time
+	employeesCache    []Employee
+	employeesCachedAt time.Time
+	userUIDCache      map[string]int
 }
 
-func NewClient(cfg config.OdooConfig) *Client {
-	return &Client{
-		config: cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+func poolKey(cfg config.OdooConfig) string {
+	return fmt.Sprintf("%s|%s|%s|%s", cfg.URL, cfg.DB, cfg.Username, cfg.Password)
+}
+
+// GetClient obtiene un cliente Odoo con conexión persistente y autenticación en caché.
+func GetClient(cfg config.OdooConfig) *Client {
+	key := poolKey(cfg)
+
+	clientPoolMu.RLock()
+	c, ok := clientPool[key]
+	clientPoolMu.RUnlock()
+	if ok && c != nil {
+		return c
 	}
+
+	clientPoolMu.Lock()
+	defer clientPoolMu.Unlock()
+	if c, ok = clientPool[key]; ok && c != nil {
+		return c
+	}
+
+	c = &Client{
+		config:       cfg,
+		httpClient:   sharedHTTPClient,
+		userUIDCache: make(map[string]int),
+	}
+	clientPool[key] = c
+	return c
+}
+
+// InvalidateClient remueve del pool un cliente con credenciales desactualizadas.
+func InvalidateClient(cfg config.OdooConfig) {
+	key := poolKey(cfg)
+	clientPoolMu.Lock()
+	delete(clientPool, key)
+	clientPoolMu.Unlock()
+}
+
+// NewClient devuelve un cliente reutilizado del pool con conexión persistente.
+func NewClient(cfg config.OdooConfig) *Client {
+	return GetClient(cfg)
 }
 
 type jsonRPCRequest struct {
@@ -84,12 +159,17 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 	}
 	defer resp.Body.Close()
 
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error leyendo respuesta de Odoo: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Odoo respondió con estado HTTP %d", resp.StatusCode)
 	}
 
 	var rpcResp jsonRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
 		return nil, fmt.Errorf("error decodificando respuesta JSON-RPC: %w", err)
 	}
 
@@ -101,7 +181,24 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 }
 
 // Authenticate autentica contra el endpoint común de Odoo y devuelve el UID.
+// Si el cliente ya tiene un UID autenticado previamente, lo devuelve de inmediato sin llamadas de red.
 func (c *Client) Authenticate(ctx context.Context) (int, error) {
+	c.mu.RLock()
+	if c.uid > 0 {
+		cachedUID := c.uid
+		c.mu.RUnlock()
+		return cachedUID, nil
+	}
+	c.mu.RUnlock()
+
+	return c.ForceAuthenticate(ctx)
+}
+
+// ForceAuthenticate fuerza una re-autenticación contra Odoo actualizando el UID persistente.
+func (c *Client) ForceAuthenticate(ctx context.Context) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.config.Username == "" || c.config.Password == "" {
 		return 0, errors.New("faltan credenciales de Odoo (usuario o contraseña/token vacíos)")
 	}
@@ -120,6 +217,7 @@ func (c *Client) Authenticate(ctx context.Context) (int, error) {
 
 	var uid int
 	if err := json.Unmarshal(resultRaw, &uid); err != nil || uid == 0 {
+		c.uid = 0
 		return 0, errors.New("autenticación fallida: usuario o contraseña incorrectos")
 	}
 
@@ -127,12 +225,34 @@ func (c *Client) Authenticate(ctx context.Context) (int, error) {
 	return uid, nil
 }
 
+// InvalidateProjectsCache limpia la caché en memoria de proyectos.
+func (c *Client) InvalidateProjectsCache() {
+	c.mu.Lock()
+	c.projectsCache = nil
+	c.projectsCachedAt = time.Time{}
+	c.mu.Unlock()
+}
+
+// InvalidateEmployeesCache limpia la caché en memoria de empleados.
+func (c *Client) InvalidateEmployeesCache() {
+	c.mu.Lock()
+	c.employeesCache = nil
+	c.employeesCachedAt = time.Time{}
+	c.mu.Unlock()
+}
+
+// InvalidateUserUIDCache limpia la caché de UIDs de usuarios.
+func (c *Client) InvalidateUserUIDCache() {
+	c.mu.Lock()
+	c.userUIDCache = make(map[string]int)
+	c.mu.Unlock()
+}
+
 // GetTimesheets consulta los registros de horas trabajadas (account.analytic.line).
 func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]TimesheetEntry, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return nil, fmt.Errorf("no se pudo autenticar antes de consultar horas: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar horas: %w", err)
 	}
 
 	if domain == nil {
@@ -182,7 +302,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"account.analytic.line",
 		"search_read",
@@ -192,8 +312,8 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
 		// Reintento con autenticación si expiró sesión
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
@@ -210,11 +330,23 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 }
 
 // GetProjects consulta los proyectos definidos en Odoo (project.project).
+// Utiliza una caché en memoria de 60 segundos cuando no se pasa un dominio de búsqueda específico.
 func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Project, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return nil, fmt.Errorf("no se pudo autenticar antes de consultar proyectos: %w", err)
+	isBaseQuery := (domain == nil || len(domain) == 0)
+	if isBaseQuery {
+		c.mu.RLock()
+		if len(c.projectsCache) > 0 && time.Since(c.projectsCachedAt) < 60*time.Second {
+			cached := make([]Project, len(c.projectsCache))
+			copy(cached, c.projectsCache)
+			c.mu.RUnlock()
+			return cached, nil
 		}
+		c.mu.RUnlock()
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar proyectos: %w", err)
 	}
 
 	if domain == nil {
@@ -239,7 +371,7 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"project.project",
 		"search_read",
@@ -248,9 +380,9 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
-		// Reintento con autenticación si expiró la sesión
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		// Reintento con autenticación forzada si expiró la sesión
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		// Fallback con menos campos si algún campo opcional falló
@@ -269,16 +401,36 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 		return nil, fmt.Errorf("error al parsear proyectos: %w", err)
 	}
 
+	if isBaseQuery && len(projects) > 0 {
+		c.mu.Lock()
+		c.projectsCache = make([]Project, len(projects))
+		copy(c.projectsCache, projects)
+		c.projectsCachedAt = time.Now()
+		c.mu.Unlock()
+	}
+
 	return projects, nil
 }
 
 // GetEmployees consulta los trabajadores/empleados definidos en Odoo (hr.employee).
 // Por defecto filtra únicamente los que están activos (active = true).
+// Utiliza una caché en memoria de 60 segundos cuando no se pasa un dominio de búsqueda específico.
 func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Employee, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return nil, fmt.Errorf("no se pudo autenticar antes de consultar empleados: %w", err)
+	isBaseQuery := (domain == nil || len(domain) == 0)
+	if isBaseQuery {
+		c.mu.RLock()
+		if len(c.employeesCache) > 0 && time.Since(c.employeesCachedAt) < 60*time.Second {
+			cached := make([]Employee, len(c.employeesCache))
+			copy(cached, c.employeesCache)
+			c.mu.RUnlock()
+			return cached, nil
 		}
+		c.mu.RUnlock()
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar empleados: %w", err)
 	}
 
 	if domain == nil {
@@ -318,7 +470,7 @@ func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Empl
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"hr.employee",
 		"search_read",
@@ -327,8 +479,8 @@ func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Empl
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
@@ -346,25 +498,45 @@ func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Empl
 		return nil, fmt.Errorf("error al parsear empleados: %w", err)
 	}
 
+	if isBaseQuery && len(employees) > 0 {
+		c.mu.Lock()
+		c.employeesCache = make([]Employee, len(employees))
+		copy(c.employeesCache, employees)
+		c.employeesCachedAt = time.Now()
+		c.mu.Unlock()
+	}
+
 	return employees, nil
 }
 
 // UID devuelve el UID del usuario autenticado en Odoo.
 func (c *Client) UID() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.uid
 }
 
 // ResolveUserUIDByEmail busca el ID de usuario en res.users por email o login.
 // Si no lo encuentra, devuelve el UID autenticado del cliente como fallback.
+// Cuenta con caché en memoria para evitar consultas repetitivas de red.
 func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return 0, err
-		}
-	}
 	email = strings.TrimSpace(email)
 	if email == "" {
-		return c.uid, nil
+		return c.UID(), nil
+	}
+
+	c.mu.RLock()
+	if c.userUIDCache != nil {
+		if cachedUID, ok := c.userUIDCache[email]; ok && cachedUID > 0 {
+			c.mu.RUnlock()
+			return cachedUID, nil
+		}
+	}
+	c.mu.RUnlock()
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, err
 	}
 
 	domain := []interface{}{
@@ -375,7 +547,7 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"res.users",
 		"search_read",
@@ -392,6 +564,12 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 			ID int `json:"id"`
 		}
 		if json.Unmarshal(resultRaw, &users) == nil && len(users) > 0 && users[0].ID > 0 {
+			c.mu.Lock()
+			if c.userUIDCache == nil {
+				c.userUIDCache = make(map[string]int)
+			}
+			c.userUIDCache[email] = users[0].ID
+			c.mu.Unlock()
 			return users[0].ID, nil
 		}
 	}
@@ -404,7 +582,7 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 	}
 	empArgs := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"hr.employee",
 		"search_read",
@@ -421,20 +599,25 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 			UserID Many2One `json:"user_id"`
 		}
 		if json.Unmarshal(resultEmp, &emps) == nil && len(emps) > 0 && emps[0].UserID.ID > 0 {
+			c.mu.Lock()
+			if c.userUIDCache == nil {
+				c.userUIDCache = make(map[string]int)
+			}
+			c.userUIDCache[email] = emps[0].UserID.ID
+			c.mu.Unlock()
 			return emps[0].UserID.ID, nil
 		}
 	}
 
-	return c.uid, nil
+	return uid, nil
 }
 
 // GetTasks consulta las tareas de un proyecto en Odoo (project.task).
 // Si userUID > 0, filtra únicamente las tareas asignadas a ese trabajador/usuario.
 func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Task, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return nil, fmt.Errorf("no se pudo autenticar antes de consultar tareas: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar tareas: %w", err)
 	}
 
 	domain := []interface{}{}
@@ -461,7 +644,7 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"project.task",
 		"search_read",
@@ -470,8 +653,8 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil && userUID > 0 {
@@ -512,10 +695,9 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 
 // CreateTask crea una nueva tarea en un proyecto en Odoo (project.task) asignada al trabajador.
 func (c *Client) CreateTask(ctx context.Context, projectID int, name string, userUID int) (int, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return 0, fmt.Errorf("no se pudo autenticar antes de crear tarea: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("no se pudo autenticar antes de crear tarea: %w", err)
 	}
 
 	if projectID <= 0 {
@@ -535,7 +717,7 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string, use
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"project.task",
 		"create",
@@ -544,8 +726,8 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string, use
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil && userUID > 0 {
@@ -570,10 +752,9 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string, use
 
 // CreateTimesheet crea un nuevo parte de horas (account.analytic.line) en Odoo.
 func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int, taskID int, unitAmount float64, description string) (int, error) {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return 0, fmt.Errorf("no se pudo autenticar antes de crear parte de horas: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("no se pudo autenticar antes de crear parte de horas: %w", err)
 	}
 
 	if projectID <= 0 {
@@ -598,7 +779,7 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"account.analytic.line",
 		"create",
@@ -607,8 +788,8 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {
@@ -626,10 +807,9 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 
 // UpdateTimesheet actualiza un registro de horas existente en Odoo (account.analytic.line).
 func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date string, taskID int, unitAmount float64, description string) error {
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return fmt.Errorf("no se pudo autenticar antes de actualizar parte de horas: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return fmt.Errorf("no se pudo autenticar antes de actualizar parte de horas: %w", err)
 	}
 
 	if timesheetID <= 0 {
@@ -658,7 +838,7 @@ func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date stri
 
 	args := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"account.analytic.line",
 		"write",
@@ -670,8 +850,8 @@ func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date stri
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			args[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {
@@ -694,16 +874,15 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 		return errors.New("el ID del parte de horas debe ser mayor a 0")
 	}
 
-	if c.uid == 0 {
-		if _, err := c.Authenticate(ctx); err != nil {
-			return fmt.Errorf("no se pudo autenticar antes de eliminar horas: %w", err)
-		}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return fmt.Errorf("no se pudo autenticar antes de eliminar horas: %w", err)
 	}
 
 	// 1. Verificar si la línea existe y si está facturada antes de intentar borrar
 	readArgs := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"account.analytic.line",
 		"read",
@@ -715,15 +894,15 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 
 	readRaw, err := c.call(ctx, "object", "execute_kw", readArgs, nil)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			readArgs[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			readArgs[1] = newUID
 			readRaw, err = c.call(ctx, "object", "execute_kw", readArgs, nil)
 		}
 		// Fallback Odoo 14: si falla por campo timesheet_invoice_id inexistente, leer solo id
 		if err != nil {
 			fallbackReadArgs := []interface{}{
 				c.config.DB,
-				c.uid,
+				uid,
 				c.config.Password,
 				"account.analytic.line",
 				"read",
@@ -756,7 +935,7 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 	// 2. Ejecutar borrado (unlink) en Odoo
 	unlinkArgs := []interface{}{
 		c.config.DB,
-		c.uid,
+		uid,
 		c.config.Password,
 		"account.analytic.line",
 		"unlink",
@@ -767,8 +946,8 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", unlinkArgs, nil)
 	if err != nil {
-		if _, authErr := c.Authenticate(ctx); authErr == nil {
-			unlinkArgs[1] = c.uid
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			unlinkArgs[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", unlinkArgs, nil)
 		}
 		if err != nil {

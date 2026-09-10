@@ -862,35 +862,66 @@ func main() {
 		}
 
 		if hasOdooToken {
-			client := odoo.NewClient(currentOdooCfg)
+			client := odoo.GetClient(currentOdooCfg)
 
-			// 1. Obtener proyectos con timeout independiente
-			ctxProj, cancelProj := context.WithTimeout(r.Context(), 20*time.Second)
-			projList, pErr := client.GetProjects(ctxProj, nil)
-			cancelProj()
+			// Asegurar sesión/autenticación una sola vez antes de lanzar peticiones paralelas
+			authCtx, cancelAuth := context.WithTimeout(r.Context(), 15*time.Second)
+			_, authErr := client.Authenticate(authCtx)
+			cancelAuth()
 
-			if pErr != nil {
-				log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
-				fetchErr = pErr
+			if authErr != nil {
+				log.Printf("[ADVERTENCIA] Error de autenticación con Odoo: %v", authErr)
+				fetchErr = authErr
 			} else {
-				projects = projList
+				var wg sync.WaitGroup
+				var pErr, tsErr, empErr error
+				var projList []odoo.Project
+				var tsEntries []odoo.TimesheetEntry
+				var empList []odoo.Employee
 
-				// 2. Obtener partes de horas con timeout independiente
-				ctxTS, cancelTS := context.WithTimeout(r.Context(), 25*time.Second)
-				tsEntries, tsErr := client.GetTimesheets(ctxTS, nil)
-				cancelTS()
+				wg.Add(3)
+
+				// 1. Obtener proyectos concurrentemente
+				go func() {
+					defer wg.Done()
+					ctxProj, cancelProj := context.WithTimeout(r.Context(), 20*time.Second)
+					defer cancelProj()
+					projList, pErr = client.GetProjects(ctxProj, nil)
+				}()
+
+				// 2. Obtener partes de horas concurrentemente
+				go func() {
+					defer wg.Done()
+					ctxTS, cancelTS := context.WithTimeout(r.Context(), 25*time.Second)
+					defer cancelTS()
+					tsEntries, tsErr = client.GetTimesheets(ctxTS, nil)
+				}()
+
+				// 3. Obtener únicamente los trabajadores activos de Odoo concurrentemente
+				go func() {
+					defer wg.Done()
+					ctxEmp, cancelEmp := context.WithTimeout(r.Context(), 15*time.Second)
+					defer cancelEmp()
+					empList, empErr = client.GetEmployees(ctxEmp, nil)
+				}()
+
+				wg.Wait()
+
+				if pErr != nil {
+					log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
+					fetchErr = pErr
+				} else {
+					projects = projList
+				}
 
 				if tsErr != nil {
 					log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
-					fetchErr = tsErr
+					if fetchErr == nil {
+						fetchErr = tsErr
+					}
 				} else {
 					entries = tsEntries
 				}
-
-				// 3. Obtener únicamente los trabajadores activos de Odoo (hr.employee con active = true)
-				ctxEmp, cancelEmp := context.WithTimeout(r.Context(), 15*time.Second)
-				empList, empErr := client.GetEmployees(ctxEmp, nil)
-				cancelEmp()
 
 				if empErr != nil {
 					log.Printf("[ADVERTENCIA] Error al obtener empleados activos de Odoo: %v", empErr)
@@ -1478,9 +1509,14 @@ func main() {
 			query = strings.TrimSpace(r.URL.Query().Get("q"))
 		}
 
+		if r.URL.Query().Get("refresh") == "true" {
+			client.InvalidateProjectsCache()
+		}
+
 		var domain []interface{}
 		if query != "" {
 			domain = append(domain, []interface{}{"name", "ilike", query})
+			client.InvalidateProjectsCache()
 		}
 
 		projects, err := client.GetProjects(ctx, domain)
