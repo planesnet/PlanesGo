@@ -52,53 +52,16 @@ function highlightSidebarProject(projectName, projectId) {
             isMatch = (bName === targetName || bName.includes(targetName) || targetName.includes(bName));
         }
 
-        if (isMatch) {
-            btn.classList.add('is-active-project-card', '!bg-blue-600', '!border-blue-700', 'shadow-md', 'ring-2', 'ring-blue-400');
-            btn.classList.remove('bg-slate-50/50', 'border-slate-200/80', 'hover:bg-sky-50/60', 'hover:bg-indigo-50/60');
-            
-            // Adaptar elementos internos para contraste perfecto en fondo azul
-            const titleEl = btn.querySelector('.text-slate-800');
-            if (titleEl) {
-                titleEl.classList.add('!text-white');
-                titleEl.classList.remove('text-slate-800');
-            }
-            const badgeEl = btn.querySelector('.font-mono.flex-shrink-0');
-            if (badgeEl) {
-                badgeEl.classList.add('!bg-blue-800', '!text-white', '!border-blue-500');
-            }
-            const taskEl = btn.querySelector('.font-mono.truncate');
-            if (taskEl) {
-                taskEl.classList.add('!bg-blue-700', '!text-white');
-            }
-            btn.querySelectorAll('.text-slate-400').forEach(el => {
-                el.classList.add('!text-blue-100');
-            });
-            btn.querySelectorAll('svg').forEach(svg => {
-                svg.classList.add('!text-blue-200');
-            });
-        } else {
-            btn.classList.remove('is-active-project-card', '!bg-blue-600', '!border-blue-700', 'shadow-md', 'ring-2', 'ring-blue-400');
-            btn.classList.add('bg-slate-50/50', 'border-slate-200/80');
+        // Limpiar cualquier clase residual inline de versiones anteriores
+        btn.classList.remove('!bg-blue-600', '!border-blue-700', 'shadow-md', 'ring-2', 'ring-blue-400');
+        btn.querySelectorAll('*').forEach(el => {
+            el.classList.remove('!text-white', '!text-blue-100', '!text-blue-200', '!bg-blue-700', '!bg-blue-800', '!border-blue-500');
+        });
 
-            const titleEl = btn.querySelector('.!text-white');
-            if (titleEl) {
-                titleEl.classList.remove('!text-white');
-                titleEl.classList.add('text-slate-800');
-            }
-            const badgeEl = btn.querySelector('.font-mono.flex-shrink-0');
-            if (badgeEl) {
-                badgeEl.classList.remove('!bg-blue-800', '!text-white', '!border-blue-500');
-            }
-            const taskEl = btn.querySelector('.font-mono.truncate');
-            if (taskEl) {
-                taskEl.classList.remove('!bg-blue-700', '!text-white');
-            }
-            btn.querySelectorAll('.!text-blue-100').forEach(el => {
-                el.classList.remove('!text-blue-100');
-            });
-            btn.querySelectorAll('svg').forEach(svg => {
-                svg.classList.remove('!text-blue-200');
-            });
+        if (isMatch) {
+            btn.classList.add('is-active-project-card');
+        } else {
+            btn.classList.remove('is-active-project-card');
         }
     };
 

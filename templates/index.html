@@ -11,6 +11,35 @@
     <style>
         body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         .tabular-nums { font-variant-numeric: tabular-nums; }
+
+        /* Estilo puro CSS para el proyecto seleccionado en el panel lateral */
+        .is-active-project-card {
+            background-color: #2563eb !important;
+            border-color: #1d4ed8 !important;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.25), 0 2px 4px -2px rgba(37, 99, 235, 0.2) !important;
+        }
+        .is-active-project-card:hover {
+            background-color: #1d4ed8 !important;
+        }
+        .is-active-project-card .sidebar-project-title,
+        .is-active-project-card span.text-slate-800 {
+            color: #ffffff !important;
+        }
+        .is-active-project-card .font-mono.flex-shrink-0 {
+            background-color: #1e40af !important;
+            color: #ffffff !important;
+            border-color: #3b82f6 !important;
+        }
+        .is-active-project-card .font-mono.truncate {
+            background-color: #1d4ed8 !important;
+            color: #ffffff !important;
+        }
+        .is-active-project-card .text-slate-400 {
+            color: #dbeafe !important;
+        }
+        .is-active-project-card svg {
+            color: #bfdbfe !important;
+        }
     </style>
 </head>
 <body class="min-h-full flex flex-col text-slate-800 bg-[#F8FAFC] antialiased">
