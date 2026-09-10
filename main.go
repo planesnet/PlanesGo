@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.0"
+var Version = "1.2.1"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -46,7 +46,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/settings", state.handleSettings)
 	mux.HandleFunc("/api/settings/test-connection", state.handleTestConnection)
 
-	// API JSON
+	// API REST
 	mux.HandleFunc("/api/timesheets", state.handleAPITimesheets)
 	mux.HandleFunc("/api/timesheets/update", state.handleAPITimesheetsUpdate)
 	mux.HandleFunc("/api/timesheets/delete", state.handleAPITimesheetsDelete)
@@ -55,6 +55,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/api/tickets", state.handleAPITickets)
 	mux.HandleFunc("/api/timer/active", state.handleAPITimerActive)
 	mux.HandleFunc("/api/timer/start", state.handleAPITimerStart)
+	mux.HandleFunc("/api/timer/tick", state.handleAPITimerTick)
 	mux.HandleFunc("/api/timer/pause", state.handleAPITimerPause)
 	mux.HandleFunc("/api/timer/resume", state.handleAPITimerResume)
 	mux.HandleFunc("/api/timer/stop", state.handleAPITimerStop)

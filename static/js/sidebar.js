@@ -188,8 +188,37 @@ function startWorkTimerForActiveProject() {
         }
     }
 
+    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para acumular
+    const todayStr = new Date().toISOString().split('T')[0];
+    let existingRow = null;
+    if (pId) {
+        existingRow = document.querySelector(`.timesheet-row[data-project-id="${pId}"][data-date="${todayStr}"]`);
+    }
+    if (!existingRow && pName) {
+        try {
+            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(pName)}"][data-date="${todayStr}"]`);
+        } catch (e) {}
+    }
+
+    let tsId = null;
+    let accumulatedMs = 0;
+    let taskId = null;
+    let taskName = '';
+    let desc = `Trabajo en ${pName}`;
+
+    if (existingRow) {
+        tsId = parseInt(existingRow.dataset.id, 10) || null;
+        const h = parseFloat(existingRow.dataset.hours) || 0;
+        accumulatedMs = Math.round(h * 3600 * 1000);
+        taskId = parseInt(existingRow.dataset.taskId, 10) || null;
+        taskName = existingRow.dataset.taskName || '';
+        if (existingRow.dataset.desc) {
+            desc = existingRow.dataset.desc;
+        }
+    }
+
     if (typeof startWorkTimer === 'function') {
-        startWorkTimer(pId || 0, pName, null, '', `Trabajo en ${pName}`);
+        startWorkTimer(pId ? parseInt(pId, 10) : 0, pName, taskId, taskName, desc, tsId, accumulatedMs);
     }
 }
 

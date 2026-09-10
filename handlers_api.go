@@ -543,12 +543,13 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		ProjectID   int    `json:"project_id"`
-		ProjectName string `json:"project_name"`
-		TaskID      int    `json:"task_id"`
-		TaskName    string `json:"task_name"`
-		TimesheetID int    `json:"timesheet_id"`
-		Description string `json:"description"`
+		ProjectID   int     `json:"project_id"`
+		ProjectName string  `json:"project_name"`
+		TaskID      int     `json:"task_id"`
+		TaskName    string  `json:"task_name"`
+		TimesheetID int     `json:"timesheet_id"`
+		Description string  `json:"description"`
+		UnitAmount  float64 `json:"unit_amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -560,7 +561,7 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description)
+	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description, req.UnitAmount)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
@@ -568,6 +569,47 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	}
 
 	json.NewEncoder(w).Encode(activeTimer)
+}
+
+// handleAPITimerTick sincroniza en segundo plano las horas acumuladas en Odoo sin pausar el cronómetro
+func (state *AppState) handleAPITimerTick(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión no configurada"})
+		return
+	}
+
+	var req struct {
+		TimesheetID int     `json:"timesheet_id"`
+		UnitAmount  float64 `json:"unit_amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	if req.TimesheetID > 0 && req.UnitAmount > 0 {
+		client := odoo.GetClient(odooCfg)
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		_ = client.UpdateTimerUnits(ctx, req.TimesheetID, req.UnitAmount)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
 // handleAPITimerPause pausa el trabajo activo en Odoo

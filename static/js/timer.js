@@ -57,6 +57,34 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     // Solicitar permiso de notificaciones de forma proactiva al iniciar
     requestNotificationPermission();
 
+    // 1. Si no se especificó timesheetId o horas acumuladas, buscar si ya existe una imputación para hoy de este proyecto en la tabla
+    if (!timesheetId) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        let existingRow = null;
+        if (projectId) {
+            existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${todayStr}"]`);
+        }
+        if (!existingRow && projectName) {
+            try {
+                existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${todayStr}"]`);
+            } catch (e) {}
+        }
+        if (existingRow) {
+            timesheetId = parseInt(existingRow.dataset.id, 10) || null;
+            if (!taskId && existingRow.dataset.taskId) {
+                taskId = parseInt(existingRow.dataset.taskId, 10) || null;
+                taskName = existingRow.dataset.taskName || '';
+            }
+            if (!accumulatedMs) {
+                const h = parseFloat(existingRow.dataset.hours) || 0;
+                accumulatedMs = Math.round(h * 3600 * 1000);
+            }
+            if (!description && existingRow.dataset.desc) {
+                description = existingRow.dataset.desc;
+            }
+        }
+    }
+
     const now = Date.now();
     const initialAccumulated = (typeof accumulatedMs === 'number' && accumulatedMs >= 0) ? accumulatedMs : 0;
 
@@ -79,7 +107,8 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     startTimerTicker();
     updateAllRowTimerButtonStates();
 
-    // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true)
+    // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true) enviando horas acumuladas
+    const initialHours = parseFloat((initialAccumulated / 3600000).toFixed(2));
     fetch('/api/timer/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,13 +118,19 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             task_id: state.taskId || 0,
             task_name: state.taskName || '',
             timesheet_id: state.timesheetId || 0,
-            description: state.description
+            description: state.description,
+            unit_amount: initialHours
         })
     }).then(res => res.json()).then(data => {
         if (data && data.timesheet_id) {
-            state.timesheetId = data.timesheet_id;
-            saveTimerState(state);
-            ensureTimesheetRowExists(data, state);
+            const current = getTimerState() || state;
+            current.timesheetId = data.timesheet_id;
+            // Preservar tiempo acumulado
+            if ((!current.accumulatedMs || current.accumulatedMs === 0) && data.accumulated_ms > 0) {
+                current.accumulatedMs = data.accumulated_ms;
+            }
+            saveTimerState(current);
+            ensureTimesheetRowExists(data, current);
             updateAllRowTimerButtonStates();
         }
     }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err));
@@ -105,7 +140,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         closeCreateTimesheetModal();
     }
 
-    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Timesheet ID: ${state.timesheetId || 'nuevo'})`);
+    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Timesheet ID: ${state.timesheetId || 'nuevo'}, Acumulado: ${initialAccumulated}ms)`);
 }
 
 /**
@@ -155,6 +190,7 @@ function togglePauseTimer() {
             }
         }
 
+        stopTimerTicker();
         console.log('[PlanesGo Timer] Trabajo en pausa. Tiempo acumulado:', formatElapsedMs(state.accumulatedMs));
     } else {
         // Reanudar
@@ -179,6 +215,7 @@ function togglePauseTimer() {
             })
         }).catch(err => console.warn('[PlanesGo Timer] Error reanudando en Odoo:', err));
 
+        startTimerTicker();
         console.log('[PlanesGo Timer] Trabajo reanudado');
     }
 
@@ -375,6 +412,19 @@ function updateTimerTick() {
                 `;
             }
         }
+    }
+
+    // Sincronización periódica liviana a Odoo cada 30 segundos mientras corre
+    if (state.status === 'running' && state.timesheetId && Math.floor(totalMs / 1000) % 30 === 0) {
+        const currentHours = parseFloat((totalMs / 3600000).toFixed(2));
+        fetch('/api/timer/tick', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: state.timesheetId,
+                unit_amount: currentHours
+            })
+        }).catch(() => {});
     }
 }
 
@@ -581,10 +631,12 @@ async function syncActiveTimerFromOdoo() {
                 ensureTimesheetRowExists(act, serverState);
                 updateAllRowTimerButtonStates();
             } else {
-                // En Odoo NO hay cronómetro corriendo -> Limpiar temporizador local si estaba activo
+                // En Odoo no se reporta cronómetro activo en este instante.
+                // IMPORTANTE: NO borrar el cronómetro local si el usuario lo inició en PlanesGo.
+                // PlanesGo mantiene la persistencia local y sincroniza hacia Odoo, evitando apagados inesperados.
                 const current = getTimerState();
-                if (current && current.status === 'running') {
-                    console.log('[PlanesGo Timer] Odoo no tiene cronómetro activo. Limpiando estado local.');
+                if (current && current.startedAt && (Date.now() - current.startedAt > 86400000)) {
+                    // Solo si lleva más de 24 horas continuo lo consideramos obsoleto
                     saveTimerState(null);
                     stopTimerTicker();
                     stopTitleFlash();
@@ -832,7 +884,8 @@ function ensureTimesheetRowExists(serverData, timerState) {
     const taskName = (serverData && serverData.task_name) || (timerState && timerState.taskName) || '';
     const taskId = (timerState && timerState.taskId) || (serverData && serverData.task_id) || '';
     const desc = (serverData && serverData.description) || (timerState && timerState.description) || '';
-    const unitAmount = (serverData && typeof serverData.unit_amount === 'number') ? serverData.unit_amount : 0;
+    const accumMs = (timerState && timerState.accumulatedMs) || ((serverData && serverData.accumulated_ms) || 0);
+    const unitAmount = (accumMs > 0) ? (accumMs / 3600000) : ((serverData && typeof serverData.unit_amount === 'number') ? serverData.unit_amount : 0);
     const hours = unitAmount.toFixed(2);
 
     // Obtener nombre del trabajador

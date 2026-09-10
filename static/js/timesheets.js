@@ -713,8 +713,28 @@ function startTimerFromModal() {
         return;
     }
 
+    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para acumular
+    const todayStr = new Date().toISOString().split('T')[0];
+    let existingRow = null;
+    if (projectId) {
+        existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${todayStr}"]`);
+    }
+    if (!existingRow && projectName) {
+        try {
+            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${todayStr}"]`);
+        } catch (e) {}
+    }
+
+    let tsId = null;
+    let accumulatedMs = 0;
+    if (existingRow) {
+        tsId = parseInt(existingRow.dataset.id, 10) || null;
+        const h = parseFloat(existingRow.dataset.hours) || 0;
+        accumulatedMs = Math.round(h * 3600 * 1000);
+    }
+
     if (typeof startWorkTimer === 'function') {
-        startWorkTimer(projectId, projectName, taskId, taskName, description);
+        startWorkTimer(projectId ? parseInt(projectId, 10) : 0, projectName, taskId ? parseInt(taskId, 10) : null, taskName, description, tsId, accumulatedMs);
     }
 }
 window.startTimerFromModal = startTimerFromModal;
