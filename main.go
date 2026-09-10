@@ -29,7 +29,7 @@ var Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
 const DefaultOdooURL = "https://planesnet.autopyme.com"
-const DefaultOdooDB = "pasi"
+const DefaultOdooDB = "ap113"
 
 type SessionData struct {
 	URL         string `json:"url"`
