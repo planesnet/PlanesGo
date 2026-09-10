@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +62,48 @@ func getIndexTemplate() (*template.Template, error) {
 		cachedIndexTmpl = t
 	})
 	return cachedIndexTmpl, cachedIndexErr
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode   int
+	bytesWritten int64
+}
+
+func (rw *statusResponseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *statusResponseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += int64(n)
+	return n, err
+}
+
+func loggingAndRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		defer func() {
+			if rec := recover(); rec != nil {
+				rw.statusCode = http.StatusInternalServerError
+				stack := debug.Stack()
+				log.Printf("[PANIC CRÍTICO] %s %s: %v\nStack:\n%s", r.Method, r.URL.Path, rec, string(stack))
+				http.Error(rw, "500 Internal Server Error", http.StatusInternalServerError)
+			}
+			duration := time.Since(start)
+			clientIP := r.Header.Get("X-Forwarded-For")
+			if clientIP == "" {
+				clientIP = r.RemoteAddr
+			}
+			log.Printf("[HTTP] %s %s %s | Status: %d (%d bytes) | Duración: %v | IP: %s | UA: %s",
+				r.Method, r.URL.Path, r.Proto, rw.statusCode, rw.bytesWritten, duration, clientIP, r.UserAgent())
+		}()
+
+		next.ServeHTTP(rw, r)
+	})
 }
 
 type SessionData struct {
@@ -896,16 +939,19 @@ func main() {
 
 		if hasOdooToken {
 			client := odoo.GetClient(currentOdooCfg)
+			log.Printf("[INDEX] Iniciando consulta a Odoo. URL=%s, DB=%s, Usuario=%s", currentOdooCfg.URL, currentOdooCfg.DB, currentOdooCfg.Username)
 
 			// Asegurar sesión/autenticación una sola vez antes de lanzar peticiones paralelas
+			authStart := time.Now()
 			authCtx, cancelAuth := context.WithTimeout(r.Context(), 15*time.Second)
-			_, authErr := client.Authenticate(authCtx)
+			uid, authErr := client.Authenticate(authCtx)
 			cancelAuth()
 
 			if authErr != nil {
-				log.Printf("[ADVERTENCIA] Error de autenticación con Odoo: %v", authErr)
+				log.Printf("[INDEX ERROR] Error de autenticación con Odoo tras %v: %v", time.Since(authStart), authErr)
 				fetchErr = authErr
 			} else {
+				log.Printf("[INDEX OK] Autenticado en Odoo en %v con UID=%d", time.Since(authStart), uid)
 				var wg sync.WaitGroup
 				var pErr, tsErr, empErr error
 				var projList []odoo.Project
@@ -917,28 +963,35 @@ func main() {
 				// 1. Obtener proyectos concurrentemente
 				go func() {
 					defer wg.Done()
+					pStart := time.Now()
 					ctxProj, cancelProj := context.WithTimeout(r.Context(), 20*time.Second)
 					defer cancelProj()
 					projList, pErr = client.GetProjects(ctxProj, nil)
+					log.Printf("[INDEX-GOROUTINE] GetProjects completado en %v (items: %d, err: %v)", time.Since(pStart), len(projList), pErr)
 				}()
 
 				// 2. Obtener partes de horas concurrentemente
 				go func() {
 					defer wg.Done()
+					tsStart := time.Now()
 					ctxTS, cancelTS := context.WithTimeout(r.Context(), 25*time.Second)
 					defer cancelTS()
 					tsEntries, tsErr = client.GetTimesheets(ctxTS, nil)
+					log.Printf("[INDEX-GOROUTINE] GetTimesheets completado en %v (items: %d, err: %v)", time.Since(tsStart), len(tsEntries), tsErr)
 				}()
 
 				// 3. Obtener únicamente los trabajadores activos de Odoo concurrentemente
 				go func() {
 					defer wg.Done()
+					empStart := time.Now()
 					ctxEmp, cancelEmp := context.WithTimeout(r.Context(), 15*time.Second)
 					defer cancelEmp()
 					empList, empErr = client.GetEmployees(ctxEmp, nil)
+					log.Printf("[INDEX-GOROUTINE] GetEmployees completado en %v (items: %d, err: %v)", time.Since(empStart), len(empList), empErr)
 				}()
 
 				wg.Wait()
+				log.Printf("[INDEX] Todas las consultas paralelas de Odoo han finalizado.")
 
 				if pErr != nil {
 					log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
@@ -1567,10 +1620,25 @@ func main() {
 		json.NewEncoder(w).Encode(projects)
 	})
 
+	// Endpoints de salud y verificación de conectividad
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"version": Version,
+			"port":    cfg.Server.Port,
+		})
+	})
+	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("pong\n"))
+	})
+
 	// 10. Servidor HTTP
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &http.Server{
 		Addr:         addr,
+		Handler:      loggingAndRecoveryMiddleware(http.DefaultServeMux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,

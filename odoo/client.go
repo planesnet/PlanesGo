@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"pasigo/config"
@@ -147,6 +148,7 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 		return nil, fmt.Errorf("error serializando petición JSON-RPC: %w", err)
 	}
 
+	startCall := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creando petición HTTP: %w", err)
@@ -154,29 +156,36 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
+	elapsed := time.Since(startCall)
 	if err != nil {
-		return nil, fmt.Errorf("error de conexión con Odoo en %s: %w", url, err)
+		log.Printf("[ODOO-RPC FAIL] %s.%s (%s) en %v: %v", service, method, url, elapsed, err)
+		return nil, fmt.Errorf("error de conexión con Odoo en %s (duración %v): %w", url, elapsed, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("[ODOO-RPC FAIL] %s.%s error leyendo cuerpo en %v: %v", service, method, elapsed, err)
 		return nil, fmt.Errorf("error leyendo respuesta de Odoo: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[ODOO-RPC HTTP %d] %s.%s en %v (cuerpo: %s)", resp.StatusCode, service, method, elapsed, string(respBody[:min(len(respBody), 256)]))
 		return nil, fmt.Errorf("Odoo respondió con estado HTTP %d", resp.StatusCode)
 	}
 
 	var rpcResp jsonRPCResponse
 	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		log.Printf("[ODOO-RPC JSON ERR] %s.%s en %v: %v", service, method, elapsed, err)
 		return nil, fmt.Errorf("error decodificando respuesta JSON-RPC: %w", err)
 	}
 
 	if rpcResp.Error != nil {
+		log.Printf("[ODOO-RPC ERROR] %s.%s en %v: código=%d, mensaje=%s, datos=%v", service, method, elapsed, rpcResp.Error.Code, rpcResp.Error.Message, rpcResp.Error.Data)
 		return nil, fmt.Errorf("error de Odoo: %s (código: %d)", rpcResp.Error.Message, rpcResp.Error.Code)
 	}
 
+	log.Printf("[ODOO-RPC OK] %s.%s en %v (bytes: %d)", service, method, elapsed, len(respBody))
 	return rpcResp.Result, nil
 }
 

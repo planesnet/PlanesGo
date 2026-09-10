@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"html/template"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"pasigo/config"
@@ -153,6 +155,33 @@ func TestGetIndexTemplateCache(t *testing.T) {
 	}
 	if tmpl1 != tmpl2 {
 		t.Fatalf("Se esperaba la misma instancia de plantilla desde la caché")
+	}
+}
+
+func TestLoggingAndRecoveryMiddleware(t *testing.T) {
+	// 1. Probar ruta normal (200 OK)
+	normalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	wrappedNormal := loggingAndRecoveryMiddleware(normalHandler)
+	req := httptest.NewRequest("GET", "/test", nil)
+	rr := httptest.NewRecorder()
+	wrappedNormal.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Se esperaba status 200, obtenido %d", rr.Code)
+	}
+
+	// 2. Probar recuperación de pánico (500 Internal Server Error)
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("error inesperado de prueba")
+	})
+	wrappedPanic := loggingAndRecoveryMiddleware(panicHandler)
+	reqPanic := httptest.NewRequest("GET", "/panic", nil)
+	rrPanic := httptest.NewRecorder()
+	wrappedPanic.ServeHTTP(rrPanic, reqPanic)
+	if rrPanic.Code != http.StatusInternalServerError {
+		t.Fatalf("Se esperaba status 500 tras pánico recuperado, obtenido %d", rrPanic.Code)
 	}
 }
 
