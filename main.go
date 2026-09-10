@@ -799,6 +799,7 @@ func main() {
 
 		var entries []odoo.TimesheetEntry
 		var projects []odoo.Project
+		var activeEmployees []odoo.Employee
 		var fetchErr error
 		hasOdooToken := (currentOdooCfg.Password != "")
 
@@ -826,6 +827,17 @@ func main() {
 					fetchErr = tsErr
 				} else {
 					entries = tsEntries
+				}
+
+				// 3. Obtener únicamente los trabajadores activos de Odoo (hr.employee con active = true)
+				ctxEmp, cancelEmp := context.WithTimeout(r.Context(), 15*time.Second)
+				empList, empErr := client.GetEmployees(ctxEmp, nil)
+				cancelEmp()
+
+				if empErr != nil {
+					log.Printf("[ADVERTENCIA] Error al obtener empleados activos de Odoo: %v", empErr)
+				} else {
+					activeEmployees = empList
 				}
 			}
 		}
@@ -879,15 +891,46 @@ func main() {
 		sort.Strings(projectsList)
 
 		var employeesList []string
-		for e := range employeeMap {
-			employeesList = append(employeesList, e)
+		activeEmpNameMap := make(map[string]bool)
+
+		if len(activeEmployees) > 0 {
+			// Usar estrictamente los trabajadores activos de Odoo (hr.employee con active = true)
+			for _, emp := range activeEmployees {
+				if emp.Active && strings.TrimSpace(emp.Name) != "" {
+					name := strings.TrimSpace(emp.Name)
+					if !activeEmpNameMap[name] {
+						activeEmpNameMap[name] = true
+						employeesList = append(employeesList, name)
+					}
+				}
+			}
+			sort.Strings(employeesList)
+		} else {
+			// Fallback si no se pudo consultar hr.employee: obtener de partes de horas
+			for e := range employeeMap {
+				employeesList = append(employeesList, e)
+			}
+			sort.Strings(employeesList)
 		}
-		sort.Strings(employeesList)
 
 		// Determinar trabajador actual asociado a la sesión
 		currentWorker := ""
 		if session != nil {
-			if session.UserName != "" {
+			email := session.UserEmail
+			if email == "" {
+				email = session.Username
+			}
+			// 1. Intentar coincidencia con email de trabajo o usuario del empleado activo
+			if email != "" && len(activeEmployees) > 0 {
+				for _, emp := range activeEmployees {
+					if emp.Active && (strings.EqualFold(emp.WorkEmail, email) || (emp.UserID.Name != "" && strings.EqualFold(emp.UserID.Name, email))) {
+						currentWorker = emp.Name
+						break
+					}
+				}
+			}
+			// 2. Coincidencia por nombre exacto en la lista de trabajadores
+			if currentWorker == "" && session.UserName != "" {
 				for _, emp := range employeesList {
 					if strings.EqualFold(emp, session.UserName) {
 						currentWorker = emp
@@ -905,18 +948,13 @@ func main() {
 					}
 				}
 			}
-			if currentWorker == "" {
-				email := session.UserEmail
-				if email == "" {
-					email = session.Username
-				}
-				if email != "" {
-					userPart := strings.ToLower(strings.Split(email, "@")[0])
-					for _, emp := range employeesList {
-						if strings.Contains(strings.ToLower(emp), userPart) {
-							currentWorker = emp
-							break
-						}
+			// 3. Coincidencia por parte de usuario del email
+			if currentWorker == "" && email != "" {
+				userPart := strings.ToLower(strings.Split(email, "@")[0])
+				for _, emp := range employeesList {
+					if strings.Contains(strings.ToLower(emp), userPart) {
+						currentWorker = emp
+						break
 					}
 				}
 			}
@@ -1024,6 +1062,11 @@ func main() {
 			log.Printf("[ERROR] Consulta Odoo: %v", fetchErr)
 		}
 
+		uniqueEmployeesCount := len(employeesList)
+		if uniqueEmployeesCount == 0 {
+			uniqueEmployeesCount = len(employeeMap)
+		}
+
 		data := PageData{
 			Version:              Version,
 			Config:               activeCfg,
@@ -1034,7 +1077,7 @@ func main() {
 			TotalHours:           totalHours,
 			TotalProjectsCount:   len(projects),
 			UniqueProjectsCount:  len(projectMap),
-			UniqueEmployeesCount: len(employeeMap),
+			UniqueEmployeesCount: uniqueEmployeesCount,
 			ProjectsList:         projectsList,
 			EmployeesList:        employeesList,
 			CurrentWorker:        currentWorker,

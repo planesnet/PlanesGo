@@ -155,3 +155,13 @@ func (t *Task) DisplayNameOrName() string {
 	}
 	return "Sin nombre"
 }
+
+// Employee representa un trabajador de Odoo (hr.employee).
+type Employee struct {
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	WorkEmail string   `json:"work_email"`
+	UserID    Many2One `json:"user_id"`
+	Active    bool     `json:"active"`
+}
+

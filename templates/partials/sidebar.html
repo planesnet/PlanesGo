@@ -22,8 +22,8 @@
             </span>
         </div>
 
-        <!-- Selector de trabajador si hay más de 1 -->
-        {{if gt (len .EmployeesList) 1}}
+        <!-- Selector de trabajador (únicamente trabajadores activos) -->
+        {{if .EmployeesList}}
         <div class="mt-3">
             <label for="sidebar-employee-select" class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                 Trabajador

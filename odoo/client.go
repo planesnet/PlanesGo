@@ -271,6 +271,83 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 	return projects, nil
 }
 
+// GetEmployees consulta los trabajadores/empleados definidos en Odoo (hr.employee).
+// Por defecto filtra únicamente los que están activos (active = true).
+func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Employee, error) {
+	if c.uid == 0 {
+		if _, err := c.Authenticate(ctx); err != nil {
+			return nil, fmt.Errorf("no se pudo autenticar antes de consultar empleados: %w", err)
+		}
+	}
+
+	if domain == nil {
+		domain = []interface{}{}
+	}
+
+	hasActiveFilter := false
+	for _, cond := range domain {
+		if condArr, ok := cond.([]interface{}); ok && len(condArr) > 0 {
+			if field, ok := condArr[0].(string); ok && field == "active" {
+				hasActiveFilter = true
+				break
+			}
+		}
+	}
+
+	effectiveDomain := make([]interface{}, 0, len(domain)+1)
+	for _, d := range domain {
+		effectiveDomain = append(effectiveDomain, d)
+	}
+	if !hasActiveFilter {
+		effectiveDomain = append(effectiveDomain, []interface{}{"active", "=", true})
+	}
+
+	fields := []string{
+		"id",
+		"name",
+		"work_email",
+		"user_id",
+		"active",
+	}
+
+	kwargs := map[string]interface{}{
+		"fields": fields,
+		"order":  "name asc, id asc",
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		c.uid,
+		c.config.Password,
+		"hr.employee",
+		"search_read",
+		[]interface{}{effectiveDomain},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		if _, authErr := c.Authenticate(ctx); authErr == nil {
+			args[1] = c.uid
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
+			fallbackFields := []string{"id", "name", "user_id", "active"}
+			kwargs["fields"] = fallbackFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error al obtener empleados: %w", err)
+		}
+	}
+
+	var employees []Employee
+	if err := json.Unmarshal(resultRaw, &employees); err != nil {
+		return nil, fmt.Errorf("error al parsear empleados: %w", err)
+	}
+
+	return employees, nil
+}
+
 // GetTasks consulta las tareas de un proyecto en Odoo (project.task).
 func (c *Client) GetTasks(ctx context.Context, projectID int) ([]Task, error) {
 	if c.uid == 0 {
