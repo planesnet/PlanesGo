@@ -18,9 +18,10 @@
                 <tbody class="divide-y divide-slate-100 font-normal text-slate-700">
                     {{if .Entries}}
                         {{range .Entries}}
-                         <tr class="timesheet-row hover:bg-slate-50/80 transition-colors"
+                         <tr class="timesheet-row hover:bg-slate-50/80 transition-colors {{if .IsTimerRunning}}bg-emerald-50/70 ring-1 ring-emerald-300{{end}}"
                             data-id="{{.ID}}"
                             data-date="{{.Date}}"
+                            data-timer-running="{{if .IsTimerRunning}}true{{else}}false{{end}}"
                             data-employee="{{.DisplayEmployee}}"
                             data-project="{{.ProjectID.String}}"
                             data-project-name="{{.ProjectID.Name}}"
@@ -78,7 +79,7 @@
                                         Facturado
                                     </span>
                                     {{end}}
-                                    <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
+                                    <span class="timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
                                         {{printf "%.2f" .UnitAmount}} h
                                     </span>
                                 </div>
@@ -96,12 +97,12 @@
                                             data-task-name="{{.TaskID.Name}}"
                                             data-hours="{{.UnitAmount}}"
                                             data-desc="{{.Name}}"
-                                            class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
-                                            title="Activar o reanudar cronómetro en esta imputación">
-                                        <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                                            class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 {{if .IsTimerRunning}}text-amber-700 bg-amber-100 hover:bg-amber-200 border-amber-300 animate-pulse{{else}}text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80{{end}} rounded-lg transition cursor-pointer"
+                                            title="{{if .IsTimerRunning}}Pausar cronómetro de esta imputación{{else}}Activar o reanudar cronómetro en esta imputación{{end}}">
+                                        <svg class="w-3.5 h-3.5 icon-play {{if .IsTimerRunning}}hidden{{end}}" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
                                         </svg>
-                                        <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                                        <svg class="w-3.5 h-3.5 icon-pause {{if not .IsTimerRunning}}hidden{{end}}" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
                                         </svg>
                                     </button>

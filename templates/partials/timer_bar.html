@@ -1,6 +1,18 @@
 {{ define "timer_bar" }}
 <!-- Barra de Temporizador de Trabajo Activo -->
-<div id="active-timer-container" class="hidden mb-5">
+<div id="active-timer-container" class="{{if not .ActiveTimer}}hidden{{end}} mb-5"
+     {{if .ActiveTimer}}
+     data-server-timer="true"
+     data-timesheet-id="{{.ActiveTimer.TimesheetID}}"
+     data-project-id="{{.ActiveTimer.ProjectID}}"
+     data-project-name="{{.ActiveTimer.ProjectName}}"
+     data-task-id="{{.ActiveTimer.TaskID}}"
+     data-task-name="{{.ActiveTimer.TaskName}}"
+     data-desc="{{.ActiveTimer.Description}}"
+     data-accumulated-ms="{{.ActiveTimer.AccumulatedMs}}"
+     data-started-at="{{.ActiveTimer.StartedAt}}"
+     data-is-running="{{if .ActiveTimer.IsRunning}}true{{else}}false{{end}}"
+     {{end}}>
     <div class="bg-white/95 backdrop-blur-md border border-sky-200/90 shadow-md shadow-sky-100/50 rounded-2xl px-4 py-3 sm:px-6 sm:py-3.5 flex flex-col md:flex-row items-center justify-between gap-4 transition-all duration-300">
         
         <!-- Información del trabajo en curso -->
@@ -21,14 +33,14 @@
                 </div>
                 <div class="flex items-baseline space-x-2 mt-0.5 truncate">
                     <span id="timer-project-name" class="text-sm font-bold text-slate-800 truncate" title="Proyecto">
-                        Proyecto
+                        {{if and .ActiveTimer .ActiveTimer.ProjectName}}{{.ActiveTimer.ProjectName}}{{else}}Proyecto{{end}}
                     </span>
                     <span id="timer-task-name" class="text-xs text-slate-500 truncate" title="Tarea">
-                        - Sin tarea
+                        {{if and .ActiveTimer .ActiveTimer.TaskName}}{{.ActiveTimer.TaskName}}{{else}}- Sin tarea{{end}}
                     </span>
                 </div>
-                <p id="timer-description-preview" class="text-[11px] text-slate-400 truncate max-w-md hidden">
-                    Descripción
+                <p id="timer-description-preview" class="text-[11px] text-slate-400 truncate max-w-md {{if not (and .ActiveTimer .ActiveTimer.Description)}}hidden{{end}}">
+                    {{if and .ActiveTimer .ActiveTimer.Description}}{{.ActiveTimer.Description}}{{else}}Descripción{{end}}
                 </p>
             </div>
         </div>

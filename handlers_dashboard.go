@@ -602,6 +602,27 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		uniqueEmployeesCount = len(employeeMap)
 	}
 
+	var activeTimer *odoo.ActiveTimer
+	for _, e := range entries {
+		if e.IsTimerRunning {
+			accumMs := int64(e.UnitAmount * 3600 * 1000)
+			activeTimer = &odoo.ActiveTimer{
+				TimesheetID:   e.ID,
+				ProjectID:     e.ProjectID.ID,
+				ProjectName:   e.ProjectID.Name,
+				TaskID:        e.TaskID.ID,
+				TaskName:      e.TaskID.Name,
+				Description:   e.Name,
+				IsRunning:     true,
+				StartedAt:     time.Now().UnixMilli() - accumMs,
+				AccumulatedMs: accumMs,
+				UnitAmount:    e.UnitAmount,
+				Date:          e.Date,
+			}
+			break
+		}
+	}
+
 	data := PageData{
 		Version:              Version,
 		Config:               activeCfg,
@@ -621,6 +642,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		CurrentWorker:        currentWorker,
 		RecentProjects:       recentProjects,
 		Today:                time.Now().Format("2006-01-02"),
+		ActiveTimer:          activeTimer,
 		Error:                errMsg,
 	}
 

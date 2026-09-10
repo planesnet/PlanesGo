@@ -89,6 +89,7 @@ type PageData struct {
 	PendingTicketsCount  int
 	OdooURL              string
 	Today                string
+	ActiveTimer          *odoo.ActiveTimer
 	Error                string
 }
 

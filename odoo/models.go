@@ -59,6 +59,7 @@ type TimesheetEntry struct {
 	UserID             Many2One    `json:"user_id"`
 	TimesheetInvoiceID Many2One    `json:"timesheet_invoice_id"`
 	BillingRef         interface{} `json:"billing_ref"` // Indica si está facturado en Odoo 14
+	IsTimerRunning     bool        `json:"is_timer_running"`
 }
 
 // IsInvoiced indica si la imputación de horas ya ha sido facturada en Odoo.
@@ -271,4 +272,6 @@ type ActiveTimer struct {
 	StartedAt     int64    `json:"started_at"`      // Timestamp unix en milisegundos
 	AccumulatedMs int64    `json:"accumulated_ms"`  // Milisegundos acumulados
 	UnitAmount    float64  `json:"unit_amount"`     // Horas calculadas en decimal
+	Date          string   `json:"date,omitempty"`
+	EmployeeName  string   `json:"employee_name,omitempty"`
 }

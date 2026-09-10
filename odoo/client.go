@@ -328,7 +328,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		limit = 200
 	}
 
-	// Campos base estándar + campos de facturación en Odoo 14
+	// Campos base estándar + campos de facturación en Odoo 14 + estado de cronómetro
 	fields := []string{
 		"id",
 		"date",
@@ -340,6 +340,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"user_id",
 		"timesheet_invoice_id",
 		"billing_ref",
+		"is_timer_running",
 	}
 
 	kwargs := map[string]interface{}{
@@ -365,7 +366,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
-			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado
+			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado (manteniendo is_timer_running)
 			fallbackFields := []string{
 				"id",
 				"date",
@@ -376,6 +377,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 				"employee_id",
 				"user_id",
 				"timesheet_invoice_id",
+				"is_timer_running",
 			}
 			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
@@ -1177,7 +1179,9 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 
 // StartTimer inicia un temporizador de trabajo en Odoo llamando a action_timer_start en account.analytic.line o project.task,
 // o marcando is_timer_running = true. Si no existe una imputación para el trabajo actual, la crea de inmediato en Odoo.
-func (c *Client) StartTimer(ctx context.Context, projectID int, taskID int, timesheetID int, description string) (*ActiveTimer, error) {
+// StartTimer inicia un temporizador de trabajo en Odoo llamando a action_timer_start en account.analytic.line o project.task,
+// o marcando is_timer_running = true. Si no existe una imputación para el trabajo actual, la crea de inmediato en Odoo.
+func (c *Client) StartTimer(ctx context.Context, projectID int, projectName string, taskID int, taskName string, timesheetID int, description string) (*ActiveTimer, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo autenticar antes de iniciar cronómetro: %w", err)
@@ -1194,10 +1198,11 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, taskID int, time
 	// 1. Si no hay timesheetID proporcionado, crear la imputación de inicio en account.analytic.line
 	if actualTimesheetID <= 0 {
 		vals := map[string]interface{}{
-			"name":        description,
-			"date":        today,
-			"project_id":  projectID,
-			"unit_amount": 0.0,
+			"name":             description,
+			"date":             today,
+			"project_id":       projectID,
+			"unit_amount":      0.0,
+			"is_timer_running": true,
 		}
 		if taskID > 0 {
 			vals["task_id"] = taskID
@@ -1250,28 +1255,35 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, taskID int, time
 		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	}
 
-	// 3. Si hay tarea asignada, invocar también action_timer_start en project.task
+	// 3. Si hay tarea asignada, invocar action_timer_start en project.task de forma asíncrona para máxima rapidez
 	if taskID > 0 {
-		taskStartArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"project.task",
-			"action_timer_start",
-			[]interface{}{[]int{taskID}},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", taskStartArgs, nil)
+		go func(tID, uID int) {
+			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			taskStartArgs := []interface{}{
+				c.config.DB,
+				uID,
+				c.config.Password,
+				"project.task",
+				"action_timer_start",
+				[]interface{}{[]int{tID}},
+			}
+			_, _ = c.call(taskCtx, "object", "execute_kw", taskStartArgs, nil)
+		}(taskID, uid)
 	}
 
 	return &ActiveTimer{
 		TimesheetID:   actualTimesheetID,
 		TaskID:        taskID,
+		TaskName:      taskName,
 		ProjectID:     projectID,
+		ProjectName:   projectName,
 		Description:   description,
 		IsRunning:     true,
 		StartedAt:     now.UnixMilli(),
 		AccumulatedMs: 0,
 		UnitAmount:    0.0,
+		Date:          today,
 	}, nil
 }
 
@@ -1314,15 +1326,19 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 	}
 
 	if taskID > 0 {
-		taskPauseArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"project.task",
-			"action_timer_pause",
-			[]interface{}{[]int{taskID}},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", taskPauseArgs, nil)
+		go func(tID, uID int) {
+			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			taskPauseArgs := []interface{}{
+				c.config.DB,
+				uID,
+				c.config.Password,
+				"project.task",
+				"action_timer_pause",
+				[]interface{}{[]int{tID}},
+			}
+			_, _ = c.call(taskCtx, "object", "execute_kw", taskPauseArgs, nil)
+		}(taskID, uid)
 	}
 
 	return nil
@@ -1363,15 +1379,19 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 	}
 
 	if taskID > 0 {
-		taskResumeArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"project.task",
-			"action_timer_resume",
-			[]interface{}{[]int{taskID}},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", taskResumeArgs, nil)
+		go func(tID, uID int) {
+			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			taskResumeArgs := []interface{}{
+				c.config.DB,
+				uID,
+				c.config.Password,
+				"project.task",
+				"action_timer_resume",
+				[]interface{}{[]int{tID}},
+			}
+			_, _ = c.call(taskCtx, "object", "execute_kw", taskResumeArgs, nil)
+		}(taskID, uid)
 	}
 
 	return nil
@@ -1419,15 +1439,19 @@ func (c *Client) StopTimer(ctx context.Context, timesheetID int, taskID int, uni
 	}
 
 	if taskID > 0 {
-		taskStopArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"project.task",
-			"action_timer_stop",
-			[]interface{}{[]int{taskID}},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", taskStopArgs, nil)
+		go func(tID, uID int) {
+			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			taskStopArgs := []interface{}{
+				c.config.DB,
+				uID,
+				c.config.Password,
+				"project.task",
+				"action_timer_stop",
+				[]interface{}{[]int{tID}},
+			}
+			_, _ = c.call(taskCtx, "object", "execute_kw", taskStopArgs, nil)
+		}(taskID, uid)
 	}
 
 	return nil

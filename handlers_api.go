@@ -544,7 +544,9 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 
 	var req struct {
 		ProjectID   int    `json:"project_id"`
+		ProjectName string `json:"project_name"`
 		TaskID      int    `json:"task_id"`
+		TaskName    string `json:"task_name"`
 		TimesheetID int    `json:"timesheet_id"`
 		Description string `json:"description"`
 	}
@@ -554,11 +556,11 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	client := odoo.NewClient(odooCfg)
+	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.TaskID, req.TimesheetID, req.Description)
+	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
@@ -600,7 +602,7 @@ func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	client := odoo.NewClient(odooCfg)
+	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -644,7 +646,7 @@ func (state *AppState) handleAPITimerResume(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	client := odoo.NewClient(odooCfg)
+	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -690,7 +692,7 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	client := odoo.NewClient(odooCfg)
+	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
