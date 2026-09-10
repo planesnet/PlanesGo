@@ -202,6 +202,35 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	type projectTicketInfo struct {
+		count       int
+		latestTitle string
+	}
+	ticketsByProjectID := make(map[int]*projectTicketInfo)
+	ticketsByProjectName := make(map[string]*projectTicketInfo)
+
+	for _, t := range pendingTickets {
+		pID := t.ProjectID.ID
+		pName := strings.TrimSpace(t.ProjectID.Name)
+		title := t.DisplayTitle()
+		if pID > 0 {
+			info, exists := ticketsByProjectID[pID]
+			if !exists {
+				info = &projectTicketInfo{count: 0, latestTitle: title}
+				ticketsByProjectID[pID] = info
+			}
+			info.count++
+		}
+		if pName != "" && pName != "-" {
+			info, exists := ticketsByProjectName[pName]
+			if !exists {
+				info = &projectTicketInfo{count: 0, latestTitle: title}
+				ticketsByProjectName[pName] = info
+			}
+			info.count++
+		}
+	}
+
 	for i := range projects {
 		pName := projects[i].DisplayNameOrName()
 		if pName != "" {
@@ -222,26 +251,16 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			projects[i].LastDate = d
 			projects[i].LastTask = projectNameLastTaskMap[pName]
 		}
-	}
 
-	// Ordenar la lista completa de proyectos: los proyectos con imputaciones más recientes primero
-	sort.SliceStable(projects, func(i, j int) bool {
-		dI := projects[i].LastDate
-		dJ := projects[j].LastDate
-		if dI != "" && dJ != "" {
-			if dI != dJ {
-				return dI > dJ // Fecha más reciente primero
-			}
-			return projects[i].TotalHours > projects[j].TotalHours
+		// Enriquecer proyectos con tickets abiertos asignados al usuario
+		if info, ok := ticketsByProjectID[projects[i].ID]; ok {
+			projects[i].OpenTicketCount = info.count
+			projects[i].TicketTitle = info.latestTitle
+		} else if info, ok := ticketsByProjectName[pName]; ok {
+			projects[i].OpenTicketCount = info.count
+			projects[i].TicketTitle = info.latestTitle
 		}
-		if dI != "" && dJ == "" {
-			return true // Proyectos con horas imputadas van antes
-		}
-		if dI == "" && dJ != "" {
-			return false
-		}
-		return strings.ToLower(projects[i].DisplayNameOrName()) < strings.ToLower(projects[j].DisplayNameOrName())
-	})
+	}
 
 	var projectsList []string
 	for p := range projectMap {
@@ -327,13 +346,17 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		currentWorker = employeesList[0]
 	}
 
-	// Calcular los últimos proyectos utilizados por el trabajador
+	// Calcular los proyectos pendientes:
+	// Aquellos que tienen horas imputadas en las últimas 2 semanas O tienen un ticket abierto asignado al usuario
+	twoWeeksAgo := time.Now().AddDate(0, 0, -14).Format("2006-01-02")
+
 	type projAccumulator struct {
 		project WorkerRecentProject
 	}
 	recentProjectsMap := make(map[string]*projAccumulator)
 	var recentProjectsOrder []string
 
+	// 1. Añadir proyectos con imputaciones del trabajador en las últimas 2 semanas o con tickets abiertos
 	for _, entry := range entries {
 		if currentWorker != "" && entry.DisplayEmployee() != currentWorker {
 			continue
@@ -344,9 +367,27 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		hasOpenTicket := false
+		if entry.ProjectID.ID > 0 && ticketsByProjectID[entry.ProjectID.ID] != nil {
+			hasOpenTicket = true
+		} else if ticketsByProjectName[pName] != nil {
+			hasOpenTicket = true
+		}
+
+		isRecent := (entry.Date >= twoWeeksAgo)
+		if !isRecent && !hasOpenTicket {
+			continue
+		}
+
 		if acc, exists := recentProjectsMap[pName]; exists {
 			acc.project.TotalHours += entry.UnitAmount
 			acc.project.EntryCount++
+			if entry.Date > acc.project.LastDate {
+				acc.project.LastDate = entry.Date
+				if entry.TaskID.Name != "" {
+					acc.project.LastTask = entry.TaskID.Name
+				}
+			}
 		} else {
 			taskName := ""
 			if entry.TaskID.Name != "" {
@@ -368,13 +409,16 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Si no hay proyectos para el trabajador seleccionado pero hay partes en total, seleccionar primer trabajador con actividad
+	// 2. Si no hay proyectos pendientes para el trabajador seleccionado pero hay actividad general,
+	// buscar fallback si aplica
 	if len(recentProjectsOrder) == 0 && len(entries) > 0 {
 		for _, entry := range entries {
-			emp := entry.DisplayEmployee()
-			if emp != "" && emp != "Sin asignar" {
-				currentWorker = emp
-				break
+			if entry.Date >= twoWeeksAgo {
+				emp := entry.DisplayEmployee()
+				if emp != "" && emp != "Sin asignar" {
+					currentWorker = emp
+					break
+				}
 			}
 		}
 		if currentWorker != "" {
@@ -386,9 +430,24 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				if pName == "" || pName == "-" {
 					continue
 				}
+				hasOpenTicket := false
+				if entry.ProjectID.ID > 0 && ticketsByProjectID[entry.ProjectID.ID] != nil {
+					hasOpenTicket = true
+				} else if ticketsByProjectName[pName] != nil {
+					hasOpenTicket = true
+				}
+				if entry.Date < twoWeeksAgo && !hasOpenTicket {
+					continue
+				}
 				if acc, exists := recentProjectsMap[pName]; exists {
 					acc.project.TotalHours += entry.UnitAmount
 					acc.project.EntryCount++
+					if entry.Date > acc.project.LastDate {
+						acc.project.LastDate = entry.Date
+						if entry.TaskID.Name != "" {
+							acc.project.LastTask = entry.TaskID.Name
+						}
+					}
 				} else {
 					taskName := ""
 					if entry.TaskID.Name != "" {
@@ -412,10 +471,125 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 3. Añadir proyectos que tienen tickets abiertos asignados al usuario y que aún no estén en recentProjectsMap
+	for _, t := range pendingTickets {
+		pID := t.ProjectID.ID
+		pName := strings.TrimSpace(t.ProjectID.Name)
+		if pName == "" || pName == "-" {
+			if pID > 0 {
+				pName = fmt.Sprintf("Proyecto #%d", pID)
+			} else {
+				continue
+			}
+		}
+
+		if _, exists := recentProjectsMap[pName]; !exists {
+			recentProjectsMap[pName] = &projAccumulator{
+				project: WorkerRecentProject{
+					ID:         pID,
+					Name:       pName,
+					LastDate:   t.CreateDate,
+					TotalHours: 0.0,
+					EntryCount: 0,
+					LastTask:   t.DisplayTitle(),
+					Employee:   currentWorker,
+				},
+			}
+			recentProjectsOrder = append(recentProjectsOrder, pName)
+		}
+	}
+
+	// 4. Enlazar datos de tickets a recentProjectsMap
+	for pName, acc := range recentProjectsMap {
+		if acc.project.ID > 0 && ticketsByProjectID[acc.project.ID] != nil {
+			info := ticketsByProjectID[acc.project.ID]
+			acc.project.OpenTicketCount = info.count
+			acc.project.TicketTitle = info.latestTitle
+		} else if ticketsByProjectName[pName] != nil {
+			info := ticketsByProjectName[pName]
+			acc.project.OpenTicketCount = info.count
+			acc.project.TicketTitle = info.latestTitle
+		}
+	}
+
 	var recentProjects []WorkerRecentProject
 	for _, pName := range recentProjectsOrder {
 		recentProjects = append(recentProjects, recentProjectsMap[pName].project)
 	}
+
+	// 5. Ordenar proyectos pendientes:
+	// - Proyectos con tickets abiertos primero
+	// - Fecha de última imputación (descendente)
+	// - Total de horas (descendente)
+	sort.SliceStable(recentProjects, func(i, j int) bool {
+		tI := recentProjects[i].OpenTicketCount > 0
+		tJ := recentProjects[j].OpenTicketCount > 0
+		if tI != tJ {
+			return tI
+		}
+		dI := recentProjects[i].LastDate
+		dJ := recentProjects[j].LastDate
+		if dI != dJ {
+			return dI > dJ
+		}
+		return recentProjects[i].TotalHours > recentProjects[j].TotalHours
+	})
+
+	// 6. Ordenar la lista completa de proyectos (projects):
+	// Los proyectos pendientes van PRIMERO y en el MISMO ORDEN EXACTO que recentProjects
+	pendingProjectRank := make(map[string]int)
+	pendingProjectIDRank := make(map[int]int)
+	for idx, rp := range recentProjects {
+		pendingProjectRank[strings.ToLower(rp.Name)] = idx + 1
+		if rp.ID > 0 {
+			pendingProjectIDRank[rp.ID] = idx + 1
+		}
+	}
+
+	sort.SliceStable(projects, func(i, j int) bool {
+		pNameI := strings.ToLower(projects[i].DisplayNameOrName())
+		pNameJ := strings.ToLower(projects[j].DisplayNameOrName())
+
+		rankI := 0
+		if r, ok := pendingProjectIDRank[projects[i].ID]; ok {
+			rankI = r
+		} else if r, ok := pendingProjectRank[pNameI]; ok {
+			rankI = r
+		}
+
+		rankJ := 0
+		if r, ok := pendingProjectIDRank[projects[j].ID]; ok {
+			rankJ = r
+		} else if r, ok := pendingProjectRank[pNameJ]; ok {
+			rankJ = r
+		}
+
+		if rankI > 0 && rankJ > 0 {
+			return rankI < rankJ // Mismo orden relativo que en pendientes
+		}
+		if rankI > 0 && rankJ == 0 {
+			return true // Proyectos pendientes van antes
+		}
+		if rankI == 0 && rankJ > 0 {
+			return false
+		}
+
+		dI := projects[i].LastDate
+		dJ := projects[j].LastDate
+		if dI != "" && dJ != "" {
+			if dI != dJ {
+				return dI > dJ
+			}
+			return projects[i].TotalHours > projects[j].TotalHours
+		}
+		if dI != "" && dJ == "" {
+			return true
+		}
+		if dI == "" && dJ != "" {
+			return false
+		}
+		return pNameI < pNameJ
+	})
 
 	errMsg := ""
 	if fetchErr != nil {
@@ -446,6 +620,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		EmployeesList:        employeesList,
 		CurrentWorker:        currentWorker,
 		RecentProjects:       recentProjects,
+		Today:                time.Now().Format("2006-01-02"),
 		Error:                errMsg,
 	}
 

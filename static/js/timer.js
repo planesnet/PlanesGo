@@ -46,11 +46,11 @@ function saveTimerState(state) {
 }
 
 /**
- * Inicia un nuevo temporizador de trabajo
+ * Inicia o reanuda un temporizador de trabajo (admite imputación existente)
  */
-function startWorkTimer(projectId, projectName, taskId, taskName, description) {
-    if (!projectId) {
-        alert('Debes seleccionar un proyecto para iniciar el trabajo.');
+function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs) {
+    if (!projectId && !timesheetId) {
+        alert('Debes seleccionar un proyecto o imputación para iniciar el trabajo.');
         return;
     }
 
@@ -58,34 +58,55 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description) {
     requestNotificationPermission();
 
     const now = Date.now();
+    const initialAccumulated = (typeof accumulatedMs === 'number' && accumulatedMs >= 0) ? accumulatedMs : 0;
+
     const state = {
-        projectId: parseInt(projectId, 10),
-        projectName: projectName || ('Proyecto #' + projectId),
+        timesheetId: timesheetId ? parseInt(timesheetId, 10) : null,
+        projectId: projectId ? parseInt(projectId, 10) : 0,
+        projectName: projectName || (projectId ? 'Proyecto #' + projectId : 'Imputación activa'),
         taskId: taskId ? parseInt(taskId, 10) : null,
         taskName: taskName || '',
         description: description || '',
         status: 'running', // 'running' | 'paused'
-        startedAt: now,
+        startedAt: now - initialAccumulated,
         lastStartTime: now,
-        accumulatedMs: 0,
+        accumulatedMs: initialAccumulated,
         lastPromptTime: now
     };
 
     saveTimerState(state);
     renderTimerBar(state);
     startTimerTicker();
+    updateAllRowTimerButtonStates();
+
+    // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true)
+    fetch('/api/timer/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            project_id: state.projectId || 0,
+            task_id: state.taskId || 0,
+            timesheet_id: state.timesheetId || 0,
+            description: state.description
+        })
+    }).then(res => res.json()).then(data => {
+        if (data && data.timesheet_id && !state.timesheetId) {
+            state.timesheetId = data.timesheet_id;
+            saveTimerState(state);
+            updateAllRowTimerButtonStates();
+        }
+    }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err));
 
     // Cerrar modal de imputación si estaba abierto
     if (typeof closeCreateTimesheetModal === 'function') {
         closeCreateTimesheetModal();
     }
 
-    // Feedback visual al usuario
-    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}"`);
+    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Timesheet ID: ${state.timesheetId || 'nuevo'})`);
 }
 
 /**
- * Alterna entre Pausar y Reanudar el temporizador
+ * Alterna entre Pausar y Reanudar el temporizador y sincroniza con Odoo
  */
 function togglePauseTimer() {
     const state = getTimerState();
@@ -99,17 +120,53 @@ function togglePauseTimer() {
         state.accumulatedMs = (state.accumulatedMs || 0) + sessionMs;
         state.status = 'paused';
         state.lastStartTime = null;
+
+        const totalHoursDecimal = parseFloat((state.accumulatedMs / 3600000).toFixed(2));
+
+        // Sincronizar pausa con Odoo (action_timer_pause / is_timer_running=false)
+        fetch('/api/timer/pause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: state.timesheetId || 0,
+                task_id: state.taskId || 0,
+                unit_amount: totalHoursDecimal
+            })
+        }).catch(err => console.warn('[PlanesGo Timer] Error pausando en Odoo:', err));
+
+        // Si hay una fila en la tabla para esta imputación, actualizar sus horas
+        if (state.timesheetId) {
+            const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+            if (row) {
+                row.dataset.hours = totalHoursDecimal;
+                const hoursBadge = row.querySelector('td:nth-last-child(2) span.font-mono');
+                if (hoursBadge) hoursBadge.textContent = `${totalHoursDecimal.toFixed(2)} h`;
+            }
+        }
+
         console.log('[PlanesGo Timer] Trabajo en pausa. Tiempo acumulado:', formatElapsedMs(state.accumulatedMs));
     } else {
         // Reanudar
         state.status = 'running';
         state.lastStartTime = now;
-        state.lastPromptTime = now; // reinicia el ciclo de 15 minutos al reanudar
+        state.lastPromptTime = now;
+
+        // Sincronizar reanudación con Odoo (action_timer_resume / is_timer_running=true)
+        fetch('/api/timer/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: state.timesheetId || 0,
+                task_id: state.taskId || 0
+            })
+        }).catch(err => console.warn('[PlanesGo Timer] Error reanudando en Odoo:', err));
+
         console.log('[PlanesGo Timer] Trabajo reanudado');
     }
 
     saveTimerState(state);
     renderTimerBar(state);
+    updateAllRowTimerButtonStates();
 }
 
 /**
@@ -175,6 +232,25 @@ function confirmDiscardTimer() {
  * Limpia y oculta el temporizador completamente
  */
 function clearTimer() {
+    const state = getTimerState();
+    if (state && (state.timesheetId || state.taskId)) {
+        let totalMs = state.accumulatedMs || 0;
+        if (state.status === 'running' && state.lastStartTime) {
+            totalMs += (Date.now() - state.lastStartTime);
+        }
+        const totalHours = parseFloat((totalMs / 3600000).toFixed(2));
+        fetch('/api/timer/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: state.timesheetId || 0,
+                task_id: state.taskId || 0,
+                unit_amount: totalHours,
+                description: state.description
+            })
+        }).catch(err => console.warn('[PlanesGo Timer] Error deteniendo en Odoo:', err));
+    }
+
     saveTimerState(null);
     stopTimerTicker();
     stopTitleFlash();
@@ -184,6 +260,8 @@ function clearTimer() {
     if (container) {
         container.classList.add('hidden');
     }
+
+    updateAllRowTimerButtonStates();
 }
 
 /**
@@ -246,6 +324,25 @@ function updateTimerTick() {
     const clockEl = document.getElementById('timer-clock-display');
     if (clockEl) {
         clockEl.textContent = formatElapsedMs(totalMs);
+    }
+
+    // Si el modal de confirmación de 15 minutos está visible en pantalla, mantener su contador activo en tiempo real
+    const modalTimeEl = document.getElementById('confirm-modal-time');
+    if (modalTimeEl) {
+        modalTimeEl.textContent = formatElapsedMs(totalMs);
+    }
+
+    // Si el temporizador corresponde a una imputación de la tabla, actualizar sus horas en pantalla en tiempo real
+    if (state.timesheetId) {
+        const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+        if (row) {
+            const hoursDecimal = (totalMs / 3600000).toFixed(2);
+            row.dataset.hours = hoursDecimal;
+            const hoursBadge = row.querySelector('td:nth-last-child(2) span.font-mono');
+            if (hoursBadge) {
+                hoursBadge.textContent = `${hoursDecimal} h`;
+            }
+        }
     }
 }
 
@@ -422,13 +519,47 @@ function renderTimerBar(state) {
 }
 
 /**
- * Inicializa el temporizador si ya existía en localStorage al cargar la página
+ * Inicializa el temporizador si ya existía al cargar la página y consulta Odoo
  */
-function initTimerFromStorage() {
-    const state = getTimerState();
-    if (state) {
-        renderTimerBar(state);
+async function initTimerFromStorage() {
+    const local = getTimerState();
+    if (local) {
+        renderTimerBar(local);
         startTimerTicker();
+        updateAllRowTimerButtonStates();
+    }
+
+    // Consultar a Odoo si hay un cronómetro activo en el servidor
+    try {
+        const resp = await fetch('/api/timer/active');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data && data.active && data.active.is_running) {
+                const act = data.active;
+                const accumulatedMs = Math.round((act.unit_amount || 0) * 3600 * 1000);
+                const serverState = {
+                    timesheetId: act.timesheet_id,
+                    projectId: act.project_id,
+                    projectName: act.project_name || ('Proyecto #' + act.project_id),
+                    taskId: act.task_id || null,
+                    taskName: act.task_name || '',
+                    description: act.description || '',
+                    status: 'running',
+                    startedAt: act.started_at || (Date.now() - accumulatedMs),
+                    lastStartTime: Date.now(),
+                    accumulatedMs: accumulatedMs,
+                    lastPromptTime: Date.now()
+                };
+                saveTimerState(serverState);
+                renderTimerBar(serverState);
+                startTimerTicker();
+                updateAllRowTimerButtonStates();
+            } else if (!local || local.status !== 'running') {
+                updateAllRowTimerButtonStates();
+            }
+        }
+    } catch (e) {
+        console.warn('[PlanesGo Timer] No se pudo sincronizar temporizador con Odoo:', e);
     }
 }
 
@@ -602,6 +733,73 @@ window.testTimerReminder = function () {
 };
 
 // Exportar funciones globalmente para interactuar desde HTML
+/**
+ * Activa o pausa el cronómetro desde el botón Play de una fila de imputación de hoy
+ */
+function toggleTimesheetRowTimer(btn) {
+    if (!btn) return;
+    const row = btn.closest('.timesheet-row');
+    const tsId = parseInt(btn.dataset.id, 10);
+    const pId = parseInt(btn.dataset.projectId, 10) || (row ? parseInt(row.dataset.projectId, 10) : 0) || 0;
+    const pName = btn.dataset.projectName || (row ? row.dataset.projectName : '') || '';
+    const taskId = parseInt(btn.dataset.taskId, 10) || (row ? parseInt(row.dataset.taskId, 10) : 0) || 0;
+    const taskName = btn.dataset.taskName || (row ? row.dataset.taskName : '') || '';
+    const hours = parseFloat(btn.dataset.hours) || (row ? parseFloat(row.dataset.hours) : 0) || 0;
+    const desc = btn.dataset.desc || (row ? row.dataset.desc : '') || '';
+
+    const current = getTimerState();
+
+    // Si este mismo registro ya está corriendo, alternar a pausa
+    if (current && current.timesheetId === tsId && current.status === 'running') {
+        togglePauseTimer();
+        return;
+    }
+
+    // Si hay otro temporizador activo, pausarlo primero
+    if (current && current.status === 'running') {
+        togglePauseTimer();
+    }
+
+    // Iniciar o reanudar el cronómetro para esta imputación concreta
+    const accumulatedMs = Math.round(hours * 3600 * 1000);
+    startWorkTimer(pId, pName, taskId, taskName, desc, tsId, accumulatedMs);
+}
+
+/**
+ * Actualiza el aspecto de todos los botones de play en las filas de imputaciones
+ */
+function updateAllRowTimerButtonStates() {
+    const current = getTimerState();
+    const activeTsId = (current && current.status === 'running') ? current.timesheetId : null;
+
+    document.querySelectorAll('.timesheet-row').forEach(row => {
+        const rowId = parseInt(row.dataset.id, 10);
+        const playBtn = row.querySelector('.btn-row-timer-play');
+        if (!playBtn) return;
+
+        const iconPlay = playBtn.querySelector('.icon-play');
+        const iconPause = playBtn.querySelector('.icon-pause');
+
+        if (activeTsId && rowId === activeTsId) {
+            // Fila activa: resaltado visual y botón de pausa pulsante
+            row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            playBtn.classList.remove('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+            playBtn.classList.add('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+            playBtn.title = 'Pausar cronómetro de esta imputación';
+            if (iconPlay) iconPlay.classList.add('hidden');
+            if (iconPause) iconPause.classList.remove('hidden');
+        } else {
+            // Fila normal inactiva
+            row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            playBtn.classList.remove('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+            playBtn.classList.add('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+            playBtn.title = 'Activar o reanudar cronómetro en esta imputación';
+            if (iconPlay) iconPlay.classList.remove('hidden');
+            if (iconPause) iconPause.classList.add('hidden');
+        }
+    });
+}
+
 window.startWorkTimer = startWorkTimer;
 window.togglePauseTimer = togglePauseTimer;
 window.finalizeActiveTimer = finalizeActiveTimer;
@@ -610,3 +808,6 @@ window.confirmContinueTimer = confirmContinueTimer;
 window.confirmPauseTimer = confirmPauseTimer;
 window.confirmFinalizeTimerFromModal = confirmFinalizeTimerFromModal;
 window.clearTimer = clearTimer;
+window.toggleTimesheetRowTimer = toggleTimesheetRowTimer;
+window.updateAllRowTimerButtonStates = updateAllRowTimerButtonStates;
+window.getTimerState = getTimerState;

@@ -119,6 +119,8 @@ type Project struct {
 	TimesheetCount    int      `json:"timesheet_count,omitempty"` // Número de partes de horas registrados
 	LastDate          string   `json:"last_date,omitempty"` // Fecha de última imputación (YYYY-MM-DD)
 	LastTask          string   `json:"last_task,omitempty"` // Última tarea imputada
+	OpenTicketCount   int      `json:"open_ticket_count,omitempty"`
+	TicketTitle       string   `json:"ticket_title,omitempty"`
 }
 
 func (p *Project) FormattedLastDate() string {

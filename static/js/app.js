@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 activeSidebarProjectId = '';
                 activeSidebarProject = '';
             }
+            if (typeof updateStartWorkTimerButton === 'function') updateStartWorkTimerButton();
             applyTimesheetFilters();
         });
     }
@@ -235,5 +236,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inicializar controles de semana y filtros iniciales
     updateWeekControls();
+    if (typeof updateStartWorkTimerButton === 'function') updateStartWorkTimerButton();
     applyTimesheetFilters();
 });

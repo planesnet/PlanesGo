@@ -38,13 +38,15 @@ type AppState struct {
 }
 
 type WorkerRecentProject struct {
-	ID         int     `json:"id"`
-	Name       string  `json:"name"`
-	LastDate   string  `json:"last_date"`
-	TotalHours float64 `json:"total_hours"`
-	EntryCount int     `json:"entry_count"`
-	LastTask   string  `json:"last_task"`
-	Employee   string  `json:"employee"`
+	ID              int     `json:"id"`
+	Name            string  `json:"name"`
+	LastDate        string  `json:"last_date"`
+	TotalHours      float64 `json:"total_hours"`
+	EntryCount      int     `json:"entry_count"`
+	LastTask        string  `json:"last_task"`
+	Employee        string  `json:"employee"`
+	OpenTicketCount int     `json:"open_ticket_count,omitempty"`
+	TicketTitle     string  `json:"ticket_title,omitempty"`
 }
 
 func (r WorkerRecentProject) FormattedHours() string {
@@ -85,6 +87,7 @@ type PageData struct {
 	PendingTickets       []odoo.Ticket
 	PendingTicketsCount  int
 	OdooURL              string
+	Today                string
 	Error                string
 }
 

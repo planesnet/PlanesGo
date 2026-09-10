@@ -85,6 +85,28 @@
                             </td>
                             <td class="py-3 px-3 text-right whitespace-nowrap">
                                 <div class="inline-flex items-center justify-end space-x-1">
+                                    {{if and (eq .Date $.Today) (not .IsInvoiced)}}
+                                    <button type="button"
+                                            onclick="toggleTimesheetRowTimer(this)"
+                                            data-id="{{.ID}}"
+                                            data-date="{{.Date}}"
+                                            data-project-id="{{.ProjectID.ID}}"
+                                            data-project-name="{{.ProjectID.Name}}"
+                                            data-task-id="{{.TaskID.ID}}"
+                                            data-task-name="{{.TaskID.Name}}"
+                                            data-hours="{{.UnitAmount}}"
+                                            data-desc="{{.Name}}"
+                                            class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
+                                            title="Activar o reanudar cronómetro en esta imputación">
+                                        <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                                        </svg>
+                                        <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+                                    {{end}}
+
                                     <button type="button"
                                             onclick="openEditTimesheetModal(this)"
                                             data-id="{{.ID}}"

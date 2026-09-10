@@ -110,6 +110,7 @@ function selectSidebarProject(projectName, projectId) {
         btnLabel.innerText = pName ? `Imputar en ${pName.length > 15 ? pName.slice(0, 14) + '...' : pName}` : 'Imputar Horas';
     }
 
+    updateStartWorkTimerButton();
     applyTimesheetFilters();
 }
 
@@ -124,12 +125,80 @@ function clearSidebarProjectFilter() {
     const projectSelect = document.getElementById('filter-project');
     if (projectSelect) projectSelect.value = '';
 
+    updateStartWorkTimerButton();
     applyTimesheetFilters();
+}
+
+/**
+ * Muestra u oculta el botón "Iniciar Trabajo" según si hay un proyecto activo
+ */
+function updateStartWorkTimerButton() {
+    const btn = document.getElementById('btn-start-work-timer-bar');
+    const label = document.getElementById('btn-start-work-timer-label');
+    if (!btn) return;
+
+    let pName = activeSidebarProjectName || '';
+    let pId = activeSidebarProjectId || '';
+
+    if (!pName) {
+        const projectSelect = document.getElementById('filter-project');
+        if (projectSelect && projectSelect.value) {
+            pName = projectSelect.value;
+        }
+    }
+
+    if (pName || pId) {
+        btn.classList.remove('hidden');
+        btn.style.display = 'inline-flex';
+        if (label) {
+            label.textContent = `Iniciar en ${pName.length > 15 ? pName.slice(0, 14) + '...' : pName}`;
+        }
+    } else {
+        btn.classList.add('hidden');
+        btn.style.display = 'none';
+        if (label) {
+            label.textContent = 'Iniciar Trabajo';
+        }
+    }
+}
+
+/**
+ * Inicia el cronómetro para el proyecto activo seleccionado
+ */
+function startWorkTimerForActiveProject() {
+    let pName = activeSidebarProjectName || '';
+    let pId = activeSidebarProjectId || '';
+
+    if (!pName && !pId) {
+        const projectSelect = document.getElementById('filter-project');
+        if (projectSelect && projectSelect.value) {
+            pName = projectSelect.value;
+        }
+    }
+
+    if (!pName && !pId) {
+        alert('Debes seleccionar un proyecto activo en el panel para iniciar el trabajo.');
+        return;
+    }
+
+    if (!pId && pName) {
+        const item = document.querySelector(`.sidebar-project-item[data-project-name="${CSS.escape(pName)}"], .sidebar-all-project-item[data-project-name="${CSS.escape(pName)}"]`);
+        if (item && item.dataset.projectId) {
+            pId = item.dataset.projectId;
+        }
+    }
+
+    if (typeof startWorkTimer === 'function') {
+        startWorkTimer(pId || 0, pName, null, '', `Trabajo en ${pName}`);
+    }
 }
 
 function filterByProjectName(projectName) {
     selectSidebarProject(projectName, '');
 }
+
+window.updateStartWorkTimerButton = updateStartWorkTimerButton;
+window.startWorkTimerForActiveProject = startWorkTimerForActiveProject;
 
 function rebuildSidebarProjects(workerName) {
     const rows = document.querySelectorAll('.timesheet-row');

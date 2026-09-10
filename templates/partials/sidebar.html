@@ -128,11 +128,11 @@
                    class="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-700 transition">
         </div>
 
-        <!-- Selector de modo en el panel (Recientes vs Todos) -->
+        <!-- Selector de modo en el panel (Pendientes vs Todos) -->
         <div class="mt-3 p-0.5 bg-slate-100 rounded-xl flex text-xs">
             <button type="button" id="sidebar-tab-btn-recent" onclick="switchSidebarTab('recent')"
                     class="flex-1 py-1 text-center font-bold text-xs rounded-lg transition-all bg-white text-sky-700 shadow-2xs cursor-pointer">
-                Recientes
+                Pendientes
             </button>
             <button type="button" id="sidebar-tab-btn-all" onclick="switchSidebarTab('all')"
                     class="flex-1 py-1 text-center font-medium text-xs text-slate-500 hover:text-slate-800 rounded-lg transition-all cursor-pointer">
@@ -140,7 +140,7 @@
             </button>
         </div>
 
-        <!-- Contenedor 1: Proyectos Recientes del Trabajador -->
+        <!-- Contenedor 1: Proyectos Pendientes del Trabajador (2 semanas o tickets abiertos) -->
         <div class="mt-3 space-y-1.5 max-h-[calc(100vh-380px)] overflow-y-auto pr-0.5" id="sidebar-projects-list">
             {{if .RecentProjects}}
                 {{range .RecentProjects}}
@@ -153,13 +153,24 @@
                         <span class="text-xs font-bold text-slate-800 group-hover:text-sky-700 line-clamp-2 leading-tight">
                             {{.Name}}
                         </span>
-                        {{if gt .TotalHours 0.0}}
-                        <span class="text-[10px] font-extrabold text-sky-700 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs font-mono flex-shrink-0">
-                            {{.FormattedHours}}
-                        </span>
-                        {{end}}
+                        <div class="flex items-center gap-1 flex-shrink-0">
+                            {{if gt .OpenTicketCount 0}}
+                            <span class="inline-flex items-center text-[9px] font-extrabold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 shadow-2xs font-mono" title="{{.OpenTicketCount}} ticket(s) abierto(s)">
+                                🎫 {{.OpenTicketCount}}
+                            </span>
+                            {{end}}
+                            {{if gt .TotalHours 0.0}}
+                            <span class="text-[10px] font-extrabold text-sky-700 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs font-mono">
+                                {{.FormattedHours}}
+                            </span>
+                            {{end}}
+                        </div>
                     </div>
-                    {{if .LastTask}}
+                    {{if .TicketTitle}}
+                    <div class="text-[10px] text-amber-700 bg-amber-50/70 border border-amber-100 px-1.5 py-0.5 rounded font-medium truncate" title="{{.TicketTitle}}">
+                        🎫 {{.TicketTitle}}
+                    </div>
+                    {{else if .LastTask}}
                     <div class="text-[10px] text-slate-500 truncate bg-slate-100/80 px-1.5 py-0.5 rounded font-mono">
                         ↳ {{.LastTask}}
                     </div>
@@ -171,13 +182,13 @@
                     <svg class="w-8 h-8 mx-auto text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
-                    <p class="text-xs font-medium text-slate-500">Sin proyectos registrados</p>
-                    <p class="text-[11px] text-slate-400 mt-0.5">No hay partes de horas no facturados para este trabajador</p>
+                    <p class="text-xs font-medium text-slate-500">Sin proyectos pendientes</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">No hay horas en las últimas 2 semanas ni tickets abiertos</p>
                 </div>
             {{end}}
         </div>
 
-        <!-- Contenedor 2: Todos los Proyectos de Odoo (ordenados por recencia) -->
+        <!-- Contenedor 2: Todos los Proyectos de Odoo (ordenados preservando pendientes al inicio) -->
         <div class="mt-3 space-y-1.5 max-h-[calc(100vh-380px)] overflow-y-auto pr-0.5 hidden" id="sidebar-all-projects-list">
             {{if .Projects}}
                 {{range .Projects}}
@@ -190,11 +201,18 @@
                         <span class="text-xs font-bold text-slate-800 group-hover:text-indigo-700 line-clamp-2 leading-tight">
                             {{.DisplayNameOrName}}
                         </span>
-                        {{if gt .TotalHours 0.0}}
-                        <span class="text-[10px] font-extrabold text-indigo-700 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs font-mono flex-shrink-0">
-                            {{.FormattedTotalHours}}
-                        </span>
-                        {{end}}
+                        <div class="flex items-center gap-1 flex-shrink-0">
+                            {{if gt .OpenTicketCount 0}}
+                            <span class="inline-flex items-center text-[9px] font-extrabold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 shadow-2xs font-mono" title="{{.OpenTicketCount}} ticket(s) abierto(s)">
+                                🎫 {{.OpenTicketCount}}
+                            </span>
+                            {{end}}
+                            {{if gt .TotalHours 0.0}}
+                            <span class="text-[10px] font-extrabold text-indigo-700 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs font-mono">
+                                {{.FormattedTotalHours}}
+                            </span>
+                            {{end}}
+                        </div>
                     </div>
                     <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
                         <span class="truncate max-w-[150px]" title="{{.DisplayPartner}}">

@@ -513,6 +513,77 @@ function submitTimesheetForm(event) {
         description: desc
     };
 
+    // Actualización optimista ultra-rápida si es edición existente
+    if (isEdit) {
+        const row = document.querySelector(`.timesheet-row[data-id="${entryId}"]`);
+        if (row) {
+            row.dataset.date = date;
+            row.dataset.desc = desc;
+            row.dataset.hours = hours.toFixed(2);
+            row.dataset.taskId = taskId || '';
+            const tName = (taskSelect && taskSelect.selectedIndex > 0) ? taskSelect.options[taskSelect.selectedIndex].text.trim() : '';
+            row.dataset.taskName = tName;
+
+            // Actualizar celda de fecha
+            const dateSpan = row.querySelector('td:nth-child(1) span');
+            if (dateSpan) dateSpan.textContent = date;
+
+            // Actualizar celda de tarea
+            const taskCell = row.querySelector('td:nth-child(4)');
+            if (taskCell) {
+                if (tName) {
+                    taskCell.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${tName}</span>`;
+                } else {
+                    taskCell.innerHTML = `<span class="text-slate-400 text-xs">-</span>`;
+                }
+            }
+
+            // Actualizar celda de descripción
+            const descCell = row.querySelector('td:nth-child(5)');
+            if (descCell) {
+                descCell.title = desc;
+                descCell.innerHTML = desc ? desc : `<span class="italic text-slate-400">Sin descripción</span>`;
+            }
+
+            // Actualizar celda de horas
+            const hoursBadge = row.querySelector('td:nth-child(6) span.font-mono');
+            if (hoursBadge) {
+                hoursBadge.textContent = `${hours.toFixed(2)} h`;
+            }
+
+            // Actualizar data-* en botones de editar y play
+            const editBtn = row.querySelector('button[onclick*="openEditTimesheetModal"]');
+            if (editBtn) {
+                editBtn.dataset.date = date;
+                editBtn.dataset.taskId = taskId || '';
+                editBtn.dataset.taskName = tName;
+                editBtn.dataset.name = desc;
+                editBtn.dataset.hours = hours.toFixed(2);
+            }
+            const playBtn = row.querySelector('.btn-row-timer-play');
+            if (playBtn) {
+                playBtn.dataset.date = date;
+                playBtn.dataset.taskId = taskId || '';
+                playBtn.dataset.taskName = tName;
+                playBtn.dataset.desc = desc;
+                playBtn.dataset.hours = hours.toFixed(2);
+            }
+
+            // Destello visual de éxito instantáneo
+            row.classList.add('bg-emerald-100/80', 'transition-colors', 'duration-500');
+            setTimeout(() => {
+                row.classList.remove('bg-emerald-100/80');
+            }, 1200);
+        }
+
+        // Cerrar modal de inmediato sin esperar a Odoo
+        closeCreateTimesheetModal();
+    } else {
+        // En creación nueva, cerrar modal y dar feedback inmediato
+        closeCreateTimesheetModal();
+    }
+
+    // Enviar a Odoo en segundo plano
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -529,21 +600,14 @@ function submitTimesheetForm(event) {
         if (typeof clearTimer === 'function') {
             clearTimer();
         }
-        if (feedback) {
-            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 block';
-            feedback.innerText = isEdit ? '✓ Parte de horas actualizado con éxito. Recargando...' : '✓ Horas imputadas con éxito en Odoo. Recargando...';
-        }
-        setTimeout(() => {
+        if (!isEdit) {
+            // Si era un nuevo registro, recargar la vista para incluirlo con todos sus datos y relaciones de Odoo
             window.location.reload();
-        }, 800);
+        }
     })
     .catch(err => {
-        if (submitBtn) submitBtn.disabled = false;
-        if (spinner) spinner.classList.add('hidden');
-        if (feedback) {
-            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
-            feedback.innerText = '⚠️ ' + err.message;
-        }
+        console.error('[PlanesGo] Error guardando imputación en Odoo:', err);
+        alert('Error al guardar en Odoo: ' + err.message);
     });
 }
 

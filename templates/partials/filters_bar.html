@@ -32,14 +32,14 @@
         </button>
     </div>
 
-    <!-- Botón Iniciar Trabajo (Cronómetro) -->
-    <button type="button" id="btn-start-work-timer-bar" onclick="openCreateTimesheetModal()"
-            class="px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 active:bg-emerald-200 rounded-xl transition shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
+    <!-- Botón Iniciar Trabajo (Cronómetro) - Solo visible si hay un proyecto activo -->
+    <button type="button" id="btn-start-work-timer-bar" onclick="startWorkTimerForActiveProject()"
+            class="hidden px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 active:bg-emerald-200 rounded-xl transition shadow-xs items-center justify-center space-x-1.5 cursor-pointer shrink-0"
             title="Iniciar un trabajo activo con cronómetro en tiempo real (Shift + Ctrl + T)">
         <svg class="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
         </svg>
-        <span>Iniciar Trabajo</span>
+        <span id="btn-start-work-timer-label">Iniciar Trabajo</span>
     </button>
 
     <!-- Botón Imputar Horas -->
