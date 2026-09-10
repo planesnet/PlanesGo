@@ -25,7 +25,7 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 	cfg.Odoo.URL = "https://planesnet.autopyme.com"
 
 	data := PageData{
-		Version:      "1.1.0",
+		Version:      Version,
 		Config:       cfg,
 		Session:      &SessionData{Username: "test@planesnet.com", UserName: "Test User"},
 		HasOdooToken: true,
@@ -102,7 +102,7 @@ func TestSettingsTemplateRendering(t *testing.T) {
 	}
 
 	dataAnon := SettingsPageData{
-		Version: "1.1.0",
+		Version: Version,
 		Config:  cfg,
 		Session: anonSession,
 	}
@@ -126,7 +126,7 @@ func TestSettingsTemplateRendering(t *testing.T) {
 	}
 
 	dataUser := SettingsPageData{
-		Version: "1.1.0",
+		Version: Version,
 		Config:  cfg,
 		Session: userSession,
 	}

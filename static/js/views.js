@@ -262,130 +262,226 @@ function applyTimesheetFilters() {
 }
 
 function renderCalendarView(matchingRows) {
-    const container = document.getElementById('calendar-grid-days');
+    const container = document.getElementById('calendar-grid-container') || document.getElementById('calendar-grid-days');
     if (!container) return;
 
-    const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const rangeEl = document.getElementById('calendar-week-range');
+    const totalEl = document.getElementById('calendar-week-total');
+
+    // 1. Días de la semana: L, M, X, J, V, S, D
+    const dayLetters = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+    const dayFullNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     const today = new Date();
 
-    let html = '';
+    const weekDays = [];
     for (let i = 0; i < 7; i++) {
         const dayDate = new Date(selectedWeekMonday);
         dayDate.setDate(dayDate.getDate() + i);
-        const dayISO = formatISODate(dayDate);
-        const isToday = isSameDay(dayDate, today);
+        weekDays.push({
+            letter: dayLetters[i],
+            fullName: dayFullNames[i],
+            date: dayDate,
+            iso: formatISODate(dayDate),
+            formatted: dayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+            isToday: isSameDay(dayDate, today)
+        });
+    }
 
-        const dayEntries = matchingRows.filter(r => r.date === dayISO);
-        const dayTotalHours = dayEntries.reduce((sum, r) => sum + r.hours, 0);
+    if (rangeEl && weekDays.length === 7) {
+        const startStr = weekDays[0].date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+        const endStr = weekDays[6].date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+        rangeEl.textContent = `(${startStr} - ${endStr})`;
+    }
 
-        const dayFormatted = dayDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-
-        html += `
-        <div class="bg-slate-50/70 rounded-2xl border ${isToday ? 'border-sky-400 ring-2 ring-sky-100 bg-sky-50/20' : 'border-slate-200/80'} p-3 flex flex-col justify-between min-h-[300px] transition-all">
-            <div>
-                <!-- Cabecera de Día -->
-                <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b ${isToday ? 'border-sky-200' : 'border-slate-200/70'}">
-                    <div>
-                        <span class="text-xs font-bold ${isToday ? 'text-sky-700' : 'text-slate-800'} block">
-                            ${dayNames[i]}
-                        </span>
-                        <span class="text-[11px] text-slate-400 font-medium">
-                            ${dayFormatted}
-                        </span>
-                    </div>
-                    <div class="flex items-center space-x-1">
-                        ${isToday ? '<span class="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-sky-500 text-white tracking-wider">Hoy</span>' : ''}
-                        <span class="text-[11px] font-mono font-bold ${dayTotalHours > 0 ? 'text-indigo-700 bg-indigo-50 border border-indigo-100' : 'text-slate-400 bg-slate-100'} px-1.5 py-0.5 rounded-md">
-                            ${dayTotalHours.toFixed(2)}h
-                        </span>
-                    </div>
-                </div>
-
-                <!-- Lista de Partes de Horas del Día -->
-                <div class="space-y-2">
-        `;
-
-        if (dayEntries.length === 0) {
-            html += `
-                <div class="py-6 text-center text-slate-300">
-                    <span class="text-[11px] font-medium block">Sin horas</span>
-                </div>
-            `;
-        } else {
-            dayEntries.forEach(r => {
-                const safeDesc = escapeHtml(r.desc);
-                const safeTask = escapeHtml(r.task);
-                const safeProject = escapeHtml(r.projectName);
-                const safeEmployee = escapeHtml(r.employee);
-
-                html += `
-                <div class="bg-white rounded-xl p-2.5 border border-slate-200/80 shadow-2xs hover:shadow-xs transition group relative">
-                    <div class="flex items-start justify-between gap-1 mb-1">
-                        <span class="text-[10px] font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-100 truncate max-w-[120px]" title="${safeProject}">
-                            ${safeProject}
-                        </span>
-                        <span class="text-[11px] font-mono font-extrabold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                            ${r.hoursFormatted}
-                        </span>
-                    </div>
-                    ${safeTask ? `
-                    <p class="text-[11px] font-semibold text-slate-800 truncate" title="${safeTask}">
-                        ↳ ${safeTask}
-                    </p>
-                    ` : ''}
-                    ${safeDesc ? `
-                    <p class="text-[10px] text-slate-500 line-clamp-2 mt-0.5" title="${safeDesc}">
-                        ${safeDesc}
-                    </p>
-                    ` : ''}
-                    
-                    <div class="flex items-center justify-between pt-2 mt-1.5 border-t border-slate-100 text-[10px] text-slate-400">
-                        <span class="truncate max-w-[90px]" title="${safeEmployee}">
-                            ${safeEmployee}
-                        </span>
-                        <div class="flex items-center space-x-1">
-                            ${r.invoiced ? `
-                            <span title="Parte Facturado en Odoo (No se puede eliminar)" class="p-1 text-slate-400 cursor-not-allowed">
-                                <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                                </svg>
-                            </span>
-                            ` : `
-                            <button type="button" onclick="openDeleteTimesheetModalFromData('${r.id}', '${r.date}', '${escapeAttr(r.projectName)}', '${escapeAttr(r.task)}', '${r.hours}', '${escapeAttr(r.desc)}')"
-                                    class="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer" title="Eliminar parte no facturado">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                            </button>
-                            `}
-                            <button type="button" onclick="openEditTimesheetModalFromRowData('${r.id}', '${r.date}', '${r.projectId}', '${r.taskId}', '${escapeAttr(r.desc)}', '${r.hours}')"
-                                    class="p-1 text-slate-400 hover:text-sky-600 rounded transition cursor-pointer" title="Editar parte">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                `;
+    // 2. Agrupar por Proyecto (columna más a la izquierda, uno por cada fila)
+    const projectsMap = new Map();
+    matchingRows.forEach(r => {
+        const pKey = r.projectId || r.projectName || 'sin_proyecto';
+        if (!projectsMap.has(pKey)) {
+            projectsMap.set(pKey, {
+                projectId: r.projectId || '',
+                projectName: r.projectName || 'Sin proyecto asignado',
+                days: {},
+                dayEntries: {},
+                totalHours: 0
             });
         }
+        const p = projectsMap.get(pKey);
+        p.totalHours += r.hours;
+        p.days[r.date] = (p.days[r.date] || 0) + r.hours;
+        if (!p.dayEntries[r.date]) p.dayEntries[r.date] = [];
+        p.dayEntries[r.date].push(r);
+    });
+
+    // Si hay un proyecto activo seleccionado en el sidebar pero no tiene imputaciones esta semana
+    if (activeSidebarProjectId && activeSidebarProjectId !== '0' && !projectsMap.has(activeSidebarProjectId)) {
+        projectsMap.set(activeSidebarProjectId, {
+            projectId: activeSidebarProjectId,
+            projectName: activeSidebarProjectName || 'Proyecto Seleccionado',
+            days: {},
+            dayEntries: {},
+            totalHours: 0
+        });
+    }
+
+    // 3. Totales por cada día y total general de la semana
+    const dailyTotals = [0, 0, 0, 0, 0, 0, 0];
+    let grandTotal = 0;
+
+    for (let i = 0; i < 7; i++) {
+        const iso = weekDays[i].iso;
+        projectsMap.forEach(proj => {
+            dailyTotals[i] += (proj.days[iso] || 0);
+        });
+        grandTotal += dailyTotals[i];
+    }
+
+    if (totalEl) totalEl.textContent = grandTotal.toFixed(2);
+
+    // 4. Si no hay proyectos con imputaciones para esta semana
+    if (projectsMap.size === 0) {
+        container.innerHTML = `
+            <div class="py-12 px-4 text-center text-slate-400">
+                <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <p class="font-semibold text-slate-600 text-sm">No hay partes de horas registrados para esta semana</p>
+                <p class="text-xs text-slate-400 mt-1">Usa los botones de navegación de semana o registra horas para tus proyectos.</p>
+                <button type="button" onclick="openCreateTimesheetModal()" class="mt-4 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer">
+                    + Imputar Horas
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    // 5. Construir la cuadrícula / hoja de datos
+    let html = `
+        <table class="w-full min-w-[700px] border-collapse text-left text-xs sm:text-sm">
+            <thead>
+                <tr class="bg-slate-50/90 border-b border-slate-200 text-slate-700">
+                    <th class="py-3 px-4 font-bold text-slate-700 w-64 sm:w-80">
+                        Proyecto
+                    </th>
+    `;
+
+    // Fila de cabecera con los días L, M, X, J, V, S, D
+    weekDays.forEach(wd => {
+        html += `
+            <th class="py-2.5 px-2 text-center w-20 sm:w-24 border-l border-slate-200/60 ${wd.isToday ? 'bg-sky-50/90 text-sky-900 ring-1 ring-inset ring-sky-300' : ''}">
+                <div class="text-sm sm:text-base font-black ${wd.isToday ? 'text-sky-700' : 'text-slate-800'}">
+                    ${wd.letter}
+                </div>
+                <div class="text-[10px] sm:text-[11px] font-mono font-medium ${wd.isToday ? 'text-sky-600 font-bold' : 'text-slate-400'}">
+                    ${wd.formatted}
+                </div>
+            </th>
+        `;
+    });
+
+    html += `
+                    <th class="py-3 px-4 text-right font-bold text-slate-700 w-24 sm:w-28 border-l border-slate-200/70">
+                        Total
+                    </th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white">
+    `;
+
+    // Filas de proyectos
+    projectsMap.forEach(proj => {
+        const safeProjName = escapeHtml(proj.projectName);
+        html += `
+            <tr class="hover:bg-slate-50/70 transition-colors">
+                <td class="py-3 px-4 text-slate-800 font-medium">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="w-2.5 h-2.5 rounded-full ${proj.totalHours > 0 ? 'bg-sky-500' : 'bg-slate-300'} shrink-0"></span>
+                        <span class="truncate max-w-[200px] sm:max-w-[280px]" title="${safeProjName}">
+                            ${safeProjName}
+                        </span>
+                    </div>
+                </td>
+        `;
+
+        // Columnas L, M, X, J, V, S, D para cada proyecto
+        weekDays.forEach(wd => {
+            const dayHours = proj.days[wd.iso] || 0;
+            const entries = proj.dayEntries[wd.iso] || [];
+
+            html += `
+                <td class="py-2 px-1.5 sm:px-2 text-center border-l border-slate-100 ${wd.isToday ? 'bg-sky-50/30' : ''}">
+            `;
+
+            if (dayHours > 0) {
+                // Tooltip con desglose de imputaciones del día
+                const tooltipLines = entries.map(e => {
+                    const taskStr = e.task ? ` [${e.task}]` : '';
+                    const descStr = e.desc ? ` - ${e.desc}` : '';
+                    return `• ${e.employee}: ${e.hours.toFixed(2)}h${taskStr}${descStr}`;
+                }).join('\n');
+
+                html += `
+                    <button type="button" 
+                            onclick="openCreateTimesheetModal('${proj.projectId}', '', '${wd.iso}')"
+                            title="${escapeAttr(tooltipLines)}"
+                            class="inline-flex items-center justify-center font-mono font-bold text-xs sm:text-sm px-2.5 py-1 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 hover:text-sky-900 border border-sky-200/80 shadow-2xs transition-all cursor-pointer">
+                        ${dayHours.toFixed(2)}
+                    </button>
+                `;
+            } else {
+                html += `
+                    <button type="button" 
+                            onclick="openCreateTimesheetModal('${proj.projectId}', '', '${wd.iso}')"
+                            title="Añadir horas en ${wd.fullName} para ${safeProjName}"
+                            class="inline-flex items-center justify-center text-slate-300 hover:text-sky-600 hover:bg-sky-50 font-mono text-xs w-7 h-7 rounded-lg transition cursor-pointer">
+                        -
+                    </button>
+                `;
+            }
+
+            html += `</td>`;
+        });
+
+        // Columna Total por Proyecto
+        html += `
+                <td class="py-3 px-4 text-right font-mono font-bold border-l border-slate-200/70 ${proj.totalHours > 0 ? 'text-slate-900' : 'text-slate-400'}">
+                    ${proj.totalHours > 0 ? proj.totalHours.toFixed(2) + ' h' : '-'}
+                </td>
+            </tr>
+        `;
+    });
+
+    // 6. Última fila: Total de cada día de las horas realizadas
+    html += `
+            </tbody>
+            <tfoot>
+                <tr class="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-slate-800">
+                    <td class="py-3 px-4 font-black uppercase text-[11px] tracking-wider text-slate-700">
+                        Total Diario
+                    </td>
+    `;
+
+    for (let i = 0; i < 7; i++) {
+        const isToday = weekDays[i].isToday;
+        const dayTotal = dailyTotals[i];
 
         html += `
-                </div>
-            </div>
-
-            <!-- Botón rápido para imputar en este día concreto -->
-            <button type="button" onclick="openCreateTimesheetModal('', '', '${dayISO}')"
-                    class="w-full mt-3 py-1.5 px-2 bg-white hover:bg-sky-50 text-slate-600 hover:text-sky-700 text-[11px] font-semibold rounded-xl border border-slate-200/80 hover:border-sky-300 transition flex items-center justify-center space-x-1 shadow-2xs cursor-pointer">
-                <svg class="w-3 h-3 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span>Imputar</span>
-            </button>
-        </div>
+            <td class="py-3 px-2 text-center font-mono border-l border-slate-200 ${isToday ? 'bg-sky-100/60 text-sky-900' : ''}">
+                <span class="text-xs sm:text-sm font-extrabold ${dayTotal > 0 ? 'text-slate-900' : 'text-slate-400'}">
+                    ${dayTotal > 0 ? dayTotal.toFixed(2) : '-'}
+                </span>
+            </td>
         `;
     }
+
+    html += `
+                    <td class="py-3 px-4 text-right font-mono font-black text-sky-800 text-xs sm:text-sm border-l border-slate-300 bg-slate-200/50">
+                        ${grandTotal.toFixed(2)} h
+                    </td>
+                </tr>
+            </tfoot>
+        </table>
+    `;
 
     container.innerHTML = html;
 }

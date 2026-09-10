@@ -13,8 +13,9 @@ RUN go mod download
 # Copiar código fuente
 COPY . .
 
-# Compilar binario estático optimizado
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w -X main.Version=1.1.0" -o planesgo .
+# Compilar binario estático optimizado inyectando la versión desde VERSION
+RUN VERSION_STR=$(tr -d '\r\n' < VERSION) && \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w -X main.Version=${VERSION_STR}" -o planesgo .
 
 # --- Etapa 2: Imagen Final Ultraligera ---
 FROM alpine:3.20

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,7 +17,16 @@ import (
 	"pasigo/store"
 )
 
-var Version = "1.1.0"
+//go:embed VERSION
+var embeddedVersion string
+
+var Version = "1.2.0"
+
+func init() {
+	if v := strings.TrimSpace(embeddedVersion); v != "" {
+		Version = v
+	}
+}
 
 func setupRoutes(mux *http.ServeMux, state *AppState) {
 	// Archivos estáticos

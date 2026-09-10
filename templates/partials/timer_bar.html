@@ -1,7 +1,7 @@
 {{ define "timer_bar" }}
-<!-- Barra de Temporizador de Trabajo Activo -->
-<div id="active-timer-container" class="{{if not .ActiveTimer}}hidden{{end}} mb-5"
-     {{if .ActiveTimer}}
+<!-- Datos de Temporizador Activo SSR (Oculto en cabecera) -->
+{{if .ActiveTimer}}
+<div id="active-timer-container" class="hidden" style="display: none !important;"
      data-server-timer="true"
      data-timesheet-id="{{.ActiveTimer.TimesheetID}}"
      data-project-id="{{.ActiveTimer.ProjectID}}"
@@ -11,86 +11,9 @@
      data-desc="{{.ActiveTimer.Description}}"
      data-accumulated-ms="{{.ActiveTimer.AccumulatedMs}}"
      data-started-at="{{.ActiveTimer.StartedAt}}"
-     data-is-running="{{if .ActiveTimer.IsRunning}}true{{else}}false{{end}}"
-     {{end}}>
-    <div class="bg-white/95 backdrop-blur-md border border-sky-200/90 shadow-md shadow-sky-100/50 rounded-2xl px-4 py-3 sm:px-6 sm:py-3.5 flex flex-col md:flex-row items-center justify-between gap-4 transition-all duration-300">
-        
-        <!-- Información del trabajo en curso -->
-        <div class="flex items-center space-x-3.5 min-w-0 w-full md:w-auto">
-            <!-- Indicador palpitante de estado -->
-            <div id="timer-status-indicator" class="relative flex items-center justify-center flex-shrink-0 w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200">
-                <span id="timer-ping" class="animate-ping absolute inline-flex h-4 w-4 rounded-full bg-emerald-400 opacity-75"></span>
-                <span id="timer-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </div>
-
-            <!-- Datos del Proyecto y Tarea -->
-            <div class="min-w-0 flex-1">
-                <div class="flex items-center space-x-2">
-                    <span id="timer-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 tracking-wide uppercase">
-                        En curso
-                    </span>
-                    <span class="text-xs text-slate-400 font-medium">Trabajo activo</span>
-                </div>
-                <div class="flex items-baseline space-x-2 mt-0.5 truncate">
-                    <span id="timer-project-name" class="text-sm font-bold text-slate-800 truncate" title="Proyecto">
-                        {{if and .ActiveTimer .ActiveTimer.ProjectName}}{{.ActiveTimer.ProjectName}}{{else}}Proyecto{{end}}
-                    </span>
-                    <span id="timer-task-name" class="text-xs text-slate-500 truncate" title="Tarea">
-                        {{if and .ActiveTimer .ActiveTimer.TaskName}}{{.ActiveTimer.TaskName}}{{else}}- Sin tarea{{end}}
-                    </span>
-                </div>
-                <p id="timer-description-preview" class="text-[11px] text-slate-400 truncate max-w-md {{if not (and .ActiveTimer .ActiveTimer.Description)}}hidden{{end}}">
-                    {{if and .ActiveTimer .ActiveTimer.Description}}{{.ActiveTimer.Description}}{{else}}Descripción{{end}}
-                </p>
-            </div>
-        </div>
-
-        <!-- Reloj / Cronómetro Central -->
-        <div class="flex flex-col items-center justify-center px-4 py-1.5 bg-slate-50/80 rounded-xl border border-slate-200/70 min-w-[170px]">
-            <div class="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Tiempo transcurrido</div>
-            <div id="timer-clock-display" class="font-mono text-2xl font-black text-slate-900 tracking-tight tabular-nums">
-                00:00:00
-            </div>
-            <div id="timer-reminder-countdown" class="text-[10px] text-sky-600 font-medium flex items-center space-x-1">
-                <span>Próximo aviso en:</span>
-                <span id="timer-next-prompt" class="font-mono font-semibold">15:00</span>
-            </div>
-        </div>
-
-        <!-- Botones de Acción / Control -->
-        <div class="flex items-center space-x-2 w-full md:w-auto justify-end">
-            <!-- Botón Pausar / Reanudar -->
-            <button type="button" id="btn-timer-toggle-pause" onclick="togglePauseTimer()"
-                    class="px-3.5 py-2 text-xs font-bold rounded-xl border transition shadow-sm flex items-center space-x-1.5 cursor-pointer bg-white border-amber-300 text-amber-700 hover:bg-amber-50">
-                <svg id="icon-timer-pause" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <svg id="icon-timer-resume" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span id="text-timer-pause">Pausar</span>
-            </button>
-
-            <!-- Botón Finalizar e Imputar -->
-            <button type="button" onclick="finalizeActiveTimer()"
-                    class="px-4 py-2 text-xs font-bold rounded-xl bg-sky-600 hover:bg-sky-700 text-white shadow-sm shadow-sky-600/30 transition flex items-center space-x-1.5 cursor-pointer">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Finalizar</span>
-            </button>
-
-            <!-- Botón Descartar / Cancelar -->
-            <button type="button" onclick="confirmDiscardTimer()" title="Descartar este temporizador"
-                    class="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-            </button>
-        </div>
-    </div>
+     data-is-running="{{if .ActiveTimer.IsRunning}}true{{else}}false{{end}}">
 </div>
+{{end}}
 
 <!-- Modal Interactivo de Confirmación Cada 15 Minutos -->
 <div id="timer-confirm-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">

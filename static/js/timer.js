@@ -143,8 +143,15 @@ function togglePauseTimer() {
             if (row) {
                 row.dataset.hours = totalHoursDecimal.toFixed(2);
                 row.dataset.timerRunning = 'false';
-                const hoursBadge = row.querySelector('.timesheet-hours-badge, td:nth-last-child(2) span.font-mono');
-                if (hoursBadge) hoursBadge.textContent = `${totalHoursDecimal.toFixed(2)} h`;
+                const hoursBadge = row.querySelector('.timesheet-hours-badge');
+                if (hoursBadge) {
+                    hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono';
+                    hoursBadge.innerHTML = `
+                        <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        <span class="font-mono font-bold text-amber-900">${formatElapsedMs(state.accumulatedMs)}</span>
+                        <span class="text-[10px] text-amber-700 font-medium">(${totalHoursDecimal.toFixed(2)}h - Pausado)</span>
+                    `;
+                }
             }
         }
 
@@ -256,8 +263,11 @@ function clearTimer() {
                 row.dataset.timerRunning = 'false';
                 row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
                 row.dataset.hours = totalHours.toFixed(2);
-                const hoursBadge = row.querySelector('.timesheet-hours-badge, td:nth-last-child(2) span.font-mono');
-                if (hoursBadge) hoursBadge.textContent = `${totalHours.toFixed(2)} h`;
+                const hoursBadge = row.querySelector('.timesheet-hours-badge');
+                if (hoursBadge) {
+                    hoursBadge.className = 'timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono';
+                    hoursBadge.textContent = `${totalHours.toFixed(2)} h`;
+                }
             }
         }
         fetch('/api/timer/stop', {
@@ -276,11 +286,6 @@ function clearTimer() {
     stopTimerTicker();
     stopTitleFlash();
     hideTimerConfirmModal();
-
-    const container = document.getElementById('active-timer-container');
-    if (container) {
-        container.classList.add('hidden');
-    }
 
     updateAllRowTimerButtonStates();
 }
@@ -311,8 +316,6 @@ function updateTimerTick() {
     const state = getTimerState();
     if (!state) {
         stopTimerTicker();
-        const container = document.getElementById('active-timer-container');
-        if (container) container.classList.add('hidden');
         return;
     }
 
@@ -327,24 +330,6 @@ function updateTimerTick() {
         if (timeSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
             trigger15MinuteReminder(state, totalMs);
         }
-
-        // Cuenta regresiva al próximo aviso
-        const remainingForNextPrompt = Math.max(0, TIMER_PROMPT_INTERVAL_MS - timeSincePrompt);
-        const nextPromptEl = document.getElementById('timer-next-prompt');
-        if (nextPromptEl) {
-            nextPromptEl.textContent = formatCountdown(remainingForNextPrompt);
-        }
-    } else {
-        const nextPromptEl = document.getElementById('timer-next-prompt');
-        if (nextPromptEl) {
-            nextPromptEl.textContent = 'En pausa';
-        }
-    }
-
-    // Actualizar visualización del reloj
-    const clockEl = document.getElementById('timer-clock-display');
-    if (clockEl) {
-        clockEl.textContent = formatElapsedMs(totalMs);
     }
 
     // Si el modal de confirmación de 15 minutos está visible en pantalla, mantener su contador activo en tiempo real
@@ -353,16 +338,41 @@ function updateTimerTick() {
         modalTimeEl.textContent = formatElapsedMs(totalMs);
     }
 
-    // Si el temporizador corresponde a una imputación de la tabla, actualizar sus horas en pantalla en tiempo real
+    // Actualizar directamente la fila activa de la tarea / imputación
+    const hoursDecimal = (totalMs / 3600000).toFixed(2);
+    const formattedClock = formatElapsedMs(totalMs);
+
+    let row = null;
     if (state.timesheetId) {
-        const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
-        if (row) {
-            const hoursDecimal = (totalMs / 3600000).toFixed(2);
-            row.dataset.hours = hoursDecimal;
-            row.dataset.timerRunning = (state.status === 'running') ? 'true' : 'false';
-            const hoursBadge = row.querySelector('.timesheet-hours-badge, td:nth-last-child(2) span.font-mono');
-            if (hoursBadge) {
-                hoursBadge.textContent = `${hoursDecimal} h`;
+        row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+    }
+    if (!row) {
+        row = document.querySelector(`.timesheet-row[data-timer-running="true"]`);
+    }
+
+    if (row) {
+        row.dataset.hours = hoursDecimal;
+        row.dataset.timerRunning = (state.status === 'running') ? 'true' : 'false';
+
+        const hoursBadge = row.querySelector('.timesheet-hours-badge');
+        if (hoursBadge) {
+            if (state.status === 'running') {
+                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs';
+                hoursBadge.innerHTML = `
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span class="timer-live-clock font-mono font-bold text-emerald-900">${formattedClock}</span>
+                    <span class="text-[10px] text-emerald-700 font-medium">(${hoursDecimal}h)</span>
+                `;
+            } else {
+                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono';
+                hoursBadge.innerHTML = `
+                    <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    <span class="font-mono font-bold text-amber-900">${formattedClock}</span>
+                    <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado)</span>
+                `;
             }
         }
     }
@@ -465,78 +475,14 @@ function confirmFinalizeTimerFromModal() {
 }
 
 /**
- * Renderiza la barra visual según el estado del temporizador
+ * Actualiza el estado visual de los cronómetros en las tareas/filas activas
  */
 function renderTimerBar(state) {
-    const container = document.getElementById('active-timer-container');
-    if (!container) return;
-
-    if (!state) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    container.classList.remove('hidden');
-
-    // Nombre de Proyecto y Tarea
-    const projEl = document.getElementById('timer-project-name');
-    if (projEl) projEl.textContent = state.projectName || 'Proyecto';
-
-    const taskEl = document.getElementById('timer-task-name');
-    if (taskEl) {
-        taskEl.textContent = state.taskName ? `- ${state.taskName}` : '- Sin tarea';
-    }
-
-    const descEl = document.getElementById('timer-description-preview');
-    if (descEl) {
-        if (state.description) {
-            descEl.textContent = state.description;
-            descEl.classList.remove('hidden');
-        } else {
-            descEl.classList.add('hidden');
-        }
-    }
-
-    // Elementos de estado
-    const badge = document.getElementById('timer-badge');
-    const ping = document.getElementById('timer-ping');
-    const dot = document.getElementById('timer-dot');
-    const statusBox = document.getElementById('timer-status-indicator');
-    const btnPause = document.getElementById('btn-timer-toggle-pause');
-    const iconPause = document.getElementById('icon-timer-pause');
-    const iconResume = document.getElementById('icon-timer-resume');
-    const textPause = document.getElementById('text-timer-pause');
-
-    if (state.status === 'running') {
-        if (badge) {
-            badge.textContent = 'En curso';
-            badge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 tracking-wide uppercase';
-        }
-        if (ping) ping.className = 'animate-ping absolute inline-flex h-4 w-4 rounded-full bg-emerald-400 opacity-75';
-        if (dot) dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500';
-        if (statusBox) statusBox.className = 'relative flex items-center justify-center flex-shrink-0 w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200';
-        
-        if (btnPause) {
-            btnPause.className = 'px-3.5 py-2 text-xs font-bold rounded-xl border transition shadow-sm flex items-center space-x-1.5 cursor-pointer bg-white border-amber-300 text-amber-700 hover:bg-amber-50';
-        }
-        if (iconPause) iconPause.classList.remove('hidden');
-        if (iconResume) iconResume.classList.add('hidden');
-        if (textPause) textPause.textContent = 'Pausar';
-    } else {
-        if (badge) {
-            badge.textContent = 'En pausa';
-            badge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 tracking-wide uppercase';
-        }
-        if (ping) ping.className = 'hidden';
-        if (dot) dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500';
-        if (statusBox) statusBox.className = 'relative flex items-center justify-center flex-shrink-0 w-8 h-8 rounded-xl bg-amber-50 border border-amber-200';
-
-        if (btnPause) {
-            btnPause.className = 'px-3.5 py-2 text-xs font-bold rounded-xl border transition shadow-sm flex items-center space-x-1.5 cursor-pointer bg-amber-500 hover:bg-amber-600 text-white border-amber-600';
-        }
-        if (iconPause) iconPause.classList.add('hidden');
-        if (iconResume) iconResume.classList.remove('hidden');
-        if (textPause) textPause.textContent = 'Reanudar';
+    // El cronómetro en cabecera fue retirado a petición del usuario.
+    // Mantenemos sincronizado el estado visual de los botones y tiempos en las tareas activas.
+    updateAllRowTimerButtonStates();
+    if (state && typeof updateTimerTick === 'function') {
+        updateTimerTick();
     }
 }
 
@@ -940,8 +886,13 @@ function ensureTimesheetRowExists(serverData, timerState) {
         </td>
         <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
             <div class="inline-flex items-center justify-end space-x-1.5">
-                <span class="timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
-                    ${hours} h
+                <span class="timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span class="timer-live-clock font-mono font-bold text-emerald-900">00:00:00</span>
+                    <span class="text-[10px] text-emerald-700 font-medium">(${hours}h)</span>
                 </span>
             </div>
         </td>
@@ -964,6 +915,14 @@ function ensureTimesheetRowExists(serverData, timerState) {
                     </svg>
                     <svg class="w-3.5 h-3.5 icon-pause" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+                <button type="button"
+                        onclick="finalizeActiveTimer()"
+                        class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
+                        title="Detener y consolidar cronómetro en Odoo">
+                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
                     </svg>
                 </button>
                 <button type="button"
@@ -990,28 +949,41 @@ function ensureTimesheetRowExists(serverData, timerState) {
 }
 
 /**
- * Actualiza el aspecto de todos los botones de play en las filas de imputaciones
+ * Actualiza el aspecto de todos los botones de play y stop en las filas de imputaciones
  */
 function updateAllRowTimerButtonStates() {
     const current = getTimerState();
-    const activeTsId = (current && current.status === 'running') ? current.timesheetId : null;
+    const activeTsId = current ? current.timesheetId : null;
+    const isRunning = current && current.status === 'running';
 
     document.querySelectorAll('.timesheet-row').forEach(row => {
         const rowId = parseInt(row.dataset.id, 10);
         const playBtn = row.querySelector('.btn-row-timer-play');
+        const stopBtn = row.querySelector('.btn-row-timer-stop');
         if (!playBtn) return;
 
         const iconPlay = playBtn.querySelector('.icon-play');
         const iconPause = playBtn.querySelector('.icon-pause');
 
         if (activeTsId && rowId === activeTsId) {
-            // Fila activa: resaltado visual y botón de pausa pulsante
-            row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
-            playBtn.classList.remove('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
-            playBtn.classList.add('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
-            playBtn.title = 'Pausar cronómetro de esta imputación';
-            if (iconPlay) iconPlay.classList.add('hidden');
-            if (iconPause) iconPause.classList.remove('hidden');
+            if (isRunning) {
+                // Fila activa corriendo
+                row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+                playBtn.classList.remove('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+                playBtn.classList.add('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+                playBtn.title = 'Pausar cronómetro de esta imputación';
+                if (iconPlay) iconPlay.classList.add('hidden');
+                if (iconPause) iconPause.classList.remove('hidden');
+            } else {
+                // Fila activa pero en pausa
+                row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+                playBtn.classList.remove('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+                playBtn.classList.add('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+                playBtn.title = 'Reanudar cronómetro en esta imputación';
+                if (iconPlay) iconPlay.classList.remove('hidden');
+                if (iconPause) iconPause.classList.add('hidden');
+            }
+            if (stopBtn) stopBtn.classList.remove('hidden');
         } else {
             // Fila normal inactiva
             row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
@@ -1020,6 +992,7 @@ function updateAllRowTimerButtonStates() {
             playBtn.title = 'Activar o reanudar cronómetro en esta imputación';
             if (iconPlay) iconPlay.classList.remove('hidden');
             if (iconPause) iconPause.classList.add('hidden');
+            if (stopBtn) stopBtn.classList.add('hidden');
         }
     });
 }
