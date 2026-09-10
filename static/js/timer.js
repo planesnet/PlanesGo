@@ -5,9 +5,11 @@
 
 const PLANESGO_TIMER_KEY = 'planesgo_active_timer';
 const TIMER_PROMPT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutos en milisegundos
+const TIMER_UNCONFIRMED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos sin confirmación para auto-pausar fijando el tiempo en 15 minutos
 
 let timerIntervalId = null;
 let titleFlashIntervalId = null;
+let activeSystemNotification = null;
 let originalDocumentTitle = document.title || 'PlanesGo - Proyectos y Horas Odoo';
 
 // Inicialización automática al cargar el DOM
@@ -362,10 +364,21 @@ function updateTimerTick() {
     if (state.status === 'running' && state.lastStartTime) {
         totalMs += (now - state.lastStartTime);
 
-        // Comprobar si han transcurrido 15 minutos desde el último prompt
-        const timeSincePrompt = now - (state.lastPromptTime || state.startedAt || now);
-        if (timeSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
-            trigger15MinuteReminder(state, totalMs);
+        // Si hay una alerta de 15 minutos pendiente de confirmación, evaluar si han pasado 5 minutos
+        if (state.promptTriggeredAt) {
+            const timeSinceAlert = now - state.promptTriggeredAt;
+            if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
+                // El usuario no confirmó en los próximos 5 minutos.
+                // Parar el cronómetro retrocediendo al momento de los 15 minutos exactos:
+                autoStopTimerDueToInactivity(state);
+                return;
+            }
+        } else {
+            // Comprobar si han transcurrido 15 minutos desde el último prompt o inicio
+            const timeSincePrompt = now - (state.lastPromptTime || state.startedAt || now);
+            if (timeSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
+                trigger15MinuteReminder(state, totalMs);
+            }
         }
     }
 
@@ -429,20 +442,95 @@ function updateTimerTick() {
 }
 
 /**
- * Dispara la alerta de 15 minutos (sonido, notificación del sistema y modal)
+ * Auto-pausa el cronómetro si el usuario no confirmó tras 5 minutos de la alerta,
+ * fijando el tiempo registrado exactamente en los 15 minutos en que sonó la alerta.
+ */
+function autoStopTimerDueToInactivity(state) {
+    if (!state || state.status !== 'running') return;
+
+    console.warn('[PlanesGo Timer] 5 minutos sin confirmar alerta de 15 minutos. Auto-pausando y fijando en 15 minutos.');
+
+    // 1. Fijar tiempo acumulado exactamente en el snapshot de los 15 minutos
+    const snapshotMs = (typeof state.promptSnapshotMs === 'number') ? state.promptSnapshotMs : (state.accumulatedMs || 0);
+    state.accumulatedMs = snapshotMs;
+    state.status = 'paused';
+    state.lastStartTime = null;
+    state.promptTriggeredAt = null;
+    state.promptSnapshotMs = null;
+    saveTimerState(state);
+
+    // 2. Detener loop y alertas visuales
+    stopTimerTicker();
+    stopTitleFlash();
+    hideTimerConfirmModal();
+
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
+
+    // 3. Actualizar fila visual
+    const hoursDecimal = (snapshotMs / 3600000).toFixed(2);
+    let row = null;
+    if (state.timesheetId) {
+        row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+    }
+    if (!row) {
+        row = document.querySelector(`.timesheet-row[data-timer-running="true"]`);
+    }
+    if (row) {
+        row.dataset.hours = hoursDecimal;
+        row.dataset.timerRunning = 'false';
+        const hoursBadge = row.querySelector('.timesheet-hours-badge');
+        if (hoursBadge) {
+            hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono';
+            hoursBadge.innerHTML = `
+                <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                <span class="font-mono font-bold text-amber-900">${formatElapsedMs(snapshotMs)}</span>
+                <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado a los 15m)</span>
+            `;
+        }
+    }
+    updateAllRowTimerButtonStates();
+
+    // 4. Notificar a Odoo para pausar y registrar las unidades ajustadas a los 15 minutos
+    const hoursFloat = parseFloat(hoursDecimal);
+    fetch('/api/timer/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            timesheet_id: state.timesheetId || 0,
+            accumulated_ms: snapshotMs,
+            unit_amount: hoursFloat
+        })
+    }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando auto-pausa con Odoo:', err));
+
+    // 5. Notificación estándar del sistema informando que se detuvo fijado en los 15 minutos
+    triggerSystemNotification(
+        'PlanesGo: Cronómetro parado por inactividad',
+        `No se confirmó en los últimos 5 minutos. El cronómetro se ha pausado fijado en los 15 minutos (${hoursDecimal}h).`
+    );
+
+    // 6. Mensaje emergente en pantalla
+    showNotificationToast(`Cronómetro pausado por inactividad a los 15 minutos (${hoursDecimal}h)`);
+}
+
+/**
+ * Dispara la alerta de 15 minutos (sonido, notificación estándar del sistema y modal)
  */
 function trigger15MinuteReminder(state, currentTotalMs) {
-    // Actualizar marca de tiempo para evitar disparo repetitivo inmediato
-    state.lastPromptTime = Date.now();
+    // Fijar el snapshot exacto de los 15 minutos y la marca de activación
+    state.promptTriggeredAt = Date.now();
+    state.promptSnapshotMs = currentTotalMs;
     saveTimerState(state);
 
     // 1. Reproducir sonido suave de aviso (Web Audio API)
     playChimeSound();
 
-    // 2. Disparar notificación del sistema operativo / navegador
+    // 2. Disparar notificación estándar del sistema operativo con soporte de click para reconfirmar
     triggerSystemNotification(
-        'PlanesGo: ¿Sigues trabajando?',
-        `Han transcurrido 15 minutos en: ${state.projectName}\nHaz clic para confirmar o pausar.`
+        `⏱️ PlanesGo: ¿Sigues en "${state.projectName}"?`,
+        `Han transcurrido 15 minutos de trabajo. Haz clic aquí para confirmar que sigues con este trabajo (se detendrá si no se confirma en 5 min).`
     );
 
     // 3. Parpadeo del título de la pestaña
@@ -498,10 +586,17 @@ function confirmContinueTimer() {
     const state = getTimerState();
     if (state) {
         state.lastPromptTime = Date.now();
+        state.promptTriggeredAt = null;
+        state.promptSnapshotMs = null;
         saveTimerState(state);
     }
     stopTitleFlash();
     hideTimerConfirmModal();
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
+    showNotificationToast('Trabajo reconfirmado: Sigues cronometrando este proyecto');
 }
 
 /**
@@ -509,18 +604,37 @@ function confirmContinueTimer() {
  */
 function confirmPauseTimer() {
     const state = getTimerState();
-    if (state && state.status === 'running') {
-        togglePauseTimer();
+    if (state) {
+        state.promptTriggeredAt = null;
+        state.promptSnapshotMs = null;
+        saveTimerState(state);
+        if (state.status === 'running') {
+            togglePauseTimer();
+        }
     }
     stopTitleFlash();
     hideTimerConfirmModal();
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
 }
 
 /**
  * Acción del usuario en el modal: "Finalizar y guardar"
  */
 function confirmFinalizeTimerFromModal() {
+    const state = getTimerState();
+    if (state) {
+        state.promptTriggeredAt = null;
+        state.promptSnapshotMs = null;
+        saveTimerState(state);
+    }
     hideTimerConfirmModal();
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
     finalizeActiveTimer();
 }
 
@@ -583,13 +697,9 @@ async function initTimerFromStorage() {
         await syncActiveTimerFromOdoo();
     }
 
-    // Sincronización periódica liviana con Odoo cada 15s y al recuperar foco de ventana
-    setInterval(syncActiveTimerFromOdoo, 15000);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            syncActiveTimerFromOdoo();
-        }
-    });
+    // Sincronización periódica cada 15 minutos con Odoo (sin reactivar al foco)
+    setInterval(syncActiveTimerFromOdoo, 15 * 60 * 1000);
+    requestNotificationPermission();
 }
 
 /**
@@ -696,28 +806,91 @@ function requestNotificationPermission() {
 }
 
 /**
- * Muestra notificación de escritorio del sistema operativo
+ * Muestra notificación de escritorio estándar del sistema operativo
+ * Permite hacer clic directamente en la notificación para reconfirmar el trabajo en curso
  */
 function triggerSystemNotification(title, body) {
     if (!('Notification' in window)) return;
 
-    if (Notification.permission === 'granted') {
+    const displayNotif = () => {
         try {
+            if (activeSystemNotification) {
+                try { activeSystemNotification.close(); } catch (e) {}
+                activeSystemNotification = null;
+            }
+
             const notif = new Notification(title, {
                 body: body,
                 icon: '/static/favicon.ico',
-                requireInteraction: true
+                tag: 'planesgo-timer-alert',
+                renotify: true,
+                requireInteraction: true // Notificación persistente en el sistema operativo
             });
 
+            activeSystemNotification = notif;
+
             notif.onclick = function () {
-                window.focus();
-                showTimerConfirmModal();
-                notif.close();
+                try {
+                    window.focus();
+                } catch (e) {}
+
+                // Al hacer clic en la notificación del sistema, reconfirmar automáticamente el trabajo en curso
+                confirmContinueTimer();
+                try { notif.close(); } catch (e) {}
+                activeSystemNotification = null;
+            };
+
+            notif.onclose = function () {
+                if (activeSystemNotification === notif) {
+                    activeSystemNotification = null;
+                }
             };
         } catch (e) {
             console.warn('Error al mostrar notificación de escritorio:', e);
         }
+    };
+
+    if (Notification.permission === 'granted') {
+        displayNotif();
+    } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+                displayNotif();
+            }
+        });
     }
+}
+
+/**
+ * Muestra un aviso emergente visual (toast) no intrusivo en la interfaz
+ */
+function showNotificationToast(message) {
+    let toast = document.getElementById('planesgo-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'planesgo-toast';
+        toast.className = 'fixed bottom-6 right-6 z-50 transform transition-all duration-300 ease-out translate-y-10 opacity-0 pointer-events-none';
+        toast.innerHTML = `
+            <div class="flex items-center space-x-3 px-4 py-3 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700/80">
+                <span class="flex h-2.5 w-2.5 relative">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span id="planesgo-toast-message" class="text-xs font-semibold tracking-wide"></span>
+            </div>
+        `;
+        document.body.appendChild(toast);
+    }
+    const msgEl = toast.querySelector('#planesgo-toast-message');
+    if (msgEl) msgEl.textContent = message;
+
+    toast.classList.remove('translate-y-10', 'opacity-0', 'pointer-events-none');
+    toast.classList.add('translate-y-0', 'opacity-100');
+
+    setTimeout(() => {
+        toast.classList.add('translate-y-10', 'opacity-0', 'pointer-events-none');
+        toast.classList.remove('translate-y-0', 'opacity-100');
+    }, 4000);
 }
 
 /**
