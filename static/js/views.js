@@ -17,7 +17,6 @@ function navigateWeek(delta) {
 function updateWeekControls() {
     const titleEl = document.getElementById('week-title-display');
     const datesEl = document.getElementById('week-dates-display');
-    const currentBadge = document.getElementById('current-week-badge');
     const btnPrev = document.getElementById('btn-prev-week');
     const btnNext = document.getElementById('btn-next-week');
 
@@ -83,11 +82,6 @@ function updateWeekControls() {
     const monStr = selectedWeekMonday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
     const sunStr = sunday.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
     if (datesEl) datesEl.textContent = `${monStr} – ${sunStr}`;
-
-    if (currentBadge) {
-        if (isCurrent) currentBadge.classList.remove('hidden');
-        else currentBadge.classList.add('hidden');
-    }
 
     if (kpiHoursSub) kpiHoursSub.textContent = 'En semana seleccionada';
     if (kpiProjectsSub) kpiProjectsSub.textContent = 'con partes esta semana';
