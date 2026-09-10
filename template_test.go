@@ -138,3 +138,21 @@ func TestSettingsTemplateRendering(t *testing.T) {
 	}
 }
 
+func TestGetIndexTemplateCache(t *testing.T) {
+	tmpl1, err := getIndexTemplate()
+	if err != nil {
+		t.Fatalf("Error al obtener plantilla index: %v", err)
+	}
+	if tmpl1 == nil {
+		t.Fatalf("Plantilla obtenida es nil")
+	}
+
+	tmpl2, err := getIndexTemplate()
+	if err != nil {
+		t.Fatalf("Error en segunda obtención de plantilla: %v", err)
+	}
+	if tmpl1 != tmpl2 {
+		t.Fatalf("Se esperaba la misma instancia de plantilla desde la caché")
+	}
+}
+

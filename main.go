@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -29,6 +30,38 @@ var Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
 const DefaultOdooURL = "https://planesnet.autopyme.com"
+
+var (
+	indexTmplOnce   sync.Once
+	cachedIndexTmpl *template.Template
+	cachedIndexErr  error
+)
+
+func getIndexTemplate() (*template.Template, error) {
+	if os.Getenv("ENV") == "development" {
+		t, err := template.ParseFiles("templates/index.html")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := t.ParseGlob("templates/partials/*.html"); err != nil {
+			log.Printf("[WARN] Error cargando plantillas parciales: %v", err)
+		}
+		return t, nil
+	}
+
+	indexTmplOnce.Do(func() {
+		t, err := template.ParseFiles("templates/index.html")
+		if err != nil {
+			cachedIndexErr = err
+			return
+		}
+		if _, err := t.ParseGlob("templates/partials/*.html"); err != nil {
+			log.Printf("[WARN] Error cargando plantillas parciales: %v", err)
+		}
+		cachedIndexTmpl = t
+	})
+	return cachedIndexTmpl, cachedIndexErr
+}
 
 type SessionData struct {
 	URL         string `json:"url"`
@@ -1174,18 +1207,23 @@ func main() {
 			Error:                errMsg,
 		}
 
-		tmpl, err := template.ParseFiles("templates/index.html")
+		tmpl, err := getIndexTemplate()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error al cargar plantilla: %v", err), http.StatusInternalServerError)
 			return
 		}
-		if _, err := tmpl.ParseGlob("templates/partials/*.html"); err != nil {
-			log.Printf("[WARN] Error cargando plantillas parciales: %v", err)
+
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, data); err != nil {
+			log.Printf("[ERROR] Renderizado de plantilla: %v", err)
+			http.Error(w, "Error interno al renderizar la página", http.StatusInternalServerError)
+			return
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(w, data); err != nil {
-			log.Printf("[ERROR] Renderizado de plantilla: %v", err)
+		w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+		if _, err := buf.WriteTo(w); err != nil {
+			log.Printf("[WARN] Error escribiendo respuesta al cliente: %v", err)
 		}
 	})
 
@@ -1533,9 +1571,9 @@ func main() {
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &http.Server{
 		Addr:         addr,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
