@@ -71,3 +71,14 @@ func TestLoadConfigNoDefaultDB(t *testing.T) {
 	}
 }
 
+func TestLoadConfigPasiIgnored(t *testing.T) {
+	os.Setenv("ODOO_DB", "pasi")
+	defer os.Unsetenv("ODOO_DB")
+
+	cfg := LoadConfig()
+	if cfg.Odoo.DB != "" {
+		t.Errorf("Odoo DB debería ignorar el valor 'pasi', obtenida '%s'", cfg.Odoo.DB)
+	}
+}
+
+

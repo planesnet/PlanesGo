@@ -115,7 +115,7 @@ func LoadConfig(envFile ...string) *Config {
 	if envOdooURL := os.Getenv("ODOO_URL"); envOdooURL != "" {
 		cfg.Odoo.URL = strings.TrimRight(envOdooURL, "/")
 	}
-	if envOdooDB := os.Getenv("ODOO_DB"); envOdooDB != "" {
+	if envOdooDB := os.Getenv("ODOO_DB"); envOdooDB != "" && !strings.EqualFold(strings.TrimSpace(envOdooDB), "pasi") {
 		cfg.Odoo.DB = envOdooDB
 	}
 	if envOdooUser := os.Getenv("ODOO_USER"); envOdooUser != "" {

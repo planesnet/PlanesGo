@@ -67,3 +67,37 @@ func TestUserSettingsStore(t *testing.T) {
 		t.Errorf("GetSharedOdooDB persistido esperado 'ap113', obtenido '%s'", sharedDB2)
 	}
 }
+
+func TestUserSettingsStoreSanitizePasi(t *testing.T) {
+	tempDir := t.TempDir()
+	jsonPath := filepath.Join(tempDir, "user_settings.json")
+
+	store, err := NewUserSettingsStore(jsonPath)
+	if err != nil {
+		t.Fatalf("error creando almacén: %v", err)
+	}
+
+	userEmail := "test@planesnet.com"
+	settings := UserSettings{
+		Email:     userEmail,
+		OdooUser:  "test@planesnet.com",
+		OdooToken: "tok123",
+		OdooDB:    "pasi", // Valor legacy que debe ser sanitizado
+	}
+
+	if err := store.SaveSettings(settings); err != nil {
+		t.Fatalf("error guardando ajustes: %v", err)
+	}
+
+	got, ok := store.GetSettings(userEmail)
+	if !ok {
+		t.Fatalf("no se encontró usuario")
+	}
+	if got.OdooDB != "" {
+		t.Errorf("OdooDB debería haber sido sanitizado a '', pero es '%s'", got.OdooDB)
+	}
+	if sharedDB := store.GetSharedOdooDB(); sharedDB != "" {
+		t.Errorf("GetSharedOdooDB debería ser '', pero es '%s'", sharedDB)
+	}
+}
+

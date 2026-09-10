@@ -68,6 +68,18 @@ func (s *UserSettingsStore) load() error {
 	}
 
 	s.settings = loaded
+	// Sanitizar cualquier valor obsoleto "pasi" que pudiera existir previamente
+	changed := false
+	for email, setting := range s.settings {
+		if strings.EqualFold(strings.TrimSpace(setting.OdooDB), "pasi") {
+			setting.OdooDB = ""
+			s.settings[email] = setting
+			changed = true
+		}
+	}
+	if changed {
+		_ = s.save()
+	}
 	return nil
 }
 
@@ -109,6 +121,10 @@ func (s *UserSettingsStore) SaveSettings(settings UserSettings) error {
 		return fmt.Errorf("el email del usuario no puede estar vacío")
 	}
 
+	if strings.EqualFold(strings.TrimSpace(settings.OdooDB), "pasi") {
+		settings.OdooDB = ""
+	}
+
 	settings.UpdatedAt = time.Now()
 	s.settings[key] = settings
 
@@ -133,8 +149,9 @@ func (s *UserSettingsStore) GetSharedOdooDB() string {
 	defer s.mu.RUnlock()
 
 	for _, val := range s.settings {
-		if strings.TrimSpace(val.OdooDB) != "" {
-			return strings.TrimSpace(val.OdooDB)
+		db := strings.TrimSpace(val.OdooDB)
+		if db != "" && !strings.EqualFold(db, "pasi") {
+			return db
 		}
 	}
 	return ""
