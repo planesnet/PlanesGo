@@ -804,16 +804,23 @@ func main() {
 
 		if hasOdooToken {
 			client := odoo.NewClient(currentOdooCfg)
-			ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
-			defer cancel()
 
-			projList, pErr := client.GetProjects(ctx, nil)
+			// 1. Obtener proyectos con timeout independiente
+			ctxProj, cancelProj := context.WithTimeout(r.Context(), 20*time.Second)
+			projList, pErr := client.GetProjects(ctxProj, nil)
+			cancelProj()
+
 			if pErr != nil {
 				log.Printf("[ADVERTENCIA] Error al obtener proyectos de Odoo: %v", pErr)
 				fetchErr = pErr
 			} else {
 				projects = projList
-				tsEntries, tsErr := client.GetTimesheets(ctx, nil)
+
+				// 2. Obtener partes de horas con timeout independiente
+				ctxTS, cancelTS := context.WithTimeout(r.Context(), 25*time.Second)
+				tsEntries, tsErr := client.GetTimesheets(ctxTS, nil)
+				cancelTS()
+
 				if tsErr != nil {
 					log.Printf("[ADVERTENCIA] Error al obtener partes de horas: %v", tsErr)
 					fetchErr = tsErr

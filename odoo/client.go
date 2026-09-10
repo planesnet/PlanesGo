@@ -21,7 +21,7 @@ func NewClient(cfg config.OdooConfig) *Client {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 8 * time.Second,
+			Timeout: 30 * time.Second,
 		},
 	}
 }
@@ -51,6 +51,7 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 		return nil, errors.New("la URL de Odoo no está configurada")
 	}
 
+	url := c.config.URL + "/jsonrpc"
 	params := map[string]interface{}{
 		"service": service,
 		"method":  method,
@@ -60,34 +61,35 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 		params["kwargs"] = kwargs
 	}
 
-	reqPayload := jsonRPCRequest{
+	reqBody, err := json.Marshal(jsonRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "call",
 		Params:  params,
 		ID:      time.Now().UnixNano(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error serializando petición JSON-RPC: %w", err)
 	}
 
-	reqBody, err := json.Marshal(reqPayload)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("error al serializar petición JSON-RPC: %w", err)
+		return nil, fmt.Errorf("error creando petición HTTP: %w", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 
-	endpoint := fmt.Sprintf("%s/jsonrpc", c.config.URL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(reqBody))
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error al crear petición HTTP: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("error de conexión con Odoo en %s: %w", endpoint, err)
+		return nil, fmt.Errorf("error de conexión con Odoo en %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Odoo respondió con estado HTTP %d", resp.StatusCode)
+	}
+
 	var rpcResp jsonRPCResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		return nil, fmt.Errorf("error al deserializar respuesta de Odoo: %w", err)
+		return nil, fmt.Errorf("error decodificando respuesta JSON-RPC: %w", err)
 	}
 
 	if rpcResp.Error != nil {
@@ -97,10 +99,10 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 	return rpcResp.Result, nil
 }
 
-// Authenticate autentica las credenciales con Odoo y guarda el UID obtenido.
+// Authenticate autentica contra el endpoint común de Odoo y devuelve el UID.
 func (c *Client) Authenticate(ctx context.Context) (int, error) {
-	if c.config.DB == "" || c.config.Username == "" {
-		return 0, errors.New("la base de datos y el usuario de Odoo son obligatorios")
+	if c.config.Username == "" || c.config.Password == "" {
+		return 0, errors.New("faltan credenciales de Odoo (usuario o contraseña/token vacíos)")
 	}
 
 	args := []interface{}{
@@ -112,16 +114,12 @@ func (c *Client) Authenticate(ctx context.Context) (int, error) {
 
 	resultRaw, err := c.call(ctx, "common", "authenticate", args, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("fallo de autenticación en Odoo: %w", err)
 	}
 
 	var uid int
 	if err := json.Unmarshal(resultRaw, &uid); err != nil || uid == 0 {
-		var isFalse bool
-		if json.Unmarshal(resultRaw, &isFalse) == nil && !isFalse {
-			return 0, errors.New("autenticación fallida: usuario o contraseña incorrectos")
-		}
-		return 0, fmt.Errorf("respuesta de autenticación no válida: %s", string(resultRaw))
+		return 0, errors.New("autenticación fallida: usuario o contraseña incorrectos")
 	}
 
 	c.uid = uid
@@ -140,6 +138,30 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		domain = []interface{}{}
 	}
 
+	// Asegurar que solo se lean líneas que pertenezcan a proyectos (partes de horas válidos)
+	hasProjectFilter := false
+	for _, cond := range domain {
+		if condArr, ok := cond.([]interface{}); ok && len(condArr) > 0 {
+			if field, ok := condArr[0].(string); ok && field == "project_id" {
+				hasProjectFilter = true
+				break
+			}
+		}
+	}
+	effectiveDomain := make([]interface{}, 0, len(domain)+1)
+	for _, d := range domain {
+		effectiveDomain = append(effectiveDomain, d)
+	}
+	if !hasProjectFilter {
+		effectiveDomain = append(effectiveDomain, []interface{}{"project_id", "!=", false})
+	}
+
+	limit := c.config.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+
+	// Campos base estándar 100% compatibles con Odoo 14 hr_timesheet
 	fields := []string{
 		"id",
 		"date",
@@ -149,12 +171,11 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"task_id",
 		"employee_id",
 		"user_id",
-		"timesheet_invoice_id",
 	}
 
 	kwargs := map[string]interface{}{
 		"fields": fields,
-		"limit":  c.config.Limit,
+		"limit":  limit,
 		"order":  "date desc, id desc",
 	}
 
@@ -164,7 +185,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		c.config.Password,
 		"account.analytic.line",
 		"search_read",
-		[]interface{}{domain},
+		[]interface{}{effectiveDomain},
 	}
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
@@ -172,12 +193,6 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		// Reintento con autenticación si expiró sesión
 		if _, authErr := c.Authenticate(ctx); authErr == nil {
 			args[1] = c.uid
-			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
-		}
-		// Fallback Odoo 14: si falla por campos como timesheet_invoice_id (sale_timesheet no instalado), reintentar sin él
-		if err != nil {
-			fallbackFields := []string{"id", "date", "name", "unit_amount", "project_id", "task_id", "employee_id", "user_id"}
-			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
