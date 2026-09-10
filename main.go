@@ -28,7 +28,7 @@ import (
 var Version = "1.1.0"
 const sessionCookieName = "planesgo_session"
 const oauthStateCookieName = "planesgo_oauth_state"
-const DefaultOdooURL = "https://www.planesnet.com"
+const DefaultOdooURL = "https://planesnet.autopyme.com"
 const DefaultOdooDB = "pasi"
 
 type SessionData struct {
@@ -171,7 +171,11 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 					odooCfg.Username = uSettings.OdooUser
 				}
 				if uSettings.OdooURL != "" {
-					odooCfg.URL = uSettings.OdooURL
+					if uSettings.OdooURL == "https://www.planesnet.com" {
+						odooCfg.URL = DefaultOdooURL
+					} else {
+						odooCfg.URL = uSettings.OdooURL
+					}
 				}
 				if uSettings.OdooDB != "" {
 					odooCfg.DB = uSettings.OdooDB
@@ -512,7 +516,7 @@ func main() {
 		if userSettings.OdooUser == "" {
 			userSettings.OdooUser = userEmail
 		}
-		if userSettings.OdooURL == "" {
+		if userSettings.OdooURL == "" || userSettings.OdooURL == "https://www.planesnet.com" {
 			userSettings.OdooURL = DefaultOdooURL
 		}
 		if userSettings.OdooDB == "" {
@@ -556,8 +560,12 @@ func main() {
 			if odooUser == "" {
 				odooUser = userEmail
 			}
-			if odooURL == "" {
-				odooURL = userSettings.OdooURL
+			if odooURL == "" || odooURL == "https://www.planesnet.com" {
+				if userSettings.OdooURL != "" && userSettings.OdooURL != "https://www.planesnet.com" {
+					odooURL = userSettings.OdooURL
+				} else {
+					odooURL = DefaultOdooURL
+				}
 			}
 			if odooDB == "" {
 				odooDB = userSettings.OdooDB
@@ -642,7 +650,7 @@ func main() {
 			return
 		}
 
-		if payload.OdooURL == "" {
+		if payload.OdooURL == "" || payload.OdooURL == "https://www.planesnet.com" {
 			payload.OdooURL = DefaultOdooURL
 		}
 		if payload.OdooDB == "" {
@@ -668,6 +676,8 @@ func main() {
 			return
 		}
 
+		serverVer, _ := client.GetServerVersion(ctx)
+
 		// Si la autenticación tuvo éxito y hay sesión activa, auto-guardamos inmediatamente de forma persistente
 		var session *SessionData
 		cookie, cErr := r.Cookie(sessionCookieName)
@@ -688,7 +698,7 @@ func main() {
 					OdooDB:    payload.OdooDB,
 					PageLimit: 200,
 				})
-				log.Printf("[SETTINGS] Token auto-guardado tras prueba exitosa para %s", userEmail)
+				log.Printf("[SETTINGS] Token auto-guardado tras prueba exitosa para %s (Odoo %s)", userEmail, serverVer)
 			}
 			session.Password = payload.OdooToken
 			session.Username = payload.OdooUser
@@ -702,7 +712,12 @@ func main() {
 			})
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "uid": uid, "saved": true})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":        true,
+			"uid":            uid,
+			"server_version": serverVer,
+			"saved":          true,
+		})
 	})
 
 	// 7. Página Principal (Protegida)

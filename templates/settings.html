@@ -118,6 +118,9 @@
                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200">
                             {{.Settings.OdooDB}}
                         </span>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Odoo 14.0
+                        </span>
                     </div>
                 </div>
 
@@ -131,15 +134,15 @@
                                 </svg>
                             </div>
                             <div>
-                                <div class="font-bold">Token de Acceso Odoo</div>
-                                <div class="text-[10px] text-slate-400 font-normal">Clave de API para consultas</div>
+                                <div class="font-bold">Credenciales y Servidor</div>
+                                <div class="text-[10px] text-slate-400 font-normal">URL, Base de Datos y Clave API</div>
                             </div>
                         </div>
                         <span class="text-sky-600">
                             {{if .Settings.OdooToken}}
-                            <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Token configurado"></span>
                             {{else}}
-                            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+                            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block" title="Token pendiente"></span>
                             {{end}}
                         </span>
                     </button>
@@ -199,11 +202,17 @@
             <div class="lg:col-span-8">
                 
                 <!-- SECCIÓN 1: Token de Acceso Odoo -->
+                <!-- SECCIÓN 1: Credenciales y Servidor Odoo -->
                 <div id="tab-odoo-token-content" class="settings-content-pane bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
                     <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
                         <div>
-                            <h3 class="text-lg font-bold text-slate-900">Credenciales de Acceso Odoo</h3>
-                            <p class="text-xs text-slate-500 mt-1">Configura tu clave de API personal o contraseña de Odoo para sincronizar tus partes de horas.</p>
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-lg font-bold text-slate-900">Credenciales y Servidor Odoo</h3>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    v14.0
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-1">Configura la dirección de Odoo, base de datos y tus credenciales de acceso para sincronizar partes de horas.</p>
                         </div>
                         <span class="p-3 bg-sky-50 text-sky-600 rounded-2xl">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -213,6 +222,33 @@
                     </div>
 
                     <form action="/settings" method="POST" class="space-y-6">
+                        <!-- Dirección del Servidor Odoo (URL) -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label for="odoo_url" class="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                                    Dirección del Servidor Odoo (URL)
+                                </label>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200">
+                                    JSON-RPC / Odoo 14.0
+                                </span>
+                            </div>
+                            <input type="url" id="odoo_url" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}https://planesnet.autopyme.com{{end}}" required
+                                   placeholder="https://planesnet.autopyme.com"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Servidor Odoo versión 14.0. Inicializado por defecto con <code>https://planesnet.autopyme.com</code>.</p>
+                        </div>
+
+                        <!-- Base de Datos Odoo -->
+                        <div>
+                            <label for="odoo_db" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                                Base de Datos Odoo
+                            </label>
+                            <input type="text" id="odoo_db" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}pasi{{end}}" required
+                                   placeholder="pasi"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Base de datos de Odoo a consultar (por defecto: <code>pasi</code>).</p>
+                        </div>
+
                         <!-- Usuario Odoo -->
                         <div>
                             <label for="odoo_user" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
@@ -220,7 +256,7 @@
                             </label>
                             <input type="text" id="odoo_user" name="odoo_user" value="{{if .Settings.OdooUser}}{{.Settings.OdooUser}}{{else}}{{.Session.Username}}{{end}}" required
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
-                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Por lo general coincide con tu correo de Google (@planesnet.com).</p>
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Por lo general coincide con tu correo (@planesnet.com).</p>
                         </div>
 
                         <!-- Token de Acceso / API Key Odoo -->
@@ -229,7 +265,7 @@
                                 Token de Acceso / Clave de API de Odoo
                             </label>
                             <div class="relative">
-                                <input type="password" id="odoo_token" name="odoo_token" value="{{.Settings.OdooToken}}" placeholder="Pega aquí tu API Key de Odoo..." required
+                                <input type="password" id="odoo_token" name="odoo_token" value="{{.Settings.OdooToken}}" placeholder="Pega aquí tu API Key de Odoo 14 o contraseña..." required
                                        class="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition shadow-sm">
                                 <button type="button" onclick="togglePasswordVisibility('odoo_token', this)" class="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none">
                                     <svg class="w-5 h-5 eye-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -238,12 +274,10 @@
                                     </svg>
                                 </button>
                             </div>
-                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Se guarda de forma segura en tus ajustes personales y se utiliza para conectar vía XML-RPC.</p>
+                            <p class="text-[11px] text-slate-400 mt-1.5 font-light">Se guarda de forma segura en tus ajustes personales y se utiliza para conectar vía JSON-RPC con Odoo 14.0.</p>
                         </div>
 
-                        <!-- Hidden inputs para preservar valores del servidor -->
-                        <input type="hidden" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}{{.Config.Odoo.URL}}{{end}}">
-                        <input type="hidden" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}">
+                        <!-- Hidden input para preservar límite de registros al guardar este formulario -->
                         <input type="hidden" name="page_limit" value="{{if .Settings.PageLimit}}{{.Settings.PageLimit}}{{else}}200{{end}}">
 
                         <!-- Panel de prueba de conexión en vivo -->
@@ -273,7 +307,7 @@
                     <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
                         <div>
                             <h3 class="text-lg font-bold text-slate-900">Parámetros del Servidor Odoo</h3>
-                            <p class="text-xs text-slate-500 mt-1">Valores por defecto del servidor Odoo de la empresa.</p>
+                            <p class="text-xs text-slate-500 mt-1">Valores por defecto del servidor Odoo de la empresa (Odoo v14.0).</p>
                         </div>
                         <span class="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,19 +319,21 @@
                     <form action="/settings" method="POST" class="space-y-6">
                         <!-- URL Odoo -->
                         <div>
-                            <label for="odoo_url" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                            <label for="odoo_url_params" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                                 URL del Servidor Odoo
                             </label>
-                            <input type="url" id="odoo_url" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}{{.Config.Odoo.URL}}{{end}}" required
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
+                            <input type="url" id="odoo_url_params" name="odoo_url" value="{{if .Settings.OdooURL}}{{.Settings.OdooURL}}{{else}}https://planesnet.autopyme.com{{end}}" required
+                                   placeholder="https://planesnet.autopyme.com"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
                         </div>
 
                         <!-- Base de Datos -->
                         <div>
-                            <label for="odoo_db" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                            <label for="odoo_db_params" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                                 Base de Datos Odoo
                             </label>
-                            <input type="text" id="odoo_db" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}" required
+                            <input type="text" id="odoo_db_params" name="odoo_db" value="{{if .Settings.OdooDB}}{{.Settings.OdooDB}}{{else}}{{.Config.Odoo.DB}}{{end}}" required
+                                   placeholder="pasi"
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition shadow-sm">
                         </div>
 
@@ -342,7 +378,7 @@
                             <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">1</div>
                             <div>
                                 <h4 class="font-bold text-slate-800 text-sm">Accede a Odoo</h4>
-                                <p class="mt-0.5 text-slate-500">Inicia sesión en tu cuenta de Odoo en <a href="https://www.planesnet.com" target="_blank" class="text-sky-600 font-semibold underline">planesnet.com</a>.</p>
+                                <p class="mt-0.5 text-slate-500">Inicia sesión en tu cuenta de Odoo en <a href="https://planesnet.autopyme.com" target="_blank" class="text-sky-600 font-semibold underline">planesnet.autopyme.com</a> (Odoo 14.0).</p>
                             </div>
                         </div>
 
@@ -358,7 +394,7 @@
                             <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">3</div>
                             <div>
                                 <h4 class="font-bold text-slate-800 text-sm">Pestaña Seguridad de la Cuenta</h4>
-                                <p class="mt-0.5 text-slate-500">Ve a la pestaña <strong>Seguridad de la Cuenta</strong> y en el apartado <strong>Claves de API</strong> pulsa en <strong>"Nueva clave de API"</strong>.</p>
+                                <p class="mt-0.5 text-slate-500">Ve a la pestaña <strong>Seguridad de la Cuenta</strong> y en el apartado <strong>Claves de API</strong> pulsa en <strong>"Nueva clave de API"</strong> (o usa tu contraseña si no tienes claves de API activas).</p>
                             </div>
                         </div>
 
@@ -366,7 +402,7 @@
                             <div class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs">4</div>
                             <div>
                                 <h4 class="font-bold text-slate-800 text-sm">Copia la Clave</h4>
-                                <p class="mt-0.5 text-slate-500">Nombra la clave como <code>PlanesGo</code>, introduce tu contraseña para confirmar y copia el código generado en la pestaña <strong>Token de Acceso Odoo</strong> de esta página.</p>
+                                <p class="mt-0.5 text-slate-500">Nombra la clave como <code>PlanesGo</code>, introduce tu contraseña para confirmar y copia el código generado en la pestaña <strong>Credenciales y Servidor Odoo</strong> de esta página.</p>
                             </div>
                         </div>
                     </div>
@@ -424,7 +460,7 @@
         async function testOdooConnection() {
             const user = document.getElementById('odoo_user').value;
             const token = document.getElementById('odoo_token').value;
-            const url = document.getElementById('odoo_url') ? document.getElementById('odoo_url').value : 'https://www.planesnet.com';
+            const url = document.getElementById('odoo_url') ? document.getElementById('odoo_url').value : 'https://planesnet.autopyme.com';
             const db = document.getElementById('odoo_db') ? document.getElementById('odoo_db').value : 'pasi';
             const resultBox = document.getElementById('test-connection-result');
             const testBtn = document.getElementById('btn-test-conn');
@@ -452,6 +488,7 @@
 
                 const data = await response.json();
                 if (data.success) {
+                    const versionBadge = data.server_version ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 ml-2">Versión: ${data.server_version}</span>` : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 ml-2">Odoo 14.0</span>`;
                     resultBox.className = "p-4 rounded-2xl text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-200 block shadow-sm";
                     resultBox.innerHTML = `
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -462,8 +499,11 @@
                                     </svg>
                                 </span>
                                 <div>
-                                    <div class="font-bold text-emerald-900">¡Conexión exitosa y credenciales guardadas!</div>
-                                    <div class="text-[11px] text-emerald-700 mt-0.5">Autenticado en Odoo (UID: ${data.uid}). Tu token ha sido guardado de forma persistente.</div>
+                                    <div class="flex items-center font-bold text-emerald-900">
+                                        <span>¡Conexión exitosa y credenciales guardadas!</span>
+                                        ${versionBadge}
+                                    </div>
+                                    <div class="text-[11px] text-emerald-700 mt-0.5">Autenticado correctamente en ${url} (UID: ${data.uid}, BD: ${db}). Tu configuración ha sido guardada.</div>
                                 </div>
                             </div>
                             <a href="/" class="inline-flex items-center justify-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow flex-shrink-0">

@@ -29,8 +29,8 @@ GOOGLE_CLIENT_ID=tu_cliente_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=tu_client_secret
 GOOGLE_ALLOWED_DOMAIN=planesnet.com
 
-# Odoo Conexión (Opcional - por defecto se usa planesnet.com / pasi)
-ODOO_URL=https://www.planesnet.com
+# Odoo Conexión (Opcional - por defecto se usa planesnet.autopyme.com / pasi, Odoo 14.0)
+ODOO_URL=https://planesnet.autopyme.com
 ODOO_DB=pasi
 ODOO_USER=
 ODOO_PASSWORD=

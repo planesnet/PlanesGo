@@ -19,7 +19,7 @@ func TestUserSettingsStore(t *testing.T) {
 		Email:     userEmail,
 		OdooUser:  "luis@planesnet.com",
 		OdooToken: "secret_api_key_12345",
-		OdooURL:   "https://www.planesnet.com",
+		OdooURL:   "https://planesnet.autopyme.com",
 		OdooDB:    "pasi",
 		PageLimit: 200,
 	}

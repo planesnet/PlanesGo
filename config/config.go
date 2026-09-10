@@ -85,7 +85,7 @@ func LoadConfig(envFile ...string) *Config {
 			Port: 8080,
 		},
 		Odoo: OdooConfig{
-			URL:      "https://www.planesnet.com",
+			URL:      "https://planesnet.autopyme.com",
 			DB:       "pasi",
 			Username: "",
 			Password: "",

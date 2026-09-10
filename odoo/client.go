@@ -174,6 +174,12 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 			args[1] = c.uid
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
+		// Fallback Odoo 14: si falla por campos como timesheet_invoice_id (sale_timesheet no instalado), reintentar sin él
+		if err != nil {
+			fallbackFields := []string{"id", "date", "name", "unit_amount", "project_id", "task_id", "employee_id", "user_id"}
+			kwargs["fields"] = fallbackFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error al obtener partes de horas: %w", err)
 		}
@@ -503,6 +509,21 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 			readArgs[1] = c.uid
 			readRaw, err = c.call(ctx, "object", "execute_kw", readArgs, nil)
 		}
+		// Fallback Odoo 14: si falla por campo timesheet_invoice_id inexistente, leer solo id
+		if err != nil {
+			fallbackReadArgs := []interface{}{
+				c.config.DB,
+				c.uid,
+				c.config.Password,
+				"account.analytic.line",
+				"read",
+				[]interface{}{
+					[]int{timesheetID},
+					[]string{"id"},
+				},
+			}
+			readRaw, err = c.call(ctx, "object", "execute_kw", fallbackReadArgs, nil)
+		}
 		if err != nil {
 			return fmt.Errorf("error al verificar estado del parte de horas en Odoo: %w", err)
 		}
@@ -553,4 +574,23 @@ func (c *Client) DeleteTimesheet(ctx context.Context, timesheetID int) error {
 	return nil
 }
 
+// GetServerVersion consulta la versión del servidor Odoo (compatible con Odoo 14.0+).
+func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
+	resultRaw, err := c.call(ctx, "common", "version", []interface{}{}, nil)
+	if err != nil {
+		return "", err
+	}
 
+	var info struct {
+		ServerVersion string `json:"server_version"`
+		ServerSerie   string `json:"server_serie"`
+	}
+	if err := json.Unmarshal(resultRaw, &info); err != nil {
+		return "", err
+	}
+
+	if info.ServerVersion != "" {
+		return info.ServerVersion, nil
+	}
+	return info.ServerSerie, nil
+}
