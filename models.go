@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -153,6 +154,7 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		odooCfg.DB = defaultCfg.DB
 	}
 
+	foundInStore := false
 	if sess != nil {
 		userEmail := sess.Username
 		if sess.UserEmail != "" {
@@ -163,6 +165,7 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		// 1. Prioridad: Almacén persistente del usuario (independiente de la sesión de Google)
 		if state.userStore != nil && userEmail != "" {
 			if uSettings, ok := state.userStore.GetSettings(userEmail); ok {
+				foundInStore = true
 				if uSettings.OdooToken != "" {
 					odooCfg.Password = uSettings.OdooToken
 				}
@@ -192,12 +195,39 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 			}
 		}
 
-		// 3. Fallback: Base de datos o contraseña en sesión de cookie
+		// 3. Fallback: Base de datos, URL, usuario o contraseña en sesión de cookie
 		if (odooCfg.DB == "" || strings.EqualFold(strings.TrimSpace(odooCfg.DB), "pasi")) && sess.DB != "" && !strings.EqualFold(strings.TrimSpace(sess.DB), "pasi") {
 			odooCfg.DB = sess.DB
 		}
 		if odooCfg.Password == "" && sess.Password != "" {
 			odooCfg.Password = sess.Password
+		}
+		if (odooCfg.URL == "" || odooCfg.URL == "https://www.planesnet.com") && sess.URL != "" && sess.URL != "https://www.planesnet.com" {
+			odooCfg.URL = sess.URL
+		}
+		if sess.Username != "" && sess.Username != userEmail && !foundInStore {
+			odooCfg.Username = sess.Username
+		}
+
+		// 4. Auto-rehidratación persistente: si la cookie contenía credenciales activas válidas y el almacén
+		// no las tenía (ej. contenedor recién regenerado o volumen reiniciado), restaurarlas en userStore inmediatamente
+		if !foundInStore && odooCfg.Password != "" && userEmail != "" && state.userStore != nil {
+			effectiveDB := odooCfg.DB
+			if strings.EqualFold(strings.TrimSpace(effectiveDB), "pasi") {
+				effectiveDB = ""
+			}
+			if effectiveDB == "" {
+				effectiveDB = DefaultOdooDB
+			}
+			_ = state.userStore.SaveSettings(store.UserSettings{
+				Email:     userEmail,
+				OdooUser:  odooCfg.Username,
+				OdooToken: odooCfg.Password,
+				OdooURL:   odooCfg.URL,
+				OdooDB:    effectiveDB,
+				PageLimit: odooCfg.Limit,
+			})
+			log.Printf("[AUTO-RESTORE] Configuración Odoo auto-restaurada desde la sesión para %s tras regeneración del contenedor", userEmail)
 		}
 	} else {
 		// Sesión anónima: comprobar si hay base de datos guardada en los ajustes
@@ -212,7 +242,7 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		odooCfg.DB = ""
 	}
 
-	// 4. Fallback: Variables del sistema si aún estuvieran vacías
+	// 5. Fallback: Variables del sistema si aún estuvieran vacías
 	if odooCfg.Password == "" && defaultCfg.Password != "" {
 		odooCfg.Password = defaultCfg.Password
 		if odooCfg.Username == "" {

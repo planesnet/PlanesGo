@@ -102,9 +102,13 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 	// Recuperar ajustes persistentes previos del usuario si existen
 	var savedToken string
 	var savedDB string
+	var savedOdooUser string
+	var savedURL string
 	if state.userStore != nil {
 		if uSettings, ok := state.userStore.GetSettings(googleUser.Email); ok {
 			savedToken = uSettings.OdooToken
+			savedOdooUser = uSettings.OdooUser
+			savedURL = uSettings.OdooURL
 			if !strings.EqualFold(strings.TrimSpace(uSettings.OdooDB), "pasi") {
 				savedDB = uSettings.OdooDB
 			}
@@ -113,6 +117,33 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 			savedDB = state.userStore.GetSharedOdooDB()
 		}
 	}
+
+	// Resiliencia ante regeneración de contenedor: recuperar ajustes previos desde la cookie si no estaban en el store
+	if oldCookie, err := r.Cookie(sessionCookieName); err == nil && oldCookie.Value != "" {
+		if oldSess, err := decodeSession(oldCookie.Value); err == nil && oldSess != nil {
+			if oldSess.UserEmail == googleUser.Email || oldSess.Username == googleUser.Email {
+				if savedToken == "" && oldSess.Password != "" {
+					savedToken = oldSess.Password
+				}
+				if (savedDB == "" || strings.EqualFold(strings.TrimSpace(savedDB), "pasi")) && oldSess.DB != "" && !strings.EqualFold(strings.TrimSpace(oldSess.DB), "pasi") {
+					savedDB = oldSess.DB
+				}
+				if savedOdooUser == "" && oldSess.Username != "" {
+					savedOdooUser = oldSess.Username
+				}
+				if (savedURL == "" || savedURL == "https://www.planesnet.com") && oldSess.URL != "" && oldSess.URL != "https://www.planesnet.com" {
+					savedURL = oldSess.URL
+				}
+			}
+		}
+	}
+
+	if savedOdooUser == "" {
+		savedOdooUser = googleUser.Email
+	}
+	if savedURL == "" || savedURL == "https://www.planesnet.com" {
+		savedURL = DefaultOdooURL
+	}
 	if savedDB == "" && state.cfg.Odoo.DB != "" && !strings.EqualFold(strings.TrimSpace(state.cfg.Odoo.DB), "pasi") {
 		savedDB = state.cfg.Odoo.DB
 	}
@@ -120,10 +151,23 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 		savedDB = DefaultOdooDB
 	}
 
+	// Rehidratar store si se recuperaron credenciales válidas
+	if savedToken != "" && state.userStore != nil {
+		_ = state.userStore.SaveSettings(store.UserSettings{
+			Email:     googleUser.Email,
+			OdooUser:  savedOdooUser,
+			OdooToken: savedToken,
+			OdooURL:   savedURL,
+			OdooDB:    savedDB,
+			PageLimit: 200,
+		})
+		log.Printf("[OAUTH] Ajustes de Odoo re-hidratados automáticamente en disco para %s", googleUser.Email)
+	}
+
 	sess := SessionData{
-		URL:         DefaultOdooURL,
+		URL:         savedURL,
 		DB:          savedDB,
-		Username:    googleUser.Email,
+		Username:    savedOdooUser,
 		Password:    savedToken,
 		AuthMethod:  "google",
 		UserEmail:   googleUser.Email,

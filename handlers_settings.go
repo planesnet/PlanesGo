@@ -93,6 +93,17 @@ func (state *AppState) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if userSettings.OdooToken == "" && session.Password != "" {
 		userSettings.OdooToken = session.Password
 	}
+	if userSettings.OdooUser == "" && session.Username != "" {
+		userSettings.OdooUser = session.Username
+	}
+
+	// Si el store estaba vacío pero la sesión tiene token, auto-guardar para persistir en disco
+	if state.userStore != nil && userEmail != "" && userEmail != "default" && userSettings.OdooToken != "" {
+		if _, exists := state.userStore.GetSettings(userEmail); !exists {
+			_ = state.userStore.SaveSettings(userSettings)
+			log.Printf("[SETTINGS] Ajustes re-persistidos automáticamente para %s desde la sesión", userEmail)
+		}
+	}
 
 	tmpl, err := template.ParseFiles("templates/settings.html")
 	if err != nil {
@@ -313,6 +324,8 @@ func (state *AppState) handleTestConnection(w http.ResponseWriter, r *http.Reque
 		}
 		session.Password = payload.OdooToken
 		session.Username = payload.OdooUser
+		session.URL = payload.OdooURL
+		session.DB = payload.OdooDB
 		http.SetCookie(w, &http.Cookie{
 			Name:     sessionCookieName,
 			Value:    encodeSession(*session),

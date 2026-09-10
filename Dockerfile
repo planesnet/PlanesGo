@@ -35,6 +35,7 @@ COPY --from=builder /app/static /app/static
 
 # Crear directorio de datos persistentes y asignar permisos
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app
+VOLUME ["/app/data"]
 USER appuser
 
 # Puerto por defecto para el servicio
