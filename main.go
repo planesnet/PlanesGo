@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.9"
+var Version = "1.2.10"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {

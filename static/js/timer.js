@@ -111,6 +111,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         startedAt: now - initialAccumulated,
         lastStartTime: now,
         accumulatedMs: initialAccumulated,
+        lastPromptAccumulatedMs: initialAccumulated,
         lastPromptTime: now
     };
 
@@ -142,6 +143,10 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     renderTimerBar(state);
     startTimerTicker();
     updateAllRowTimerButtonStates();
+
+    if (typeof showToast === 'function') {
+        showToast(`⏱️ Cronómetro iniciado en "${state.projectName}"`, 'success');
+    }
 
     // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true) enviando horas acumuladas y fecha
     fetch('/api/timer/start', {
@@ -279,6 +284,9 @@ function togglePauseTimer() {
 
         stopTimerTicker();
         console.log('[PlanesGo Timer] Trabajo en pausa. Tiempo acumulado:', formatElapsedMs(state.accumulatedMs));
+        if (typeof showToast === 'function') {
+            showToast(`⏸️ Cronómetro pausado (${totalHoursDecimal.toFixed(2)}h)`, 'warning');
+        }
     } else {
         // Reanudar
         state.status = 'running';
@@ -304,6 +312,9 @@ function togglePauseTimer() {
 
         startTimerTicker();
         console.log('[PlanesGo Timer] Trabajo reanudado');
+        if (typeof showToast === 'function') {
+            showToast(`▶️ Cronómetro reanudado: "${state.projectName}"`, 'info');
+        }
     }
 
     saveTimerState(state);
@@ -433,6 +444,8 @@ function stopTimerTicker() {
     }
 }
 
+let lastAlertChimeSec = -1;
+
 /**
  * Actualiza cada segundo el cronómetro en pantalla y evalúa el recordatorio
  */
@@ -452,6 +465,24 @@ function updateTimerTick() {
         // Si hay una alerta de 15 minutos pendiente de confirmación, evaluar si han pasado 5 minutos
         if (state.promptTriggeredAt) {
             const timeSinceAlert = now - state.promptTriggeredAt;
+            const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
+
+            // Actualizar cuenta regresiva en el modal si está visible
+            const countdownEl = document.getElementById('confirm-modal-countdown');
+            if (countdownEl) {
+                const totalSec = Math.ceil(remainingTimeoutMs / 1000);
+                const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                const sec = String(totalSec % 60).padStart(2, '0');
+                countdownEl.textContent = `${min}:${sec}`;
+            }
+
+            // Repetir aviso acústico suave cada 20 segundos para que no pase desapercibido
+            const secondsSinceAlert = Math.floor(timeSinceAlert / 1000);
+            if (secondsSinceAlert > 0 && secondsSinceAlert % 20 === 0 && secondsSinceAlert !== lastAlertChimeSec) {
+                lastAlertChimeSec = secondsSinceAlert;
+                playChimeSound(true);
+            }
+
             if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
                 // El usuario no confirmó en los próximos 5 minutos.
                 // Parar el cronómetro retrocediendo al momento de los 15 minutos exactos:
@@ -459,9 +490,15 @@ function updateTimerTick() {
                 return;
             }
         } else {
-            // Comprobar si han transcurrido 15 minutos desde el último prompt o inicio
-            const timeSincePrompt = now - (state.lastPromptTime || state.startedAt || now);
-            if (timeSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
+            // Comprobar si han transcurrido los minutos configurados de TRABAJO REAL desde el último prompt
+            const lastPromptAccum = (typeof state.lastPromptAccumulatedMs === 'number')
+                ? state.lastPromptAccumulatedMs
+                : ((state.startedAt && state.lastPromptTime) ? (state.accumulatedMs || 0) : 0);
+
+            const workDoneSincePrompt = totalMs - lastPromptAccum;
+            const wallClockSincePrompt = now - (state.lastPromptTime || state.startedAt || now);
+
+            if (workDoneSincePrompt >= TIMER_PROMPT_INTERVAL_MS || wallClockSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
                 trigger15MinuteReminder(state, totalMs);
             }
         }
@@ -682,7 +719,13 @@ function hideTimerConfirmModal() {
  */
 function confirmContinueTimer() {
     const state = getTimerState();
+    let totalMs = 0;
     if (state) {
+        totalMs = state.accumulatedMs || 0;
+        if (state.status === 'running' && state.lastStartTime) {
+            totalMs += (Date.now() - state.lastStartTime);
+        }
+        state.lastPromptAccumulatedMs = totalMs;
         state.lastPromptTime = Date.now();
         state.promptTriggeredAt = null;
         state.promptSnapshotMs = null;
@@ -694,7 +737,11 @@ function confirmContinueTimer() {
         try { activeSystemNotification.close(); } catch (e) {}
         activeSystemNotification = null;
     }
-    showNotificationToast('Trabajo reconfirmado: Sigues cronometrando este proyecto');
+    if (typeof showToast === 'function') {
+        showToast('✅ Trabajo reconfirmado: Sigues cronometrando este proyecto', 'success');
+    } else {
+        showNotificationToast('Trabajo reconfirmado: Sigues cronometrando este proyecto');
+    }
 }
 
 /**
@@ -761,10 +808,14 @@ async function initTimerFromStorage() {
         const taskId = parseInt(container.dataset.taskId, 10) || null;
         const taskName = container.dataset.taskName || '';
         const desc = container.dataset.desc || '';
-        const startedAt = parseInt(container.dataset.startedAt, 10) || Date.now();
+        let startedAt = parseInt(container.dataset.startedAt, 10) || Date.now();
+        if (startedAt > 0 && startedAt < 1000000000000) {
+            startedAt *= 1000;
+        }
         const accumMs = parseInt(container.dataset.accumulatedMs, 10) || 0;
         const isRunning = container.dataset.isRunning === 'true';
 
+        const existingState = getTimerState();
         const serverState = {
             timesheetId: tsId,
             projectId: pId,
@@ -776,7 +827,18 @@ async function initTimerFromStorage() {
             startedAt: startedAt,
             lastStartTime: isRunning ? Date.now() : null,
             accumulatedMs: accumMs,
-            lastPromptTime: Date.now()
+            lastPromptAccumulatedMs: (existingState && existingState.timesheetId === tsId && typeof existingState.lastPromptAccumulatedMs === 'number')
+                ? existingState.lastPromptAccumulatedMs
+                : accumMs,
+            lastPromptTime: (existingState && existingState.timesheetId === tsId && existingState.lastPromptTime)
+                ? existingState.lastPromptTime
+                : Date.now(),
+            promptTriggeredAt: (existingState && existingState.timesheetId === tsId)
+                ? existingState.promptTriggeredAt
+                : null,
+            promptSnapshotMs: (existingState && existingState.timesheetId === tsId)
+                ? existingState.promptSnapshotMs
+                : null
         };
         saveTimerState(serverState);
         renderTimerBar(serverState);
@@ -784,6 +846,10 @@ async function initTimerFromStorage() {
             startTimerTicker();
         }
         updateAllRowTimerButtonStates();
+
+        if (serverState.promptTriggeredAt) {
+            showTimerConfirmModal();
+        }
     } else {
         const local = getTimerState();
         if (local) {
@@ -820,6 +886,11 @@ async function syncActiveTimerFromOdoo() {
                     return;
                 }
 
+                let startedAt = act.started_at || (Date.now() - accumulatedMs);
+                if (startedAt > 0 && startedAt < 1000000000000) {
+                    startedAt *= 1000;
+                }
+
                 const serverState = {
                     timesheetId: act.timesheet_id,
                     projectId: act.project_id,
@@ -828,22 +899,41 @@ async function syncActiveTimerFromOdoo() {
                     taskName: act.task_name || '',
                     description: act.description || '',
                     status: 'running',
-                    startedAt: act.started_at || (Date.now() - accumulatedMs),
+                    startedAt: startedAt,
                     lastStartTime: Date.now(),
                     accumulatedMs: accumulatedMs,
-                    lastPromptTime: Date.now()
+                    lastPromptAccumulatedMs: (current && current.timesheetId === act.timesheet_id && typeof current.lastPromptAccumulatedMs === 'number')
+                        ? current.lastPromptAccumulatedMs
+                        : accumulatedMs,
+                    lastPromptTime: (current && current.timesheetId === act.timesheet_id && current.lastPromptTime)
+                        ? current.lastPromptTime
+                        : Date.now(),
+                    promptTriggeredAt: (current && current.timesheetId === act.timesheet_id)
+                        ? current.promptTriggeredAt
+                        : null,
+                    promptSnapshotMs: (current && current.timesheetId === act.timesheet_id)
+                        ? current.promptSnapshotMs
+                        : null
                 };
                 saveTimerState(serverState);
                 renderTimerBar(serverState);
                 startTimerTicker();
                 ensureTimesheetRowExists(act, serverState);
                 updateAllRowTimerButtonStates();
+
+                if (serverState.promptTriggeredAt) {
+                    showTimerConfirmModal();
+                }
             } else {
                 // En Odoo no se reporta cronómetro activo en este instante.
                 // IMPORTANTE: NO borrar el cronómetro local si el usuario lo inició en PlanesGo.
                 // PlanesGo mantiene la persistencia local y sincroniza hacia Odoo, evitando apagados inesperados.
                 const current = getTimerState();
-                if (current && current.startedAt && (Date.now() - current.startedAt > 86400000)) {
+                let started = current ? current.startedAt : 0;
+                if (started > 0 && started < 1000000000000) {
+                    started *= 1000;
+                }
+                if (current && started && (Date.now() - started > 86400000)) {
                     // Solo si lleva más de 24 horas continuo lo consideramos obsoleto
                     saveTimerState(null);
                     stopTimerTicker();
@@ -859,24 +949,52 @@ async function syncActiveTimerFromOdoo() {
     }
 }
 
-/**
- * Sonido de campana suave usando Web Audio API (sin mp3s externos)
- */
-function playChimeSound() {
+let sharedAudioContext = null;
+
+function getAudioContext() {
     try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
+        if (!AudioCtx) return null;
+        if (!sharedAudioContext) {
+            sharedAudioContext = new AudioCtx();
+        }
+        if (sharedAudioContext.state === 'suspended') {
+            sharedAudioContext.resume().catch(() => {});
+        }
+        return sharedAudioContext;
+    } catch (e) {
+        console.warn('[PlanesGo Audio] Error inicializando AudioContext:', e);
+        return null;
+    }
+}
 
-        const playTone = (freq, delay, duration) => {
+// Desbloquear AudioContext en la primera interacción del usuario con la página
+['click', 'keydown', 'touchstart'].forEach(evt => {
+    window.addEventListener(evt, () => {
+        if (sharedAudioContext && sharedAudioContext.state === 'suspended') {
+            sharedAudioContext.resume().catch(() => {});
+        }
+    }, { once: false, passive: true });
+});
+
+/**
+ * Sonido de aviso usando Web Audio API (alta audibilidad armónica sin dependencias externas)
+ * @param {boolean} isGentleReminder Si es true, reproduce un bip suave de recordatorio en lugar del acorde completo
+ */
+function playChimeSound(isGentleReminder = false) {
+    try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+
+        const playTone = (freq, delay, duration, volume = 0.6) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
 
-            osc.type = 'sine';
+            osc.type = 'triangle'; // Más nítido y audible en altavoces que sine pura
             osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
 
             gain.gain.setValueAtTime(0.001, ctx.currentTime + delay);
-            gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + delay + 0.05);
+            gain.gain.exponentialRampToValueAtTime(volume, ctx.currentTime + delay + 0.04);
             gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration);
 
             osc.connect(gain);
@@ -886,11 +1004,19 @@ function playChimeSound() {
             osc.stop(ctx.currentTime + delay + duration);
         };
 
-        // Acorde suave bifónico: D5 (587 Hz) y A5 (880 Hz)
-        playTone(587.33, 0, 0.6);
-        playTone(880.00, 0.15, 0.8);
+        if (isGentleReminder) {
+            // Tono recordatorio corto y sutil: E5 (659Hz) -> A5 (880Hz)
+            playTone(659.25, 0, 0.35, 0.4);
+            playTone(880.00, 0.12, 0.45, 0.5);
+        } else {
+            // Acorde de atención armonioso y de amplio rango: D5, F#5, A5, D6
+            playTone(587.33, 0.00, 0.60, 0.65);
+            playTone(739.99, 0.12, 0.70, 0.65);
+            playTone(880.00, 0.24, 0.85, 0.70);
+            playTone(1174.66, 0.38, 1.10, 0.75);
+        }
     } catch (e) {
-        console.warn('AudioContext no disponible o bloqueado por el navegador:', e);
+        console.warn('[PlanesGo Audio] AudioContext bloqueado o no disponible:', e);
     }
 }
 
@@ -919,7 +1045,7 @@ function triggerSystemNotification(title, body) {
 
             const notif = new Notification(title, {
                 body: body,
-                icon: '/static/favicon.ico',
+                icon: '/static/img/logo.png',
                 tag: 'planesgo-timer-alert',
                 renotify: true,
                 requireInteraction: true // Notificación persistente en el sistema operativo
@@ -958,6 +1084,48 @@ function triggerSystemNotification(title, body) {
         });
     }
 }
+
+/**
+ * Diagnóstico interactivo para comprobar sonidos y notificaciones nativas del cronómetro
+ */
+window.testTimerNotification = async function () {
+    console.log('[PlanesGo Test] Probando sonido y notificaciones...');
+
+    // 1. Probar sonido armónico inmediatamente
+    playChimeSound(false);
+
+    // 2. Verificar o solicitar permiso de notificación
+    if (!('Notification' in window)) {
+        if (typeof showToast === 'function') {
+            showToast('⚠️ Tu navegador no soporta notificaciones de escritorio nativas.', 'warning', 5000);
+        }
+        return;
+    }
+
+    if (Notification.permission === 'denied') {
+        if (typeof showToast === 'function') {
+            showToast('🚫 Las notificaciones están bloqueadas en los ajustes del navegador.', 'error', 6000);
+        }
+        return;
+    }
+
+    if (Notification.permission === 'default') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+            if (typeof showToast === 'function') {
+                showToast('ℹ️ Permiso de notificaciones no concedido.', 'warning', 4000);
+            }
+            return;
+        }
+    }
+
+    // 3. Emitir notificación de prueba
+    triggerSystemNotification('🔔 PlanesGo - Prueba de Notificación', '¡El sistema de avisos sonoros y de escritorio está activo y funcionando correctamente!');
+
+    if (typeof showToast === 'function') {
+        showToast('🔔 Aviso emitido: sonido reproducido y notificación de escritorio enviada.', 'success', 5000);
+    }
+};
 
 /**
  * Muestra un aviso emergente visual (toast) no intrusivo en la interfaz

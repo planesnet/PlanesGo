@@ -982,6 +982,10 @@ function submitTimesheetForm(event) {
                 el.dataset.id = data.id;
             });
         }
+
+        if (typeof showToast === 'function') {
+            showToast(isEdit ? '✅ Imputación actualizada en Odoo' : '✅ Imputación guardada correctamente en Odoo', 'success');
+        }
     })
     .catch(err => {
         console.error('[PlanesGo] Error guardando imputación en Odoo:', err);
@@ -995,7 +999,11 @@ function submitTimesheetForm(event) {
                 rebuildSidebarProjects(workerVal);
             }
         }
-        alert('⚠️ No se pudo guardar en Odoo: ' + err.message);
+        if (typeof showToast === 'function') {
+            showToast('⚠️ No se pudo guardar en Odoo: ' + err.message, 'error', 6000);
+        } else {
+            alert('⚠️ No se pudo guardar en Odoo: ' + err.message);
+        }
     });
 }
 

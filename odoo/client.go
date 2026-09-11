@@ -1278,7 +1278,7 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 		Date:          targetDate,
 		AccumulatedMs: accumMs,
 		IsRunning:     true,
-		StartedAt:     now.Unix(),
+		StartedAt:     now.UnixMilli(),
 	}, nil
 }
 
