@@ -966,6 +966,9 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 		"project_id":  projectID,
 		"unit_amount": unitAmount,
 	}
+	if uid > 0 {
+		vals["user_id"] = uid
+	}
 	if taskID > 0 {
 		vals["task_id"] = taskID
 	}
@@ -992,7 +995,12 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 
 	var newID int
 	if err := json.Unmarshal(resultRaw, &newID); err != nil || newID == 0 {
-		return 0, fmt.Errorf("respuesta inválida al crear parte de horas: %s", string(resultRaw))
+		var ids []int
+		if err2 := json.Unmarshal(resultRaw, &ids); err2 == nil && len(ids) > 0 {
+			newID = ids[0]
+		} else {
+			return 0, fmt.Errorf("respuesta inválida al crear parte de horas: %s", string(resultRaw))
+		}
 	}
 
 	return newID, nil

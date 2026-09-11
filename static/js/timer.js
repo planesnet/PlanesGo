@@ -92,38 +92,15 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     // Determinar la fecha objetivo de trabajo (parámetro, input modal o hoy)
     const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || new Date().toISOString().split('T')[0];
 
-    // 1. Si no se especificó timesheetId o horas acumuladas, buscar si ya existe una imputación para esta fecha concreta de este proyecto en la tabla
-    if (!timesheetId) {
-        let existingRow = null;
-        if (projectId) {
-            existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${targetDate}"]`);
-        }
-        if (!existingRow && projectName) {
-            try {
-                existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${targetDate}"]`);
-            } catch (e) {}
-        }
-        if (existingRow) {
-            timesheetId = parseInt(existingRow.dataset.id, 10) || null;
-            if (!taskId && existingRow.dataset.taskId) {
-                taskId = parseInt(existingRow.dataset.taskId, 10) || null;
-                taskName = existingRow.dataset.taskName || '';
-            }
-            if (!accumulatedMs) {
-                const h = parseFloat(existingRow.dataset.hours) || 0;
-                accumulatedMs = Math.round(h * 3600 * 1000);
-            }
-            if (!description && existingRow.dataset.desc) {
-                description = existingRow.dataset.desc;
-            }
-        }
-    }
-
     const now = Date.now();
     const initialAccumulated = (typeof accumulatedMs === 'number' && accumulatedMs >= 0) ? accumulatedMs : 0;
+    const initialHours = parseFloat((initialAccumulated / 3600000).toFixed(2));
+
+    const isNewTimesheet = !timesheetId;
+    const tempId = isNewTimesheet ? ('temp-' + now) : null;
 
     const state = {
-        timesheetId: timesheetId ? parseInt(timesheetId, 10) : null,
+        timesheetId: timesheetId ? parseInt(timesheetId, 10) : tempId,
         projectId: projectId ? parseInt(projectId, 10) : 0,
         projectName: projectName || (projectId ? 'Proyecto #' + projectId : 'Imputación activa'),
         taskId: taskId ? parseInt(taskId, 10) : null,
@@ -137,13 +114,40 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         lastPromptTime: now
     };
 
+    // Si es un nuevo trabajo, crear fila optimista inmediatamente en la tabla para feedback visual instantáneo
+    let optimisticRow = null;
+    if (isNewTimesheet && typeof insertOptimisticTimesheetRow === 'function') {
+        const workerBadge = document.querySelector('.timesheet-row[data-employee]');
+        const employeeName = workerBadge ? workerBadge.dataset.employee : (document.body.dataset.currentWorker || document.getElementById('sidebar-worker-name')?.textContent?.trim() || document.getElementById('sidebar-employee-select')?.value || 'Yo');
+        optimisticRow = insertOptimisticTimesheetRow({
+            id: tempId,
+            date: state.date,
+            projectId: state.projectId,
+            projectName: state.projectName,
+            taskId: state.taskId,
+            taskName: state.taskName,
+            desc: state.description,
+            hours: initialHours,
+            employeeName: employeeName
+        });
+        if (optimisticRow) {
+            optimisticRow.dataset.timerRunning = 'true';
+            optimisticRow.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+            if (typeof updateWeekControls === 'function') updateWeekControls();
+            if (typeof rebuildSidebarProjects === 'function') {
+                const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+                rebuildSidebarProjects(workerVal);
+            }
+        }
+    }
+
     saveTimerState(state);
     renderTimerBar(state);
     startTimerTicker();
     updateAllRowTimerButtonStates();
 
     // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true) enviando horas acumuladas y fecha
-    const initialHours = parseFloat((initialAccumulated / 3600000).toFixed(2));
     fetch('/api/timer/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -152,7 +156,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             project_name: state.projectName || '',
             task_id: state.taskId || 0,
             task_name: state.taskName || '',
-            timesheet_id: state.timesheetId || 0,
+            timesheet_id: isNewTimesheet ? 0 : (parseInt(timesheetId, 10) || 0),
             description: state.description,
             unit_amount: initialHours,
             date: state.date
@@ -167,15 +171,42 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
                 current.accumulatedMs = data.accumulated_ms;
             }
             saveTimerState(current);
-            ensureTimesheetRowExists(data, current);
+
+            // Actualizar la fila optimista con el ID real de Odoo
+            if (optimisticRow) {
+                optimisticRow.dataset.id = data.timesheet_id;
+                optimisticRow.querySelectorAll('[data-id]').forEach(el => {
+                    el.dataset.id = data.timesheet_id;
+                });
+            } else {
+                ensureTimesheetRowExists(data, current);
+            }
             updateAllRowTimerButtonStates();
+            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+            if (typeof updateWeekControls === 'function') updateWeekControls();
+            if (typeof rebuildSidebarProjects === 'function') {
+                const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+                rebuildSidebarProjects(workerVal);
+            }
         } else if (data && data.error) {
             console.error('[PlanesGo Timer] Error de Odoo al iniciar temporizador:', data.error);
+            if (optimisticRow) {
+                optimisticRow.remove();
+                if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+            }
             if (typeof showToast === 'function') {
                 showToast(data.error, 'error');
+            } else {
+                alert('⚠️ Error al iniciar temporizador en Odoo: ' + data.error);
             }
         }
-    }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err));
+    }).catch(err => {
+        console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err);
+        if (optimisticRow) {
+            optimisticRow.remove();
+            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+        }
+    });
 
     // Cerrar modal de imputación si estaba abierto
     if (typeof closeTimesheetModal === 'function') {
