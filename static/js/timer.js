@@ -231,8 +231,6 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
         rebuildSidebarProjects(workerVal);
     }
-
-    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Fecha: ${state.date}, Timesheet ID: ${state.timesheetId || 'nuevo'}, Acumulado: ${initialAccumulated}ms)`);
 }
 
 /**
@@ -283,7 +281,6 @@ function togglePauseTimer() {
         }
 
         stopTimerTicker();
-        console.log('[PlanesGo Timer] Trabajo en pausa. Tiempo acumulado:', formatElapsedMs(state.accumulatedMs));
         if (typeof showToast === 'function') {
             showToast(`⏸️ Cronómetro pausado (${totalHoursDecimal.toFixed(2)}h)`, 'warning');
         }
@@ -311,7 +308,6 @@ function togglePauseTimer() {
         }).catch(err => console.warn('[PlanesGo Timer] Error reanudando en Odoo:', err));
 
         startTimerTicker();
-        console.log('[PlanesGo Timer] Trabajo reanudado');
         if (typeof showToast === 'function') {
             showToast(`▶️ Cronómetro reanudado: "${state.projectName}"`, 'info');
         }
@@ -1089,8 +1085,6 @@ function triggerSystemNotification(title, body) {
  * Diagnóstico interactivo para comprobar sonidos y notificaciones nativas del cronómetro
  */
 window.testTimerNotification = async function () {
-    console.log('[PlanesGo Test] Probando sonido y notificaciones...');
-
     // 1. Probar sonido armónico inmediatamente
     playChimeSound(false);
 
@@ -1193,7 +1187,6 @@ function setupGlobalTimerKeyboardShortcut() {
 
         if (isCtrlOrCmd && isShift && isKeyT) {
             e.preventDefault();
-            console.log('[PlanesGo] Atajo Shift+Ctrl+T activado');
 
             const state = getTimerState();
             if (state) {
