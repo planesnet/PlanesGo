@@ -4,7 +4,7 @@
  */
 
 const PLANESGO_TIMER_KEY = 'planesgo_active_timer';
-const TIMER_PROMPT_MINUTES = 5; // Temporalmente 5 minutos para pruebas (luego volver a 15)
+const TIMER_PROMPT_MINUTES = 15;
 const TIMER_PROMPT_INTERVAL_MS = TIMER_PROMPT_MINUTES * 60 * 1000;
 const TIMER_UNCONFIRMED_TIMEOUT_MINUTES = 5; // 5 minutos sin confirmación para auto-pausar
 const TIMER_UNCONFIRMED_TIMEOUT_MS = TIMER_UNCONFIRMED_TIMEOUT_MINUTES * 60 * 1000;
