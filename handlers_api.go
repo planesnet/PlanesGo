@@ -65,6 +65,11 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			json.NewEncoder(w).Encode(map[string]string{"error": "El tiempo dedicado debe ser mayor a 0 horas."})
 			return
 		}
+		if strings.TrimSpace(req.Description) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "La descripción del trabajo es obligatoria."})
+			return
+		}
 		if strings.TrimSpace(req.Date) == "" {
 			req.Date = time.Now().Format("2006-01-02")
 		}
@@ -132,6 +137,11 @@ func (state *AppState) handleAPITimesheetsUpdate(w http.ResponseWriter, r *http.
 	if req.UnitAmount <= 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "El tiempo dedicado debe ser mayor a 0 horas."})
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "La descripción del trabajo es obligatoria."})
 		return
 	}
 

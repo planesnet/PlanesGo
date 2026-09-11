@@ -1197,76 +1197,14 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 	actualTimesheetID := timesheetID
 	currentHours := initialHours
 
-	// 1. Si no hay timesheetID proporcionado, intentar buscar una imputación existente de la fecha objetivo para este usuario y proyecto
-	if actualTimesheetID <= 0 && projectID > 0 {
-		domain := []interface{}{
-			[]interface{}{"date", "=", targetDate},
-			[]interface{}{"project_id", "=", projectID},
-			[]interface{}{"user_id", "=", uid},
-		}
-		if taskID > 0 {
-			domain = append(domain, []interface{}{"task_id", "=", taskID})
-		}
-		searchArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"search_read",
-			[]interface{}{domain},
-			map[string]interface{}{
-				"fields": []string{"id", "unit_amount", "name", "project_id", "task_id"},
-				"limit":  1,
-				"order":  "id desc",
-			},
-		}
-		if sRaw, sErr := c.call(ctx, "object", "execute_kw", searchArgs, nil); sErr == nil {
-			var found []struct {
-				ID         int     `json:"id"`
-				UnitAmount float64 `json:"unit_amount"`
-				Name       string  `json:"name"`
-			}
-			if json.Unmarshal(sRaw, &found) == nil && len(found) > 0 {
-				actualTimesheetID = found[0].ID
-				if currentHours <= 0 {
-					currentHours = found[0].UnitAmount
-				}
-				if description == "Trabajo en curso" && found[0].Name != "" {
-					description = found[0].Name
-				}
-			}
-		}
-	}
-
-	// 2. Si todavía no hay timesheetID, crear la imputación de inicio en account.analytic.line
+	// 1. Si no se proporcionó un timesheetID (iniciando un nuevo trabajo), crear la imputación directamente en account.analytic.line
 	if actualTimesheetID <= 0 {
-		vals := map[string]interface{}{
-			"name":             description,
-			"date":             targetDate,
-			"project_id":       projectID,
-			"unit_amount":      currentHours,
-			"is_timer_running": true,
+		newID, createErr := c.CreateTimesheet(ctx, targetDate, projectID, taskID, currentHours, description)
+		if createErr != nil {
+			log.Printf("[PlanesGo Odoo] Error al crear parte de horas en Odoo al iniciar temporizador: %v", createErr)
+			return nil, fmt.Errorf("error al crear parte de horas en Odoo: %w", createErr)
 		}
-		if taskID > 0 {
-			vals["task_id"] = taskID
-		}
-
-		createArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"create",
-			[]interface{}{vals},
-		}
-
-		resultRaw, createErr := c.call(ctx, "object", "execute_kw", createArgs, nil)
-		if createErr == nil {
-			var newID int
-			if json.Unmarshal(resultRaw, &newID) == nil && newID > 0 {
-				actualTimesheetID = newID
-			}
-		}
+		actualTimesheetID = newID
 	} else if currentHours <= 0 {
 		// Si teníamos timesheetID pero currentHours era 0, consultar su unit_amount actual en Odoo
 		readArgs := []interface{}{
@@ -1290,7 +1228,7 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 		}
 	}
 
-	// 3. Invocar acción nativa de Odoo action_timer_start en account.analytic.line
+	// 2. Invocar acción nativa de Odoo action_timer_start en account.analytic.line si está disponible
 	if actualTimesheetID > 0 {
 		startArgs := []interface{}{
 			c.config.DB,
@@ -1301,25 +1239,9 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 			[]interface{}{[]int{actualTimesheetID}},
 		}
 		_, _ = c.call(ctx, "object", "execute_kw", startArgs, nil)
-
-		// Asegurar que is_timer_running quede activado en Odoo si el campo existe
-		writeArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"write",
-			[]interface{}{
-				[]int{actualTimesheetID},
-				map[string]interface{}{
-					"is_timer_running": true,
-				},
-			},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	}
 
-	// 4. Si hay tarea asignada, invocar action_timer_start en project.task de forma asíncrona para máxima rapidez
+	// 3. Si hay tarea asignada, invocar action_timer_start en project.task de forma asíncrona para máxima rapidez
 	if taskID > 0 {
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1338,17 +1260,17 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 
 	accumMs := int64(currentHours * 3600 * 1000)
 	return &ActiveTimer{
-		TimesheetID:   actualTimesheetID,
-		TaskID:        taskID,
-		TaskName:      taskName,
 		ProjectID:     projectID,
 		ProjectName:   projectName,
+		TaskID:        taskID,
+		TaskName:      taskName,
+		TimesheetID:   actualTimesheetID,
 		Description:   description,
-		IsRunning:     true,
-		StartedAt:     now.UnixMilli() - accumMs,
-		AccumulatedMs: accumMs,
 		UnitAmount:    currentHours,
 		Date:          targetDate,
+		AccumulatedMs: accumMs,
+		IsRunning:     true,
+		StartedAt:     now.Unix(),
 	}, nil
 }
 
@@ -1378,7 +1300,7 @@ func (c *Client) UpdateTimerUnits(ctx context.Context, timesheetID int, unitAmou
 	return err
 }
 
-// PauseTimer pausa el cronómetro activo en Odoo ejecutando action_timer_pause / action_timer_stop o escribiendo is_timer_running=false
+// PauseTimer pausa el cronómetro activo en Odoo ejecutando action_timer_pause / action_timer_stop y actualizando unit_amount
 func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, unitAmount float64) error {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
@@ -1396,24 +1318,22 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 		}
 		_, _ = c.call(ctx, "object", "execute_kw", pauseArgs, nil)
 
-		vals := map[string]interface{}{
-			"is_timer_running": false,
-		}
 		if unitAmount > 0 {
-			vals["unit_amount"] = unitAmount
+			writeArgs := []interface{}{
+				c.config.DB,
+				uid,
+				c.config.Password,
+				"account.analytic.line",
+				"write",
+				[]interface{}{
+					[]int{timesheetID},
+					map[string]interface{}{
+						"unit_amount": unitAmount,
+					},
+				},
+			}
+			_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 		}
-		writeArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"write",
-			[]interface{}{
-				[]int{timesheetID},
-				vals,
-			},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	}
 
 	if taskID > 0 {
@@ -1435,7 +1355,7 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 	return nil
 }
 
-// ResumeTimer reanuda el cronómetro activo en Odoo ejecutando action_timer_resume / action_timer_start o escribiendo is_timer_running=true
+// ResumeTimer reanuda el cronómetro activo en Odoo ejecutando action_timer_resume / action_timer_start
 func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) error {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
@@ -1452,21 +1372,6 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 			[]interface{}{[]int{timesheetID}},
 		}
 		_, _ = c.call(ctx, "object", "execute_kw", resumeArgs, nil)
-
-		writeArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"write",
-			[]interface{}{
-				[]int{timesheetID},
-				map[string]interface{}{
-					"is_timer_running": true,
-				},
-			},
-		}
-		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	}
 
 	if taskID > 0 {
@@ -1506,27 +1411,27 @@ func (c *Client) StopTimer(ctx context.Context, timesheetID int, taskID int, uni
 		}
 		_, _ = c.call(ctx, "object", "execute_kw", stopArgs, nil)
 
-		vals := map[string]interface{}{
-			"is_timer_running": false,
-		}
+		vals := map[string]interface{}{}
 		if unitAmount > 0 {
 			vals["unit_amount"] = unitAmount
 		}
 		if description != "" {
 			vals["name"] = description
 		}
-		writeArgs := []interface{}{
-			c.config.DB,
-			uid,
-			c.config.Password,
-			"account.analytic.line",
-			"write",
-			[]interface{}{
-				[]int{timesheetID},
-				vals,
-			},
+		if len(vals) > 0 {
+			writeArgs := []interface{}{
+				c.config.DB,
+				uid,
+				c.config.Password,
+				"account.analytic.line",
+				"write",
+				[]interface{}{
+					[]int{timesheetID},
+					vals,
+				},
+			}
+			_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 		}
-		_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	}
 
 	if taskID > 0 {

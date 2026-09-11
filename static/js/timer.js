@@ -169,6 +169,11 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             saveTimerState(current);
             ensureTimesheetRowExists(data, current);
             updateAllRowTimerButtonStates();
+        } else if (data && data.error) {
+            console.error('[PlanesGo Timer] Error de Odoo al iniciar temporizador:', data.error);
+            if (typeof showToast === 'function') {
+                showToast(data.error, 'error');
+            }
         }
     }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando inicio con Odoo:', err));
 
@@ -1223,6 +1228,9 @@ function ensureTimesheetRowExists(serverData, timerState) {
     `;
 
     tbody.insertBefore(tr, tbody.firstChild);
+    if (typeof applyTimesheetFilters === 'function') {
+        applyTimesheetFilters();
+    }
 }
 
 /**

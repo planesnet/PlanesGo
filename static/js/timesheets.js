@@ -802,6 +802,20 @@ function submitTimesheetForm(event) {
         return;
     }
 
+    if (!desc) {
+        if (feedback) {
+            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+            feedback.innerText = 'Debes indicar una descripción del trabajo realizado.';
+        }
+        const descInp = document.getElementById('modal-desc-input');
+        if (descInp) {
+            descInp.focus();
+            descInp.classList.add('ring-2', 'ring-rose-400', 'border-rose-300');
+            setTimeout(() => descInp.classList.remove('ring-2', 'ring-rose-400', 'border-rose-300'), 3000);
+        }
+        return;
+    }
+
     // Iniciar loading
     if (submitBtn) submitBtn.disabled = true;
     if (spinner) spinner.classList.remove('hidden');
@@ -1016,23 +1030,31 @@ function startTimerFromModal() {
         return;
     }
 
-    // Buscar si ya existe una imputación para esta fecha concreta de este proyecto en la tabla para acumular
-    let existingRow = null;
-    if (projectId) {
-        existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${workDate}"]`);
-    }
-    if (!existingRow && projectName) {
-        try {
-            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${workDate}"]`);
-        } catch (e) {}
+    if (!description) {
+        const feedback = document.getElementById('modal-feedback');
+        if (feedback) {
+            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 block';
+            feedback.innerText = 'Debes indicar una descripción del trabajo realizado.';
+        }
+        if (descInput) {
+            descInput.focus();
+            descInput.classList.add('ring-2', 'ring-rose-400', 'border-rose-300');
+            setTimeout(() => descInput.classList.remove('ring-2', 'ring-rose-400', 'border-rose-300'), 3000);
+        }
+        return;
     }
 
-    let tsId = null;
+    // Si venimos de editar o reanudar un parte existente, usamos su id
+    const entryId = document.getElementById('modal-entry-id')?.value?.trim();
+    let tsId = entryId ? parseInt(entryId, 10) : null;
     let accumulatedMs = 0;
-    if (existingRow) {
-        tsId = parseInt(existingRow.dataset.id, 10) || null;
-        const h = parseFloat(existingRow.dataset.hours) || 0;
-        accumulatedMs = Math.round(h * 3600 * 1000);
+
+    if (tsId) {
+        const existingRow = document.querySelector(`.timesheet-row[data-id="${tsId}"]`);
+        if (existingRow) {
+            const h = parseFloat(existingRow.dataset.hours) || 0;
+            accumulatedMs = Math.round(h * 3600 * 1000);
+        }
     }
 
     // Si el usuario introdujo horas previas en el input de tiempo, considerarlas como base acumulada
