@@ -163,7 +163,7 @@ function updateStartWorkTimerButton() {
 }
 
 /**
- * Inicia el cronómetro para el proyecto activo seleccionado
+ * Abre el diálogo de parte de trabajo en modo "Iniciar Trabajo" para el proyecto activo seleccionado
  */
 function startWorkTimerForActiveProject() {
     let pName = activeSidebarProjectName || '';
@@ -176,11 +176,6 @@ function startWorkTimerForActiveProject() {
         }
     }
 
-    if (!pName && !pId) {
-        alert('Debes seleccionar un proyecto activo en el panel para iniciar el trabajo.');
-        return;
-    }
-
     if (!pId && pName) {
         const item = document.querySelector(`.sidebar-project-item[data-project-name="${CSS.escape(pName)}"], .sidebar-all-project-item[data-project-name="${CSS.escape(pName)}"]`);
         if (item && item.dataset.projectId) {
@@ -188,37 +183,26 @@ function startWorkTimerForActiveProject() {
         }
     }
 
-    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para acumular
-    const todayStr = new Date().toISOString().split('T')[0];
-    let existingRow = null;
-    if (pId) {
-        existingRow = document.querySelector(`.timesheet-row[data-project-id="${pId}"][data-date="${todayStr}"]`);
-    }
-    if (!existingRow && pName) {
-        try {
-            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(pName)}"][data-date="${todayStr}"]`);
-        } catch (e) {}
-    }
-
-    let tsId = null;
-    let accumulatedMs = 0;
-    let taskId = null;
-    let taskName = '';
-    let desc = `Trabajo en ${pName}`;
-
-    if (existingRow) {
-        tsId = parseInt(existingRow.dataset.id, 10) || null;
-        const h = parseFloat(existingRow.dataset.hours) || 0;
-        accumulatedMs = Math.round(h * 3600 * 1000);
-        taskId = parseInt(existingRow.dataset.taskId, 10) || null;
-        taskName = existingRow.dataset.taskName || '';
-        if (existingRow.dataset.desc) {
-            desc = existingRow.dataset.desc;
+    // Si aún no tenemos pId, buscar en el select del modal de proyectos
+    if (!pId && pName) {
+        const modalProjSelect = document.getElementById('modal-project-select');
+        if (modalProjSelect) {
+            for (let i = 0; i < modalProjSelect.options.length; i++) {
+                const optText = modalProjSelect.options[i].text.toLowerCase().trim();
+                const searchName = pName.toLowerCase().trim();
+                if (optText === searchName || optText.includes(searchName) || searchName.includes(optText)) {
+                    pId = modalProjSelect.options[i].value;
+                    break;
+                }
+            }
         }
     }
 
-    if (typeof startWorkTimer === 'function') {
-        startWorkTimer(pId ? parseInt(pId, 10) : 0, pName, taskId, taskName, desc, tsId, accumulatedMs);
+    // Abrir el diálogo para registrar o iniciar el parte de trabajo con el proyecto seleccionado
+    if (typeof openCreateTimesheetModal === 'function') {
+        openCreateTimesheetModal(pId, pName, null, true);
+    } else {
+        console.error('[PlanesGo] openCreateTimesheetModal no está disponible');
     }
 }
 

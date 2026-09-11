@@ -227,6 +227,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     submitInlineCreateTask();
                     return;
                 }
+                const modal = document.getElementById('timesheet-modal');
+                const isTimerMode = modal && modal.dataset.mode === 'timer';
+                const hoursInput = document.getElementById('modal-hours-input');
+                const hasHours = hoursInput && hoursInput.value.trim().length > 0;
+
+                // Si está en modo Iniciar Trabajo y no se introdujeron horas manuales, Enter inicia el cronómetro en vivo
+                if (isTimerMode && !hasHours) {
+                    e.preventDefault();
+                    if (typeof startTimerFromModal === 'function') {
+                        startTimerFromModal();
+                    }
+                    return;
+                }
+
                 // En inputs y selects, Enter equivale a Aceptar
                 e.preventDefault();
                 submitTimesheetForm(e);

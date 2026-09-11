@@ -202,7 +202,7 @@ function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, ho
     openEditTimesheetModal(fakeBtn);
 }
 
-function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate) {
+function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode) {
     const modal = document.getElementById('timesheet-modal');
     const container = document.getElementById('timesheet-modal-container');
     const title = document.getElementById('modal-title');
@@ -216,9 +216,11 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
 
     if (!modal) return;
 
+    modal.dataset.mode = isStartTimerMode ? 'timer' : 'standard';
+
     // Reset estado
     entryIdInput.value = '';
-    title.innerText = 'Registrar Horas';
+    title.innerText = isStartTimerMode ? 'Iniciar Trabajo' : 'Registrar Horas';
     submitBtnText.innerText = 'Guardar';
     toggleInlineCreateTask(false);
     if (feedback) {
@@ -243,18 +245,41 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
 
     // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
     let targetProjectId = preselectedProjectId || activeSidebarProjectId;
-    if (!targetProjectId && activeSidebarProjectName && projectSelect) {
+    const targetProjectName = preselectedProjectName || activeSidebarProjectName;
+    if (!targetProjectId && targetProjectName && projectSelect) {
         for (let i = 0; i < projectSelect.options.length; i++) {
-            if (projectSelect.options[i].text.toLowerCase().includes(activeSidebarProjectName.toLowerCase())) {
+            const optText = projectSelect.options[i].text.toLowerCase().trim();
+            const searchName = targetProjectName.toLowerCase().trim();
+            if (optText === searchName || optText.includes(searchName) || searchName.includes(optText)) {
                 targetProjectId = projectSelect.options[i].value;
                 break;
             }
         }
     }
 
+    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para precargar tarea / desc si existe
+    const todayStr = dateInput.value;
+    let existingRow = null;
+    if (targetProjectId) {
+        existingRow = document.querySelector(`.timesheet-row[data-project-id="${targetProjectId}"][data-date="${todayStr}"]`);
+    }
+    if (!existingRow && targetProjectName) {
+        try {
+            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(targetProjectName)}"][data-date="${todayStr}"]`);
+        } catch (e) {}
+    }
+
+    let preselectedTaskId = null;
+    if (existingRow) {
+        preselectedTaskId = existingRow.dataset.taskId || null;
+        if (existingRow.dataset.desc) {
+            descInput.value = existingRow.dataset.desc;
+        }
+    }
+
     if (targetProjectId && projectSelect) {
-        projectSelect.value = targetProjectId;
-        loadTasksForProject(targetProjectId);
+        projectSelect.value = String(targetProjectId);
+        loadTasksForProject(targetProjectId, preselectedTaskId);
     } else {
         if (projectSelect) projectSelect.value = '';
         const taskSelect = document.getElementById('modal-task-select');
@@ -263,15 +288,44 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         }
     }
 
+    // Adaptar horas y botón según el modo
+    if (hoursInput) {
+        if (isStartTimerMode) {
+            hoursInput.removeAttribute('required');
+        } else {
+            hoursInput.setAttribute('required', 'required');
+        }
+    }
+
+    const startTimerBtn = document.getElementById('btn-modal-start-timer');
+    if (startTimerBtn) {
+        if (isStartTimerMode) {
+            startTimerBtn.className = 'px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl transition flex items-center space-x-1.5 shadow-xs ring-2 ring-emerald-400 cursor-pointer';
+        } else {
+            startTimerBtn.className = 'px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 cursor-pointer';
+        }
+    }
+
     modal.classList.remove('hidden');
     requestAnimationFrame(() => {
         container.classList.remove('scale-95', 'opacity-0');
         container.classList.add('scale-100', 'opacity-100');
-        // Foco inteligente: si ya hay proyecto, enfocar tiempo para escribir y pulsar Enter
-        if (targetProjectId && hoursInput) {
-            setTimeout(() => hoursInput.focus(), 100);
-        } else if (projectSelect) {
-            setTimeout(() => projectSelect.focus(), 100);
+
+        if (isStartTimerMode) {
+            // En modo iniciar trabajo, dar foco a la tarea o a la descripción
+            const taskSelect = document.getElementById('modal-task-select');
+            if (taskSelect) {
+                setTimeout(() => taskSelect.focus(), 100);
+            } else if (descInput) {
+                setTimeout(() => descInput.focus(), 100);
+            }
+        } else {
+            // Foco inteligente: si ya hay proyecto, enfocar tiempo para escribir y pulsar Enter
+            if (targetProjectId && hoursInput) {
+                setTimeout(() => hoursInput.focus(), 100);
+            } else if (projectSelect) {
+                setTimeout(() => projectSelect.focus(), 100);
+            }
         }
     });
 }
@@ -339,8 +393,16 @@ function closeTimesheetModal() {
     const container = document.getElementById('timesheet-modal-container');
     const submitBtn = document.getElementById('btn-submit-timesheet');
     const spinner = document.getElementById('btn-submit-timesheet-spinner');
+    const hoursInput = document.getElementById('modal-hours-input');
+    const startTimerBtn = document.getElementById('btn-modal-start-timer');
+
     if (submitBtn) submitBtn.disabled = false;
     if (spinner) spinner.classList.add('hidden');
+    if (hoursInput) hoursInput.setAttribute('required', 'required');
+    if (modal) delete modal.dataset.mode;
+    if (startTimerBtn) {
+        startTimerBtn.className = 'px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 cursor-pointer';
+    }
 
     if (!modal) return;
 
@@ -354,9 +416,10 @@ function closeTimesheetModal() {
     }, 150);
 }
 
-// Alias de seguridad para evitar errores si algún script o componente lo llama por su nombre alternativo
+// Alias de seguridad para asegurar disponibilidad global entre scripts
 window.closeTimesheetModal = closeTimesheetModal;
 window.closeCreateTimesheetModal = closeTimesheetModal;
+window.openCreateTimesheetModal = openCreateTimesheetModal;
 
 function onModalProjectChange(projectId) {
     toggleInlineCreateTask(false);
@@ -958,6 +1021,15 @@ function startTimerFromModal() {
         tsId = parseInt(existingRow.dataset.id, 10) || null;
         const h = parseFloat(existingRow.dataset.hours) || 0;
         accumulatedMs = Math.round(h * 3600 * 1000);
+    }
+
+    // Si el usuario introdujo horas previas en el input de tiempo, considerarlas como base acumulada
+    const hoursRaw = document.getElementById('modal-hours-input')?.value?.trim();
+    if (hoursRaw) {
+        const manualHours = typeof parseTimeToDecimal === 'function' ? parseTimeToDecimal(hoursRaw) : parseFloat(hoursRaw);
+        if (!isNaN(manualHours) && manualHours > 0) {
+            accumulatedMs = Math.max(accumulatedMs, Math.round(manualHours * 3600 * 1000));
+        }
     }
 
     if (typeof startWorkTimer === 'function') {
