@@ -166,6 +166,8 @@ function applyTimesheetFilters() {
         const hours = parseFloat(row.dataset.hours) || 0;
         const rowDateStr = row.dataset.date || '';
 
+        const isTimerRunning = (row.dataset.timerRunning === 'true');
+
         const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal);
 
         let matchProject = true;
@@ -175,7 +177,7 @@ function applyTimesheetFilters() {
             matchProject = (projectName === targetProjectName || project === targetProjectName || projectName.includes(targetProjectName) || project.includes(targetProjectName));
         }
 
-        const matchEmployee = !employeeVal || employee.includes(employeeVal);
+        const matchEmployee = !employeeVal || employee.includes(employeeVal) || (employeeVal.includes(employee) && employee.length > 2) || (isTimerRunning && (employee === 'yo' || !employee));
 
         let matchWeek = false;
         if (rowDateStr) {
@@ -185,7 +187,10 @@ function applyTimesheetFilters() {
             }
         }
 
-        if (matchSearch && matchProject && matchEmployee && matchWeek) {
+        // Si el temporizador está corriendo para el usuario, debe ser SIEMPRE visible en la semana actual
+        const shouldShow = isTimerRunning ? (matchEmployee && (matchWeek || !rowDateStr)) : (matchSearch && matchProject && matchEmployee && matchWeek);
+
+        if (shouldShow) {
             row.style.display = '';
             visibleHours += hours;
             visibleCount++;

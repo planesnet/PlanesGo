@@ -579,6 +579,14 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if activeTimer != nil && activeTimer.EmployeeName == "" {
+		if session != nil && session.UserName != "" {
+			activeTimer.EmployeeName = session.UserName
+		} else if odooCfg.Username != "" {
+			activeTimer.EmployeeName = odooCfg.Username
+		}
+	}
+
 	json.NewEncoder(w).Encode(activeTimer)
 }
 

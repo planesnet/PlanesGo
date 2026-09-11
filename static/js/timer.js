@@ -116,10 +116,10 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
 
     // Si es un nuevo trabajo, crear fila optimista inmediatamente en la tabla para feedback visual instantáneo
     let optimisticRow = null;
-    if (isNewTimesheet && typeof insertOptimisticTimesheetRow === 'function') {
-        const workerBadge = document.querySelector('.timesheet-row[data-employee]');
-        const employeeName = workerBadge ? workerBadge.dataset.employee : (document.body.dataset.currentWorker || document.getElementById('sidebar-worker-name')?.textContent?.trim() || document.getElementById('sidebar-employee-select')?.value || 'Yo');
-        optimisticRow = insertOptimisticTimesheetRow({
+    const insertFn = window.insertOptimisticTimesheetRow || (typeof insertOptimisticTimesheetRow === 'function' ? insertOptimisticTimesheetRow : null);
+    if (isNewTimesheet && insertFn) {
+        const employeeName = (typeof getActiveWorkerName === 'function') ? getActiveWorkerName() : (document.body?.dataset.currentWorker || 'Yo');
+        optimisticRow = insertFn({
             id: tempId,
             date: state.date,
             projectId: state.projectId,
@@ -128,17 +128,13 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             taskName: state.taskName,
             desc: state.description,
             hours: initialHours,
-            employeeName: employeeName
+            employeeName: employeeName,
+            timerRunning: true,
+            isRunning: true
         });
         if (optimisticRow) {
             optimisticRow.dataset.timerRunning = 'true';
             optimisticRow.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
-            if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
-            if (typeof updateWeekControls === 'function') updateWeekControls();
-            if (typeof rebuildSidebarProjects === 'function') {
-                const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
-                rebuildSidebarProjects(workerVal);
-            }
         }
     }
 
@@ -213,6 +209,22 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         closeTimesheetModal();
     } else if (typeof closeCreateTimesheetModal === 'function') {
         closeCreateTimesheetModal();
+    }
+
+    // Sincronizar selección de proyecto en el sidebar si no estaba ya seleccionado
+    if (typeof selectSidebarProject === 'function' && state.projectId) {
+        const currentActiveId = (typeof activeSidebarProjectId !== 'undefined') ? activeSidebarProjectId : '';
+        if (String(state.projectId) !== String(currentActiveId)) {
+            selectSidebarProject(state.projectName, state.projectId);
+        }
+    }
+
+    if (typeof applyTimesheetFilters === 'function') applyTimesheetFilters();
+    if (typeof updateWeekControls === 'function') updateWeekControls();
+    if (typeof updateAllRowTimerButtonStates === 'function') updateAllRowTimerButtonStates();
+    if (typeof rebuildSidebarProjects === 'function') {
+        const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+        rebuildSidebarProjects(workerVal);
     }
 
     console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Fecha: ${state.date}, Timesheet ID: ${state.timesheetId || 'nuevo'}, Acumulado: ${initialAccumulated}ms)`);
@@ -1133,12 +1145,12 @@ function ensureTimesheetRowExists(serverData, timerState) {
     if (!tbody) return;
 
     // Eliminar fila vacía ("No hay imputaciones") si existe
-    const emptyRow = tbody.querySelector('tr td[colspan]');
+    const emptyRow = tbody.querySelector('#empty-row');
     if (emptyRow) {
-        emptyRow.closest('tr').remove();
+        emptyRow.remove();
     }
 
-    const todayStr = (serverData && serverData.date) || new Date().toISOString().split('T')[0];
+    const todayStr = (serverData && serverData.date) || ((typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0]);
     const projectName = (serverData && serverData.project_name) || (timerState && timerState.projectName) || ('Proyecto #' + ((timerState && timerState.projectId) || ''));
     const projectId = (timerState && timerState.projectId) || (serverData && serverData.project_id) || '';
     const taskName = (serverData && serverData.task_name) || (timerState && timerState.taskName) || '';
@@ -1149,8 +1161,7 @@ function ensureTimesheetRowExists(serverData, timerState) {
     const hours = unitAmount.toFixed(2);
 
     // Obtener nombre del trabajador
-    const workerBadge = document.querySelector('.timesheet-row[data-employee]');
-    const workerName = (serverData && serverData.employee_name) || (workerBadge ? workerBadge.dataset.employee : (document.querySelector('#user-menu-btn span')?.textContent?.trim() || 'Yo'));
+    const workerName = (serverData && serverData.employee_name) || (typeof getActiveWorkerName === 'function' ? getActiveWorkerName() : (document.body ? document.body.dataset.currentWorker : '') || 'Yo');
     const workerInitial = workerName.charAt(0).toUpperCase() || 'U';
 
     const tr = document.createElement('tr');

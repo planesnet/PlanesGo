@@ -190,3 +190,24 @@ function formatDateJS(dateStr) {
     }
     return dateStr;
 }
+
+function getActiveWorkerName() {
+    const sidebarSelect = document.getElementById('sidebar-employee-select');
+    if (sidebarSelect && sidebarSelect.value && sidebarSelect.value.trim() && sidebarSelect.value.trim().toLowerCase() !== 'todos') {
+        return sidebarSelect.value.trim();
+    }
+    const bodyWorker = document.body ? document.body.dataset.currentWorker : '';
+    if (bodyWorker && bodyWorker.trim() && bodyWorker.trim() !== 'Trabajador') {
+        return bodyWorker.trim();
+    }
+    const sidebarName = document.getElementById('sidebar-worker-name')?.textContent?.trim();
+    if (sidebarName && sidebarName !== 'Trabajador') {
+        return sidebarName;
+    }
+    const badge = document.querySelector('.timesheet-row[data-employee]');
+    if (badge && badge.dataset.employee && badge.dataset.employee.trim()) {
+        return badge.dataset.employee.trim();
+    }
+    return 'Yo';
+}
+window.getActiveWorkerName = getActiveWorkerName;

@@ -597,23 +597,23 @@ function insertOptimisticTimesheetRow(data) {
     if (!tbody) return null;
 
     // Eliminar fila vacía ("No hay partes de horas") si existe
-    const emptyRow = tbody.querySelector('#empty-row') || tbody.querySelector('tr td[colspan]');
+    const emptyRow = tbody.querySelector('#empty-row');
     if (emptyRow) {
-        const trEmpty = emptyRow.closest('tr');
-        if (trEmpty) trEmpty.remove();
+        emptyRow.remove();
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
     const isToday = (data.date === todayStr);
-    const workerName = data.employeeName || 'Yo';
+    const workerName = data.employeeName || (typeof getActiveWorkerName === 'function' ? getActiveWorkerName() : (document.body ? document.body.dataset.currentWorker : '') || 'Yo');
     const workerInitial = workerName.charAt(0).toUpperCase() || 'U';
-    const hoursFormatted = parseFloat(data.hours).toFixed(2);
+    const hoursFormatted = parseFloat(data.hours || 0).toFixed(2);
+    const isRunning = Boolean(data.timerRunning || data.isRunning);
 
     const tr = document.createElement('tr');
-    tr.className = 'timesheet-row hover:bg-slate-50/80 transition-colors bg-emerald-100/80';
+    tr.className = `timesheet-row hover:bg-slate-50/80 transition-colors ${isRunning ? 'bg-emerald-50/70 ring-1 ring-emerald-300' : 'bg-emerald-100/80'}`;
     tr.dataset.id = data.id;
     tr.dataset.date = data.date;
-    tr.dataset.timerRunning = 'false';
+    tr.dataset.timerRunning = isRunning ? 'true' : 'false';
     tr.dataset.employee = workerName;
     tr.dataset.project = data.projectName;
     tr.dataset.projectName = data.projectName;
@@ -659,8 +659,15 @@ function insertOptimisticTimesheetRow(data) {
         </td>
         <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
             <div class="inline-flex items-center justify-end space-x-1.5">
-                <span class="timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono">
-                    ${hoursFormatted} h
+                <span class="timesheet-hours-badge ${isRunning ? 'inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs' : 'inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono'}">
+                    ${isRunning ? `
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span class="timer-live-clock font-mono font-bold text-emerald-900">00:00:00</span>
+                    <span class="text-[10px] text-emerald-700 font-medium">(${hoursFormatted}h)</span>
+                    ` : `${hoursFormatted} h`}
                 </span>
             </div>
         </td>
@@ -677,18 +684,18 @@ function insertOptimisticTimesheetRow(data) {
                         data-task-name="${data.taskName || ''}"
                         data-hours="${hoursFormatted}"
                         data-desc="${data.desc || ''}"
-                        class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
-                        title="Activar o reanudar cronómetro en esta imputación">
-                    <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                        class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 ${isRunning ? 'text-amber-700 bg-amber-100 hover:bg-amber-200 border-amber-300 animate-pulse' : 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80'} rounded-lg transition cursor-pointer"
+                        title="${isRunning ? 'Pausar cronómetro de esta imputación' : 'Activar o reanudar cronómetro en esta imputación'}">
+                    <svg class="w-3.5 h-3.5 icon-play ${isRunning ? 'hidden' : ''}" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
                     </svg>
-                    <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                    <svg class="w-3.5 h-3.5 icon-pause ${isRunning ? '' : 'hidden'}" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
                     </svg>
                 </button>
                 <button type="button"
                         onclick="finalizeActiveTimer()"
-                        class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer hidden"
+                        class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer ${isRunning ? '' : 'hidden'}"
                         title="Detener y consolidar cronómetro en Odoo">
                     <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
@@ -730,23 +737,29 @@ function insertOptimisticTimesheetRow(data) {
         </td>
     `;
 
-    // Insertar en la posición ordenada por fecha descendente
-    const existingRows = Array.from(tbody.querySelectorAll('.timesheet-row'));
-    let inserted = false;
-    for (const r of existingRows) {
-        if ((r.dataset.date || '') < data.date) {
-            tbody.insertBefore(tr, r);
-            inserted = true;
-            break;
+    // Si está corriendo el cronómetro, insertar arriba de todo para visibilidad inmediata; si no, insertar ordenado por fecha
+    if (isRunning) {
+        tbody.insertBefore(tr, tbody.firstChild);
+    } else {
+        const existingRows = Array.from(tbody.querySelectorAll('.timesheet-row'));
+        let inserted = false;
+        for (const r of existingRows) {
+            if ((r.dataset.date || '') < data.date) {
+                tbody.insertBefore(tr, r);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) {
+            tbody.appendChild(tr);
         }
     }
-    if (!inserted) {
-        tbody.appendChild(tr);
-    }
 
-    setTimeout(() => {
-        tr.classList.remove('bg-emerald-100/80');
-    }, 1500);
+    if (!isRunning) {
+        setTimeout(() => {
+            tr.classList.remove('bg-emerald-100/80');
+        }, 1500);
+    }
 
     return tr;
 }
@@ -917,8 +930,7 @@ function submitTimesheetForm(event) {
         }
     } else {
         // En creación nueva: inserción optimista instantánea en el DOM
-        const workerBadge = document.querySelector('.timesheet-row[data-employee]');
-        const employeeName = workerBadge ? workerBadge.dataset.employee : (document.body.dataset.currentWorker || document.getElementById('sidebar-worker-name')?.textContent?.trim() || 'Yo');
+        const employeeName = (typeof getActiveWorkerName === 'function') ? getActiveWorkerName() : (document.body?.dataset.currentWorker || 'Yo');
 
         const tempId = 'temp-' + Date.now();
         tempRow = insertOptimisticTimesheetRow({
@@ -1071,3 +1083,4 @@ function startTimerFromModal() {
     }
 }
 window.startTimerFromModal = startTimerFromModal;
+window.insertOptimisticTimesheetRow = insertOptimisticTimesheetRow;
