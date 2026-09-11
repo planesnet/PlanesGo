@@ -8,10 +8,267 @@ const currentMonday = getMonday(new Date());
 let selectedWeekMonday = new Date(currentMonday);
 let currentView = 'list';
 
-function navigateWeek(delta) {
+// Registro de semanas ya cargadas en el DOM (clave: YYYY-MM-DD del lunes)
+const loadedWeeks = new Set();
+if (typeof formatISODate === 'function') {
+    loadedWeeks.add(formatISODate(currentMonday));
+}
+
+let isWeekLoading = false;
+
+function showWeekLoadingIndicator(isLoading) {
+    const titleEl = document.getElementById('week-title-display');
+    const btnPrev = document.getElementById('btn-prev-week');
+    const btnNext = document.getElementById('btn-next-week');
+
+    if (isLoading) {
+        if (btnPrev) btnPrev.classList.add('opacity-50', 'pointer-events-none');
+        if (btnNext) btnNext.classList.add('opacity-50', 'pointer-events-none');
+        if (titleEl && !titleEl.querySelector('.week-spinner')) {
+            const sp = document.createElement('span');
+            sp.className = 'week-spinner inline-block w-3.5 h-3.5 ml-2 border-2 border-sky-600 border-t-transparent rounded-full animate-spin align-middle';
+            titleEl.appendChild(sp);
+        }
+    } else {
+        if (btnPrev) btnPrev.classList.remove('opacity-50', 'pointer-events-none');
+        if (btnNext) btnNext.classList.remove('opacity-50', 'pointer-events-none');
+        const sp = document.querySelector('.week-spinner');
+        if (sp) sp.remove();
+    }
+}
+
+/**
+ * Inserta partes de horas devueltos por la API para una semana concreta
+ */
+function insertWeekEntriesIntoTable(entries) {
+    const tbody = document.querySelector('#timesheet-table tbody');
+    if (!tbody || !Array.isArray(entries)) return;
+
+    // Si había una fila de "No hay partes", la quitamos si vienen nuevos datos
+    const emptyRow = tbody.querySelector('#empty-row');
+    if (emptyRow && entries.length > 0) {
+        emptyRow.remove();
+    }
+
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
+
+    entries.forEach(entry => {
+        // Evitar duplicados si ya existe en el DOM
+        if (tbody.querySelector(`.timesheet-row[data-id="${entry.id}"]`)) {
+            return;
+        }
+
+        const isRunning = Boolean(entry.is_timer_running);
+        const empName = (entry.employee_id && entry.employee_id.name) ? entry.employee_id.name : 
+                        ((entry.user_id && entry.user_id.name) ? entry.user_id.name : 'Sin asignar');
+        const empInitial = empName.charAt(0).toUpperCase() || 'U';
+        const projName = entry.project_id ? (entry.project_id.name || '') : '';
+        const projId = entry.project_id ? entry.project_id.id : 0;
+        const taskName = entry.task_id ? (entry.task_id.name || '') : '';
+        const taskId = entry.task_id ? entry.task_id.id : 0;
+        const hoursFormatted = (typeof entry.unit_amount === 'number') ? entry.unit_amount.toFixed(2) : '0.00';
+        const desc = entry.name || '';
+        const isToday = (entry.date === todayStr);
+        const isInvoiced = Boolean(entry.timesheet_invoice_id && entry.timesheet_invoice_id.id);
+        const invoiceName = entry.timesheet_invoice_id ? (entry.timesheet_invoice_id.name || `#${entry.timesheet_invoice_id.id}`) : '';
+
+        const tr = document.createElement('tr');
+        tr.className = `timesheet-row hover:bg-slate-50/80 transition-colors ${isRunning ? 'bg-emerald-50/70 ring-1 ring-emerald-300' : ''}`;
+        tr.dataset.id = entry.id;
+        tr.dataset.date = entry.date;
+        tr.dataset.timerRunning = isRunning ? 'true' : 'false';
+        tr.dataset.employee = empName;
+        tr.dataset.project = projName;
+        tr.dataset.projectName = projName;
+        tr.dataset.projectId = projId;
+        tr.dataset.task = taskName;
+        tr.dataset.taskId = taskId;
+        tr.dataset.taskName = taskName;
+        tr.dataset.desc = desc;
+        tr.dataset.hours = hoursFormatted;
+        tr.dataset.invoiced = isInvoiced ? 'true' : 'false';
+
+        const safeEmpName = (typeof escapeHtml === 'function') ? escapeHtml(empName) : empName;
+        const safeProjName = (typeof escapeHtml === 'function') ? escapeHtml(projName) : projName;
+        const safeTaskName = (typeof escapeHtml === 'function') ? escapeHtml(taskName) : taskName;
+        const safeDesc = (typeof escapeHtml === 'function') ? escapeHtml(desc) : desc;
+        const safeInvoice = (typeof escapeHtml === 'function') ? escapeHtml(invoiceName) : invoiceName;
+
+        tr.innerHTML = `
+            <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+                <span class="font-medium text-slate-900 font-mono text-xs">${entry.date}</span>
+            </td>
+            <td class="py-3 px-4 whitespace-nowrap">
+                <div class="flex items-center space-x-2">
+                    <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[10px] shrink-0">
+                        ${empInitial}
+                    </div>
+                    <span class="font-medium text-slate-800">${safeEmpName}</span>
+                </div>
+            </td>
+            <td class="py-3 px-4 whitespace-nowrap col-project-cell">
+                ${projName ? `
+                <button type="button"
+                        onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
+                        data-project-name="${safeProjName}"
+                        data-project-id="${projId}"
+                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                        title="Filtrar por este proyecto">
+                    ${safeProjName}
+                </button>` : `<span class="text-slate-400 text-xs">-</span>`}
+            </td>
+            <td class="py-3 px-4 whitespace-nowrap">
+                ${taskName ? `
+                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                    ${safeTaskName}
+                </span>` : `<span class="text-slate-400 text-xs">-</span>`}
+            </td>
+            <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${safeDesc}">
+                ${desc ? safeDesc : `<span class="italic text-slate-400">Sin descripción</span>`}
+            </td>
+            <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+                <div class="inline-flex items-center justify-end space-x-1.5">
+                    ${isInvoiced ? `
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80" title="Factura: ${safeInvoice}">
+                        <svg class="w-2.5 h-2.5 mr-1 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                        Facturado
+                    </span>` : ''}
+                    <span class="timesheet-hours-badge ${isRunning ? 'inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs' : 'inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono'}">
+                        ${isRunning ? `
+                        <span class="relative flex h-2 w-2">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span class="timer-live-clock font-mono font-bold text-emerald-900">${hoursFormatted} h</span>
+                        <span class="text-[10px] text-emerald-700 font-medium">(Activo)</span>
+                        ` : `${hoursFormatted} h`}
+                    </span>
+                </div>
+            </td>
+            <td class="py-3 px-3 text-right whitespace-nowrap">
+                <div class="inline-flex items-center justify-end space-x-1">
+                    ${(isToday && !isInvoiced) ? `
+                    <button type="button"
+                            onclick="toggleTimesheetRowTimer(this)"
+                            data-id="${entry.id}"
+                            data-date="${entry.date}"
+                            data-project-id="${projId}"
+                            data-project-name="${safeProjName}"
+                            data-task-id="${taskId}"
+                            data-task-name="${safeTaskName}"
+                            data-hours="${hoursFormatted}"
+                            data-desc="${safeDesc}"
+                            class="btn-row-timer-play inline-flex items-center justify-center w-7 h-7 ${isRunning ? 'text-amber-700 bg-amber-100 hover:bg-amber-200 border-amber-300 animate-pulse' : 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80'} rounded-lg transition cursor-pointer"
+                            title="${isRunning ? 'Pausar cronómetro de esta imputación' : 'Activar o reanudar cronómetro en esta imputación'}">
+                        <svg class="w-3.5 h-3.5 icon-play ${isRunning ? 'hidden' : ''}" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                        </svg>
+                        <svg class="w-3.5 h-3.5 icon-pause ${isRunning ? '' : 'hidden'}" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button type="button"
+                            onclick="finalizeActiveTimer()"
+                            class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer ${isRunning ? '' : 'hidden'}"
+                            title="Detener y consolidar cronómetro en Odoo">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                        </svg>
+                    </button>` : ''}
+                    
+                    <button type="button"
+                            onclick="openEditTimesheetModal(this)"
+                            data-id="${entry.id}"
+                            data-date="${entry.date}"
+                            data-project-id="${projId}"
+                            data-project-name="${safeProjName}"
+                            data-task-id="${taskId}"
+                            data-task-name="${safeTaskName}"
+                            data-name="${safeDesc}"
+                            data-hours="${hoursFormatted}"
+                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer"
+                            title="Editar este parte de horas">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                    </button>
+
+                    ${isInvoiced ? `
+                    <span class="inline-flex items-center justify-center w-7 h-7 text-slate-300 rounded-lg cursor-not-allowed"
+                          title="No se puede borrar: Imputación ya facturada en Odoo (Factura ${safeInvoice})">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </span>` : `
+                    <button type="button"
+                            onclick="openDeleteTimesheetModal(this)"
+                            data-id="${entry.id}"
+                            data-date="${entry.date}"
+                            data-project-name="${safeProjName}"
+                            data-task-name="${safeTaskName}"
+                            data-hours="${hoursFormatted}"
+                            data-desc="${safeDesc}"
+                            class="inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                            title="Eliminar este parte de horas">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>`}
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+/**
+ * Consulta la API para traer partes de horas de una semana específica
+ */
+async function fetchWeekTimesheets(mondayStr, sundayStr) {
+    isWeekLoading = true;
+    showWeekLoadingIndicator(true);
+
+    try {
+        const resp = await fetch(`/api/timesheets?date_from=${mondayStr}&date_to=${sundayStr}`, {
+            cache: 'no-cache'
+        });
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+        const entries = await resp.json();
+        insertWeekEntriesIntoTable(entries);
+        loadedWeeks.add(mondayStr);
+    } catch (err) {
+        console.error('[PlanesGo] Error cargando partes de la semana:', err);
+        if (typeof showToast === 'function') {
+            showToast('No se pudieron obtener partes de horas para esa semana', 'error');
+        }
+    } finally {
+        isWeekLoading = false;
+        showWeekLoadingIndicator(false);
+        updateWeekControls();
+        applyTimesheetFilters();
+    }
+}
+
+async function navigateWeek(delta) {
+    if (isWeekLoading) return;
+
     selectedWeekMonday.setDate(selectedWeekMonday.getDate() + delta * 7);
+    const mondayStr = (typeof formatISODate === 'function') ? formatISODate(selectedWeekMonday) : selectedWeekMonday.toISOString().split('T')[0];
+    const sundayDate = getSunday(selectedWeekMonday);
+    const sundayStr = (typeof formatISODate === 'function') ? formatISODate(sundayDate) : sundayDate.toISOString().split('T')[0];
+
     updateWeekControls();
-    applyTimesheetFilters();
+
+    if (loadedWeeks.has(mondayStr)) {
+        applyTimesheetFilters();
+        return;
+    }
+
+    await fetchWeekTimesheets(mondayStr, sundayStr);
 }
 
 function updateWeekControls() {
@@ -25,33 +282,11 @@ function updateWeekControls() {
     const kpiEntriesSub = document.getElementById('kpi-entries-sub');
     const kpiEmployeesSub = document.getElementById('kpi-employees-sub');
 
-    // Determinar viabilidad de botones según fechas existentes en las imputaciones
-    const rows = document.querySelectorAll('.timesheet-row');
-    let minMonday = null;
-    let maxMonday = null;
-
-    rows.forEach(r => {
-        const dStr = r.dataset.date;
-        if (dStr) {
-            const d = parseISODate(dStr);
-            if (d) {
-                const mon = getMonday(d);
-                if (!minMonday || mon < minMonday) minMonday = mon;
-                if (!maxMonday || mon > maxMonday) maxMonday = mon;
-            }
-        }
-    });
-
-    let prevViable = false;
-    let nextViable = false;
-
-    if (minMonday && selectedWeekMonday.getTime() > minMonday.getTime()) {
-        prevViable = true;
-    }
-    // Siguiente es viable si estamos antes de la semana actual o si hay registros futuros
-    if (selectedWeekMonday.getTime() < currentMonday.getTime() || (maxMonday && selectedWeekMonday.getTime() < maxMonday.getTime())) {
-        nextViable = true;
-    }
+    // La navegación hacia semanas pasadas siempre es viable (se cargan on-demand)
+    const prevViable = true;
+    // Siguiente es viable hasta 1 semana en el futuro respecto a la semana actual
+    const maxFutureMs = currentMonday.getTime() + (7 * 24 * 3600 * 1000);
+    const nextViable = (selectedWeekMonday.getTime() <= maxFutureMs);
 
     if (btnPrev) {
         btnPrev.disabled = !prevViable;
@@ -219,10 +454,18 @@ function applyTimesheetFilters() {
     });
 
     // Fila de tabla vacía en vista Lista
+    const emptyRow = document.getElementById('empty-row');
     if (emptyFilterRow) {
-        if (visibleCount === 0 && rows.length > 0) {
-            emptyFilterRow.classList.remove('hidden');
+        if (visibleCount === 0) {
+            if (emptyRow && rows.length === 0) {
+                emptyRow.classList.remove('hidden');
+                emptyFilterRow.classList.add('hidden');
+            } else {
+                if (emptyRow) emptyRow.classList.add('hidden');
+                emptyFilterRow.classList.remove('hidden');
+            }
         } else {
+            if (emptyRow) emptyRow.classList.add('hidden');
             emptyFilterRow.classList.add('hidden');
         }
     }

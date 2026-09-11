@@ -33,7 +33,45 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 
 	switch r.Method {
 	case http.MethodGet:
-		entries, err := client.GetTimesheets(ctx, nil)
+		dateFrom := strings.TrimSpace(r.URL.Query().Get("date_from"))
+		if dateFrom == "" {
+			dateFrom = strings.TrimSpace(r.URL.Query().Get("start_date"))
+		}
+		dateTo := strings.TrimSpace(r.URL.Query().Get("date_to"))
+		if dateTo == "" {
+			dateTo = strings.TrimSpace(r.URL.Query().Get("end_date"))
+		}
+
+		var domain []interface{}
+		if dateFrom != "" {
+			domain = append(domain, []interface{}{"date", ">=", dateFrom})
+		}
+		if dateTo != "" {
+			domain = append(domain, []interface{}{"date", "<=", dateTo})
+		}
+
+		if projIDStr := strings.TrimSpace(r.URL.Query().Get("project_id")); projIDStr != "" {
+			if pID, pErr := strconv.Atoi(projIDStr); pErr == nil && pID > 0 {
+				domain = append(domain, []interface{}{"project_id", "=", pID})
+			}
+		}
+
+		// Si no se especifican fechas ni proyecto, filtrar por defecto por la semana actual
+		if len(domain) == 0 {
+			now := time.Now()
+			weekday := int(now.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			monday := now.AddDate(0, 0, -(weekday - 1))
+			sunday := monday.AddDate(0, 0, 6)
+			domain = append(domain,
+				[]interface{}{"date", ">=", monday.Format("2006-01-02")},
+				[]interface{}{"date", "<=", sunday.Format("2006-01-02")},
+			)
+		}
+
+		entries, err := client.GetTimesheets(ctx, domain)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})

@@ -51,19 +51,22 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	var activeEmployees []odoo.Employee
 	var pendingTickets []odoo.Ticket
 	var fetchErr error
+	var client *odoo.Client
+	var uid int
 	hasOdooToken := (currentOdooCfg.Password != "" && currentOdooCfg.DB != "")
 	if currentOdooCfg.Password != "" && currentOdooCfg.DB == "" {
 		fetchErr = fmt.Errorf("Base de datos de Odoo no configurada. Por favor, ve a Ajustes para especificarla.")
 	}
 
 	if hasOdooToken {
-		client := odoo.GetClient(currentOdooCfg)
+		client = odoo.GetClient(currentOdooCfg)
 		log.Printf("[INDEX] Iniciando consulta a Odoo. URL=%s, DB=%s, Usuario=%s", currentOdooCfg.URL, currentOdooCfg.DB, currentOdooCfg.Username)
 
 		// Asegurar sesión/autenticación una sola vez antes de lanzar peticiones paralelas
 		authStart := time.Now()
 		authCtx, cancelAuth := context.WithTimeout(r.Context(), 15*time.Second)
-		uid, authErr := client.Authenticate(authCtx)
+		var authErr error
+		uid, authErr = client.Authenticate(authCtx)
 		cancelAuth()
 
 		if authErr != nil {
@@ -90,14 +93,35 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[INDEX-GOROUTINE] GetProjects completado en %v (items: %d, err: %v)", time.Since(pStart), len(projList), pErr)
 			}()
 
-			// 2. Obtener partes de horas concurrentemente
+			// Determinar semana solicitada (?date=YYYY-MM-DD) o semana actual por defecto
+			now := time.Now()
+			targetDate := now
+			if qDate := strings.TrimSpace(r.URL.Query().Get("date")); qDate != "" {
+				if parsed, pErr := time.Parse("2006-01-02", qDate); pErr == nil {
+					targetDate = parsed
+				}
+			}
+			weekday := int(targetDate.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			weekMonday := targetDate.AddDate(0, 0, -(weekday - 1))
+			weekSunday := weekMonday.AddDate(0, 0, 6)
+			startOfWeekStr := weekMonday.Format("2006-01-02")
+			endOfWeekStr := weekSunday.Format("2006-01-02")
+
+			// 2. Obtener partes de horas de la semana concurrentemente
 			go func() {
 				defer wg.Done()
 				tsStart := time.Now()
-				ctxTS, cancelTS := context.WithTimeout(r.Context(), 25*time.Second)
+				ctxTS, cancelTS := context.WithTimeout(r.Context(), 20*time.Second)
 				defer cancelTS()
-				tsEntries, tsErr = client.GetTimesheets(ctxTS, nil)
-				log.Printf("[INDEX-GOROUTINE] GetTimesheets completado en %v (items: %d, err: %v)", time.Since(tsStart), len(tsEntries), tsErr)
+				domainWeek := []interface{}{
+					[]interface{}{"date", ">=", startOfWeekStr},
+					[]interface{}{"date", "<=", endOfWeekStr},
+				}
+				tsEntries, tsErr = client.GetTimesheets(ctxTS, domainWeek)
+				log.Printf("[INDEX-GOROUTINE] GetTimesheets semana (%s al %s) completado en %v (items: %d, err: %v)", startOfWeekStr, endOfWeekStr, time.Since(tsStart), len(tsEntries), tsErr)
 			}()
 
 			// 3. Obtener únicamente los trabajadores activos de Odoo concurrentemente
@@ -620,6 +644,36 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				Date:          e.Date,
 			}
 			break
+		}
+	}
+
+	if activeTimer == nil && client != nil {
+		targetUID := uid
+		if session != nil && session.UserEmail != "" {
+			if resUID, rErr := client.ResolveUserUIDByEmail(r.Context(), session.UserEmail); rErr == nil && resUID > 0 {
+				targetUID = resUID
+			}
+		}
+		if timer, tErr := client.GetActiveTimer(r.Context(), targetUID); tErr == nil && timer != nil {
+			activeTimer = timer
+			found := false
+			for _, e := range entries {
+				if e.ID == timer.TimesheetID {
+					found = true
+					break
+				}
+			}
+			if !found && timer.TimesheetID > 0 {
+				entries = append([]odoo.TimesheetEntry{{
+					ID:             timer.TimesheetID,
+					Date:           timer.Date,
+					Name:           timer.Description,
+					UnitAmount:     timer.UnitAmount,
+					ProjectID:      odoo.Many2One{ID: timer.ProjectID, Name: timer.ProjectName},
+					TaskID:         odoo.Many2One{ID: timer.TaskID, Name: timer.TaskName},
+					IsTimerRunning: true,
+				}}, entries...)
+			}
 		}
 	}
 
