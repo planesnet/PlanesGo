@@ -481,7 +481,6 @@ function applyTimesheetFilters() {
         td.style.display = hasActiveProject ? 'none' : '';
     });
 
-    const emptyRow = document.getElementById('empty-row');
     if (emptyFilterRow) {
         const td = emptyFilterRow.querySelector('td');
         if (td) td.colSpan = hasActiveProject ? 6 : 7;
