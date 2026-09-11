@@ -1178,15 +1178,18 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 }
 
 // StartTimer inicia un temporizador de trabajo en Odoo llamando a action_timer_start en account.analytic.line o project.task,
-// o marcando is_timer_running = true. Es acumulativo sobre las horas ya imputadas en la tarea o proyecto.
-func (c *Client) StartTimer(ctx context.Context, projectID int, projectName string, taskID int, taskName string, timesheetID int, description string, initialHours float64) (*ActiveTimer, error) {
+// o marcando is_timer_running = true. Es acumulativo sobre las horas ya imputadas en la tarea o proyecto en la fecha especificada.
+func (c *Client) StartTimer(ctx context.Context, projectID int, projectName string, taskID int, taskName string, timesheetID int, description string, initialHours float64, workDate string) (*ActiveTimer, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo autenticar antes de iniciar cronómetro: %w", err)
 	}
 
 	now := time.Now()
-	today := now.Format("2006-01-02")
+	targetDate := strings.TrimSpace(workDate)
+	if targetDate == "" {
+		targetDate = now.Format("2006-01-02")
+	}
 	if description == "" {
 		description = "Trabajo en curso"
 	}
@@ -1194,10 +1197,10 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 	actualTimesheetID := timesheetID
 	currentHours := initialHours
 
-	// 1. Si no hay timesheetID proporcionado, intentar buscar una imputación existente de hoy para este usuario y proyecto
+	// 1. Si no hay timesheetID proporcionado, intentar buscar una imputación existente de la fecha objetivo para este usuario y proyecto
 	if actualTimesheetID <= 0 && projectID > 0 {
 		domain := []interface{}{
-			[]interface{}{"date", "=", today},
+			[]interface{}{"date", "=", targetDate},
 			[]interface{}{"project_id", "=", projectID},
 			[]interface{}{"user_id", "=", uid},
 		}
@@ -1239,7 +1242,7 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 	if actualTimesheetID <= 0 {
 		vals := map[string]interface{}{
 			"name":             description,
-			"date":             today,
+			"date":             targetDate,
 			"project_id":       projectID,
 			"unit_amount":      currentHours,
 			"is_timer_running": true,
@@ -1345,7 +1348,7 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 		StartedAt:     now.UnixMilli() - accumMs,
 		AccumulatedMs: accumMs,
 		UnitAmount:    currentHours,
-		Date:          today,
+		Date:          targetDate,
 	}, nil
 }
 

@@ -69,9 +69,18 @@ function saveTimerState(state) {
 }
 
 /**
- * Inicia o reanuda un temporizador de trabajo (admite imputación existente)
+ * Inicia o reanuda un temporizador de trabajo (admite imputación existente y fecha de inicio)
  */
-function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs) {
+function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal) {
+    // Si no viene confirmado explícitamente desde el modal de imputación y no es reanudar una fila existente con timesheetId,
+    // DEBE abrir el diálogo modal para que el usuario pueda revisar o modificar fecha, tarea y notas antes de iniciar
+    if (!fromModal && !timesheetId) {
+        if (typeof openCreateTimesheetModal === 'function') {
+            openCreateTimesheetModal(projectId, projectName, workDate, true, description, taskId);
+            return;
+        }
+    }
+
     if (!projectId && !timesheetId) {
         alert('Debes seleccionar un proyecto o imputación para iniciar el trabajo.');
         return;
@@ -80,16 +89,18 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     // Solicitar permiso de notificaciones de forma proactiva al iniciar
     requestNotificationPermission();
 
-    // 1. Si no se especificó timesheetId o horas acumuladas, buscar si ya existe una imputación para hoy de este proyecto en la tabla
+    // Determinar la fecha objetivo de trabajo (parámetro, input modal o hoy)
+    const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || new Date().toISOString().split('T')[0];
+
+    // 1. Si no se especificó timesheetId o horas acumuladas, buscar si ya existe una imputación para esta fecha concreta de este proyecto en la tabla
     if (!timesheetId) {
-        const todayStr = new Date().toISOString().split('T')[0];
         let existingRow = null;
         if (projectId) {
-            existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${todayStr}"]`);
+            existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${targetDate}"]`);
         }
         if (!existingRow && projectName) {
             try {
-                existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${todayStr}"]`);
+                existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${targetDate}"]`);
             } catch (e) {}
         }
         if (existingRow) {
@@ -118,6 +129,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         taskId: taskId ? parseInt(taskId, 10) : null,
         taskName: taskName || '',
         description: description || '',
+        date: targetDate,
         status: 'running', // 'running' | 'paused'
         startedAt: now - initialAccumulated,
         lastStartTime: now,
@@ -130,7 +142,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     startTimerTicker();
     updateAllRowTimerButtonStates();
 
-    // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true) enviando horas acumuladas
+    // Sincronizar inicio con Odoo en segundo plano (action_timer_start / is_timer_running=true) enviando horas acumuladas y fecha
     const initialHours = parseFloat((initialAccumulated / 3600000).toFixed(2));
     fetch('/api/timer/start', {
         method: 'POST',
@@ -142,12 +154,14 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             task_name: state.taskName || '',
             timesheet_id: state.timesheetId || 0,
             description: state.description,
-            unit_amount: initialHours
+            unit_amount: initialHours,
+            date: state.date
         })
     }).then(res => res.json()).then(data => {
         if (data && data.timesheet_id) {
             const current = getTimerState() || state;
             current.timesheetId = data.timesheet_id;
+            if (data.date) current.date = data.date;
             // Preservar tiempo acumulado
             if ((!current.accumulatedMs || current.accumulatedMs === 0) && data.accumulated_ms > 0) {
                 current.accumulatedMs = data.accumulated_ms;
@@ -165,7 +179,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         closeCreateTimesheetModal();
     }
 
-    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Timesheet ID: ${state.timesheetId || 'nuevo'}, Acumulado: ${initialAccumulated}ms)`);
+    console.log(`[PlanesGo Timer] Trabajo iniciado en "${state.projectName}" (Fecha: ${state.date}, Timesheet ID: ${state.timesheetId || 'nuevo'}, Acumulado: ${initialAccumulated}ms)`);
 }
 
 /**
@@ -1058,8 +1072,9 @@ function toggleTimesheetRowTimer(btn) {
     }
 
     // Iniciar o reanudar el cronómetro para esta imputación concreta
+    const rowDate = btn.dataset.date || (row ? row.dataset.date : '') || '';
     const accumulatedMs = Math.round(hours * 3600 * 1000);
-    startWorkTimer(pId, pName, taskId, taskName, desc, tsId, accumulatedMs);
+    startWorkTimer(pId, pName, taskId, taskName, desc, tsId, accumulatedMs, rowDate, false);
 }
 
 /**

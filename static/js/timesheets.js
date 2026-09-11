@@ -202,7 +202,7 @@ function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, ho
     openEditTimesheetModal(fakeBtn);
 }
 
-function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode) {
+function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode, preselectedDesc, preselectedTaskId) {
     const modal = document.getElementById('timesheet-modal');
     const container = document.getElementById('timesheet-modal-container');
     const title = document.getElementById('modal-title');
@@ -240,7 +240,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
     }
 
     hoursInput.value = '';
-    descInput.value = '';
+    descInput.value = preselectedDesc || '';
     updateModalTimeBadge();
 
     // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
@@ -257,29 +257,31 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         }
     }
 
-    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para precargar tarea / desc si existe
-    const todayStr = dateInput.value;
+    // Buscar si ya existe una imputación para esta fecha de este proyecto en la tabla para precargar tarea / desc si no se pasaron explícitas
+    const targetDateStr = dateInput.value;
     let existingRow = null;
     if (targetProjectId) {
-        existingRow = document.querySelector(`.timesheet-row[data-project-id="${targetProjectId}"][data-date="${todayStr}"]`);
+        existingRow = document.querySelector(`.timesheet-row[data-project-id="${targetProjectId}"][data-date="${targetDateStr}"]`);
     }
     if (!existingRow && targetProjectName) {
         try {
-            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(targetProjectName)}"][data-date="${todayStr}"]`);
+            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(targetProjectName)}"][data-date="${targetDateStr}"]`);
         } catch (e) {}
     }
 
-    let preselectedTaskId = null;
+    let finalTaskId = preselectedTaskId || null;
     if (existingRow) {
-        preselectedTaskId = existingRow.dataset.taskId || null;
-        if (existingRow.dataset.desc) {
+        if (!finalTaskId) {
+            finalTaskId = existingRow.dataset.taskId || null;
+        }
+        if (!descInput.value && existingRow.dataset.desc) {
             descInput.value = existingRow.dataset.desc;
         }
     }
 
     if (targetProjectId && projectSelect) {
         projectSelect.value = String(targetProjectId);
-        loadTasksForProject(targetProjectId, preselectedTaskId);
+        loadTasksForProject(targetProjectId, finalTaskId);
     } else {
         if (projectSelect) projectSelect.value = '';
         const taskSelect = document.getElementById('modal-task-select');
@@ -993,6 +995,17 @@ function startTimerFromModal() {
 
     const description = descInput ? descInput.value.trim() : '';
 
+    // Obtener la fecha seleccionada en el diálogo (modal-date-input)
+    const dateInput = document.getElementById('modal-date-input');
+    let workDate = dateInput ? dateInput.value.trim() : '';
+    if (!workDate) {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        workDate = `${yyyy}-${mm}-${dd}`;
+    }
+
     if (!projectId) {
         const feedback = document.getElementById('modal-feedback');
         if (feedback) {
@@ -1003,15 +1016,14 @@ function startTimerFromModal() {
         return;
     }
 
-    // Buscar si ya existe una imputación para hoy de este proyecto en la tabla para acumular
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Buscar si ya existe una imputación para esta fecha concreta de este proyecto en la tabla para acumular
     let existingRow = null;
     if (projectId) {
-        existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${todayStr}"]`);
+        existingRow = document.querySelector(`.timesheet-row[data-project-id="${projectId}"][data-date="${workDate}"]`);
     }
     if (!existingRow && projectName) {
         try {
-            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${todayStr}"]`);
+            existingRow = document.querySelector(`.timesheet-row[data-project-name="${CSS.escape(projectName)}"][data-date="${workDate}"]`);
         } catch (e) {}
     }
 
@@ -1033,7 +1045,7 @@ function startTimerFromModal() {
     }
 
     if (typeof startWorkTimer === 'function') {
-        startWorkTimer(projectId ? parseInt(projectId, 10) : 0, projectName, taskId ? parseInt(taskId, 10) : null, taskName, description, tsId, accumulatedMs);
+        startWorkTimer(projectId ? parseInt(projectId, 10) : 0, projectName, taskId ? parseInt(taskId, 10) : null, taskName, description, tsId, accumulatedMs, workDate, true);
     }
 }
 window.startTimerFromModal = startTimerFromModal;

@@ -82,12 +82,12 @@
     <!-- Footer Corporativo -->
     {{ template "footer" . }}
 
-    <!-- Scripts Modularizados de la Aplicación -->
-    <script src="/static/js/utils.js"></script>
-    <script src="/static/js/timer.js"></script>
-    <script src="/static/js/sidebar.js"></script>
-    <script src="/static/js/views.js"></script>
-    <script src="/static/js/timesheets.js"></script>
-    <script src="/static/js/app.js"></script>
+    <!-- Scripts Modularizados de la Aplicación con Cache-Busting -->
+    <script src="/static/js/utils.js?v={{.Version}}"></script>
+    <script src="/static/js/timer.js?v={{.Version}}"></script>
+    <script src="/static/js/sidebar.js?v={{.Version}}"></script>
+    <script src="/static/js/views.js?v={{.Version}}"></script>
+    <script src="/static/js/timesheets.js?v={{.Version}}"></script>
+    <script src="/static/js/app.js?v={{.Version}}"></script>
 </body>
 </html>

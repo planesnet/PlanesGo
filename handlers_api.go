@@ -550,6 +550,7 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		TimesheetID int     `json:"timesheet_id"`
 		Description string  `json:"description"`
 		UnitAmount  float64 `json:"unit_amount"`
+		Date        string  `json:"date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -561,7 +562,7 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description, req.UnitAmount)
+	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description, req.UnitAmount, req.Date)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
