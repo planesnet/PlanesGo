@@ -170,7 +170,15 @@ function insertWeekEntriesIntoTable(entries) {
                         </svg>
                     </button>
                     <button type="button"
-                            onclick="finalizeActiveTimer()"
+                            onclick="finalizeActiveTimer(this)"
+                            data-id="${entry.id}"
+                            data-date="${entry.date}"
+                            data-project-id="${projId}"
+                            data-project-name="${safeProjName}"
+                            data-task-id="${taskId}"
+                            data-task-name="${safeTaskName}"
+                            data-hours="${hoursFormatted}"
+                            data-desc="${safeDesc}"
                             class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer ${isRunning ? '' : 'hidden'}"
                             title="Detener y consolidar cronómetro en Odoo">
                         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">

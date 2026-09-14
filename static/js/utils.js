@@ -98,28 +98,30 @@ function formatDecimalToTime(decimalVal) {
 
 function updateModalTimeBadge() {
     const input = document.getElementById('modal-hours-input');
-    const badge = document.getElementById('modal-time-badge');
+    const badge = document.getElementById('modal-time-badge') || document.getElementById('modal-hours-preview');
     if (!input || !badge) return;
 
     const raw = input.value.trim();
     if (!raw) {
-        badge.innerText = '0h 00m (0.00h)';
-        badge.className = 'font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded text-[11px] font-semibold';
+        badge.innerText = '0.00 h';
+        badge.classList.add('hidden');
         return;
     }
 
     const dec = parseTimeToDecimal(raw);
     if (isNaN(dec) || dec < 0) {
         badge.innerText = 'Formato inválido';
-        badge.className = 'font-mono text-rose-600 bg-rose-50 px-2 py-0.5 rounded text-[11px] font-semibold';
+        badge.className = 'text-[11px] font-mono text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md font-semibold';
+        badge.classList.remove('hidden');
         return;
     }
 
     const totalMinutes = Math.round(dec * 60);
     const h = Math.floor(totalMinutes / 60);
     const m = totalMinutes % 60;
-    badge.innerText = `${h}h ${String(m).padStart(2, '0')}m (${dec.toFixed(2)}h dec)`;
-    badge.className = 'font-mono text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded text-[11px] font-semibold';
+    badge.innerText = `${h}h ${String(m).padStart(2, '0')}m (${dec.toFixed(2)}h)`;
+    badge.className = 'text-[11px] font-mono text-sky-700 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-md font-semibold';
+    badge.classList.remove('hidden');
 }
 
 function normalizeModalTimeInput() {

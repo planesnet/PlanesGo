@@ -202,7 +202,7 @@ function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, ho
     openEditTimesheetModal(fakeBtn);
 }
 
-function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode, preselectedDesc, preselectedTaskId) {
+function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode, preselectedDesc, preselectedTaskId, initialHours) {
     const modal = document.getElementById('timesheet-modal');
     const container = document.getElementById('timesheet-modal-container');
     const title = document.getElementById('modal-title');
@@ -239,13 +239,27 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         dateInput.value = `${yyyy}-${mm}-${dd}`;
     }
 
-    hoursInput.value = '';
-    descInput.value = preselectedDesc || '';
+    const activeTimer = (typeof getActiveTimerCurrentTime === 'function') ? getActiveTimerCurrentTime() : null;
+
+    if (initialHours) {
+        hoursInput.value = (typeof formatDecimalToTime === 'function' && !isNaN(parseFloat(initialHours)))
+            ? formatDecimalToTime(parseFloat(initialHours))
+            : String(initialHours);
+    } else if (!isStartTimerMode && activeTimer && activeTimer.formattedTime) {
+        // Si el cronómetro está activo, colocar el tiempo actual del cronómetro en el campo
+        hoursInput.value = activeTimer.formattedTime;
+        if (!preselectedDesc && activeTimer.state.description) {
+            descInput.value = activeTimer.state.description;
+        }
+    } else {
+        hoursInput.value = '';
+    }
+    descInput.value = preselectedDesc || descInput.value || '';
     updateModalTimeBadge();
 
-    // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
-    let targetProjectId = preselectedProjectId || activeSidebarProjectId;
-    const targetProjectName = preselectedProjectName || activeSidebarProjectName;
+    // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral o del cronómetro activo
+    let targetProjectId = preselectedProjectId || activeSidebarProjectId || (activeTimer && activeTimer.state.projectId);
+    const targetProjectName = preselectedProjectName || activeSidebarProjectName || (activeTimer && activeTimer.state.projectName);
     if (!targetProjectId && targetProjectName && projectSelect) {
         for (let i = 0; i < projectSelect.options.length; i++) {
             const optText = projectSelect.options[i].text.toLowerCase().trim();
@@ -269,7 +283,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         } catch (e) {}
     }
 
-    let finalTaskId = preselectedTaskId || null;
+    let finalTaskId = preselectedTaskId || (activeTimer && activeTimer.state.taskId) || null;
     if (existingRow) {
         if (!finalTaskId) {
             finalTaskId = existingRow.dataset.taskId || null;
@@ -363,7 +377,24 @@ function openEditTimesheetModal(btn) {
     }
 
     dateInput.value = date || '';
-    hoursInput.value = hours ? formatDecimalToTime(parseFloat(hours)) : '';
+
+    // Si el cronómetro está activo para esta imputación (o fila activa), precargar con su tiempo actual
+    let initialHoursValue = (hours && !isNaN(parseFloat(hours))) ? formatDecimalToTime(parseFloat(hours)) : '';
+    const activeTimer = (typeof getActiveTimerCurrentTime === 'function') ? getActiveTimerCurrentTime() : null;
+    if (activeTimer) {
+        const row = btn.closest ? btn.closest('.timesheet-row') : null;
+        const isTimerForThisEntry = Boolean(
+            (id && String(activeTimer.state.timesheetId) === String(id)) ||
+            (row && (row.dataset?.timerRunning === 'true' || row.dataset?.id === String(activeTimer.state.timesheetId))) ||
+            (btn.dataset && btn.dataset.timerRunning === 'true') ||
+            (id && !activeTimer.state.timesheetId && projectId && String(activeTimer.state.projectId) === String(projectId))
+        );
+        if (isTimerForThisEntry && activeTimer.formattedTime) {
+            initialHoursValue = activeTimer.formattedTime;
+        }
+    }
+
+    hoursInput.value = initialHoursValue;
     descInput.value = desc || '';
     updateModalTimeBadge();
 
@@ -694,7 +725,15 @@ function insertOptimisticTimesheetRow(data) {
                     </svg>
                 </button>
                 <button type="button"
-                        onclick="finalizeActiveTimer()"
+                        onclick="finalizeActiveTimer(this)"
+                        data-id="${data.id}"
+                        data-date="${data.date}"
+                        data-project-id="${data.projectId}"
+                        data-project-name="${data.projectName}"
+                        data-task-id="${data.taskId || ''}"
+                        data-task-name="${data.taskName || ''}"
+                        data-hours="${hoursFormatted}"
+                        data-desc="${data.desc || ''}"
                         class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer ${isRunning ? '' : 'hidden'}"
                         title="Detener y consolidar cronómetro en Odoo">
                     <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -972,7 +1011,7 @@ function submitTimesheetForm(event) {
     })
     .then(data => {
         if (typeof clearTimer === 'function') {
-            clearTimer();
+            clearTimer(true);
         }
 
         // Si era una nueva inserción, actualizar el ID temporal con el ID real retornado por Odoo

@@ -69,6 +69,34 @@ function saveTimerState(state) {
 }
 
 /**
+ * Devuelve información detallada del tiempo actual si el cronómetro está activo (en marcha o pausado)
+ */
+function getActiveTimerCurrentTime() {
+    const state = getTimerState();
+    if (!state || (state.status !== 'running' && state.status !== 'paused')) {
+        return null;
+    }
+    let totalMs = state.accumulatedMs || 0;
+    if (state.status === 'running' && state.lastStartTime) {
+        totalMs += (Date.now() - state.lastStartTime);
+    }
+    const totalMinutes = Math.max(totalMs > 0 ? 1 : 0, Math.round(totalMs / 60000));
+    const hoursDecimal = parseFloat((totalMinutes / 60).toFixed(2));
+    const formattedTime = (typeof formatDecimalToTime === 'function')
+        ? formatDecimalToTime(hoursDecimal)
+        : `${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, '0')}`;
+
+    return {
+        state,
+        totalMs,
+        totalMinutes,
+        hoursDecimal,
+        formattedTime: formattedTime || '0:00'
+    };
+}
+window.getActiveTimerCurrentTime = getActiveTimerCurrentTime;
+
+/**
  * Inicia o reanuda un temporizador de trabajo (admite imputación existente y fecha de inicio)
  */
 function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal) {
@@ -319,51 +347,129 @@ function togglePauseTimer() {
 }
 
 /**
- * Abre el modal de imputación con las horas calculadas del cronómetro
+ * Abre el modal de imputación para finalizar y consolidar las horas calculadas del cronómetro
  */
-function finalizeActiveTimer() {
-    const state = getTimerState();
+function finalizeActiveTimer(btn) {
+    let state = getTimerState();
+    if (!state && btn) {
+        const row = btn.closest('.timesheet-row');
+        if (row) {
+            const rowHours = parseFloat(row.dataset.hours || 0);
+            state = {
+                timesheetId: parseInt(btn.dataset.id || row.dataset.id, 10) || null,
+                projectId: parseInt(btn.dataset.projectId || row.dataset.projectId, 10) || 0,
+                projectName: btn.dataset.projectName || row.dataset.projectName || '',
+                taskId: parseInt(btn.dataset.taskId || row.dataset.taskId, 10) || null,
+                taskName: btn.dataset.taskName || row.dataset.taskName || '',
+                description: btn.dataset.desc || row.dataset.desc || '',
+                date: btn.dataset.date || row.dataset.date || '',
+                accumulatedMs: Math.round(rowHours * 3600000),
+                status: 'paused'
+            };
+        }
+    }
     if (!state) return;
 
+    // Detener parpadeo de título, tickers y notificaciones pendientes
+    stopTitleFlash();
+    stopTimerTicker();
+    hideTimerConfirmModal();
+
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
+
+    // Calcular tiempo total transcurrido
     let totalMs = state.accumulatedMs || 0;
     if (state.status === 'running' && state.lastStartTime) {
         totalMs += (Date.now() - state.lastStartTime);
     }
 
-    // Convertir a horas decimales (mínimo 0.05 para que no sea 0 si fue muy breve)
-    let hoursDecimal = totalMs / 3600000;
-    if (hoursDecimal < 0.02) {
-        hoursDecimal = 0.05;
+    // Asegurar al menos 1 minuto (0.02 horas) si el cronómetro estuvo activo
+    const totalMinutes = Math.max(totalMs > 0 ? 1 : 0, Math.round(totalMs / 60000));
+    const hoursDecimal = parseFloat((totalMinutes / 60).toFixed(2));
+    const formattedHoursTime = (typeof formatDecimalToTime === 'function' && totalMinutes > 0)
+        ? formatDecimalToTime(hoursDecimal)
+        : `${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, '0')}`;
+
+    // Pausar el cronómetro localmente para no seguir incrementando mientras el usuario revisa el modal
+    state.status = 'paused';
+    state.accumulatedMs = totalMs;
+    state.lastStartTime = null;
+    saveTimerState(state);
+    if (typeof renderTimerBar === 'function') {
+        renderTimerBar(state);
     }
-    const formattedHours = hoursDecimal.toFixed(2);
 
-    // Detener parpadeo de título si estaba activo
-    stopTitleFlash();
+    // Comprobar si corresponde a un parte de horas existente en Odoo
+    const isExistingTimesheet = Boolean(state.timesheetId && !String(state.timesheetId).startsWith('temp-') && parseInt(state.timesheetId, 10) > 0);
 
-    // Abrir modal de imputación con los datos del trabajo
-    if (typeof openCreateTimesheetModal === 'function') {
-        openCreateTimesheetModal(state.projectId, state.projectName);
-        
-        // Asignar los campos en el modal una vez abierto
-        setTimeout(() => {
-            const unitAmountInput = document.getElementById('modal-unit-amount');
-            if (unitAmountInput) {
-                unitAmountInput.value = formattedHours;
+    if (isExistingTimesheet && typeof openEditTimesheetModalFromRowData === 'function') {
+        // Abrir modal de edición con los datos del cronómetro y el tiempo exacto prellenado
+        openEditTimesheetModalFromRowData(
+            state.timesheetId,
+            state.date,
+            state.projectId,
+            state.taskId,
+            state.description,
+            hoursDecimal
+        );
+
+        // Personalizar título y texto del botón para finalización clara
+        const title = document.getElementById('modal-title');
+        if (title) {
+            title.innerText = `Finalizar Trabajo #${state.timesheetId}`;
+        }
+        const submitBtnText = document.getElementById('btn-submit-timesheet-text');
+        if (submitBtnText) {
+            submitBtnText.innerText = 'Actualizar y Finalizar';
+        }
+
+        // Asegurar que el input de horas y descripción muestren los valores exactos
+        const hoursInput = document.getElementById('modal-hours-input');
+        if (hoursInput) {
+            hoursInput.value = formattedHoursTime;
+            if (typeof updateModalTimeBadge === 'function') {
+                updateModalTimeBadge();
             }
+        }
+        const descInput = document.getElementById('modal-desc-input');
+        if (descInput && state.description) {
+            descInput.value = state.description;
+        }
+    } else if (typeof openCreateTimesheetModal === 'function') {
+        // Modo creación precargando el tiempo calculado del cronómetro
+        openCreateTimesheetModal(
+            state.projectId,
+            state.projectName,
+            state.date,
+            false,
+            state.description,
+            state.taskId,
+            hoursDecimal
+        );
 
-            const descInput = document.getElementById('modal-description');
-            if (descInput && state.description) {
-                descInput.value = state.description;
-            }
+        const title = document.getElementById('modal-title');
+        if (title) {
+            title.innerText = 'Finalizar Trabajo y Registrar Horas';
+        }
+        const submitBtnText = document.getElementById('btn-submit-timesheet-text');
+        if (submitBtnText) {
+            submitBtnText.innerText = 'Guardar y Finalizar';
+        }
 
-            // Seleccionar tarea si existía
-            if (state.taskId) {
-                const taskSelect = document.getElementById('modal-task-select');
-                if (taskSelect) {
-                    taskSelect.value = state.taskId;
-                }
+        const hoursInput = document.getElementById('modal-hours-input');
+        if (hoursInput) {
+            hoursInput.value = formattedHoursTime;
+            if (typeof updateModalTimeBadge === 'function') {
+                updateModalTimeBadge();
             }
-        }, 150);
+        }
+        const descInput = document.getElementById('modal-desc-input');
+        if (descInput && state.description) {
+            descInput.value = state.description;
+        }
     }
 }
 
@@ -379,38 +485,63 @@ function confirmDiscardTimer() {
 
 /**
  * Limpia y oculta el temporizador completamente
+ * @param {boolean} [skipOdooSync=false] Si es true, no sobreescribe en Odoo ni en el DOM las horas ya guardadas
  */
-function clearTimer() {
+function clearTimer(skipOdooSync) {
     const state = getTimerState();
     if (state && (state.timesheetId || state.taskId)) {
-        let totalMs = state.accumulatedMs || 0;
-        if (state.status === 'running' && state.lastStartTime) {
-            totalMs += (Date.now() - state.lastStartTime);
-        }
-        const totalHours = parseFloat((totalMs / 3600000).toFixed(2));
-        if (state.timesheetId) {
-            const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
-            if (row) {
-                row.dataset.timerRunning = 'false';
-                row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
-                row.dataset.hours = totalHours.toFixed(2);
-                const hoursBadge = row.querySelector('.timesheet-hours-badge');
-                if (hoursBadge) {
-                    hoursBadge.className = 'timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono';
-                    hoursBadge.textContent = `${totalHours.toFixed(2)} h`;
+        if (!skipOdooSync) {
+            let totalMs = state.accumulatedMs || 0;
+            if (state.status === 'running' && state.lastStartTime) {
+                totalMs += (Date.now() - state.lastStartTime);
+            }
+            const totalHours = parseFloat((totalMs / 3600000).toFixed(2));
+            if (state.timesheetId) {
+                const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+                if (row) {
+                    row.dataset.timerRunning = 'false';
+                    row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+                    row.dataset.hours = totalHours.toFixed(2);
+                    const hoursBadge = row.querySelector('.timesheet-hours-badge');
+                    if (hoursBadge) {
+                        hoursBadge.className = 'timesheet-hours-badge inline-block px-2.5 py-0.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-100 font-mono';
+                        hoursBadge.textContent = `${totalHours.toFixed(2)} h`;
+                    }
+                }
+            }
+            fetch('/api/timer/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    timesheet_id: state.timesheetId || 0,
+                    task_id: state.taskId || 0,
+                    unit_amount: totalHours,
+                    description: state.description
+                })
+            }).catch(err => console.warn('[PlanesGo Timer] Error deteniendo en Odoo:', err));
+        } else {
+            // Cuando skipOdooSync es true (submitTimesheetForm ya guardó las horas y descripción actualizadas),
+            // solo detenemos el timer en Odoo con 0 horas para no sobreescribir lo que guardó el usuario
+            if (state.timesheetId || state.taskId) {
+                fetch('/api/timer/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timesheet_id: state.timesheetId || 0,
+                        task_id: state.taskId || 0,
+                        unit_amount: 0,
+                        description: ''
+                    })
+                }).catch(() => {});
+            }
+            if (state.timesheetId) {
+                const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+                if (row) {
+                    row.dataset.timerRunning = 'false';
+                    row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
                 }
             }
         }
-        fetch('/api/timer/stop', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timesheet_id: state.timesheetId || 0,
-                task_id: state.taskId || 0,
-                unit_amount: totalHours,
-                description: state.description
-            })
-        }).catch(err => console.warn('[PlanesGo Timer] Error deteniendo en Odoo:', err));
     }
 
     saveTimerState(null);
@@ -521,6 +652,9 @@ function updateTimerTick() {
     if (row) {
         row.dataset.hours = hoursDecimal;
         row.dataset.timerRunning = (state.status === 'running') ? 'true' : 'false';
+        row.querySelectorAll('[data-hours]').forEach(el => {
+            el.dataset.hours = hoursDecimal;
+        });
 
         const hoursBadge = row.querySelector('.timesheet-hours-badge');
         if (hoursBadge) {
@@ -541,6 +675,30 @@ function updateTimerTick() {
                     <span class="font-mono font-bold text-amber-900">${formattedClock}</span>
                     <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado)</span>
                 `;
+            }
+        }
+    }
+
+    // Si el modal de imputación está abierto, mantener sincronizado el campo de horas con el tiempo del cronómetro activo
+    const modal = document.getElementById('timesheet-modal');
+    if (modal && !modal.classList.contains('hidden')) {
+        const hoursInput = document.getElementById('modal-hours-input');
+        // Solo actualizar automáticamente si el usuario no está escribiendo activamente dentro del input
+        if (hoursInput && document.activeElement !== hoursInput) {
+            const modalEntryId = document.getElementById('modal-entry-id')?.value;
+            const isMatchingModal = !modalEntryId || (state.timesheetId && String(state.timesheetId) === String(modalEntryId));
+            if (isMatchingModal) {
+                const totalMinutes = Math.max(totalMs > 0 ? 1 : 0, Math.round(totalMs / 60000));
+                const currentDec = parseFloat((totalMinutes / 60).toFixed(2));
+                const formattedTime = (typeof formatDecimalToTime === 'function')
+                    ? formatDecimalToTime(currentDec)
+                    : `${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, '0')}`;
+                if (formattedTime && hoursInput.value !== formattedTime) {
+                    hoursInput.value = formattedTime;
+                    if (typeof updateModalTimeBadge === 'function') {
+                        updateModalTimeBadge();
+                    }
+                }
             }
         }
     }
@@ -1403,7 +1561,15 @@ function ensureTimesheetRowExists(serverData, timerState) {
                     </svg>
                 </button>
                 <button type="button"
-                        onclick="finalizeActiveTimer()"
+                        onclick="finalizeActiveTimer(this)"
+                        data-id="${tsId}"
+                        data-date="${todayStr}"
+                        data-project-id="${projectId}"
+                        data-project-name="${projectName}"
+                        data-task-id="${taskId}"
+                        data-task-name="${taskName}"
+                        data-hours="${hours}"
+                        data-desc="${desc}"
                         class="btn-row-timer-stop inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
                         title="Detener y consolidar cronómetro en Odoo">
                     <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
