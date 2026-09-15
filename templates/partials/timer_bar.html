@@ -42,7 +42,7 @@
             </div>
 
             <!-- Ficha de resumen del proyecto activo con descripción y cuenta regresiva -->
-            <div class="bg-amber-50/60 rounded-xl p-3.5 border border-amber-200 mb-4 space-y-2">
+            <div class="bg-amber-50/60 rounded-xl p-3.5 border border-amber-200 mb-3 space-y-2">
                 <div class="flex justify-between items-center text-xs">
                     <span class="text-slate-500 font-medium">Proyecto:</span>
                     <span id="confirm-modal-project" class="font-bold text-slate-800 text-right truncate max-w-[260px]">-</span>
@@ -76,38 +76,8 @@
                 </div>
             </div>
 
-            <!-- Sección: Finalizar e Iniciar Nueva Tarea -->
-            <div class="mb-5 p-3.5 rounded-xl bg-sky-50/80 border border-sky-200 space-y-2.5">
-                <div class="flex items-center justify-between">
-                    <label for="confirm-modal-next-desc" class="text-xs font-bold text-sky-950 flex items-center gap-1.5">
-                        <span>⚡</span> Siguiente tarea (iniciar nuevo cronómetro):
-                    </label>
-                    <span class="text-[10px] font-semibold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">Continuar trabajo</span>
-                </div>
-                <input type="text" id="confirm-modal-next-desc"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();confirmFinishAndStartNewTimer();}"
-                       class="w-full text-xs px-3 py-2 rounded-lg border border-sky-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-800 bg-white placeholder-slate-400 shadow-xs"
-                       placeholder="¿Qué vas a hacer ahora? Escribe la nueva tarea..." />
-                <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 text-xs pt-1">
-                    <div class="flex items-center space-x-1.5 flex-1 min-w-0">
-                        <span class="text-[11px] text-slate-500 font-medium whitespace-nowrap">Tarea:</span>
-                        <select id="confirm-modal-task-select" class="w-full text-[11px] py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-slate-700 focus:ring-1 focus:ring-sky-500">
-                            <option value="">-- Sin tarea específica --</option>
-                        </select>
-                    </div>
-                    <button type="button" id="confirm-modal-finish-new-btn" onclick="confirmFinishAndStartNewTimer()"
-                            class="px-3.5 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-400 rounded-lg shadow-sm transition flex items-center justify-center space-x-1.5 whitespace-nowrap cursor-pointer">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>Finalizar e Iniciar Nuevo</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Acciones de confirmación y opciones adicionales -->
-            <div class="flex flex-col space-y-2 sm:space-y-0 sm:flex-row-reverse sm:gap-2 pt-2 border-t border-slate-100">
+            <!-- Acciones para la tarea actual: Continuar, Pausar o Finalizar -->
+            <div class="flex flex-col space-y-2 sm:space-y-0 sm:flex-row-reverse sm:gap-2 mb-4">
                 <button type="button" id="confirm-modal-continue-btn" onclick="confirmContinueTimer()"
                         class="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 rounded-xl shadow-md shadow-emerald-600/30 transition flex items-center justify-center space-x-1.5 cursor-pointer">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,9 +100,49 @@
                 </button>
             </div>
 
+            <!-- Pequeño Separador -->
+            <div class="relative my-4">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-slate-200"></div>
+                </div>
+                <div class="relative flex justify-center text-[10px]">
+                    <span class="bg-white px-2.5 text-slate-400 uppercase tracking-wider font-semibold">o empezar otra tarea</span>
+                </div>
+            </div>
+
+            <!-- Sección Inferior: Finalizar la tarea actual y empezar una nueva -->
+            <div class="p-3.5 rounded-xl bg-sky-50/80 border border-sky-200 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <label for="confirm-modal-next-desc" class="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                        <span>⚡</span> Finalizar actual y empezar nueva tarea:
+                    </label>
+                    <span class="text-[10px] font-semibold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">Nuevo cronómetro</span>
+                </div>
+                <input type="text" id="confirm-modal-next-desc"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();confirmFinishAndStartNewTimer();}"
+                       class="w-full text-xs px-3 py-2 rounded-lg border border-sky-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-800 bg-white placeholder-slate-400 shadow-xs"
+                       placeholder="¿Qué vas a hacer ahora? Escribe la nueva tarea..." />
+                <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 text-xs pt-1">
+                    <div class="flex items-center space-x-1.5 flex-1 min-w-0">
+                        <span class="text-[11px] text-slate-500 font-medium whitespace-nowrap">Tarea:</span>
+                        <select id="confirm-modal-task-select" class="w-full text-[11px] py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-slate-700 focus:ring-1 focus:ring-sky-500">
+                            <option value="">-- Sin tarea específica --</option>
+                        </select>
+                    </div>
+                    <button type="button" id="confirm-modal-finish-new-btn" onclick="confirmFinishAndStartNewTimer()"
+                            class="px-3.5 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-400 rounded-lg shadow-sm transition flex items-center justify-center space-x-1.5 whitespace-nowrap cursor-pointer">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Finalizar y Empezar Nueva</span>
+                    </button>
+                </div>
+            </div>
+
             <!-- Nota de atajo de teclado -->
             <p class="text-[10px] text-slate-400 text-center mt-3">
-                Pulsa <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono text-[9px] text-slate-700 font-bold">Intro</kbd> para seguir actual, o escribe en nueva tarea y pulsa <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono text-[9px] text-slate-700 font-bold">Intro</kbd> para finalizar e iniciar siguiente.
+                Pulsa <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono text-[9px] text-slate-700 font-bold">Intro</kbd> para seguir actual, o escribe abajo y pulsa <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono text-[9px] text-slate-700 font-bold">Intro</kbd> para finalizar y empezar la siguiente.
             </p>
         </div>
     </div>
