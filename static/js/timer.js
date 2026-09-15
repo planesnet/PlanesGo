@@ -817,6 +817,36 @@ function trigger15MinuteReminder(state, currentTotalMs) {
 }
 
 /**
+ * Carga las tareas del proyecto para el selector dentro del modal de confirmación
+ */
+function loadTasksForConfirmModal(projectId, currentTaskId) {
+    const taskSelect = document.getElementById('confirm-modal-task-select');
+    if (!taskSelect) return;
+    if (!projectId) {
+        taskSelect.innerHTML = '<option value="">-- Sin tarea específica --</option>';
+        return;
+    }
+    taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
+    fetch(`/api/tasks?project_id=${projectId}&_t=${Date.now()}`, {
+        cache: 'no-store'
+    })
+    .then(r => r.json())
+    .then(tasks => {
+        let html = '<option value="">-- Sin tarea específica --</option>';
+        if (Array.isArray(tasks) && tasks.length > 0) {
+            tasks.forEach(t => {
+                const selected = (currentTaskId && String(t.id) === String(currentTaskId)) ? 'selected' : '';
+                html += `<option value="${t.id}" ${selected}>${t.name || ('Tarea #' + t.id)}</option>`;
+            });
+        }
+        taskSelect.innerHTML = html;
+    })
+    .catch(() => {
+        taskSelect.innerHTML = '<option value="">-- Sin tarea específica --</option>';
+    });
+}
+
+/**
  * Muestra el modal de confirmación con el botón Continuar enfocado por defecto
  */
 function showTimerConfirmModal(state, totalMs) {
@@ -844,8 +874,21 @@ function showTimerConfirmModal(state, totalMs) {
 
     const descEl = document.getElementById('confirm-modal-desc');
     if (descEl) {
-        descEl.textContent = `Han pasado ${TIMER_PROMPT_MINUTES} minutos de trabajo. Si no confirmas en ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos, el cronómetro se detendrá fijado en los ${TIMER_PROMPT_MINUTES} minutos.`;
+        descEl.textContent = `Han pasado ${TIMER_PROMPT_MINUTES} minutos de trabajo. Si no confirmas en ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos, el cronómetro se auto-pausará.`;
     }
+
+    // Prellenar descripción actual del trabajo y resetear nueva descripción
+    const currentDescInput = document.getElementById('confirm-modal-current-desc');
+    if (currentDescInput) {
+        currentDescInput.value = state.description || '';
+    }
+
+    const nextDescInput = document.getElementById('confirm-modal-next-desc');
+    if (nextDescInput) {
+        nextDescInput.value = '';
+    }
+
+    loadTasksForConfirmModal(state.projectId, state.taskId);
 
     modal.classList.remove('hidden');
 
@@ -883,6 +926,13 @@ function confirmContinueTimer() {
         state.lastPromptTime = Date.now();
         state.promptTriggeredAt = null;
         state.promptSnapshotMs = null;
+
+        // Actualizar descripción si el usuario la editó en el diálogo
+        const currentDescInput = document.getElementById('confirm-modal-current-desc');
+        if (currentDescInput && currentDescInput.value.trim()) {
+            state.description = currentDescInput.value.trim();
+        }
+
         saveTimerState(state);
     }
     stopTitleFlash();
@@ -925,6 +975,10 @@ function confirmPauseTimer() {
 function confirmFinalizeTimerFromModal() {
     const state = getTimerState();
     if (state) {
+        const currentDescInput = document.getElementById('confirm-modal-current-desc');
+        if (currentDescInput && currentDescInput.value.trim()) {
+            state.description = currentDescInput.value.trim();
+        }
         state.promptTriggeredAt = null;
         state.promptSnapshotMs = null;
         saveTimerState(state);
@@ -935,6 +989,187 @@ function confirmFinalizeTimerFromModal() {
         activeSystemNotification = null;
     }
     finalizeActiveTimer();
+}
+
+/**
+ * Acción del usuario en el modal: "Finalizar e Iniciar Nuevo"
+ * Guarda el tramo de trabajo acumulado en Odoo y arranca inmediatamente un nuevo cronómetro
+ * con la nueva descripción especificada por el usuario.
+ */
+async function confirmFinishAndStartNewTimer() {
+    const state = getTimerState();
+    if (!state) return;
+
+    const currentDescInput = document.getElementById('confirm-modal-current-desc');
+    const nextDescInput = document.getElementById('confirm-modal-next-desc');
+    const taskSelect = document.getElementById('confirm-modal-task-select');
+
+    const nextDesc = nextDescInput ? nextDescInput.value.trim() : '';
+    if (!nextDesc) {
+        if (nextDescInput) {
+            nextDescInput.focus();
+            nextDescInput.classList.add('ring-2', 'ring-rose-400', 'border-rose-400');
+            setTimeout(() => nextDescInput.classList.remove('ring-2', 'ring-rose-400', 'border-rose-400'), 2500);
+        }
+        if (typeof showToast === 'function') {
+            showToast('Indica la descripción de la nueva tarea a realizar', 'warning');
+        }
+        return;
+    }
+
+    const currentDesc = (currentDescInput ? currentDescInput.value.trim() : '') || state.description || state.projectName || 'Trabajo realizado';
+
+    // Detener avisos y parpadeo de título
+    stopTitleFlash();
+    if (activeSystemNotification) {
+        try { activeSystemNotification.close(); } catch (e) {}
+        activeSystemNotification = null;
+    }
+
+    // Calcular tiempo total transcurrido del cronómetro actual
+    let totalMs = state.accumulatedMs || 0;
+    if (state.status === 'running' && state.lastStartTime) {
+        totalMs += (Date.now() - state.lastStartTime);
+    }
+    const totalMinutes = Math.max(totalMs > 0 ? 1 : 0, Math.round(totalMs / 60000));
+    const hoursDecimal = parseFloat((totalMinutes / 60).toFixed(2));
+
+    const isExistingTimesheet = Boolean(state.timesheetId && !String(state.timesheetId).startsWith('temp-') && parseInt(state.timesheetId, 10) > 0);
+    const targetDate = state.date || new Date().toISOString().split('T')[0];
+
+    // Cerrar el modal de confirmación de inmediato
+    hideTimerConfirmModal();
+
+    // 1. Persistir el trabajo realizado en Odoo
+    if (isExistingTimesheet) {
+        const timesheetId = parseInt(state.timesheetId, 10);
+        const row = document.querySelector(`.timesheet-row[data-id="${timesheetId}"]`);
+        if (row) {
+            row.dataset.hours = hoursDecimal.toFixed(2);
+            row.dataset.desc = currentDesc;
+            row.dataset.timerRunning = 'false';
+            row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            const hoursBadge = row.querySelector('td:nth-child(6) span.font-mono');
+            if (hoursBadge) hoursBadge.textContent = `${hoursDecimal.toFixed(2)} h`;
+            const descCell = row.querySelector('td:nth-child(5)');
+            if (descCell) {
+                descCell.title = currentDesc;
+                descCell.textContent = currentDesc;
+            }
+        }
+
+        // Actualizar en Odoo
+        fetch('/api/timesheets/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: timesheetId,
+                date: targetDate,
+                task_id: state.taskId || 0,
+                unit_amount: hoursDecimal,
+                description: currentDesc
+            })
+        }).catch(err => console.error('Error actualizando parte anterior:', err));
+
+        fetch('/api/timer/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: timesheetId,
+                task_id: state.taskId || 0,
+                unit_amount: hoursDecimal,
+                description: currentDesc
+            })
+        }).catch(err => console.error('Error deteniendo timer anterior en Odoo:', err));
+    } else {
+        // Nueva imputación
+        const oldRow = state.timesheetId ? document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`) : null;
+        let savedRow = null;
+
+        if (oldRow) {
+            oldRow.dataset.hours = hoursDecimal.toFixed(2);
+            oldRow.dataset.desc = currentDesc;
+            oldRow.dataset.timerRunning = 'false';
+            oldRow.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            const hoursBadge = oldRow.querySelector('td:nth-child(6) span.font-mono');
+            if (hoursBadge) hoursBadge.textContent = `${hoursDecimal.toFixed(2)} h`;
+            const descCell = oldRow.querySelector('td:nth-child(5)');
+            if (descCell) {
+                descCell.title = currentDesc;
+                descCell.textContent = currentDesc;
+            }
+            savedRow = oldRow;
+        } else if (typeof insertOptimisticTimesheetRow === 'function') {
+            const employeeName = (typeof getActiveWorkerName === 'function') ? getActiveWorkerName() : (document.body?.dataset.currentWorker || 'Yo');
+            savedRow = insertOptimisticTimesheetRow({
+                id: 'temp-' + Date.now(),
+                date: targetDate,
+                projectId: state.projectId,
+                projectName: state.projectName,
+                taskId: state.taskId,
+                taskName: state.taskName,
+                hours: hoursDecimal,
+                desc: currentDesc,
+                employeeName: employeeName
+            });
+        }
+
+        fetch('/api/timesheets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: targetDate,
+                project_id: state.projectId,
+                task_id: state.taskId || 0,
+                unit_amount: hoursDecimal,
+                description: currentDesc
+            })
+        }).then(async res => {
+            const data = await res.json().catch(() => ({}));
+            if (data && data.id && savedRow) {
+                savedRow.dataset.id = data.id;
+                savedRow.querySelectorAll('[data-id]').forEach(el => el.dataset.id = data.id);
+            }
+        }).catch(err => console.error('Error guardando parte anterior:', err));
+    }
+
+    // 2. Determinar la tarea para el nuevo cronómetro
+    let newTaskId = state.taskId;
+    let newTaskName = state.taskName;
+    if (taskSelect && taskSelect.value) {
+        newTaskId = parseInt(taskSelect.value, 10);
+        newTaskName = taskSelect.options[taskSelect.selectedIndex].text.trim();
+    } else if (taskSelect && taskSelect.value === '') {
+        newTaskId = null;
+        newTaskName = '';
+    }
+
+    // 3. Detener ticker del cronómetro previo
+    stopTimerTicker();
+
+    // 4. Iniciar inmediatamente el nuevo cronómetro con la nueva descripción
+    startWorkTimer(
+        state.projectId,
+        state.projectName,
+        newTaskId,
+        newTaskName,
+        nextDesc,
+        null,
+        0,
+        targetDate,
+        true
+    );
+
+    // 5. Notificación al usuario
+    if (typeof showToast === 'function') {
+        showToast(`✅ Finalizado tramo (${hoursDecimal}h) e iniciado: "${nextDesc}"`, 'success');
+    }
+
+    // Refrescar métricas del sidebar si existen
+    if (typeof rebuildSidebarProjects === 'function') {
+        const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
+        rebuildSidebarProjects(workerVal);
+    }
 }
 
 /**
@@ -1658,6 +1893,9 @@ window.confirmDiscardTimer = confirmDiscardTimer;
 window.confirmContinueTimer = confirmContinueTimer;
 window.confirmPauseTimer = confirmPauseTimer;
 window.confirmFinalizeTimerFromModal = confirmFinalizeTimerFromModal;
+window.confirmFinishAndStartNewTimer = confirmFinishAndStartNewTimer;
+window.showTimerConfirmModal = showTimerConfirmModal;
+window.hideTimerConfirmModal = hideTimerConfirmModal;
 window.clearTimer = clearTimer;
 window.toggleTimesheetRowTimer = toggleTimesheetRowTimer;
 window.updateAllRowTimerButtonStates = updateAllRowTimerButtonStates;
