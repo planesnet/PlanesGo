@@ -227,6 +227,9 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         feedback.className = 'hidden p-3 rounded-xl text-xs font-medium';
         feedback.innerText = '';
     }
+    // Al crear un nuevo parte, el texto descriptivo siempre debe aparecer en blanco,
+    // salvo que se proporcione un valor explícito en la llamada (ej: ticket de ayuda)
+    descInput.value = preselectedDesc ? String(preselectedDesc) : '';
 
     // Fecha por defecto: initialDate o hoy (YYYY-MM-DD)
     if (initialDate) {
@@ -248,13 +251,9 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
     } else if (!isStartTimerMode && activeTimer && activeTimer.formattedTime) {
         // Si el cronómetro está activo, colocar el tiempo actual del cronómetro en el campo
         hoursInput.value = activeTimer.formattedTime;
-        if (!preselectedDesc && activeTimer.state.description) {
-            descInput.value = activeTimer.state.description;
-        }
     } else {
         hoursInput.value = '';
     }
-    descInput.value = preselectedDesc || descInput.value || '';
     updateModalTimeBadge();
 
     // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral o del cronómetro activo
@@ -271,7 +270,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         }
     }
 
-    // Buscar si ya existe una imputación para esta fecha de este proyecto en la tabla para precargar tarea / desc si no se pasaron explícitas
+    // Buscar si ya existe una imputación para esta fecha de este proyecto en la tabla para precargar tarea si no se pasó explícita
     const targetDateStr = dateInput.value;
     let existingRow = null;
     if (targetProjectId) {
@@ -284,13 +283,8 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
     }
 
     let finalTaskId = preselectedTaskId || (activeTimer && activeTimer.state.taskId) || null;
-    if (existingRow) {
-        if (!finalTaskId) {
-            finalTaskId = existingRow.dataset.taskId || null;
-        }
-        if (!descInput.value && existingRow.dataset.desc) {
-            descInput.value = existingRow.dataset.desc;
-        }
+    if (existingRow && !finalTaskId) {
+        finalTaskId = existingRow.dataset.taskId || null;
     }
 
     if (targetProjectId && projectSelect) {
@@ -427,11 +421,13 @@ function closeTimesheetModal() {
     const submitBtn = document.getElementById('btn-submit-timesheet');
     const spinner = document.getElementById('btn-submit-timesheet-spinner');
     const hoursInput = document.getElementById('modal-hours-input');
+    const descInput = document.getElementById('modal-desc-input');
     const startTimerBtn = document.getElementById('btn-modal-start-timer');
 
     if (submitBtn) submitBtn.disabled = false;
     if (spinner) spinner.classList.add('hidden');
     if (hoursInput) hoursInput.setAttribute('required', 'required');
+    if (descInput) descInput.value = '';
     if (modal) delete modal.dataset.mode;
     if (startTimerBtn) {
         startTimerBtn.className = 'px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 cursor-pointer';
