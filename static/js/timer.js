@@ -97,6 +97,51 @@ function getActiveTimerCurrentTime() {
 window.getActiveTimerCurrentTime = getActiveTimerCurrentTime;
 
 /**
+ * Detiene y finaliza el cronómetro anterior cuando el usuario pulsa en otro cronómetro
+ * @param {Object} prevTimer Estado del cronómetro anterior
+ */
+function stopPreviousRunningTimer(prevTimer) {
+    if (!prevTimer) return;
+
+    // Calcular tiempo total transcurrido
+    let totalMs = prevTimer.accumulatedMs || 0;
+    if (prevTimer.status === 'running' && prevTimer.lastStartTime) {
+        totalMs += (Date.now() - prevTimer.lastStartTime);
+    }
+    const totalMinutes = Math.max(totalMs > 0 ? 1 : 0, Math.round(totalMs / 60000));
+    const hoursDecimal = parseFloat((totalMinutes / 60).toFixed(2));
+
+    // Si tiene un timesheet ID en Odoo, sincronizar acción de parada con unit_amount y descripción
+    if (prevTimer.timesheetId && !String(prevTimer.timesheetId).startsWith('temp-') && parseInt(prevTimer.timesheetId, 10) > 0) {
+        fetch('/api/timer/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: parseInt(prevTimer.timesheetId, 10),
+                task_id: parseInt(prevTimer.taskId, 10) || 0,
+                unit_amount: hoursDecimal,
+                description: prevTimer.description || ''
+            })
+        }).catch(err => console.warn('[PlanesGo Timer] Error al detener cronómetro anterior en Odoo:', err));
+    }
+
+    // Actualizar fila del cronómetro anterior en la tabla
+    if (prevTimer.timesheetId) {
+        const prevRow = document.querySelector(`.timesheet-row[data-id="${prevTimer.timesheetId}"]`);
+        if (prevRow) {
+            prevRow.dataset.timerRunning = 'false';
+            prevRow.dataset.hours = hoursDecimal.toFixed(2);
+            prevRow.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            const hoursBadge = prevRow.querySelector('.timesheet-hours-badge');
+            if (hoursBadge) {
+                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700';
+                hoursBadge.innerText = `${hoursDecimal.toFixed(2)}h`;
+            }
+        }
+    }
+}
+
+/**
  * Inicia o reanuda un temporizador de trabajo (admite imputación existente y fecha de inicio)
  */
 function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal) {
@@ -112,6 +157,21 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     if (!projectId && !timesheetId) {
         alert('Debes seleccionar un proyecto o imputación para iniciar el trabajo.');
         return;
+    }
+
+    // Si ya existe un cronómetro previo activo y es diferente al que vamos a arrancar,
+    // detener el cronómetro anterior y sincronizar sus horas en Odoo
+    const current = getTimerState();
+    const newTsId = timesheetId ? parseInt(timesheetId, 10) : null;
+    const isDifferent = current && (
+        (newTsId && current.timesheetId && String(current.timesheetId) !== String(newTsId)) ||
+        (!newTsId && current.projectId && String(current.projectId) !== String(projectId)) ||
+        (newTsId && !current.timesheetId) ||
+        (!newTsId && current.timesheetId)
+    );
+
+    if (isDifferent) {
+        stopPreviousRunningTimer(current);
     }
 
     // Solicitar permiso de notificaciones de forma proactiva al iniciar
@@ -470,6 +530,11 @@ function finalizeActiveTimer(btn) {
         if (descInput && state.description) {
             descInput.value = state.description;
         }
+    }
+
+    const modal = document.getElementById('timesheet-modal');
+    if (modal) {
+        modal.dataset.isFinalizingTimer = 'true';
     }
 }
 
@@ -1668,12 +1733,7 @@ function toggleTimesheetRowTimer(btn) {
         return;
     }
 
-    // Si hay otro temporizador activo, pausarlo primero
-    if (current && current.status === 'running') {
-        togglePauseTimer();
-    }
-
-    // Iniciar o reanudar el cronómetro para esta imputación concreta
+    // Iniciar o reanudar el cronómetro para esta imputación concreta (startWorkTimer detiene el anterior limpiamente)
     const rowDate = btn.dataset.date || (row ? row.dataset.date : '') || '';
     const accumulatedMs = Math.round(hours * 3600 * 1000);
     startWorkTimer(pId, pName, taskId, taskName, desc, tsId, accumulatedMs, rowDate, false);

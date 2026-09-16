@@ -217,6 +217,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
     if (!modal) return;
 
     modal.dataset.mode = isStartTimerMode ? 'timer' : 'standard';
+    modal.dataset.isFinalizingTimer = 'false';
 
     // Reset estado
     entryIdInput.value = '';
@@ -242,23 +243,18 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         dateInput.value = `${yyyy}-${mm}-${dd}`;
     }
 
-    const activeTimer = (typeof getActiveTimerCurrentTime === 'function') ? getActiveTimerCurrentTime() : null;
-
     if (initialHours) {
         hoursInput.value = (typeof formatDecimalToTime === 'function' && !isNaN(parseFloat(initialHours)))
             ? formatDecimalToTime(parseFloat(initialHours))
             : String(initialHours);
-    } else if (!isStartTimerMode && activeTimer && activeTimer.formattedTime) {
-        // Si el cronómetro está activo, colocar el tiempo actual del cronómetro en el campo
-        hoursInput.value = activeTimer.formattedTime;
     } else {
         hoursInput.value = '';
     }
     updateModalTimeBadge();
 
-    // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral o del cronómetro activo
-    let targetProjectId = preselectedProjectId || activeSidebarProjectId || (activeTimer && activeTimer.state.projectId);
-    const targetProjectName = preselectedProjectName || activeSidebarProjectName || (activeTimer && activeTimer.state.projectName);
+    // Proyecto a preseleccionar: argumento explícito o proyecto activo del panel lateral
+    let targetProjectId = preselectedProjectId || activeSidebarProjectId;
+    const targetProjectName = preselectedProjectName || activeSidebarProjectName;
     if (!targetProjectId && targetProjectName && projectSelect) {
         for (let i = 0; i < projectSelect.options.length; i++) {
             const optText = projectSelect.options[i].text.toLowerCase().trim();
@@ -282,7 +278,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
         } catch (e) {}
     }
 
-    let finalTaskId = preselectedTaskId || (activeTimer && activeTimer.state.taskId) || null;
+    let finalTaskId = preselectedTaskId || null;
     if (existingRow && !finalTaskId) {
         finalTaskId = existingRow.dataset.taskId || null;
     }
@@ -353,6 +349,7 @@ function openEditTimesheetModal(btn) {
     const feedback = document.getElementById('modal-feedback');
 
     if (!modal || !btn) return;
+    modal.dataset.isFinalizingTimer = 'false';
 
     const id = btn.dataset.id;
     const date = btn.dataset.date;
@@ -428,7 +425,10 @@ function closeTimesheetModal() {
     if (spinner) spinner.classList.add('hidden');
     if (hoursInput) hoursInput.setAttribute('required', 'required');
     if (descInput) descInput.value = '';
-    if (modal) delete modal.dataset.mode;
+    if (modal) {
+        delete modal.dataset.mode;
+        delete modal.dataset.isFinalizingTimer;
+    }
     if (startTimerBtn) {
         startTimerBtn.className = 'px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 cursor-pointer';
     }
@@ -1006,8 +1006,26 @@ function submitTimesheetForm(event) {
         return data;
     })
     .then(data => {
-        if (typeof clearTimer === 'function') {
+        const isFinalizing = (modal && modal.dataset.isFinalizingTimer === 'true');
+        if (modal) {
+            delete modal.dataset.isFinalizingTimer;
+        }
+
+        // Solo limpiar el cronómetro si el usuario abrió este modal expresamente para finalizar el cronómetro activo
+        if (isFinalizing && typeof clearTimer === 'function') {
             clearTimer(true);
+        }
+
+        // Si se modificó la misma imputación que coincide con el cronómetro activo, actualizar su descripción/tarea sin detenerlo
+        if (isEdit && !isFinalizing && typeof getTimerState === 'function') {
+            const currentTimer = getTimerState();
+            if (currentTimer && targetId && String(currentTimer.timesheetId) === String(targetId)) {
+                currentTimer.description = desc;
+                if (taskId) currentTimer.taskId = parseInt(taskId, 10);
+                if (taskName) currentTimer.taskName = taskName;
+                if (typeof saveTimerState === 'function') saveTimerState(currentTimer);
+                if (typeof renderTimerBar === 'function') renderTimerBar(currentTimer);
+            }
         }
 
         // Si era una nueva inserción, actualizar el ID temporal con el ID real retornado por Odoo
@@ -1016,6 +1034,11 @@ function submitTimesheetForm(event) {
             tempRow.querySelectorAll('[data-id]').forEach(el => {
                 el.dataset.id = data.id;
             });
+        }
+
+        // Mantener las filas y botones del cronómetro activo sincronizados
+        if (typeof updateAllRowTimerButtonStates === 'function') {
+            updateAllRowTimerButtonStates();
         }
 
         if (typeof showToast === 'function') {
