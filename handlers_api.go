@@ -96,6 +96,43 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		// Inyectar o marcar la tarea con temporizador activo del usuario si existe
+		targetUID := 0
+		if session != nil && session.UserEmail != "" {
+			if resUID, rErr := client.ResolveUserUIDByEmail(ctx, session.UserEmail); rErr == nil && resUID > 0 {
+				targetUID = resUID
+			}
+		}
+		if targetUID == 0 {
+			targetUID = client.UID()
+		}
+		if timer, tErr := client.GetActiveTimer(ctx, targetUID); tErr == nil && timer != nil {
+			found := false
+			for i := range entries {
+				if (timer.TimesheetID > 0 && entries[i].ID == timer.TimesheetID) ||
+					(timer.TaskID > 0 && entries[i].TaskID.ID == timer.TaskID) {
+					entries[i].IsTimerRunning = true
+					found = true
+					break
+				}
+			}
+			if !found {
+				tDate := timer.Date
+				if tDate == "" {
+					tDate = time.Now().Format("2006-01-02")
+				}
+				entries = append([]odoo.TimesheetEntry{{
+					ID:             timer.TimesheetID,
+					Date:           tDate,
+					Name:           timer.Description,
+					UnitAmount:     timer.UnitAmount,
+					ProjectID:      odoo.Many2One{ID: timer.ProjectID, Name: timer.ProjectName},
+					TaskID:         odoo.Many2One{ID: timer.TaskID, Name: timer.TaskName},
+					IsTimerRunning: true,
+				}}, entries...)
+			}
+		}
+
 		// Enriquecer imputaciones con PartnerID si viene vacío
 		projectPartnerMu.RLock()
 		for i := range entries {
@@ -610,7 +647,8 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"active": timer,
+		"active":            timer,
+		"last_confirmed_at": state.getLastConfirmedAt(userUID),
 	})
 }
 
@@ -712,6 +750,75 @@ func (state *AppState) handleAPITimerTick(w http.ResponseWriter, r *http.Request
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleAPITimerConfirm sincroniza la confirmación de actividad del temporizador entre múltiples dispositivos/navegadores
+func (state *AppState) handleAPITimerConfirm(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión de Odoo no configurada"})
+		return
+	}
+
+	var req struct {
+		TimesheetID int     `json:"timesheet_id"`
+		Description string  `json:"description"`
+		UnitAmount  float64 `json:"unit_amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	client := odoo.GetClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+
+	nowMs := time.Now().UnixMilli()
+	state.setLastConfirmedAt(userUID, nowMs)
+
+	if req.TimesheetID > 0 {
+		if req.UnitAmount > 0 {
+			_ = client.UpdateTimerUnits(ctx, req.TimesheetID, req.UnitAmount)
+		}
+		if strings.TrimSpace(req.Description) != "" {
+			_ = client.UpdateTimesheetDescription(ctx, req.TimesheetID, strings.TrimSpace(req.Description))
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":           true,
+		"last_confirmed_at": nowMs,
+	})
 }
 
 // handleAPITimerPause pausa el trabajo activo en Odoo

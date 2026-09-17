@@ -790,6 +790,29 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		workerName = session.UserEmail
 	}
 
+	var activeTimer *odoo.ActiveTimer
+	if currentOdooCfg.Password != "" && currentOdooCfg.DB != "" {
+		client := odoo.GetClient(currentOdooCfg)
+		targetUID := 0
+		if session != nil && session.UserEmail != "" {
+			ctxUID, cancelUID := context.WithTimeout(r.Context(), 5*time.Second)
+			if resUID, rErr := client.ResolveUserUIDByEmail(ctxUID, session.UserEmail); rErr == nil && resUID > 0 {
+				targetUID = resUID
+			}
+			cancelUID()
+		}
+		if targetUID == 0 && client != nil {
+			targetUID = client.UID()
+		}
+		if client != nil {
+			ctxTimer, cancelTimer := context.WithTimeout(r.Context(), 5*time.Second)
+			if timer, tErr := client.GetActiveTimer(ctxTimer, targetUID); tErr == nil && timer != nil {
+				activeTimer = timer
+			}
+			cancelTimer()
+		}
+	}
+
 	data := PageData{
 		Version:               Version,
 		Config:                activeCfg,
@@ -798,6 +821,7 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		CurrentWorker:         workerName,
 		Today:                 time.Now().Format("2006-01-02"),
 		ProjectPartnerMapJSON: string(ppmJSON),
+		ActiveTimer:           activeTimer,
 	}
 
 	tmpl, err := getExpressStandaloneTemplate()

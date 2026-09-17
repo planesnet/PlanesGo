@@ -13,6 +13,24 @@ let timerIntervalId = null;
 let titleFlashIntervalId = null;
 let activeSystemNotification = null;
 let originalDocumentTitle = document.title || 'PlanesGo - Proyectos y Horas Odoo';
+let lastRemoteSyncTime = 0;
+
+/**
+ * Determina si la vista Express está actualmente activa y visible:
+ * - En la app móvil / pantalla independiente (/m o /express o body[data-is-standalone="true"]): SIEMPRE ACTIVA (true).
+ * - En el ordenador (/): SÓLO ACTIVA si la ventana flotante Express (#express-floating-window) existe y NO está oculta.
+ */
+function isExpressViewActive() {
+    if (document.body && (document.body.dataset.isStandalone === 'true' || document.body.classList.contains('express-body'))) {
+        return true;
+    }
+    const path = window.location.pathname;
+    if (path === '/m' || path === '/express') {
+        return true;
+    }
+    const win = document.getElementById('express-floating-window');
+    return !!(win && !win.classList.contains('hidden'));
+}
 
 // Inicialización automática al cargar el DOM
 document.addEventListener('DOMContentLoaded', function () {
@@ -654,32 +672,95 @@ function updateTimerTick() {
     if (state.status === 'running' && state.lastStartTime) {
         totalMs += (now - state.lastStartTime);
 
-        // Si hay una alerta de 15 minutos pendiente de confirmación, evaluar si han pasado 5 minutos
+        // Si hay una alerta de 15 minutos pendiente de confirmación:
         if (state.promptTriggeredAt) {
-            const timeSinceAlert = now - state.promptTriggeredAt;
-            const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
+            // REGLA: Si la vista Express NO está activa en este navegador/ventana, silenciar y cerrar modal
+            if (!isExpressViewActive()) {
+                hideTimerConfirmModal();
+                stopTitleFlash();
+                if (activeSystemNotification) {
+                    try { activeSystemNotification.close(); } catch (e) {}
+                    activeSystemNotification = null;
+                }
+            } else {
+                // Vista Express SÍ está activa aquí.
+                // Sincronizar periódicamente con el backend para detectar si el usuario confirmó en otro dispositivo (PC o móvil)
+                if (now - lastRemoteSyncTime >= 3000) {
+                    lastRemoteSyncTime = now;
+                    fetch('/api/timer/active?_t=' + now, { cache: 'no-store' })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (!data || !data.active || !data.active.is_running) {
+                                // Se pausó o detuvo desde otro dispositivo
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof syncActiveTimerFromOdoo === 'function') {
+                                    syncActiveTimerFromOdoo();
+                                }
+                                return;
+                            }
+                            if (data.active.timesheet_id !== state.timesheetId) {
+                                // Cambió de tarea desde otro dispositivo
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof syncActiveTimerFromOdoo === 'function') {
+                                    syncActiveTimerFromOdoo();
+                                }
+                                return;
+                            }
+                            // Si se confirmó en otro dispositivo con timestamp posterior al prompt
+                            if (data.last_confirmed_at && data.last_confirmed_at > state.promptTriggeredAt) {
+                                state.promptTriggeredAt = null;
+                                state.promptSnapshotMs = null;
+                                state.lastPromptAccumulatedMs = totalMs;
+                                state.lastPromptTime = Date.now();
+                                saveTimerState(state);
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof showToast === 'function') {
+                                    showToast('✅ Tarea reconfirmada desde otro dispositivo', 'info');
+                                }
+                            }
+                        })
+                        .catch(() => {});
+                }
 
-            // Actualizar cuenta regresiva en el modal si está visible
-            const countdownEl = document.getElementById('confirm-modal-countdown');
-            if (countdownEl) {
-                const totalSec = Math.ceil(remainingTimeoutMs / 1000);
-                const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
-                const sec = String(totalSec % 60).padStart(2, '0');
-                countdownEl.textContent = `${min}:${sec}`;
-            }
+                const timeSinceAlert = now - state.promptTriggeredAt;
+                const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
 
-            // Repetir aviso acústico suave cada 20 segundos para que no pase desapercibido
-            const secondsSinceAlert = Math.floor(timeSinceAlert / 1000);
-            if (secondsSinceAlert > 0 && secondsSinceAlert % 20 === 0 && secondsSinceAlert !== lastAlertChimeSec) {
-                lastAlertChimeSec = secondsSinceAlert;
-                playChimeSound(true);
-            }
+                // Actualizar cuenta regresiva en el modal si está visible
+                const countdownEl = document.getElementById('confirm-modal-countdown');
+                if (countdownEl) {
+                    const totalSec = Math.ceil(remainingTimeoutMs / 1000);
+                    const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                    const sec = String(totalSec % 60).padStart(2, '0');
+                    countdownEl.textContent = `${min}:${sec}`;
+                }
 
-            if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
-                // El usuario no confirmó en los próximos 5 minutos.
-                // Parar el cronómetro retrocediendo al momento de los 15 minutos exactos:
-                autoStopTimerDueToInactivity(state);
-                return;
+                // Repetir aviso acústico suave cada 20 segundos para que no pase desapercibido
+                const secondsSinceAlert = Math.floor(timeSinceAlert / 1000);
+                if (secondsSinceAlert > 0 && secondsSinceAlert % 20 === 0 && secondsSinceAlert !== lastAlertChimeSec) {
+                    lastAlertChimeSec = secondsSinceAlert;
+                    playChimeSound(true);
+                }
+
+                if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
+                    // El usuario no confirmó en los próximos 5 minutos en ningún dispositivo.
+                    autoStopTimerDueToInactivity(state);
+                    return;
+                }
             }
         } else {
             // Comprobar si han transcurrido los minutos configurados de TRABAJO REAL desde el último prompt
@@ -691,7 +772,10 @@ function updateTimerTick() {
             const wallClockSincePrompt = now - (state.lastPromptTime || state.startedAt || now);
 
             if (workDoneSincePrompt >= TIMER_PROMPT_INTERVAL_MS || wallClockSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
-                trigger15MinuteReminder(state, totalMs);
+                // REGLA: Sólo disparar recordatorio si la vista Express está activa
+                if (isExpressViewActive()) {
+                    trigger15MinuteReminder(state, totalMs);
+                }
             }
         }
     }
@@ -793,6 +877,7 @@ function updateTimerTick() {
  */
 function autoStopTimerDueToInactivity(state) {
     if (!state || state.status !== 'running') return;
+    if (!isExpressViewActive()) return;
 
     console.warn(`[PlanesGo Timer] ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos sin confirmar alerta de ${TIMER_PROMPT_MINUTES} minutos. Auto-pausando y fijando en ${TIMER_PROMPT_MINUTES} minutos.`);
 
@@ -865,6 +950,8 @@ function autoStopTimerDueToInactivity(state) {
  * Dispara la alerta periódica (sonido, notificación estándar del sistema y modal)
  */
 function trigger15MinuteReminder(state, currentTotalMs) {
+    if (!isExpressViewActive()) return;
+
     // Fijar el snapshot exacto de la alerta y la marca de activación
     state.promptTriggeredAt = Date.now();
     state.promptSnapshotMs = currentTotalMs;
@@ -927,6 +1014,7 @@ function loadTasksForConfirmModal(projectId, currentTaskId) {
  * Muestra el modal de confirmación con el botón Continuar enfocado por defecto
  */
 function showTimerConfirmModal(state, totalMs) {
+    if (!isExpressViewActive()) return;
     if (!state) state = getTimerState();
     if (!state) return;
 
@@ -1011,6 +1099,18 @@ function confirmContinueTimer() {
         }
 
         saveTimerState(state);
+
+        // Sincronizar confirmación con el backend para que otros dispositivos (PC/móvil) cancelen sus alertas
+        const hoursDecimal = parseFloat((totalMs / 3600000).toFixed(4));
+        fetch('/api/timer/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: state.timesheetId || 0,
+                description: state.description || '',
+                unit_amount: hoursDecimal
+            })
+        }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando confirmación con el servidor:', err));
     }
     stopTitleFlash();
     hideTimerConfirmModal();
@@ -1448,6 +1548,7 @@ function getAudioContext() {
  * @param {boolean} isGentleReminder Si es true, reproduce un bip suave de recordatorio en lugar del acorde completo
  */
 function playChimeSound(isGentleReminder = false) {
+    if (!isExpressViewActive()) return;
     try {
         const ctx = getAudioContext();
         if (!ctx) return;
@@ -1500,6 +1601,7 @@ function requestNotificationPermission() {
  * Permite hacer clic directamente en la notificación para reconfirmar el trabajo en curso
  */
 function triggerSystemNotification(title, body) {
+    if (!isExpressViewActive()) return;
     if (!('Notification' in window)) return;
 
     const displayNotif = () => {
@@ -1595,6 +1697,7 @@ window.testTimerNotification = async function () {
  * Muestra un aviso emergente visual (toast) no intrusivo en la interfaz
  */
 function showNotificationToast(message) {
+    if (!isExpressViewActive()) return;
     let toast = document.getElementById('planesgo-toast');
     if (!toast) {
         toast = document.createElement('div');

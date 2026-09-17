@@ -33,9 +33,29 @@ type SessionData struct {
 }
 
 type AppState struct {
-	mu        sync.RWMutex
-	cfg       *config.Config
-	userStore *store.UserSettingsStore
+	mu                      sync.RWMutex
+	cfg                     *config.Config
+	userStore               *store.UserSettingsStore
+	lastTimerConfirmMu      sync.RWMutex
+	lastTimerConfirmedTimes map[int]int64
+}
+
+func (state *AppState) setLastConfirmedAt(userUID int, ts int64) {
+	state.lastTimerConfirmMu.Lock()
+	defer state.lastTimerConfirmMu.Unlock()
+	if state.lastTimerConfirmedTimes == nil {
+		state.lastTimerConfirmedTimes = make(map[int]int64)
+	}
+	state.lastTimerConfirmedTimes[userUID] = ts
+}
+
+func (state *AppState) getLastConfirmedAt(userUID int) int64 {
+	state.lastTimerConfirmMu.RLock()
+	defer state.lastTimerConfirmMu.RUnlock()
+	if state.lastTimerConfirmedTimes == nil {
+		return 0
+	}
+	return state.lastTimerConfirmedTimes[userUID]
 }
 
 type WorkerRecentProject struct {

@@ -267,6 +267,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof updateExpressTimerState === 'function') {
                 updateExpressTimerState();
             }
+            if (e.key === 'planesgo_active_timer') {
+                try {
+                    const parsed = e.newValue ? JSON.parse(e.newValue) : null;
+                    if (!parsed || !parsed.promptTriggeredAt) {
+                        if (typeof hideTimerConfirmModal === 'function') {
+                            hideTimerConfirmModal();
+                        }
+                        if (typeof stopTitleFlash === 'function') {
+                            stopTitleFlash();
+                        }
+                    }
+                } catch (err) {}
+            }
         }
     });
 });

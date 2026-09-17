@@ -58,6 +58,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/api/timer/active", state.handleAPITimerActive)
 	mux.HandleFunc("/api/timer/start", state.handleAPITimerStart)
 	mux.HandleFunc("/api/timer/tick", state.handleAPITimerTick)
+	mux.HandleFunc("/api/timer/confirm", state.handleAPITimerConfirm)
 	mux.HandleFunc("/api/timer/pause", state.handleAPITimerPause)
 	mux.HandleFunc("/api/timer/resume", state.handleAPITimerResume)
 	mux.HandleFunc("/api/timer/stop", state.handleAPITimerStop)

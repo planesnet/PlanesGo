@@ -1302,9 +1302,9 @@ function renderExpressView() {
 
     allEntries.forEach(entry => {
         const emp = (entry.employee || '').toLowerCase();
-        if (employeeVal) {
+        // Si la tarea está corriendo actualmente, nunca filtrarla por trabajador
+        if (employeeVal && !entry.isTimerRunning) {
             const matchEmp = !emp || emp.includes(employeeVal) || employeeVal.includes(emp) || 
-                             (entry.isTimerRunning && (emp === 'yo' || !emp)) ||
                              (employeeVal.split(' ').some(w => w.length > 2 && emp.includes(w)));
             if (!matchEmp) return;
         }
@@ -1320,14 +1320,15 @@ function renderExpressView() {
             if (!pNameLower.includes(targetProjectName)) return;
         }
 
-        // Filtro por buscador
+        // Filtro por buscador (soporte multitoken para palabras compuestas)
         if (searchVal) {
             const descLower = (entry.desc || '').toLowerCase();
             const taskLower = (entry.taskName || '').toLowerCase();
             const projLower = (entry.projectName || '').toLowerCase();
-            if (!descLower.includes(searchVal) && !taskLower.includes(searchVal) && !projLower.includes(searchVal)) {
-                return;
-            }
+            const combined = `${descLower} ${taskLower} ${projLower}`;
+            const tokens = searchVal.split(/\s+/).filter(Boolean);
+            const matchesAll = tokens.every(token => combined.includes(token));
+            if (!matchesAll) return;
         }
 
         const pId = entry.projectId || 0;
@@ -1465,8 +1466,8 @@ function renderExpressView() {
     if (emptyEl) emptyEl.classList.add('hidden');
 
     let liveClockStr = '00:00:00';
-    if (timerState) {
-        const totalMs = (timerState.accumulatedMs || 0) + (timerState.status === 'running' && timerState.lastStartTime ? (Date.now() - timerState.lastStartTime) : 0);
+    if (timerState && timerState.status === 'running' && timerState.lastStartTime) {
+        const totalMs = (timerState.accumulatedMs || 0) + (Date.now() - timerState.lastStartTime);
         if (typeof formatElapsedMs === 'function') {
             liveClockStr = formatElapsedMs(totalMs);
         }
@@ -1484,14 +1485,14 @@ function renderExpressView() {
         let dateBadgeHtml = '';
         if (item.hasTodayEntry) {
             dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
                     <span>HOY</span>
                     ${item.todayHours > 0 ? `<span>${item.todayHours.toFixed(1)}h</span>` : ''}
                 </span>
             `;
         } else if (item.lastDate) {
             dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-800 text-slate-400 border border-slate-700 font-mono" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 font-mono" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
                     <span>${formatCardDate(item.lastDate)}</span>
                 </span>
             `;
@@ -1499,7 +1500,7 @@ function renderExpressView() {
 
         const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
         const partnerLogoHtml = partnerId > 0
-            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-4 h-4 sm:w-4.5 sm:h-4.5 rounded object-cover bg-slate-900 border border-slate-700/80 shrink-0 shadow-sm" loading="lazy" onerror="this.style.display='none'">`
+            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-4.5 h-4.5 sm:w-5 sm:h-5 rounded object-cover bg-slate-900 border border-slate-700/80 shrink-0 shadow-sm" loading="lazy" onerror="this.style.display='none'">`
             : '';
 
         const isRunning = item.isRunning;
@@ -1508,7 +1509,7 @@ function renderExpressView() {
             : 'border-slate-700/80 hover:border-slate-500 shadow-sm bg-slate-800/90 hover:bg-slate-750 text-slate-100';
 
         cardsHtml += `
-            <div class="express-card group relative rounded-xl border ${cardBorderClass} p-2.5 transition-all duration-100 flex flex-col justify-between cursor-pointer select-none active:scale-[0.98]"
+            <div class="express-card group relative rounded-xl border ${cardBorderClass} p-3 sm:p-3.5 transition-all duration-100 flex flex-col justify-between cursor-pointer select-none active:scale-[0.98]"
                  role="button" tabindex="0"
                  data-project-id="${item.projectId}"
                  data-project-name="${escapeAttr(item.projectName)}"
@@ -1527,13 +1528,13 @@ function renderExpressView() {
                 <div class="flex items-center justify-between gap-1.5 mb-1.5">
                     <div class="flex items-center space-x-1.5 min-w-0">
                         ${partnerLogoHtml}
-                        <span class="w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-sky-400'} shrink-0"></span>
-                        <span class="text-[11px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
+                        <span class="w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-sky-400'} shrink-0"></span>
+                        <span class="text-xs sm:text-[13px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
                             ${safeProj}
                         </span>
                     </div>
                     <div class="shrink-0">
-                        <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
+                        <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             <span>ACTIVO</span>
                         </span>
@@ -1544,12 +1545,12 @@ function renderExpressView() {
                 </div>
 
                 <!-- Cuerpo de la tecla: MÁXIMA IMPORTANCIA A LA DESCRIPCIÓN DE LA TAREA REALIZADA -->
-                <div class="mb-2 space-y-0.5">
-                    <h4 class="text-xs sm:text-[13px] font-bold text-slate-100 group-hover:text-amber-300 leading-snug line-clamp-2 transition-colors" title="${safeDesc}">
+                <div class="mb-2.5 space-y-1">
+                    <h4 class="text-sm sm:text-base font-bold text-slate-100 group-hover:text-amber-300 leading-snug line-clamp-2 transition-colors" title="${safeDesc}">
                         ${safeDesc}
                     </h4>
                     ${hasTask ? `
-                    <div class="flex items-center space-x-1 text-[10px] text-slate-400 truncate pt-0.5" title="Tarea: ${safeTask}">
+                    <div class="flex items-center space-x-1 text-xs text-slate-400 truncate pt-0.5" title="Tarea: ${safeTask}">
                         <span class="text-slate-500 font-normal">Tarea:</span>
                         <span class="font-medium text-slate-300 truncate">${safeTask}</span>
                     </div>
@@ -1557,19 +1558,19 @@ function renderExpressView() {
                 </div>
 
                 <!-- Pie de la tecla: Reloj / Horas y Botón de 1-clic -->
-                <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between gap-1 mt-auto">
+                <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between gap-1 mt-auto">
                     <div class="min-w-0">
-                        <div class="express-live-clock-container ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 text-emerald-400 font-mono font-bold text-[11px]">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                        <div class="express-live-clock-container ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1.5 text-emerald-400 font-mono font-bold text-xs sm:text-sm">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                             <span class="express-live-clock font-mono">${liveClockStr}</span>
                         </div>
-                        <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-[10px] text-slate-400 font-mono">
+                        <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-xs sm:text-sm text-slate-400 font-mono">
                             ${item.hasTodayEntry && item.todayHours > 0 ? `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h</span>` : `<span class="text-slate-500">${item.totalHours.toFixed(1)}h (2s)</span>`}
                         </div>
                     </div>
 
                     <div class="shrink-0">
-                        <span class="express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition ${isRunning ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold' : 'bg-slate-700/80 hover:bg-sky-600 text-slate-200 hover:text-white'}">
+                        <span class="express-btn-action inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-extrabold tracking-wide uppercase transition ${isRunning ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black' : 'bg-slate-700/80 hover:bg-sky-600 text-slate-200 hover:text-white'}">
                             ${isRunning ? 'PAUSAR' : (item.hasTodayEntry ? 'REANUDAR' : 'INICIAR')}
                         </span>
                     </div>

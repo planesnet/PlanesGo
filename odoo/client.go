@@ -1322,6 +1322,32 @@ func (c *Client) UpdateTimerUnits(ctx context.Context, timesheetID int, unitAmou
 	return err
 }
 
+// UpdateTimesheetDescription actualiza la descripción de un parte de horas en Odoo
+func (c *Client) UpdateTimesheetDescription(ctx context.Context, timesheetID int, description string) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+	if timesheetID <= 0 || strings.TrimSpace(description) == "" {
+		return nil
+	}
+	writeArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"account.analytic.line",
+		"write",
+		[]interface{}{
+			[]int{timesheetID},
+			map[string]interface{}{
+				"name": description,
+			},
+		},
+	}
+	_, err = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	return err
+}
+
 // PauseTimer pausa el cronómetro activo en Odoo ejecutando action_timer_pause / action_timer_stop y actualizando unit_amount
 func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, unitAmount float64) error {
 	uid, err := c.Authenticate(ctx)

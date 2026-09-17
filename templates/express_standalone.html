@@ -47,27 +47,43 @@
       data-is-standalone="true">
 
     <!-- Cabecera Compacta Móvil: Trabajador, Versión y Salir -->
-    <header class="px-3 py-2 shrink-0 bg-slate-900/95 border-b border-slate-800/90 flex items-center justify-between gap-2 select-none shadow-sm">
+    {{if .ActiveTimer}}
+    <div id="active-timer-container" class="hidden" style="display: none !important;"
+         data-server-timer="true"
+         data-timesheet-id="{{.ActiveTimer.TimesheetID}}"
+         data-project-id="{{.ActiveTimer.ProjectID}}"
+         data-project-name="{{.ActiveTimer.ProjectName}}"
+         data-task-id="{{.ActiveTimer.TaskID}}"
+         data-task-name="{{.ActiveTimer.TaskName}}"
+         data-desc="{{.ActiveTimer.Description}}"
+         data-accumulated-ms="{{.ActiveTimer.AccumulatedMs}}"
+         data-started-at="{{.ActiveTimer.StartedAt}}"
+         data-is-running="{{if .ActiveTimer.IsRunning}}true{{else}}false{{end}}">
+    </div>
+    {{end}}
+
+    <!-- Cabecera de la botonera móvil -->
+    <header class="px-3.5 py-2.5 shrink-0 bg-slate-900/95 border-b border-slate-800/90 flex items-center justify-between gap-2 select-none shadow-sm">
         <!-- Info Trabajador y Versión -->
-        <div class="flex items-center space-x-2.5 min-w-0">
+        <div class="flex items-center space-x-3 min-w-0">
             {{if and .Session .Session.UserPicture}}
-            <img src="{{.Session.UserPicture}}" alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-sky-500/50 shrink-0" referrerpolicy="no-referrer">
+            <img src="{{.Session.UserPicture}}" alt="" class="w-8 h-8 rounded-full object-cover ring-1 ring-sky-500/50 shrink-0" referrerpolicy="no-referrer">
             {{else}}
-            <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm">
+            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
                 {{if .CurrentWorker}}{{printf "%.1s" .CurrentWorker}}{{else if and .Session .Session.UserName}}{{printf "%.1s" .Session.UserName}}{{else}}P{{end}}
             </div>
             {{end}}
             <div class="min-w-0 flex flex-col">
-                <div class="flex items-center space-x-1.5">
-                    <span class="text-xs sm:text-sm font-bold text-slate-100 truncate max-w-[140px] sm:max-w-[220px]" title="{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{end}}">
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm sm:text-base font-bold text-slate-100 truncate max-w-[150px] sm:max-w-[240px]" title="{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{end}}">
                         {{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Trabajador{{end}}
                     </span>
-                    <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-950/80 text-sky-400 border border-sky-800/60 shrink-0">
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-950/80 text-sky-400 border border-sky-800/60 shrink-0">
                         v{{.Version}}
                     </span>
                 </div>
                 {{if and .Session .Session.UserEmail}}
-                <span class="text-[10px] text-slate-400 truncate max-w-[140px] sm:max-w-[220px]">
+                <span class="text-xs text-slate-400 truncate max-w-[150px] sm:max-w-[240px]">
                     {{.Session.UserEmail}}
                 </span>
                 {{end}}
@@ -77,20 +93,20 @@
         <!-- Botón Salir / Logout -->
         <div class="flex items-center shrink-0">
             <a href="/logout?next=/m"
-               class="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 transition active:scale-95 text-xs font-medium cursor-pointer"
+               class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-950/60 text-slate-200 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 transition active:scale-95 text-xs font-semibold cursor-pointer"
                title="Cerrar sesión">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
                 </svg>
-                <span class="text-[11px] font-semibold">Salir</span>
+                <span>Salir</span>
             </a>
         </div>
     </header>
 
     <!-- Barra de búsqueda minimalista -->
-    <div class="px-3 pt-2 pb-2 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
+    <div class="px-3 pt-2.5 pb-2.5 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
         <div class="relative flex-1">
-            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
@@ -98,9 +114,9 @@
             <input type="search" id="filter-search" oninput="handleExpressSearchInput(this)"
                    placeholder="Buscar proyecto o tarea..."
                    autocomplete="off" autocorrect="off" spellcheck="false"
-                   class="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs sm:text-sm rounded-xl pl-9 pr-9 py-2 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner">
+                   class="w-full bg-slate-900 border border-slate-800 text-slate-100 text-sm sm:text-base rounded-xl pl-10 pr-9 py-2.5 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner">
             <button type="button" id="clear-search-btn" onclick="clearExpressSearch()"
-                    class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white cursor-pointer"
+                    class="hidden absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white cursor-pointer"
                     title="Limpiar">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -108,7 +124,7 @@
             </button>
         </div>
         <button type="button" onclick="loadExpressTimesheets(true)"
-                class="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 active:scale-95 transition cursor-pointer shrink-0"
+                class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 active:scale-95 transition cursor-pointer shrink-0"
                 title="Recargar tareas">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -116,18 +132,8 @@
         </button>
     </div>
 
-    <!-- Cuerpo principal de la botonera con scroll fluido -->
-    <main id="express-main-scroll" class="flex-1 overflow-y-auto p-2.5 sm:p-3 overscroll-contain relative">
-        <!-- Indicador gestual de actualización (Pull to Refresh) -->
-        <div id="pull-refresh-indicator" class="overflow-hidden transition-[height,opacity] duration-200 flex items-center justify-center text-sky-400 font-medium text-xs h-0 opacity-0 select-none pointer-events-none">
-            <div class="flex items-center space-x-2 py-2">
-                <svg id="pull-refresh-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                </svg>
-                <span id="pull-refresh-text">Desliza para actualizar...</span>
-            </div>
-        </div>
-
+    <!-- Cuerpo principal de la botonera con scroll fluido nativo -->
+    <main id="express-main-scroll" class="flex-1 overflow-y-auto p-2.5 sm:p-3 relative">
         <!-- Estado de carga -->
         <div id="express-loading-state" class="flex flex-col items-center justify-center py-16 space-y-3">
             <svg class="animate-spin h-7 w-7 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -154,6 +160,9 @@
 
     <!-- Toast de notificaciones flotante -->
     <div id="toast-container" class="fixed bottom-3 right-3 z-50 pointer-events-none space-y-2"></div>
+
+    <!-- Modal Interactivo de Confirmación Cada 15 Minutos -->
+    {{ template "confirm_modal" . }}
 
     <!-- Scripts de PlanesGo con Cache-Busting -->
     <script>
@@ -255,103 +264,6 @@
                     }
                 }
             });
-
-            // Soporte gestual Pull-to-Refresh en móvil (deslizar hacia abajo para actualizar)
-            const mainEl = document.getElementById('express-main-scroll');
-            const pullIndicator = document.getElementById('pull-refresh-indicator');
-            const pullIcon = document.getElementById('pull-refresh-icon');
-            const pullText = document.getElementById('pull-refresh-text');
-
-            if (mainEl && pullIndicator && pullIcon && pullText) {
-                let touchStartY = 0;
-                let isPulling = false;
-                let isRefreshing = false;
-                const pullThreshold = 55;
-
-                mainEl.addEventListener('touchstart', function(e) {
-                    if (mainEl.scrollTop <= 0 && !isRefreshing && e.touches.length === 1) {
-                        touchStartY = e.touches[0].pageY;
-                        isPulling = true;
-                    } else {
-                        isPulling = false;
-                    }
-                }, { passive: true });
-
-                mainEl.addEventListener('touchmove', function(e) {
-                    if (!isPulling || isRefreshing) return;
-                    if (mainEl.scrollTop > 0) {
-                        isPulling = false;
-                        pullIndicator.style.height = '0px';
-                        pullIndicator.style.opacity = '0';
-                        return;
-                    }
-
-                    const currentY = e.touches[0].pageY;
-                    const diff = currentY - touchStartY;
-
-                    if (diff > 0) {
-                        const pullHeight = Math.min(diff * 0.45, 70);
-                        pullIndicator.style.height = pullHeight + 'px';
-                        pullIndicator.style.opacity = Math.min(pullHeight / 30, 1).toString();
-
-                        if (pullHeight >= pullThreshold) {
-                            pullText.textContent = 'Suelta para actualizar...';
-                            pullIcon.style.transform = 'rotate(180deg)';
-                        } else {
-                            pullText.textContent = 'Desliza para actualizar...';
-                            pullIcon.style.transform = 'rotate(0deg)';
-                        }
-
-                        if (diff > 8 && e.cancelable) {
-                            e.preventDefault();
-                        }
-                    }
-                }, { passive: false });
-
-                function finishPullRefresh() {
-                    setTimeout(function() {
-                        pullIndicator.style.height = '0px';
-                        pullIndicator.style.opacity = '0';
-                        setTimeout(function() {
-                            isRefreshing = false;
-                            pullIcon.classList.remove('animate-spin');
-                            pullIcon.style.transform = 'rotate(0deg)';
-                            pullIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>';
-                            pullText.textContent = 'Desliza para actualizar...';
-                        }, 250);
-                    }, 350);
-                }
-
-                mainEl.addEventListener('touchend', function(e) {
-                    if (!isPulling || isRefreshing) return;
-                    isPulling = false;
-                    const currentHeight = parseFloat(pullIndicator.style.height || '0');
-
-                    if (currentHeight >= pullThreshold) {
-                        isRefreshing = true;
-                        pullIndicator.style.height = '42px';
-                        pullIndicator.style.opacity = '1';
-                        pullText.textContent = 'Actualizando tareas...';
-                        pullIcon.style.transform = 'none';
-                        pullIcon.classList.add('animate-spin');
-                        pullIcon.innerHTML = '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>';
-
-                        if (typeof loadExpressTimesheets === 'function') {
-                            const p = loadExpressTimesheets(true);
-                            if (p && typeof p.finally === 'function') {
-                                p.finally(finishPullRefresh);
-                            } else {
-                                finishPullRefresh();
-                            }
-                        } else {
-                            finishPullRefresh();
-                        }
-                    } else {
-                        pullIndicator.style.height = '0px';
-                        pullIndicator.style.opacity = '0';
-                    }
-                }, { passive: true });
-            }
         });
     </script>
 </body>
