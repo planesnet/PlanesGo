@@ -41,7 +41,11 @@ func (state *AppState) handleGoogleAuth(w http.ResponseWriter, r *http.Request) 
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	if nextParam := r.URL.Query().Get("next"); nextParam != "" && strings.HasPrefix(nextParam, "/") {
+	nextParam := r.URL.Query().Get("next")
+	if nextParam == "" && isMobileRequest(r) {
+		nextParam = "/m"
+	}
+	if nextParam != "" && strings.HasPrefix(nextParam, "/") {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "oauth_next_target",
 			Value:    nextParam,
@@ -207,6 +211,10 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
+	if (targetURL == "/" || targetURL == "") && isMobileRequest(r) {
+		targetURL = "/m"
+	}
+
 	http.Redirect(w, r, targetURL, http.StatusSeeOther)
 }
 
@@ -242,6 +250,9 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		errorQuery := r.URL.Query().Get("error")
 		nextQuery := r.URL.Query().Get("next")
+		if nextQuery == "" && isMobileRequest(r) {
+			nextQuery = "/m"
+		}
 		data := LoginPageData{
 			Version:           Version,
 			URL:               DefaultOdooURL,
@@ -366,6 +377,9 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if nextParam != "" && strings.HasPrefix(nextParam, "/") {
 			targetURL = nextParam
 		}
+		if (targetURL == "/" || targetURL == "") && isMobileRequest(r) {
+			targetURL = "/m"
+		}
 
 		http.Redirect(w, r, targetURL, http.StatusSeeOther)
 	}
@@ -381,8 +395,15 @@ func (state *AppState) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 	nextParam := r.URL.Query().Get("next")
+	if nextParam == "" && isMobileRequest(r) {
+		nextParam = "/m"
+	}
 	if nextParam != "" && strings.HasPrefix(nextParam, "/") {
 		http.Redirect(w, r, "/login?next="+url.QueryEscape(nextParam), http.StatusSeeOther)
+		return
+	}
+	if isMobileRequest(r) {
+		http.Redirect(w, r, "/login?next=/m", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)

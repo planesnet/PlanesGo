@@ -8,6 +8,11 @@
     <link rel="apple-touch-icon" href="/static/img/icon-192.png">
     <script>
         (function() {
+            // La aplicación en móvil tiene que ir siempre a la url /m
+            if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) || (window.innerWidth && window.innerWidth < 768)) {
+                window.location.replace('/m');
+                return;
+            }
             var noop = function() {};
             window.console.log = noop;
             window.console.info = noop;

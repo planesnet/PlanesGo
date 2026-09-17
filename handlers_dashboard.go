@@ -25,6 +25,12 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// La aplicación en móvil tiene que ir siempre a la url /m
+	if isMobileRequest(r) {
+		http.Redirect(w, r, "/m", http.StatusSeeOther)
+		return
+	}
+
 	var session *SessionData
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && cookie.Value != "" {
@@ -745,6 +751,12 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 // handleExpressStandalone renderiza la botonera Express como ventana independiente ligera (pop-out)
 func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Request) {
+	// Si un móvil accede a /express, redirigir canónicamente a /m
+	if r.URL.Path == "/express" && isMobileRequest(r) {
+		http.Redirect(w, r, "/m", http.StatusMovedPermanently)
+		return
+	}
+
 	var session *SessionData
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && cookie.Value != "" {
@@ -845,4 +857,39 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 	if _, err := buf.WriteTo(w); err != nil {
 		log.Printf("[WARN] Error escribiendo respuesta al cliente: %v", err)
 	}
+}
+
+// isMobileRequest determina si una petición HTTP proviene de un navegador o dispositivo móvil
+func isMobileRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	// 1. Client Hints moderno estándar (Sec-CH-UA-Mobile)
+	if r.Header.Get("Sec-CH-UA-Mobile") == "?1" {
+		return true
+	}
+	// 2. Inspección del User-Agent
+	ua := strings.ToLower(r.UserAgent())
+	if ua == "" {
+		return false
+	}
+	mobileKeywords := []string{
+		"android",
+		"iphone",
+		"ipod",
+		"ipad",
+		"mobile",
+		"webos",
+		"blackberry",
+		"iemobile",
+		"opera mini",
+		"opera mobi",
+		"windows phone",
+	}
+	for _, kw := range mobileKeywords {
+		if strings.Contains(ua, kw) {
+			return true
+		}
+	}
+	return false
 }

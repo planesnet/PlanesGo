@@ -1166,9 +1166,9 @@ function loadExpressTimesheets(forceReload) {
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
-    const fiveDaysAgo = new Date(today);
-    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
-    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(fiveDaysAgo) : fiveDaysAgo.toISOString().split('T')[0];
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(sevenDaysAgo) : sevenDaysAgo.toISOString().split('T')[0];
 
     const pTimesheets = fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
         .then(res => {
@@ -1264,6 +1264,29 @@ function loadExpressTimesheets(forceReload) {
 }
 
 /**
+ * Determina si una fecha corresponde a la jornada anterior (ayer, o viernes si hoy es lunes).
+ */
+function isYesterdayDate(dateStr, today) {
+    if (!dateStr) return false;
+    const refToday = today || new Date();
+    const yesterday = new Date(refToday);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = (typeof formatISODate === 'function') ? formatISODate(yesterday) : yesterday.toISOString().split('T')[0];
+    if (dateStr === yesterdayStr) return true;
+
+    // Si hoy es lunes (día 1), incluir también viernes, sábado y domingo como jornada anterior inmediata
+    if (refToday.getDay() === 1) {
+        const friday = new Date(refToday);
+        friday.setDate(friday.getDate() - 3);
+        const fridayStr = (typeof formatISODate === 'function') ? formatISODate(friday) : friday.toISOString().split('T')[0];
+        if (dateStr >= fridayStr && dateStr <= yesterdayStr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Formatea una fecha para mostrar en las teclas de la botonera.
  */
 function formatCardDate(dateStr) {
@@ -1271,11 +1294,7 @@ function formatCardDate(dateStr) {
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
     if (dateStr === todayStr) return 'Hoy';
-
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = (typeof formatISODate === 'function') ? formatISODate(yesterday) : yesterday.toISOString().split('T')[0];
-    if (dateStr === yesterdayStr) return 'Ayer';
+    if (isYesterdayDate(dateStr, today)) return 'Ayer';
 
     const parts = dateStr.split('-');
     if (parts.length === 3) {
@@ -1375,8 +1394,10 @@ function renderExpressView() {
         const emp = (entry.employee || '').toLowerCase();
         // Si la tarea está corriendo actualmente, nunca filtrarla por trabajador
         if (employeeVal && !entry.isTimerRunning) {
-            const matchEmp = !emp || emp.includes(employeeVal) || employeeVal.includes(emp) || 
-                             (employeeVal.split(' ').some(w => w.length > 2 && emp.includes(w)));
+            const cleanWorker = employeeVal.includes('@') ? employeeVal.split('@')[0] : employeeVal;
+            const workerTokens = cleanWorker.split(/[\s._-]+/).filter(w => w.length > 1);
+            const matchEmp = !emp || emp.includes(cleanWorker) || cleanWorker.includes(emp) || 
+                             (workerTokens.length > 0 && workerTokens.some(w => emp.includes(w)));
             if (!matchEmp) return;
         }
 
@@ -1406,16 +1427,22 @@ function renderExpressView() {
             if (!matchesAll && !entry.isTimerRunning) return;
         }
 
+        // En la botonera deben aparecer los partes de trabajo en los que se han imputado horas (hours > 0 o timer corriendo)
+        if ((entry.hours || 0) <= 0 && !entry.isTimerRunning) {
+            return;
+        }
+
         const pId = entry.projectId || 0;
         const tId = entry.taskId || 0;
         const descClean = (entry.desc || '').trim();
         const descKey = descClean.toLowerCase();
         if (!pId) return;
 
-        // Botonera: agrupamos por Proyecto + Tarea (o Proyecto + Descripción si no hay tarea)
-        // Regla: si hoy ya tengo parte de este proyecto y tarea, no repetir los de días anteriores
-        const key = tId > 0 ? `${pId}_${tId}` : `${pId}_0_${descKey}`;
+        // Botonera: agrupamos por Proyecto + Tarea + Descripción de la tarea realizada
+        // Cada parte de trabajo con descripción realizada constituye su propia tecla
+        const key = `${pId}_${tId}_${descKey}`;
         const isToday = (entry.date === todayStr);
+        const isYesterday = isYesterdayDate(entry.date, today);
 
         if (!taskMap.has(key)) {
             taskMap.set(key, {
@@ -1431,8 +1458,10 @@ function renderExpressView() {
                 lastTimesheetId: entry.id,
                 totalHours: 0,
                 todayTimesheetId: isToday ? entry.id : null,
-                todayHours: isToday ? entry.hours : 0,
+                todayHours: isToday ? (entry.hours || 0) : 0,
+                yesterdayHours: isYesterday ? (entry.hours || 0) : 0,
                 hasTodayEntry: isToday,
+                hasYesterdayEntry: isYesterday,
                 hasRunningTimer: Boolean(entry.isTimerRunning)
             });
         }
@@ -1447,19 +1476,27 @@ function renderExpressView() {
         }
 
         if (isToday) {
-            // Prioridad absoluta a la imputación de hoy: oculta y reemplaza las referencias pasadas
             item.hasTodayEntry = true;
             item.todayTimesheetId = entry.id;
-            item.todayHours = Math.max(item.todayHours, entry.hours);
+            item.todayHours += (entry.hours || 0);
             item.lastDate = todayStr;
             if (descClean) item.lastDescription = descClean;
             item.lastTimesheetId = entry.id;
-        } else if (!item.hasTodayEntry) {
-            // Solo si aún NO tenemos imputación de hoy guardamos la más reciente de los últimos 5 días
-            if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
+        } else if (isYesterday) {
+            item.hasYesterdayEntry = true;
+            item.yesterdayHours += (entry.hours || 0);
+            if (!item.hasTodayEntry) {
                 item.lastDate = entry.date;
                 if (descClean) item.lastDescription = descClean;
                 item.lastTimesheetId = entry.id;
+            }
+        } else {
+            if (!item.hasTodayEntry && !item.hasYesterdayEntry) {
+                if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
+                    item.lastDate = entry.date;
+                    if (descClean) item.lastDescription = descClean;
+                    item.lastTimesheetId = entry.id;
+                }
             }
         }
     });
@@ -1469,7 +1506,7 @@ function renderExpressView() {
         const timerDescClean = (timerState.description || '').trim();
         const pId = timerState.projectId;
         const tId = timerState.taskId || 0;
-        const activeKey = tId > 0 ? `${pId}_${tId}` : `${pId}_0_${timerDescClean.toLowerCase()}`;
+        const activeKey = `${pId}_${tId}_${timerDescClean.toLowerCase()}`;
         if (!taskMap.has(activeKey)) {
             let partnerId = 0;
             if (window.projectPartnerMap && window.projectPartnerMap[pId]) {
@@ -1488,7 +1525,9 @@ function renderExpressView() {
                 totalHours: 0,
                 todayTimesheetId: timerState.timesheetId,
                 todayHours: (timerState.unitAmount || 0),
+                yesterdayHours: 0,
                 hasTodayEntry: true,
+                hasYesterdayEntry: false,
                 hasRunningTimer: true
             });
         } else {
@@ -1529,9 +1568,15 @@ function renderExpressView() {
     tasks.sort((a, b) => {
         if (a.isRunning && !b.isRunning) return -1;
         if (!a.isRunning && b.isRunning) return 1;
+        if (a.hasTodayEntry && !b.hasTodayEntry) return -1;
+        if (!a.hasTodayEntry && b.hasTodayEntry) return 1;
+        if (a.hasYesterdayEntry && !b.hasYesterdayEntry) return -1;
+        if (!a.hasYesterdayEntry && b.hasYesterdayEntry) return 1;
         if (a.lastDate > b.lastDate) return -1;
         if (a.lastDate < b.lastDate) return 1;
-        return (b.todayHours || 0) - (a.todayHours || 0);
+        const aH = (a.todayHours || 0) + (a.yesterdayHours || 0) + (a.totalHours || 0);
+        const bH = (b.todayHours || 0) + (b.yesterdayHours || 0) + (b.totalHours || 0);
+        return bH - aH;
     });
 
     if (countBadge) {
@@ -1569,6 +1614,13 @@ function renderExpressView() {
                 <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
                     <span>HOY</span>
                     ${item.todayHours > 0 ? `<span>${item.todayHours.toFixed(1)}h</span>` : ''}
+                </span>
+            `;
+        } else if (item.hasYesterdayEntry) {
+            dateBadgeHtml = `
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60 font-mono" title="Parte de ayer: ${item.lastDate}. Se duplicará para hoy al pulsar">
+                    <span>AYER</span>
+                    ${item.yesterdayHours > 0 ? `<span>${item.yesterdayHours.toFixed(1)}h</span>` : ''}
                 </span>
             `;
         } else if (item.lastDate) {
@@ -1646,7 +1698,20 @@ function renderExpressView() {
                             <span class="express-live-clock font-mono">${liveClockStr}</span>
                         </div>
                         <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-xs sm:text-sm text-slate-400 font-mono">
-                            ${item.hasTodayEntry && item.todayHours > 0 ? `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h</span>` : `<span class="text-slate-500">${item.totalHours.toFixed(1)}h (2s)</span>`}
+                            ${(() => {
+                                if (item.hasTodayEntry && item.todayHours > 0) {
+                                    let txt = `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h hoy</span>`;
+                                    if (item.yesterdayHours > 0) {
+                                        txt += ` <span class="text-slate-400 text-xs">(${item.yesterdayHours.toFixed(1)}h ayer)</span>`;
+                                    }
+                                    return txt;
+                                } else if (item.hasYesterdayEntry && item.yesterdayHours > 0) {
+                                    return `<span class="text-amber-300 font-bold">${item.yesterdayHours.toFixed(2)}h ayer</span>`;
+                                } else if (item.totalHours > 0) {
+                                    return `<span class="text-slate-400">${item.totalHours.toFixed(1)}h</span>`;
+                                }
+                                return '';
+                            })()}
                         </div>
                     </div>
 
