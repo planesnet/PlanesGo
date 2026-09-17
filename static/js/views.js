@@ -1155,27 +1155,34 @@ function initExpressWindowInteractions() {
         }
     });
 }
+let isExpressLoading = false;
+let isExpressSilentLoading = false;
 
 /**
  * Carga desde el servidor las imputaciones de las dos últimas semanas.
+ * Soporta actualización silenciosa en segundo plano (isSilent = true) sin spinners ni parpadeos.
  */
-function loadExpressTimesheets(forceReload) {
-    if (isExpressLoading && !forceReload) return;
+function loadExpressTimesheets(forceReload = false, isSilent = false) {
+    if (isExpressLoading && !forceReload && !isSilent) return;
+    if (isExpressSilentLoading && isSilent) return;
 
     const loadingEl = document.getElementById('express-loading-state');
     const gridEl = document.getElementById('express-grid-container');
     const emptyEl = document.getElementById('express-empty-state');
 
-    if (expressTimesheets && !forceReload) {
-        renderExpressView();
+    if (expressTimesheets && !forceReload && !isSilent) {
+        renderExpressView(false);
         return;
     }
 
-    if (loadingEl) loadingEl.classList.remove('hidden');
-    if (gridEl) gridEl.classList.add('hidden');
-    if (emptyEl) emptyEl.classList.add('hidden');
-
-    isExpressLoading = true;
+    if (!isSilent) {
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        if (gridEl) gridEl.classList.add('hidden');
+        if (emptyEl) emptyEl.classList.add('hidden');
+        isExpressLoading = true;
+    } else {
+        isExpressSilentLoading = true;
+    }
 
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
@@ -1205,38 +1212,44 @@ function loadExpressTimesheets(forceReload) {
     return Promise.all([pTimesheets, pActive])
         .then(([data, activeData]) => {
             expressTimesheets = Array.isArray(data) ? data : [];
+            window.expressTimesheets = expressTimesheets;
 
             if (activeData && activeData.active && activeData.active.is_running) {
                 const act = activeData.active;
-                const accumulatedMs = Math.round((act.unit_amount || 0) * 3600 * 1000);
+                const accumulatedMs = (typeof act.accumulated_ms === 'number' && act.accumulated_ms >= 0)
+                    ? act.accumulated_ms
+                    : Math.round((act.unit_amount || 0) * 3600 * 1000);
                 let startedAt = act.started_at || (Date.now() - accumulatedMs);
                 if (startedAt > 0 && startedAt < 1000000000000) {
                     startedAt *= 1000;
                 }
-                const serverState = {
-                    timesheetId: act.timesheet_id,
-                    projectId: act.project_id,
-                    projectName: act.project_name || ('Proyecto #' + act.project_id),
-                    taskId: act.task_id || null,
-                    taskName: act.task_name || '',
-                    description: act.description || '',
-                    status: 'running',
-                    startedAt: startedAt,
-                    lastStartTime: Date.now(),
-                    accumulatedMs: accumulatedMs,
-                    lastPromptAccumulatedMs: accumulatedMs,
-                    lastPromptTime: Date.now(),
-                    promptTriggeredAt: null,
-                    promptSnapshotMs: null
-                };
-                if (typeof saveTimerState === 'function') {
-                    saveTimerState(serverState);
-                }
-                if (typeof renderTimerBar === 'function') {
-                    renderTimerBar(serverState);
-                }
-                if (typeof startTimerTicker === 'function') {
-                    startTimerTicker();
+                const cur = (typeof getTimerState === 'function') ? getTimerState() : null;
+                if (!cur || cur.timesheetId !== act.timesheet_id || cur.status !== 'running') {
+                    const serverState = {
+                        timesheetId: act.timesheet_id,
+                        projectId: act.project_id,
+                        projectName: act.project_name || ('Proyecto #' + act.project_id),
+                        taskId: act.task_id || null,
+                        taskName: act.task_name || '',
+                        description: act.description || '',
+                        status: 'running',
+                        startedAt: startedAt,
+                        lastStartTime: Date.now(),
+                        accumulatedMs: accumulatedMs,
+                        lastPromptAccumulatedMs: accumulatedMs,
+                        lastPromptTime: Date.now(),
+                        promptTriggeredAt: null,
+                        promptSnapshotMs: null
+                    };
+                    if (typeof saveTimerState === 'function') {
+                        saveTimerState(serverState);
+                    }
+                    if (typeof renderTimerBar === 'function') {
+                        renderTimerBar(serverState);
+                    }
+                    if (typeof startTimerTicker === 'function') {
+                        startTimerTicker();
+                    }
                 }
 
                 // Inyectar o asegurar en expressTimesheets
@@ -1261,23 +1274,35 @@ function loadExpressTimesheets(forceReload) {
                         if ((act.timesheet_id > 0 && ts.id === act.timesheet_id) ||
                             (act.task_id > 0 && ts.task_id && ts.task_id.id === act.task_id)) {
                             ts.is_timer_running = true;
+                            if (typeof act.unit_amount === 'number') {
+                                ts.unit_amount = act.unit_amount;
+                            }
                         }
                     });
                 }
             }
 
-            isExpressLoading = false;
-            if (loadingEl) loadingEl.classList.add('hidden');
-            if (gridEl) gridEl.classList.remove('hidden');
-            renderExpressView();
+            if (!isSilent) {
+                isExpressLoading = false;
+                if (loadingEl) loadingEl.classList.add('hidden');
+                if (gridEl) gridEl.classList.remove('hidden');
+            } else {
+                isExpressSilentLoading = false;
+            }
+            renderExpressView(isSilent);
         })
         .catch(err => {
             console.error('[PlanesGo Express] Error:', err);
-            isExpressLoading = false;
-            if (loadingEl) loadingEl.classList.add('hidden');
-            if (gridEl) gridEl.classList.remove('hidden');
+            if (!isSilent) {
+                isExpressLoading = false;
+                if (loadingEl) loadingEl.classList.add('hidden');
+                if (gridEl) gridEl.classList.remove('hidden');
+            } else {
+                isExpressSilentLoading = false;
+            }
             expressTimesheets = expressTimesheets || [];
-            renderExpressView();
+            window.expressTimesheets = expressTimesheets;
+            renderExpressView(isSilent);
         });
 }
 
@@ -1324,8 +1349,9 @@ function formatCardDate(dateStr) {
 
 /**
  * Renderiza la matriz concentrada de la botonera tipo máquina.
+ * Soporta actualización minuciosa y silenciosa (isSilent = true) sin parpadeo de DOM.
  */
-function renderExpressView() {
+function renderExpressView(isSilent = false) {
     const gridEl = document.getElementById('express-grid-container');
     const emptyEl = document.getElementById('express-empty-state');
     const countBadge = document.getElementById('express-tasks-count-badge');
@@ -1625,6 +1651,85 @@ function renderExpressView() {
 
     if (emptyEl) emptyEl.classList.add('hidden');
 
+    function getItemDateBadgeHtml(item) {
+        if (item.hasTodayEntry) {
+            return `
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
+                    <span>HOY</span>
+                    ${item.todayHours > 0 ? `<span>${item.todayHours.toFixed(1)}h</span>` : ''}
+                </span>
+            `;
+        } else if (item.hasYesterdayEntry) {
+            return `
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60 font-mono" title="Parte de ayer: ${item.lastDate}. Se duplicará para hoy al pulsar">
+                    <span>AYER</span>
+                    ${item.yesterdayHours > 0 ? `<span>${item.yesterdayHours.toFixed(1)}h</span>` : ''}
+                </span>
+            `;
+        } else if (item.lastDate) {
+            return `
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 font-mono" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
+                    <span>${formatCardDate(item.lastDate)}</span>
+                </span>
+            `;
+        }
+        return '';
+    }
+
+    function getItemHoursSummaryHtml(item) {
+        if (item.hasTodayEntry && item.todayHours > 0) {
+            let txt = `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h hoy</span>`;
+            if (item.yesterdayHours > 0) {
+                txt += ` <span class="text-slate-400 text-xs">(${item.yesterdayHours.toFixed(1)}h ayer)</span>`;
+            }
+            return txt;
+        } else if (item.hasYesterdayEntry && item.yesterdayHours > 0) {
+            return `<span class="text-amber-300 font-bold">${item.yesterdayHours.toFixed(2)}h ayer</span>`;
+        } else if (item.totalHours > 0) {
+            return `<span class="text-slate-400">${item.totalHours.toFixed(1)}h</span>`;
+        }
+        return '';
+    }
+
+    // ACTUALIZACIÓN MINUCIOSA Y SILENCIOSA: Si es silent y las teclas coinciden, actualizar in-place
+    if (isSilent && gridEl.children.length > 0) {
+        const existingCards = Array.from(gridEl.querySelectorAll('.express-card'));
+        const existingKeys = existingCards.map(c => c.dataset.cardKey).filter(Boolean);
+        const newKeys = tasks.map(t => t.key);
+
+        const isSameKeys = (existingKeys.length === newKeys.length) &&
+                           existingKeys.every((k, idx) => k === newKeys[idx]);
+
+        if (isSameKeys) {
+            tasks.forEach((item, idx) => {
+                const card = existingCards[idx];
+                if (!card) return;
+
+                card.dataset.timesheetId = item.lastTimesheetId || 0;
+                card.dataset.todayTimesheetId = item.todayTimesheetId || 0;
+                card.dataset.todayHours = item.todayHours || 0;
+                card.dataset.yesterdayHours = item.yesterdayHours || 0;
+                card.dataset.lastDate = item.lastDate || '';
+                card.dataset.hasToday = item.hasTodayEntry ? 'true' : 'false';
+
+                const badgeIdle = card.querySelector('.express-badge-idle');
+                const newBadgeHtml = getItemDateBadgeHtml(item);
+                if (badgeIdle && badgeIdle.innerHTML.trim() !== newBadgeHtml.trim()) {
+                    badgeIdle.innerHTML = newBadgeHtml;
+                }
+
+                const hoursSummary = card.querySelector('.express-hours-summary');
+                const newSummaryHtml = getItemHoursSummaryHtml(item);
+                if (hoursSummary && hoursSummary.innerHTML.trim() !== newSummaryHtml.trim()) {
+                    hoursSummary.innerHTML = newSummaryHtml;
+                }
+            });
+
+            updateExpressTimerState();
+            return;
+        }
+    }
+
     let liveClockStr = '00:00:00';
     if (timerState && timerState.status === 'running' && timerState.lastStartTime) {
         const totalMs = (timerState.accumulatedMs || 0) + (Date.now() - timerState.lastStartTime);
@@ -1642,28 +1747,7 @@ function renderExpressView() {
         // Lo que identifica la tecla es el nombre del proyecto y la descripción de la tarea realizada
         const safeDesc = hasDesc ? escapeHtml(item.lastDescription) : (hasTask ? safeTask : 'Trabajo general');
 
-        let dateBadgeHtml = '';
-        if (item.hasTodayEntry) {
-            dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
-                    <span>HOY</span>
-                    ${item.todayHours > 0 ? `<span>${item.todayHours.toFixed(1)}h</span>` : ''}
-                </span>
-            `;
-        } else if (item.hasYesterdayEntry) {
-            dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60 font-mono" title="Parte de ayer: ${item.lastDate}. Se duplicará para hoy al pulsar">
-                    <span>AYER</span>
-                    ${item.yesterdayHours > 0 ? `<span>${item.yesterdayHours.toFixed(1)}h</span>` : ''}
-                </span>
-            `;
-        } else if (item.lastDate) {
-            dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 font-mono" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
-                    <span>${formatCardDate(item.lastDate)}</span>
-                </span>
-            `;
-        }
+        const dateBadgeHtml = getItemDateBadgeHtml(item);
 
         const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
         const partnerLogoHtml = (partnerId > 0 || item.projectId > 0)
@@ -1678,6 +1762,7 @@ function renderExpressView() {
         cardsHtml += `
             <div class="express-card group relative rounded-xl border ${cardBorderClass} p-3 sm:p-3.5 transition-all duration-100 flex flex-col justify-between cursor-pointer select-none active:scale-[0.98]"
                  role="button" tabindex="0"
+                 data-card-key="${escapeAttr(item.key)}"
                  data-project-id="${item.projectId}"
                  data-project-name="${escapeAttr(item.projectName)}"
                  data-task-id="${item.taskId || 0}"
@@ -1686,6 +1771,7 @@ function renderExpressView() {
                  data-timesheet-id="${item.lastTimesheetId || 0}"
                  data-today-timesheet-id="${item.todayTimesheetId || 0}"
                  data-today-hours="${item.todayHours || 0}"
+                 data-yesterday-hours="${item.yesterdayHours || 0}"
                  data-last-date="${item.lastDate || ''}"
                  data-has-today="${item.hasTodayEntry ? 'true' : 'false'}"
                  onclick="handleExpressCardClick(this)"
@@ -1732,20 +1818,7 @@ function renderExpressView() {
                             <span class="express-live-clock font-mono">${liveClockStr}</span>
                         </div>
                         <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-xs sm:text-sm text-slate-400 font-mono">
-                            ${(() => {
-                                if (item.hasTodayEntry && item.todayHours > 0) {
-                                    let txt = `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h hoy</span>`;
-                                    if (item.yesterdayHours > 0) {
-                                        txt += ` <span class="text-slate-400 text-xs">(${item.yesterdayHours.toFixed(1)}h ayer)</span>`;
-                                    }
-                                    return txt;
-                                } else if (item.hasYesterdayEntry && item.yesterdayHours > 0) {
-                                    return `<span class="text-amber-300 font-bold">${item.yesterdayHours.toFixed(2)}h ayer</span>`;
-                                } else if (item.totalHours > 0) {
-                                    return `<span class="text-slate-400">${item.totalHours.toFixed(1)}h</span>`;
-                                }
-                                return '';
-                            })()}
+                            ${getItemHoursSummaryHtml(item)}
                         </div>
                     </div>
 
@@ -1955,4 +2028,39 @@ window.renderExpressView = renderExpressView;
 window.handleExpressCardClick = handleExpressCardClick;
 window.updateExpressTimerState = updateExpressTimerState;
 window.initExpressWindowInteractions = initExpressWindowInteractions;
+
+// Sincronización periódica y silenciosa en segundo plano (cada 20 segundos)
+if (!window.__expressSilentSyncInterval) {
+    window.__expressSilentSyncInterval = setInterval(() => {
+        if (document.visibilityState !== 'hidden') {
+            const gridEl = document.getElementById('express-grid-container');
+            const floatingWin = document.getElementById('express-floating-window');
+            const isExpressVisible = (floatingWin && !floatingWin.classList.contains('hidden')) ||
+                                    (window.location.pathname === '/express' || window.location.pathname === '/m') ||
+                                    (gridEl && !gridEl.closest('.hidden'));
+
+            if (isExpressVisible && typeof loadExpressTimesheets === 'function') {
+                loadExpressTimesheets(true, true);
+            }
+        }
+    }, 20000);
+}
+
+if (!window.__expressVisibilityListenerAdded) {
+    window.__expressVisibilityListenerAdded = true;
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            const gridEl = document.getElementById('express-grid-container');
+            const floatingWin = document.getElementById('express-floating-window');
+            const isExpressVisible = (floatingWin && !floatingWin.classList.contains('hidden')) ||
+                                    (window.location.pathname === '/express' || window.location.pathname === '/m') ||
+                                    (gridEl && !gridEl.closest('.hidden'));
+
+            if (isExpressVisible && typeof loadExpressTimesheets === 'function') {
+                loadExpressTimesheets(true, true);
+            }
+        }
+    });
+}
+
 

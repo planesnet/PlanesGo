@@ -480,7 +480,12 @@ function togglePauseTimer() {
     saveTimerState(state);
     renderTimerBar(state);
     updateAllRowTimerButtonStates();
-    if (typeof renderExpressView === 'function') {
+    if (typeof updateExpressTimerState === 'function') {
+        updateExpressTimerState();
+    }
+    if (typeof loadExpressTimesheets === 'function') {
+        loadExpressTimesheets(true, true);
+    } else if (typeof renderExpressView === 'function') {
         renderExpressView();
     }
 }
@@ -694,7 +699,12 @@ function clearTimer(skipOdooSync) {
     hideTimerConfirmModal();
 
     updateAllRowTimerButtonStates();
-    if (typeof renderExpressView === 'function') {
+    if (typeof updateExpressTimerState === 'function') {
+        updateExpressTimerState();
+    }
+    if (typeof loadExpressTimesheets === 'function') {
+        loadExpressTimesheets(true, true);
+    } else if (typeof renderExpressView === 'function') {
         renderExpressView();
     }
 }
@@ -1586,10 +1596,13 @@ async function syncActiveTimerFromOdoo() {
                 startTimerTicker();
                 ensureTimesheetRowExists(act, serverState);
                 updateAllRowTimerButtonStates();
-                if (typeof renderExpressView === 'function') {
-                    renderExpressView();
-                } else if (typeof updateExpressTimerState === 'function') {
+                if (typeof updateExpressTimerState === 'function') {
                     updateExpressTimerState();
+                }
+                if (typeof loadExpressTimesheets === 'function') {
+                    loadExpressTimesheets(true, true);
+                } else if (typeof renderExpressView === 'function') {
+                    renderExpressView();
                 }
             } else if (act && !act.is_running) {
                 // El servidor indica que el temporizador está pausado (ej. pausado desde el móvil o PC)
@@ -1611,6 +1624,7 @@ async function syncActiveTimerFromOdoo() {
                         renderTimerBar(current);
                         updateAllRowTimerButtonStates();
                         if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
+                        if (typeof loadExpressTimesheets === 'function') loadExpressTimesheets(true, true);
                     }
                 }
             } else {
@@ -1626,6 +1640,7 @@ async function syncActiveTimerFromOdoo() {
                     if (container) container.classList.add('hidden');
                     updateAllRowTimerButtonStates();
                     if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
+                    if (typeof loadExpressTimesheets === 'function') loadExpressTimesheets(true, true);
                 }
             }
         }

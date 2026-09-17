@@ -1070,6 +1070,11 @@ function submitTimesheetForm(event) {
             updateAllRowTimerButtonStates();
         }
 
+        // Actualizar silenciosamente la botonera Express si está disponible
+        if (typeof loadExpressTimesheets === 'function') {
+            loadExpressTimesheets(true, true);
+        }
+
         if (typeof showToast === 'function') {
             showToast(isEdit ? '✅ Imputación actualizada en Odoo' : '✅ Imputación guardada correctamente en Odoo', 'success');
         }
