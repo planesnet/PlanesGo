@@ -1170,7 +1170,7 @@ function loadExpressTimesheets(forceReload) {
     fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
     const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(fiveDaysAgo) : fiveDaysAgo.toISOString().split('T')[0];
 
-    fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
+    return fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
         .then(res => {
             if (!res.ok) throw new Error('Error al cargar imputaciones de las últimas 2 semanas');
             return res.json();

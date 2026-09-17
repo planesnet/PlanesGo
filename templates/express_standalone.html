@@ -117,7 +117,17 @@
     </div>
 
     <!-- Cuerpo principal de la botonera con scroll fluido -->
-    <main class="flex-1 overflow-y-auto p-2.5 sm:p-3 overscroll-contain">
+    <main id="express-main-scroll" class="flex-1 overflow-y-auto p-2.5 sm:p-3 overscroll-contain relative">
+        <!-- Indicador gestual de actualización (Pull to Refresh) -->
+        <div id="pull-refresh-indicator" class="overflow-hidden transition-[height,opacity] duration-200 flex items-center justify-center text-sky-400 font-medium text-xs h-0 opacity-0 select-none pointer-events-none">
+            <div class="flex items-center space-x-2 py-2">
+                <svg id="pull-refresh-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                </svg>
+                <span id="pull-refresh-text">Desliza para actualizar...</span>
+            </div>
+        </div>
+
         <!-- Estado de carga -->
         <div id="express-loading-state" class="flex flex-col items-center justify-center py-16 space-y-3">
             <svg class="animate-spin h-7 w-7 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -245,6 +255,103 @@
                     }
                 }
             });
+
+            // Soporte gestual Pull-to-Refresh en móvil (deslizar hacia abajo para actualizar)
+            const mainEl = document.getElementById('express-main-scroll');
+            const pullIndicator = document.getElementById('pull-refresh-indicator');
+            const pullIcon = document.getElementById('pull-refresh-icon');
+            const pullText = document.getElementById('pull-refresh-text');
+
+            if (mainEl && pullIndicator && pullIcon && pullText) {
+                let touchStartY = 0;
+                let isPulling = false;
+                let isRefreshing = false;
+                const pullThreshold = 55;
+
+                mainEl.addEventListener('touchstart', function(e) {
+                    if (mainEl.scrollTop <= 0 && !isRefreshing && e.touches.length === 1) {
+                        touchStartY = e.touches[0].pageY;
+                        isPulling = true;
+                    } else {
+                        isPulling = false;
+                    }
+                }, { passive: true });
+
+                mainEl.addEventListener('touchmove', function(e) {
+                    if (!isPulling || isRefreshing) return;
+                    if (mainEl.scrollTop > 0) {
+                        isPulling = false;
+                        pullIndicator.style.height = '0px';
+                        pullIndicator.style.opacity = '0';
+                        return;
+                    }
+
+                    const currentY = e.touches[0].pageY;
+                    const diff = currentY - touchStartY;
+
+                    if (diff > 0) {
+                        const pullHeight = Math.min(diff * 0.45, 70);
+                        pullIndicator.style.height = pullHeight + 'px';
+                        pullIndicator.style.opacity = Math.min(pullHeight / 30, 1).toString();
+
+                        if (pullHeight >= pullThreshold) {
+                            pullText.textContent = 'Suelta para actualizar...';
+                            pullIcon.style.transform = 'rotate(180deg)';
+                        } else {
+                            pullText.textContent = 'Desliza para actualizar...';
+                            pullIcon.style.transform = 'rotate(0deg)';
+                        }
+
+                        if (diff > 8 && e.cancelable) {
+                            e.preventDefault();
+                        }
+                    }
+                }, { passive: false });
+
+                function finishPullRefresh() {
+                    setTimeout(function() {
+                        pullIndicator.style.height = '0px';
+                        pullIndicator.style.opacity = '0';
+                        setTimeout(function() {
+                            isRefreshing = false;
+                            pullIcon.classList.remove('animate-spin');
+                            pullIcon.style.transform = 'rotate(0deg)';
+                            pullIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>';
+                            pullText.textContent = 'Desliza para actualizar...';
+                        }, 250);
+                    }, 350);
+                }
+
+                mainEl.addEventListener('touchend', function(e) {
+                    if (!isPulling || isRefreshing) return;
+                    isPulling = false;
+                    const currentHeight = parseFloat(pullIndicator.style.height || '0');
+
+                    if (currentHeight >= pullThreshold) {
+                        isRefreshing = true;
+                        pullIndicator.style.height = '42px';
+                        pullIndicator.style.opacity = '1';
+                        pullText.textContent = 'Actualizando tareas...';
+                        pullIcon.style.transform = 'none';
+                        pullIcon.classList.add('animate-spin');
+                        pullIcon.innerHTML = '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>';
+
+                        if (typeof loadExpressTimesheets === 'function') {
+                            const p = loadExpressTimesheets(true);
+                            if (p && typeof p.finally === 'function') {
+                                p.finally(finishPullRefresh);
+                            } else {
+                                finishPullRefresh();
+                            }
+                        } else {
+                            finishPullRefresh();
+                        }
+                    } else {
+                        pullIndicator.style.height = '0px';
+                        pullIndicator.style.opacity = '0';
+                    }
+                }, { passive: true });
+            }
         });
     </script>
 </body>
