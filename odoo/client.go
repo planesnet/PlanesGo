@@ -57,10 +57,11 @@ type Client struct {
 	projectsCache     []Project
 	projectsCachedAt  time.Time
 	employeesCache    []Employee
-	employeesCachedAt time.Time
-	ticketsCache      []Ticket
-	ticketsCachedAt   time.Time
-	userUIDCache      map[string]int
+	employeesCachedAt   time.Time
+	ticketsCache        []Ticket
+	ticketsCachedAt     time.Time
+	userUIDCache        map[string]int
+	partnerAvatarFields []string
 }
 
 func poolKey(cfg config.OdooConfig) string {
@@ -504,6 +505,50 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 	return projects, nil
 }
 
+// GetProjectPartnerID obtiene el partner_id asignado a un proyecto específico en Odoo.
+func (c *Client) GetProjectPartnerID(ctx context.Context, projectID int) (int, error) {
+	if projectID <= 0 {
+		return 0, errors.New("ID de proyecto inválido")
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.project",
+		"read",
+		[]interface{}{[]int{projectID}},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "partner_id"},
+	}
+
+	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		if newUID, aErr := c.ForceAuthenticate(ctx); aErr == nil {
+			args[1] = newUID
+			raw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	var recs []struct {
+		ID        int      `json:"id"`
+		PartnerID Many2One `json:"partner_id"`
+	}
+	if err := json.Unmarshal(raw, &recs); err == nil && len(recs) > 0 {
+		return recs[0].PartnerID.ID, nil
+	}
+	return 0, errors.New("proyecto no encontrado")
+}
+
 // GetEmployees consulta los trabajadores/empleados definidos en Odoo (hr.employee).
 // Por defecto filtra únicamente los que están activos (active = true).
 // Utiliza una caché en memoria de 60 segundos cuando no se pasa un dominio de búsqueda específico.
@@ -612,43 +657,126 @@ func (c *Client) GetPartnerAvatar(ctx context.Context, partnerID int) ([]byte, s
 		return nil, "", fmt.Errorf("no se pudo autenticar para leer avatar de partner: %w", err)
 	}
 
-	args := []interface{}{
-		c.config.DB,
-		uid,
-		c.config.Password,
-		"res.partner",
-		"read",
-		[]interface{}{[]int{partnerID}},
-	}
-	kwargs := map[string]interface{}{
-		"fields": []string{"id", "image_128"},
+	c.mu.RLock()
+	fieldsToQuery := c.partnerAvatarFields
+	c.mu.RUnlock()
+
+	if len(fieldsToQuery) == 0 {
+		// Descubrir de forma segura qué campos de imagen existen en el modelo res.partner
+		candFields := []string{"avatar_128", "image_128", "image_256", "image_512", "image_1920", "image_medium", "image_small", "image", "parent_id"}
+		fieldsGetArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"res.partner",
+			"fields_get",
+			[]interface{}{candFields},
+		}
+		rawFields, fErr := c.call(ctx, "object", "execute_kw", fieldsGetArgs, nil)
+		if fErr != nil {
+			if newUID, aErr := c.ForceAuthenticate(ctx); aErr == nil {
+				uid = newUID
+				fieldsGetArgs[1] = uid
+				rawFields, fErr = c.call(ctx, "object", "execute_kw", fieldsGetArgs, nil)
+			}
+		}
+
+		discovered := make(map[string]interface{})
+		if fErr == nil {
+			_ = json.Unmarshal(rawFields, &discovered)
+		}
+
+		var valid []string
+		for _, cand := range candFields {
+			if _, exists := discovered[cand]; exists {
+				valid = append(valid, cand)
+			}
+		}
+		if len(valid) == 0 {
+			valid = []string{"image_128", "avatar_128", "image_1920", "parent_id"}
+		}
+		valid = append(valid, "id")
+
+		c.mu.Lock()
+		c.partnerAvatarFields = valid
+		fieldsToQuery = valid
+		c.mu.Unlock()
 	}
 
-	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
-	if err != nil {
-		return nil, "", fmt.Errorf("error llamando a res.partner: %w", err)
+	// Función para leer un registro de res.partner y extraer la primera imagen base64 válida
+	fetchPartnerImage := func(pID int) ([]byte, string, int, error) {
+		readArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"res.partner",
+			"read",
+			[]interface{}{[]int{pID}},
+		}
+		readKwargs := map[string]interface{}{
+			"fields": fieldsToQuery,
+		}
+
+		raw, rErr := c.call(ctx, "object", "execute_kw", readArgs, readKwargs)
+		if rErr != nil {
+			if newUID, aErr := c.ForceAuthenticate(ctx); aErr == nil {
+				uid = newUID
+				readArgs[1] = uid
+				raw, rErr = c.call(ctx, "object", "execute_kw", readArgs, readKwargs)
+			}
+		}
+		if rErr != nil {
+			return nil, "", 0, rErr
+		}
+
+		var records []map[string]interface{}
+		if err := json.Unmarshal(raw, &records); err != nil || len(records) == 0 {
+			return nil, "", 0, errors.New("partner no encontrado")
+		}
+
+		rec := records[0]
+
+		// Comprobar campos de imagen en orden de preferencia (thumbnails ligeros primero)
+		prefOrder := []string{"avatar_128", "image_128", "image_256", "image_medium", "image_512", "image_1920", "image_small", "image"}
+		for _, f := range prefOrder {
+			if val, ok := rec[f]; ok && val != nil {
+				if strVal, isStr := val.(string); isStr && strings.TrimSpace(strVal) != "" {
+					data, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(strVal))
+					if decErr == nil && len(data) > 0 {
+						cType := http.DetectContentType(data)
+						return data, cType, 0, nil
+					}
+				}
+			}
+		}
+
+		// Si no tiene imagen propia, comprobar si pertenece a una empresa matriz (parent_id)
+		parentID := 0
+		if pVal, ok := rec["parent_id"]; ok && pVal != nil {
+			if pSlice, isSlice := pVal.([]interface{}); isSlice && len(pSlice) > 0 {
+				if idFloat, isFloat := pSlice[0].(float64); isFloat {
+					parentID = int(idFloat)
+				}
+			}
+		}
+
+		return nil, "", parentID, nil
 	}
 
-	var records []struct {
-		ID       int         `json:"id"`
-		Image128 interface{} `json:"image_128"`
-	}
-	if err := json.Unmarshal(raw, &records); err != nil || len(records) == 0 {
-		return nil, "", errors.New("partner no encontrado")
+	data, cType, parentID, err := fetchPartnerImage(partnerID)
+	if err == nil && len(data) > 0 {
+		return data, cType, nil
 	}
 
-	imgStr, ok := records[0].Image128.(string)
-	if !ok || strings.TrimSpace(imgStr) == "" {
-		return nil, "", errors.New("partner sin imagen")
+	// Si no tiene imagen directa y tiene parent_id, intentar leer el logo de la empresa matriz
+	if parentID > 0 && parentID != partnerID {
+		dataParent, cTypeParent, _, errParent := fetchPartnerImage(parentID)
+		if errParent == nil && len(dataParent) > 0 {
+			return dataParent, cTypeParent, nil
+		}
 	}
 
-	imgData, err := base64.StdEncoding.DecodeString(imgStr)
-	if err != nil {
-		return nil, "", fmt.Errorf("error decodificando imagen base64: %w", err)
-	}
-
-	cType := http.DetectContentType(imgData)
-	return imgData, cType, nil
+	return nil, "", errors.New("partner sin imagen")
 }
 
 // UID devuelve el UID del usuario autenticado en Odoo.
@@ -1604,7 +1732,7 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 				TaskName:      l.TaskID.Name,
 				Description:   l.Name,
 				IsRunning:     true,
-				StartedAt:     time.Now().UnixMilli() - accumulatedMs,
+				StartedAt:     time.Now().UnixMilli(),
 				AccumulatedMs: accumulatedMs,
 				UnitAmount:    l.UnitAmount,
 			}, nil

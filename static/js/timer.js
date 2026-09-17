@@ -1427,13 +1427,38 @@ async function initTimerFromStorage() {
         await syncActiveTimerFromOdoo();
     }
 
-    // Sincronización periódica frecuente con el backend (cada 4 segundos cuando la pestaña está visible)
+    // Sincronización periódica frecuente con el backend (cada 3 segundos cuando la pestaña está visible)
     // Garantiza que activar en PC y pausar/reanudar en móvil (y viceversa) se refleje en tiempo real.
     setInterval(() => {
         if (document.visibilityState !== 'hidden') {
             syncActiveTimerFromOdoo();
         }
-    }, 4000);
+    }, 3000);
+
+    // Sincronización instantánea al volver a la app o desbloquear el móvil
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            syncActiveTimerFromOdoo();
+        }
+    });
+
+    // Sincronización inmediata entre múltiples pestañas/ventanas en el mismo navegador
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'planesgo_active_timer') {
+            const cur = getTimerState();
+            renderTimerBar(cur);
+            if (cur && cur.status === 'running') {
+                startTimerTicker();
+            } else {
+                stopTimerTicker();
+            }
+            updateAllRowTimerButtonStates();
+            if (typeof updateExpressTimerState === 'function') {
+                updateExpressTimerState();
+            }
+        }
+    });
+
     requestNotificationPermission();
 }
 
@@ -1449,19 +1474,32 @@ async function syncActiveTimerFromOdoo() {
             const lastConfirmedAt = data ? data.last_confirmed_at : 0;
             const current = getTimerState();
             const now = Date.now();
+            const serverTime = (data && data.server_time) ? data.server_time : now;
+            const clockOffset = serverTime - now;
 
             if (act && act.is_running) {
-                const accumulatedMs = Math.round((act.unit_amount || 0) * 3600 * 1000);
+                const accumulatedMs = (typeof act.accumulated_ms === 'number' && act.accumulated_ms >= 0)
+                    ? act.accumulated_ms
+                    : Math.round((act.unit_amount || 0) * 3600 * 1000);
+
+                let startedAt = act.started_at || serverTime;
+                if (startedAt > 0 && startedAt < 1000000000000) {
+                    startedAt *= 1000;
+                }
+                const localStartTime = startedAt - clockOffset;
 
                 // Si ya coincide con el temporizador actual
                 if (current && current.timesheetId === act.timesheet_id) {
+                    current.startedAt = startedAt;
+                    current.accumulatedMs = accumulatedMs;
+                    current.lastStartTime = localStartTime;
+                    current.unitAmount = act.unit_amount;
+
                     if (current.status !== 'running') {
                         // Se reanudó desde otro dispositivo (ej. desde el PC o desde el móvil)
                         current.status = 'running';
-                        current.lastStartTime = now;
                         startTimerTicker();
                     }
-                    current.unitAmount = act.unit_amount;
                     // Si se confirmó o reanudó en otro dispositivo
                     if (lastConfirmedAt && current.promptTriggeredAt && lastConfirmedAt > current.promptTriggeredAt) {
                         current.promptTriggeredAt = null;
@@ -1479,10 +1517,6 @@ async function syncActiveTimerFromOdoo() {
                 }
 
                 // Es un temporizador iniciado en otro dispositivo (ej. activado en PC y abierto en móvil)
-                let startedAt = act.started_at || (now - accumulatedMs);
-                if (startedAt > 0 && startedAt < 1000000000000) {
-                    startedAt *= 1000;
-                }
                 const serverState = {
                     timesheetId: act.timesheet_id,
                     projectId: act.project_id,
@@ -1492,8 +1526,9 @@ async function syncActiveTimerFromOdoo() {
                     description: act.description || '',
                     status: 'running',
                     startedAt: startedAt,
-                    lastStartTime: now,
+                    lastStartTime: localStartTime,
                     accumulatedMs: accumulatedMs,
+                    unitAmount: act.unit_amount,
                     // Inicializar prompts limpios para no disparar alertas acústicas prematuras al abrir el móvil
                     lastPromptAccumulatedMs: accumulatedMs,
                     lastPromptTime: (lastConfirmedAt && (now - lastConfirmedAt < TIMER_PROMPT_INTERVAL_MS)) ? lastConfirmedAt : now,
@@ -1512,14 +1547,16 @@ async function syncActiveTimerFromOdoo() {
                 }
             } else if (act && !act.is_running) {
                 // El servidor indica que el temporizador está pausado (ej. pausado desde el móvil o PC)
-                const now = Date.now();
                 const isRecentAction = (window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 6000)) ||
                                        (current && current.lastStartTime && (now - current.lastStartTime < 6000));
                 if (!isRecentAction && current && current.timesheetId === act.timesheet_id) {
                     if (current.status === 'running') {
+                        const accumulatedMs = (typeof act.accumulated_ms === 'number' && act.accumulated_ms >= 0)
+                            ? act.accumulated_ms
+                            : Math.round((act.unit_amount || 0) * 3600 * 1000);
                         current.status = 'paused';
                         current.lastStartTime = null;
-                        current.accumulatedMs = Math.round((act.unit_amount || 0) * 3600 * 1000);
+                        current.accumulatedMs = accumulatedMs;
                         current.promptTriggeredAt = null;
                         stopTimerTicker();
                         stopTitleFlash();
@@ -1532,7 +1569,6 @@ async function syncActiveTimerFromOdoo() {
                 }
             } else {
                 // En el servidor ya no hay temporizador activo ni pausado (se detuvo o completó)
-                const now = Date.now();
                 const isRecentAction = (window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 6000)) ||
                                        (current && current.lastStartTime && (now - current.lastStartTime < 6000));
                 if (!isRecentAction && current && current.status === 'running') {
@@ -1548,7 +1584,7 @@ async function syncActiveTimerFromOdoo() {
             }
         }
     } catch (e) {
-        console.warn('[PlanesGo Timer] Error sincronizando temporizador con Odoo:', e);
+        console.warn('Error al sincronizar temporizador con Odoo:', e);
     }
 }
 

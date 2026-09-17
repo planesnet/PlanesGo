@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"strings"
 	"sync"
@@ -96,12 +97,23 @@ func (state *AppState) clearActiveTimer(userUID int) {
 	}
 }
 
-func (state *AppState) pauseActiveTimer(userUID int) {
+func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
 	if state.activeTimers != nil {
 		if t, ok := state.activeTimers[userUID]; ok && t != nil {
 			t.IsRunning = false
+			nowMs := time.Now().UnixMilli()
+			if t.StartedAt > 0 && nowMs > t.StartedAt {
+				t.AccumulatedMs += (nowMs - t.StartedAt)
+			}
+			t.StartedAt = 0
+			if unitAmount > 0 {
+				t.UnitAmount = unitAmount
+				t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
+			} else {
+				t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
+			}
 		}
 	}
 }
@@ -112,6 +124,7 @@ func (state *AppState) resumeActiveTimer(userUID int) {
 	if state.activeTimers != nil {
 		if t, ok := state.activeTimers[userUID]; ok && t != nil {
 			t.IsRunning = true
+			t.StartedAt = time.Now().UnixMilli()
 		}
 	}
 }
@@ -166,10 +179,10 @@ type PageData struct {
 	PendingTickets       []odoo.Ticket
 	PendingTicketsCount  int
 	OdooURL              string
-	Today                string
-	ActiveTimer          *odoo.ActiveTimer
-	ProjectPartnerMapJSON string
-	Error                string
+	Today                 string
+	ActiveTimer           *odoo.ActiveTimer
+	ProjectPartnerMapJSON template.JS
+	Error                 string
 }
 
 type SettingsPageData struct {

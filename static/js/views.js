@@ -1323,6 +1323,9 @@ function renderExpressView() {
     }
 
     try {
+        if (typeof window.projectPartnerMap === 'string') {
+            try { window.projectPartnerMap = JSON.parse(window.projectPartnerMap); } catch (e) {}
+        }
         const today = new Date();
         const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
@@ -1649,8 +1652,8 @@ function renderExpressView() {
         }
 
         const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
-        const partnerLogoHtml = partnerId > 0
-            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-3.5 h-3.5 rounded object-cover shrink-0" loading="lazy" onerror="this.remove()">`
+        const partnerLogoHtml = (partnerId > 0 || item.projectId > 0)
+            ? `<img src="/api/partner/avatar?id=${partnerId}&project_id=${item.projectId || 0}" alt="" class="w-3.5 h-3.5 rounded object-cover shrink-0 inline-block" loading="lazy" onerror="this.remove()">`
             : '';
 
         const isRunning = item.isRunning;

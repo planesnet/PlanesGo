@@ -654,20 +654,48 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 		userUID = client.UID()
 	}
 
-	timer, err := client.GetActiveTimer(ctx, userUID)
-	if err == nil && timer != nil && timer.IsRunning {
-		state.setActiveTimer(userUID, timer)
-	} else {
-		timer = state.getActiveTimer(userUID)
+	cur := state.getActiveTimer(userUID)
+
+	// Consultar el estado real en Odoo
+	odooTimer, err := client.GetActiveTimer(ctx, userUID)
+	if err == nil {
+		if odooTimer != nil && odooTimer.IsRunning {
+			if cur == nil {
+				// No teníamos temporizador en memoria local: adoptar el de Odoo
+				state.setActiveTimer(userUID, odooTimer)
+				cur = odooTimer
+			} else if cur.TimesheetID != odooTimer.TimesheetID || cur.TaskID != odooTimer.TaskID {
+				// El usuario cambió de tarea/imputación en Odoo o desde otro cliente: actualizar
+				state.setActiveTimer(userUID, odooTimer)
+				cur = odooTimer
+			} else if !cur.IsRunning {
+				// En memoria estaba pausado pero en Odoo se reanudó: reanudar
+				state.resumeActiveTimer(userUID)
+				cur = state.getActiveTimer(userUID)
+			}
+			// Si coincide con cur y cur.IsRunning, se conserva cur en memoria (StartedAt y AccumulatedMs exactos)
+		} else if odooTimer == nil || !odooTimer.IsRunning {
+			// En Odoo no hay temporizador corriendo
+			if cur != nil && cur.IsRunning {
+				// Se pausó o detuvo directamente en Odoo
+				state.pauseActiveTimer(userUID, 0)
+				cur = state.getActiveTimer(userUID)
+			}
+		}
 	}
 
-	if timer == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{"active": nil})
+	serverNowMs := time.Now().UnixMilli()
+	if cur == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":      nil,
+			"server_time": serverNowMs,
+		})
 		return
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"active":            timer,
+		"active":            cur,
+		"server_time":       serverNowMs,
 		"last_confirmed_at": state.getLastConfirmedAt(userUID),
 	})
 }
@@ -918,7 +946,7 @@ func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Reques
 	if userUID == 0 {
 		userUID = client.UID()
 	}
-	state.pauseActiveTimer(userUID)
+	state.pauseActiveTimer(userUID, req.UnitAmount)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -1080,36 +1108,47 @@ func (state *AppState) handleServiceWorker(w http.ResponseWriter, r *http.Reques
 
 // handleAPIPartnerAvatar sirve y cachea el logotipo auténtico del partner desde Odoo
 func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimSpace(r.URL.Query().Get("id"))
-	partnerID, err := strconv.Atoi(idStr)
-	if err != nil || partnerID <= 0 {
-		http.Error(w, "ID de partner no válido", http.StatusBadRequest)
+	partnerID, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("id")))
+	projectID, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("project_id")))
+
+	// Si no vino partnerID directo pero vino projectID, resolver desde caché en memoria
+	if partnerID <= 0 && projectID > 0 {
+		projectPartnerMu.RLock()
+		partnerID = projectPartnerCache[projectID]
+		projectPartnerMu.RUnlock()
+	}
+
+	if partnerID <= 0 && projectID <= 0 {
+		http.Error(w, "ID no válido", http.StatusBadRequest)
 		return
 	}
 
-	// 1. Comprobar caché en memoria
-	partnerAvatarCacheMu.RLock()
-	cached, found := partnerAvatarCache[partnerID]
-	partnerAvatarCacheMu.RUnlock()
-
 	now := time.Now()
-	if found && now.Before(cached.expiresAt) {
-		if len(cached.data) == 0 {
-			// Negativo en caché: el partner no tiene logotipo. Devolver 404 para no mostrar nada.
-			w.Header().Set("Cache-Control", "public, max-age=60")
-			http.Error(w, "Sin imagen", http.StatusNotFound)
+
+	// 1. Comprobar caché en memoria si ya tenemos partnerID
+	if partnerID > 0 {
+		partnerAvatarCacheMu.RLock()
+		cached, found := partnerAvatarCache[partnerID]
+		partnerAvatarCacheMu.RUnlock()
+
+		if found && now.Before(cached.expiresAt) {
+			if len(cached.data) == 0 {
+				// Negativo en caché: el partner no tiene logotipo. Devolver 404 para no mostrar nada.
+				w.Header().Set("Cache-Control", "public, max-age=30")
+				http.Error(w, "Sin imagen", http.StatusNotFound)
+				return
+			}
+			// Validar ETag del cliente
+			if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && ifNoneMatch == cached.etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("Content-Type", cached.contentType)
+			w.Header().Set("ETag", cached.etag)
+			w.Header().Set("Cache-Control", "public, max-age=600")
+			w.Write(cached.data)
 			return
 		}
-		// Validar ETag del cliente
-		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && ifNoneMatch == cached.etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		w.Header().Set("Content-Type", cached.contentType)
-		w.Header().Set("ETag", cached.etag)
-		w.Header().Set("Cache-Control", "public, max-age=600")
-		w.Write(cached.data)
-		return
 	}
 
 	// 2. Resolver configuración de Odoo autenticada
@@ -1124,19 +1163,57 @@ func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Req
 	}
 
 	client := odoo.GetClient(odooCfg)
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+
+	// Si aún no tenemos partnerID pero tenemos projectID, consultar Odoo para el partner_id de este proyecto
+	if partnerID <= 0 && projectID > 0 {
+		resolvedPartID, pErr := client.GetProjectPartnerID(ctx, projectID)
+		if pErr == nil && resolvedPartID > 0 {
+			partnerID = resolvedPartID
+			projectPartnerMu.Lock()
+			projectPartnerCache[projectID] = partnerID
+			projectPartnerMu.Unlock()
+		}
+	}
+
+	if partnerID <= 0 {
+		w.Header().Set("Cache-Control", "public, max-age=30")
+		http.Error(w, "Sin imagen", http.StatusNotFound)
+		return
+	}
+
+	// Volver a chequear caché de partnerID por si se resolvió justo ahora
+	partnerAvatarCacheMu.RLock()
+	cached, found := partnerAvatarCache[partnerID]
+	partnerAvatarCacheMu.RUnlock()
+	if found && now.Before(cached.expiresAt) {
+		if len(cached.data) == 0 {
+			w.Header().Set("Cache-Control", "public, max-age=30")
+			http.Error(w, "Sin imagen", http.StatusNotFound)
+			return
+		}
+		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && ifNoneMatch == cached.etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", cached.contentType)
+		w.Header().Set("ETag", cached.etag)
+		w.Header().Set("Cache-Control", "public, max-age=600")
+		w.Write(cached.data)
+		return
+	}
 
 	imgData, cType, imgErr := client.GetPartnerAvatar(ctx, partnerID)
 	if imgErr != nil || len(imgData) == 0 {
-		// Guardar negativo breve (1 minuto) en caché para no saturar Odoo
+		// Guardar negativo breve (30 segundos) en caché para no saturar Odoo y permitir ver cambios rápidos
 		partnerAvatarCacheMu.Lock()
 		partnerAvatarCache[partnerID] = avatarCacheItem{
-			expiresAt: now.Add(1 * time.Minute),
+			expiresAt: now.Add(30 * time.Second),
 		}
 		partnerAvatarCacheMu.Unlock()
 
-		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Set("Cache-Control", "public, max-age=30")
 		http.Error(w, "Sin imagen", http.StatusNotFound)
 		return
 	}

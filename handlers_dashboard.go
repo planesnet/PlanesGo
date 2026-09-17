@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"net/url"
@@ -725,7 +726,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		RecentProjects:        recentProjects,
 		Today:                 time.Now().Format("2006-01-02"),
 		ActiveTimer:           activeTimer,
-		ProjectPartnerMapJSON: string(ppmJSON),
+		ProjectPartnerMapJSON: template.JS(ppmJSON),
 		Error:                 errMsg,
 	}
 
@@ -848,7 +849,7 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		HasOdooToken:          (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),
 		CurrentWorker:         workerName,
 		Today:                 time.Now().Format("2006-01-02"),
-		ProjectPartnerMapJSON: string(ppmJSON),
+		ProjectPartnerMapJSON: template.JS(ppmJSON),
 		ActiveTimer:           activeTimer,
 	}
 
