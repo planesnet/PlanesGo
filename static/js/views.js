@@ -414,8 +414,12 @@ function applyTimesheetFilters() {
         const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal);
 
         let matchProject = true;
-        if (targetProjectId && rowProjectId && targetProjectId !== '0' && rowProjectId !== '0') {
+        const hasProjectFilter = Boolean((targetProjectId && targetProjectId !== '0') || targetProjectName);
+        if (targetProjectId && targetProjectId !== '0') {
             matchProject = (rowProjectId === targetProjectId);
+            if (!matchProject && targetProjectName) {
+                matchProject = (projectName === targetProjectName || project === targetProjectName || projectName.includes(targetProjectName) || project.includes(targetProjectName));
+            }
         } else if (targetProjectName) {
             matchProject = (projectName === targetProjectName || project === targetProjectName || projectName.includes(targetProjectName) || project.includes(targetProjectName));
         }
@@ -430,8 +434,10 @@ function applyTimesheetFilters() {
             }
         }
 
-        // Si el temporizador está corriendo para el usuario, debe ser SIEMPRE visible en la semana actual
-        const shouldShow = isTimerRunning ? (matchEmployee && (matchWeek || !rowDateStr)) : (matchSearch && matchProject && matchEmployee && matchWeek);
+        // Si el temporizador está corriendo para el usuario, debe ser visible en la semana actual respetando el filtro estricto de proyecto
+        const shouldShow = isTimerRunning
+            ? ((!hasProjectFilter || matchProject) && matchEmployee && (matchWeek || !rowDateStr))
+            : (matchSearch && matchProject && matchEmployee && matchWeek);
 
         if (shouldShow) {
             row.style.display = '';

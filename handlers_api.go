@@ -308,6 +308,10 @@ func (state *AppState) handleAPITasks(w http.ResponseWriter, r *http.Request) {
 
 		projectIDStr := r.URL.Query().Get("project_id")
 		projectID, _ := strconv.Atoi(projectIDStr)
+		if projectID <= 0 {
+			json.NewEncoder(w).Encode([]odoo.Task{})
+			return
+		}
 
 		tasks, err := client.GetTasks(ctx, projectID, userUID)
 		if err != nil {

@@ -459,15 +459,21 @@ function loadTasksForProject(projectId, preselectedTaskId) {
     const taskSelect = document.getElementById('modal-task-select');
     if (!taskSelect) return;
 
-    if (!projectId) {
+    const pid = projectId ? parseInt(projectId, 10) : 0;
+    if (!pid || pid <= 0) {
+        taskSelect.dataset.loadedProjectId = '';
+        taskSelect.dataset.loadingProjectId = '';
         taskSelect.innerHTML = '<option value="">-- Sin tarea asignada --</option>';
+        taskSelect.disabled = false;
         return;
     }
 
+    const currentReqProjectId = String(pid);
+    taskSelect.dataset.loadingProjectId = currentReqProjectId;
     taskSelect.innerHTML = '<option value="">Cargando tareas actualizadas...</option>';
     taskSelect.disabled = true;
 
-    fetch(`/api/tasks?project_id=${projectId}&_t=${Date.now()}`, {
+    fetch(`/api/tasks?project_id=${pid}&_t=${Date.now()}`, {
         cache: 'no-store',
         headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -479,19 +485,39 @@ function loadTasksForProject(projectId, preselectedTaskId) {
             return res.json();
         })
         .then(tasks => {
+            // Protección contra race conditions: asegurar que el proyecto seleccionado sigue siendo este
+            const projectSelect = document.getElementById('modal-project-select');
+            if (projectSelect && String(projectSelect.value) !== currentReqProjectId) {
+                return;
+            }
+            if (taskSelect.dataset.loadingProjectId !== currentReqProjectId) {
+                return;
+            }
             taskSelect.disabled = false;
+            taskSelect.dataset.loadedProjectId = currentReqProjectId;
+
             let html = '<option value="">-- Sin tarea específica asignada --</option>';
             if (Array.isArray(tasks) && tasks.length > 0) {
-                tasks.forEach(t => {
-                    const selected = (preselectedTaskId && String(t.id) === String(preselectedTaskId)) ? 'selected' : '';
-                    html += `<option value="${t.id}" ${selected}>${t.name || ('Tarea #' + t.id)}</option>`;
-                });
+                // Filtrado estricto en frontend: exclusivamente tareas del proyecto solicitado
+                const projectTasks = tasks.filter(t => !t.project_id || !t.project_id.id || String(t.project_id.id) === currentReqProjectId);
+                if (projectTasks.length > 0) {
+                    projectTasks.forEach(t => {
+                        const selected = (preselectedTaskId && String(t.id) === String(preselectedTaskId)) ? 'selected' : '';
+                        html += `<option value="${t.id}" ${selected}>${t.name || ('Tarea #' + t.id)}</option>`;
+                    });
+                } else {
+                    html += '<option value="" disabled>(No hay tareas creadas aún en este proyecto)</option>';
+                }
             } else {
-                html += '<option value="" disabled>(No hay tareas creadas aún)</option>';
+                html += '<option value="" disabled>(No hay tareas creadas aún en este proyecto)</option>';
             }
             taskSelect.innerHTML = html;
         })
         .catch(err => {
+            const projectSelect = document.getElementById('modal-project-select');
+            if (projectSelect && String(projectSelect.value) !== currentReqProjectId) {
+                return;
+            }
             console.error('Error cargando tareas:', err);
             taskSelect.disabled = false;
             taskSelect.innerHTML = '<option value="">-- Sin tarea asignada (error al cargar) --</option>';
@@ -593,6 +619,9 @@ function submitInlineCreateTask() {
         // Añadir al selector y seleccionar
         const taskSelect = document.getElementById('modal-task-select');
         if (taskSelect) {
+            const placeholderOpt = taskSelect.querySelector('option[disabled]');
+            if (placeholderOpt) placeholderOpt.remove();
+
             const opt = document.createElement('option');
             opt.value = data.id;
             opt.text = data.name || taskName;

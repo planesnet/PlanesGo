@@ -887,19 +887,25 @@ function trigger15MinuteReminder(state, currentTotalMs) {
 function loadTasksForConfirmModal(projectId, currentTaskId) {
     const taskSelect = document.getElementById('confirm-modal-task-select');
     if (!taskSelect) return;
-    if (!projectId) {
+    const pid = projectId ? parseInt(projectId, 10) : 0;
+    if (!pid || pid <= 0) {
+        taskSelect.dataset.loadingProjectId = '';
         taskSelect.innerHTML = '<option value="">-- Sin tarea específica --</option>';
         return;
     }
+    const currentReqProjectId = String(pid);
+    taskSelect.dataset.loadingProjectId = currentReqProjectId;
     taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
-    fetch(`/api/tasks?project_id=${projectId}&_t=${Date.now()}`, {
+    fetch(`/api/tasks?project_id=${pid}&_t=${Date.now()}`, {
         cache: 'no-store'
     })
     .then(r => r.json())
     .then(tasks => {
+        if (taskSelect.dataset.loadingProjectId !== currentReqProjectId) return;
         let html = '<option value="">-- Sin tarea específica --</option>';
         if (Array.isArray(tasks) && tasks.length > 0) {
-            tasks.forEach(t => {
+            const projectTasks = tasks.filter(t => !t.project_id || !t.project_id.id || String(t.project_id.id) === currentReqProjectId);
+            projectTasks.forEach(t => {
                 const selected = (currentTaskId && String(t.id) === String(currentTaskId)) ? 'selected' : '';
                 html += `<option value="${t.id}" ${selected}>${t.name || ('Tarea #' + t.id)}</option>`;
             });
@@ -907,6 +913,7 @@ function loadTasksForConfirmModal(projectId, currentTaskId) {
         taskSelect.innerHTML = html;
     })
     .catch(() => {
+        if (taskSelect.dataset.loadingProjectId !== currentReqProjectId) return;
         taskSelect.innerHTML = '<option value="">-- Sin tarea específica --</option>';
     });
 }

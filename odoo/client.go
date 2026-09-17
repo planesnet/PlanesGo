@@ -703,16 +703,20 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 
 // GetTasks consulta las tareas de un proyecto en Odoo (project.task) en tiempo real.
 // Devuelve todas las tareas activas del proyecto, ordenadas priorizando aquellas
-// asignadas al usuario actual.
+// asignadas al usuario actual. Si projectID <= 0, devuelve una lista vacía para evitar
+// mezclar tareas de otros proyectos.
 func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Task, error) {
+	if projectID <= 0 {
+		return []Task{}, nil
+	}
+
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo autenticar antes de consultar tareas: %w", err)
 	}
 
-	domain := []interface{}{}
-	if projectID > 0 {
-		domain = append(domain, []interface{}{"project_id", "=", projectID})
+	domain := []interface{}{
+		[]interface{}{"project_id", "=", projectID},
 	}
 
 	fields := []string{
@@ -749,9 +753,17 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 		}
 	}
 
-	var tasks []Task
-	if err := json.Unmarshal(resultRaw, &tasks); err != nil {
+	var allTasks []Task
+	if err := json.Unmarshal(resultRaw, &allTasks); err != nil {
 		return nil, fmt.Errorf("error al parsear tareas: %w", err)
+	}
+
+	// Filtrado estricto en memoria: asegurar exclusivamente tareas del proyecto solicitado
+	tasks := make([]Task, 0, len(allTasks))
+	for _, t := range allTasks {
+		if t.ProjectID.ID == projectID {
+			tasks = append(tasks, t)
+		}
 	}
 
 	// Si hay userUID especificado, ordenar priorizando las tareas asignadas a dicho usuario
