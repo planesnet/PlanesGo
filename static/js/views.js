@@ -1233,10 +1233,10 @@ function renderExpressView() {
 
     // Filtros activos
     const searchInput = document.getElementById('filter-search');
-    const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    const currentWorkerGlobal = (typeof window.currentWorker === 'string' && window.currentWorker.trim()) ? window.currentWorker.trim() : (document.body.dataset.currentWorker || '');
     const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
     const employeeSelect = document.getElementById('filter-employee');
-    const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : '')).toLowerCase().trim();
+    const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : currentWorkerGlobal)).toLowerCase().trim();
 
     const targetProjectId = (typeof activeSidebarProjectId !== 'undefined') ? activeSidebarProjectId : null;
     const targetProjectName = (typeof activeSidebarProjectName !== 'undefined' ? activeSidebarProjectName : '').toLowerCase().trim();
@@ -1303,7 +1303,9 @@ function renderExpressView() {
     allEntries.forEach(entry => {
         const emp = (entry.employee || '').toLowerCase();
         if (employeeVal) {
-            const matchEmp = emp.includes(employeeVal) || employeeVal.includes(emp) || (entry.isTimerRunning && (emp === 'yo' || !emp));
+            const matchEmp = !emp || emp.includes(employeeVal) || employeeVal.includes(emp) || 
+                             (entry.isTimerRunning && (emp === 'yo' || !emp)) ||
+                             (employeeVal.split(' ').some(w => w.length > 2 && emp.includes(w)));
             if (!matchEmp) return;
         }
 
@@ -1525,7 +1527,7 @@ function renderExpressView() {
                 <div class="flex items-center justify-between gap-1.5 mb-1.5">
                     <div class="flex items-center space-x-1.5 min-w-0">
                         ${partnerLogoHtml}
-                        <span class="w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-400 animate-ping' : 'bg-sky-400'} shrink-0"></span>
+                        <span class="w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-sky-400'} shrink-0"></span>
                         <span class="text-[11px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
                             ${safeProj}
                         </span>

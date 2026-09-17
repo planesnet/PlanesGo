@@ -371,7 +371,7 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleLogout destruye la cookie de sesión y redirige al login
+// handleLogout destruye la cookie de sesión y redirige al login o a la URL especificada
 func (state *AppState) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -380,5 +380,10 @@ func (state *AppState) handleLogout(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		MaxAge:   -1,
 	})
+	nextParam := r.URL.Query().Get("next")
+	if nextParam != "" && strings.HasPrefix(nextParam, "/") {
+		http.Redirect(w, r, "/login?next="+url.QueryEscape(nextParam), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

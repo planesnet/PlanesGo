@@ -751,20 +751,27 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		session, _ = decodeSession(cookie.Value)
 	}
 
-	if session == nil {
-		target := r.URL.RequestURI()
-		if target == "" {
-			target = "/m"
+	target := r.URL.RequestURI()
+	if target == "" {
+		target = "/m"
+	}
+
+	state.mu.RLock()
+	googleAuthEnabled := state.cfg.GoogleAuth.Enabled
+	serverPort := state.cfg.Server.Port
+	state.mu.RUnlock()
+
+	// La botonera móvil /m exige autenticación mediante Google OAuth para identificar fehacientemente al trabajador
+	if session == nil || (googleAuthEnabled && session.AuthMethod != "google") {
+		if googleAuthEnabled {
+			http.Redirect(w, r, "/auth/google?next="+url.QueryEscape(target), http.StatusTemporaryRedirect)
+		} else {
+			http.Redirect(w, r, "/login?next="+url.QueryEscape(target), http.StatusSeeOther)
 		}
-		http.Redirect(w, r, "/login?next="+url.QueryEscape(target), http.StatusSeeOther)
 		return
 	}
 
 	currentOdooCfg := state.resolveUserOdooConfig(session)
-
-	state.mu.RLock()
-	serverPort := state.cfg.Server.Port
-	state.mu.RUnlock()
 
 	activeCfg := &config.Config{
 		Server: config.ServerConfig{Port: serverPort},
@@ -775,12 +782,20 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 	ppmJSON, _ := json.Marshal(projectPartnerCache)
 	projectPartnerMu.RUnlock()
 
+	workerName := session.UserName
+	if workerName == "" {
+		workerName = session.Username
+	}
+	if workerName == "" {
+		workerName = session.UserEmail
+	}
+
 	data := PageData{
 		Version:               Version,
 		Config:                activeCfg,
 		Session:               session,
 		HasOdooToken:          (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),
-		CurrentWorker:         session.UserName,
+		CurrentWorker:         workerName,
 		Today:                 time.Now().Format("2006-01-02"),
 		ProjectPartnerMapJSON: string(ppmJSON),
 	}

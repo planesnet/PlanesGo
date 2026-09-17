@@ -46,8 +46,49 @@
       data-app-version="{{.Version}}"
       data-is-standalone="true">
 
-    <!-- Barra de búsqueda minimalista (sin cabecera) -->
-    <div class="px-3 pt-2.5 pb-2 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
+    <!-- Cabecera Compacta Móvil: Trabajador, Versión y Salir -->
+    <header class="px-3 py-2 shrink-0 bg-slate-900/95 border-b border-slate-800/90 flex items-center justify-between gap-2 select-none shadow-sm">
+        <!-- Info Trabajador y Versión -->
+        <div class="flex items-center space-x-2.5 min-w-0">
+            {{if and .Session .Session.UserPicture}}
+            <img src="{{.Session.UserPicture}}" alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-sky-500/50 shrink-0" referrerpolicy="no-referrer">
+            {{else}}
+            <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm">
+                {{if .CurrentWorker}}{{printf "%.1s" .CurrentWorker}}{{else if and .Session .Session.UserName}}{{printf "%.1s" .Session.UserName}}{{else}}P{{end}}
+            </div>
+            {{end}}
+            <div class="min-w-0 flex flex-col">
+                <div class="flex items-center space-x-1.5">
+                    <span class="text-xs sm:text-sm font-bold text-slate-100 truncate max-w-[140px] sm:max-w-[220px]" title="{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{end}}">
+                        {{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Trabajador{{end}}
+                    </span>
+                    <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-950/80 text-sky-400 border border-sky-800/60 shrink-0">
+                        v{{.Version}}
+                    </span>
+                </div>
+                {{if and .Session .Session.UserEmail}}
+                <span class="text-[10px] text-slate-400 truncate max-w-[140px] sm:max-w-[220px]">
+                    {{.Session.UserEmail}}
+                </span>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Botón Salir / Logout -->
+        <div class="flex items-center shrink-0">
+            <a href="/logout?next=/m"
+               class="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 transition active:scale-95 text-xs font-medium cursor-pointer"
+               title="Cerrar sesión">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                </svg>
+                <span class="text-[11px] font-semibold">Salir</span>
+            </a>
+        </div>
+    </header>
+
+    <!-- Barra de búsqueda minimalista -->
+    <div class="px-3 pt-2 pb-2 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
         <div class="relative flex-1">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,6 +148,7 @@
     <!-- Scripts de PlanesGo con Cache-Busting -->
     <script>
         window.projectPartnerMap = {{if .ProjectPartnerMapJSON}}{{.ProjectPartnerMapJSON}}{{else}}{}{{end}};
+        window.currentWorker = {{if .CurrentWorker}}"{{.CurrentWorker}}"{{else if and .Session .Session.UserName}}"{{.Session.UserName}}"{{else}}""{{end}};
         
         function handleExpressSearchInput(input) {
             const clearBtn = document.getElementById('clear-search-btn');
