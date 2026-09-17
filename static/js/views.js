@@ -1166,11 +1166,15 @@ function loadExpressTimesheets(forceReload) {
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
-    const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(sevenDaysAgo) : sevenDaysAgo.toISOString().split('T')[0];
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateToStr = (typeof formatISODate === 'function') ? formatISODate(tomorrow) : tomorrow.toISOString().split('T')[0];
 
-    const pTimesheets = fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
+    const pastDays = new Date(today);
+    pastDays.setDate(pastDays.getDate() - 14);
+    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(pastDays) : pastDays.toISOString().split('T')[0];
+
+    const pTimesheets = fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${dateToStr}`, { cache: 'no-store' })
         .then(res => {
             if (!res.ok) throw new Error('Error al cargar imputaciones');
             return res.json();
@@ -1318,227 +1322,240 @@ function renderExpressView() {
         return;
     }
 
-    const today = new Date();
-    const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
+    try {
+        const today = new Date();
+        const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
-    // Filtros activos
-    const searchInput = document.getElementById('filter-search');
-    const currentWorkerGlobal = (typeof window.currentWorker === 'string' && window.currentWorker.trim()) ? window.currentWorker.trim() : (document.body.dataset.currentWorker || '');
-    const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
-    const employeeSelect = document.getElementById('filter-employee');
-    const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : currentWorkerGlobal)).toLowerCase().trim();
+        // Filtros activos
+        const searchInput = document.getElementById('filter-search');
+        const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+        const currentWorkerGlobal = (typeof window.currentWorker === 'string' && window.currentWorker.trim()) ? window.currentWorker.trim() : (document.body.dataset.currentWorker || '');
+        const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
+        const employeeSelect = document.getElementById('filter-employee');
+        let employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : currentWorkerGlobal)).toLowerCase().trim();
+        if (employeeVal === 'todos' || employeeVal === 'todas' || employeeVal === 'all') {
+            employeeVal = '';
+        }
 
-    const targetProjectId = (typeof activeSidebarProjectId !== 'undefined') ? activeSidebarProjectId : null;
-    const targetProjectName = (typeof activeSidebarProjectName !== 'undefined' ? activeSidebarProjectName : '').toLowerCase().trim();
+        const targetProjectId = (typeof activeSidebarProjectId !== 'undefined') ? activeSidebarProjectId : null;
+        const targetProjectName = (typeof activeSidebarProjectName !== 'undefined' ? activeSidebarProjectName : '').toLowerCase().trim();
 
-    // 1. Recopilar datos
-    const allEntries = [];
+        // 1. Recopilar datos
+        const allEntries = [];
 
-    if (Array.isArray(expressTimesheets)) {
-        expressTimesheets.forEach(ts => {
-            const empName = (ts.employee_id && ts.employee_id.name) ? ts.employee_id.name :
-                            ((ts.user_id && ts.user_id.name) ? ts.user_id.name : '');
-            const pId = ts.project_id ? ts.project_id.id : 0;
-            let partnerId = (ts.partner_id && ts.partner_id.id) ? ts.partner_id.id : 0;
-            if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
-                partnerId = window.projectPartnerMap[pId];
-            }
-            allEntries.push({
-                id: ts.id,
-                date: ts.date,
-                projectId: pId,
-                projectName: ts.project_id ? (ts.project_id.name || '') : '',
-                partnerId: partnerId,
-                taskId: ts.task_id ? ts.task_id.id : 0,
-                taskName: ts.task_id ? (ts.task_id.name || '') : '',
-                desc: ts.name || '',
-                hours: typeof ts.unit_amount === 'number' ? ts.unit_amount : 0,
-                employee: empName,
-                isTimerRunning: Boolean(ts.is_timer_running)
+        if (Array.isArray(expressTimesheets)) {
+            expressTimesheets.forEach(ts => {
+                const empName = (ts.employee_id && ts.employee_id.name) ? ts.employee_id.name :
+                                ((ts.user_id && ts.user_id.name) ? ts.user_id.name : '');
+                const pId = ts.project_id ? ts.project_id.id : 0;
+                let partnerId = (ts.partner_id && ts.partner_id.id) ? ts.partner_id.id : 0;
+                if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                    partnerId = window.projectPartnerMap[pId];
+                }
+                const parsedHours = typeof ts.unit_amount === 'number' ? ts.unit_amount : (parseFloat(ts.unit_amount) || 0);
+                allEntries.push({
+                    id: ts.id,
+                    date: ts.date,
+                    projectId: pId,
+                    projectName: ts.project_id ? (ts.project_id.name || '') : '',
+                    partnerId: partnerId,
+                    taskId: ts.task_id ? ts.task_id.id : 0,
+                    taskName: ts.task_id ? (ts.task_id.name || '') : '',
+                    desc: ts.name || '',
+                    hours: parsedHours,
+                    employee: empName,
+                    isTimerRunning: Boolean(ts.is_timer_running)
+                });
             });
+        }
+
+        // Integrar filas del DOM
+        const existingIds = new Set(allEntries.map(e => String(e.id)));
+        document.querySelectorAll('#timesheet-table .timesheet-row').forEach(row => {
+            const id = row.dataset.id;
+            if (id && !existingIds.has(String(id))) {
+                const pId = parseInt(row.dataset.projectId, 10) || 0;
+                let partnerId = parseInt(row.dataset.partnerId, 10) || 0;
+                if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                    partnerId = window.projectPartnerMap[pId];
+                }
+                allEntries.push({
+                    id: id,
+                    date: row.dataset.date,
+                    projectId: pId,
+                    projectName: row.dataset.projectName || row.dataset.project || '',
+                    partnerId: partnerId,
+                    taskId: parseInt(row.dataset.taskId, 10) || 0,
+                    taskName: row.dataset.taskName || row.dataset.task || '',
+                    desc: row.dataset.desc || '',
+                    hours: parseFloat(row.dataset.hours) || 0,
+                    employee: row.dataset.employee || '',
+                    isTimerRunning: row.dataset.timerRunning === 'true'
+                });
+            }
         });
-    }
 
-    // Integrar filas del DOM
-    const existingIds = new Set(allEntries.map(e => String(e.id)));
-    document.querySelectorAll('#timesheet-table .timesheet-row').forEach(row => {
-        const id = row.dataset.id;
-        if (id && !existingIds.has(String(id))) {
-            const pId = parseInt(row.dataset.projectId, 10) || 0;
-            let partnerId = parseInt(row.dataset.partnerId, 10) || 0;
-            if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
-                partnerId = window.projectPartnerMap[pId];
-            }
-            allEntries.push({
-                id: id,
-                date: row.dataset.date,
-                projectId: pId,
-                projectName: row.dataset.projectName || row.dataset.project || '',
-                partnerId: partnerId,
-                taskId: parseInt(row.dataset.taskId, 10) || 0,
-                taskName: row.dataset.taskName || row.dataset.task || '',
-                desc: row.dataset.desc || '',
-                hours: parseFloat(row.dataset.hours) || 0,
-                employee: row.dataset.employee || '',
-                isTimerRunning: row.dataset.timerRunning === 'true'
-            });
-        }
-    });
+        const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
 
-    const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
+        // 2. Agrupar por tarea única de la botonera con función reutilizable
+        function buildTaskMap(applyEmployeeFilter) {
+            const map = new Map();
+            allEntries.forEach(entry => {
+                const emp = (entry.employee || '').toLowerCase();
+                // Si la tarea está corriendo actualmente, nunca filtrarla por trabajador
+                if (applyEmployeeFilter && employeeVal && !entry.isTimerRunning) {
+                    const cleanWorker = employeeVal.includes('@') ? employeeVal.split('@')[0] : employeeVal;
+                    const workerTokens = cleanWorker.split(/[\s._-]+/).filter(w => w.length > 1);
+                    const matchEmp = !emp || emp.includes(cleanWorker) || cleanWorker.includes(emp) || 
+                                     (workerTokens.length > 0 && workerTokens.some(w => emp.includes(w)));
+                    if (!matchEmp) return;
+                }
 
-    // 2. Agrupar por tarea única de la botonera
-    const taskMap = new Map();
+                // Filtro por proyecto del sidebar
+                const pIdStr = String(entry.projectId || '');
+                const pNameLower = (entry.projectName || '').toLowerCase();
+                if (targetProjectId && targetProjectId !== '0' && !entry.isTimerRunning) {
+                    if (pIdStr !== String(targetProjectId)) {
+                        if (!targetProjectName || !pNameLower.includes(targetProjectName)) return;
+                    }
+                } else if (targetProjectName && !entry.isTimerRunning) {
+                    if (!pNameLower.includes(targetProjectName)) return;
+                }
 
-    allEntries.forEach(entry => {
-        const emp = (entry.employee || '').toLowerCase();
-        // Si la tarea está corriendo actualmente, nunca filtrarla por trabajador
-        if (employeeVal && !entry.isTimerRunning) {
-            const cleanWorker = employeeVal.includes('@') ? employeeVal.split('@')[0] : employeeVal;
-            const workerTokens = cleanWorker.split(/[\s._-]+/).filter(w => w.length > 1);
-            const matchEmp = !emp || emp.includes(cleanWorker) || cleanWorker.includes(emp) || 
-                             (workerTokens.length > 0 && workerTokens.some(w => emp.includes(w)));
-            if (!matchEmp) return;
-        }
+                // Filtro por buscador (soporte multitoken para palabras compuestas)
+                if (searchVal) {
+                    const descLower = (entry.desc || '').toLowerCase();
+                    const taskLower = (entry.taskName || '').toLowerCase();
+                    const projLower = (entry.projectName || '').toLowerCase();
+                    let partnerName = '';
+                    if (entry.partnerId && window.partnersMap && window.partnersMap[entry.partnerId]) {
+                        partnerName = (window.partnersMap[entry.partnerId].name || '').toLowerCase();
+                    }
+                    const combined = `${descLower} ${taskLower} ${projLower} ${partnerName}`;
+                    const tokens = searchVal.split(/\s+/).filter(Boolean);
+                    const matchesAll = tokens.every(token => combined.includes(token));
+                    if (!matchesAll && !entry.isTimerRunning) return;
+                }
 
-        // Filtro por proyecto del sidebar
-        const pIdStr = String(entry.projectId || '');
-        const pNameLower = (entry.projectName || '').toLowerCase();
-        if (targetProjectId && targetProjectId !== '0' && !entry.isTimerRunning) {
-            if (pIdStr !== String(targetProjectId)) {
-                if (!targetProjectName || !pNameLower.includes(targetProjectName)) return;
-            }
-        } else if (targetProjectName && !entry.isTimerRunning) {
-            if (!pNameLower.includes(targetProjectName)) return;
-        }
+                // En la botonera deben aparecer los partes de trabajo en los que se han imputado horas (hours > 0 o timer corriendo)
+                if ((entry.hours || 0) <= 0 && !entry.isTimerRunning) {
+                    return;
+                }
 
-        // Filtro por buscador (soporte multitoken para palabras compuestas)
-        if (searchVal) {
-            const descLower = (entry.desc || '').toLowerCase();
-            const taskLower = (entry.taskName || '').toLowerCase();
-            const projLower = (entry.projectName || '').toLowerCase();
-            let partnerName = '';
-            if (entry.partnerId && window.partnersMap && window.partnersMap[entry.partnerId]) {
-                partnerName = (window.partnersMap[entry.partnerId].name || '').toLowerCase();
-            }
-            const combined = `${descLower} ${taskLower} ${projLower} ${partnerName}`;
-            const tokens = searchVal.split(/\s+/).filter(Boolean);
-            const matchesAll = tokens.every(token => combined.includes(token));
-            if (!matchesAll && !entry.isTimerRunning) return;
-        }
+                const pId = entry.projectId || 0;
+                const tId = entry.taskId || 0;
+                const descClean = (entry.desc || '').trim();
+                const descKey = descClean.toLowerCase();
+                if (!pId) return;
 
-        // En la botonera deben aparecer los partes de trabajo en los que se han imputado horas (hours > 0 o timer corriendo)
-        if ((entry.hours || 0) <= 0 && !entry.isTimerRunning) {
-            return;
-        }
+                // Botonera: agrupamos por Proyecto + Tarea + Descripción de la tarea realizada
+                // Cada parte de trabajo con descripción realizada constituye su propia tecla
+                const key = `${pId}_${tId}_${descKey}`;
+                const isToday = (entry.date === todayStr);
+                const isYesterday = isYesterdayDate(entry.date, today);
 
-        const pId = entry.projectId || 0;
-        const tId = entry.taskId || 0;
-        const descClean = (entry.desc || '').trim();
-        const descKey = descClean.toLowerCase();
-        if (!pId) return;
+                if (!map.has(key)) {
+                    map.set(key, {
+                        key: key,
+                        projectId: pId,
+                        projectName: entry.projectName || `Proyecto #${pId}`,
+                        partnerId: entry.partnerId || 0,
+                        taskId: tId,
+                        taskName: (entry.taskName && entry.taskName.trim()) ? entry.taskName.trim() : '',
+                        lastDate: entry.date || '',
+                        lastDescription: descClean,
+                        lastTimesheetId: entry.id,
+                        totalHours: 0,
+                        todayTimesheetId: isToday ? entry.id : null,
+                        todayHours: isToday ? (entry.hours || 0) : 0,
+                        yesterdayHours: isYesterday ? (entry.hours || 0) : 0,
+                        hasTodayEntry: isToday,
+                        hasYesterdayEntry: isYesterday,
+                        hasRunningTimer: Boolean(entry.isTimerRunning)
+                    });
+                }
 
-        // Botonera: agrupamos por Proyecto + Tarea + Descripción de la tarea realizada
-        // Cada parte de trabajo con descripción realizada constituye su propia tecla
-        const key = `${pId}_${tId}_${descKey}`;
-        const isToday = (entry.date === todayStr);
-        const isYesterday = isYesterdayDate(entry.date, today);
+                const item = map.get(key);
+                item.totalHours += (entry.hours || 0);
+                if (entry.isTimerRunning) {
+                    item.hasRunningTimer = true;
+                }
+                if (entry.partnerId && !item.partnerId) {
+                    item.partnerId = entry.partnerId;
+                }
 
-        if (!taskMap.has(key)) {
-            taskMap.set(key, {
-                key: key,
-                projectId: pId,
-                projectName: entry.projectName || `Proyecto #${pId}`,
-                partnerId: entry.partnerId || 0,
-                taskId: tId,
-                // REGLA: Si la tarea no está informada, NO poner etiqueta
-                taskName: (entry.taskName && entry.taskName.trim()) ? entry.taskName.trim() : '',
-                lastDate: entry.date || '',
-                lastDescription: descClean,
-                lastTimesheetId: entry.id,
-                totalHours: 0,
-                todayTimesheetId: isToday ? entry.id : null,
-                todayHours: isToday ? (entry.hours || 0) : 0,
-                yesterdayHours: isYesterday ? (entry.hours || 0) : 0,
-                hasTodayEntry: isToday,
-                hasYesterdayEntry: isYesterday,
-                hasRunningTimer: Boolean(entry.isTimerRunning)
-            });
-        }
-
-        const item = taskMap.get(key);
-        item.totalHours += (entry.hours || 0);
-        if (entry.isTimerRunning) {
-            item.hasRunningTimer = true;
-        }
-        if (entry.partnerId && !item.partnerId) {
-            item.partnerId = entry.partnerId;
-        }
-
-        if (isToday) {
-            item.hasTodayEntry = true;
-            item.todayTimesheetId = entry.id;
-            item.todayHours += (entry.hours || 0);
-            item.lastDate = todayStr;
-            if (descClean) item.lastDescription = descClean;
-            item.lastTimesheetId = entry.id;
-        } else if (isYesterday) {
-            item.hasYesterdayEntry = true;
-            item.yesterdayHours += (entry.hours || 0);
-            if (!item.hasTodayEntry) {
-                item.lastDate = entry.date;
-                if (descClean) item.lastDescription = descClean;
-                item.lastTimesheetId = entry.id;
-            }
-        } else {
-            if (!item.hasTodayEntry && !item.hasYesterdayEntry) {
-                if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
-                    item.lastDate = entry.date;
+                if (isToday) {
+                    item.hasTodayEntry = true;
+                    item.todayTimesheetId = entry.id;
+                    item.todayHours += (entry.hours || 0);
+                    item.lastDate = todayStr;
                     if (descClean) item.lastDescription = descClean;
                     item.lastTimesheetId = entry.id;
+                } else if (isYesterday) {
+                    item.hasYesterdayEntry = true;
+                    item.yesterdayHours += (entry.hours || 0);
+                    if (!item.hasTodayEntry) {
+                        item.lastDate = entry.date;
+                        if (descClean) item.lastDescription = descClean;
+                        item.lastTimesheetId = entry.id;
+                    }
+                } else {
+                    if (!item.hasTodayEntry && !item.hasYesterdayEntry) {
+                        if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
+                            item.lastDate = entry.date;
+                            if (descClean) item.lastDescription = descClean;
+                            item.lastTimesheetId = entry.id;
+                        }
+                    }
                 }
-            }
-        }
-    });
-
-    // Incluir tarea activa actual si existe
-    if (timerState && timerState.projectId && timerState.status === 'running') {
-        const timerDescClean = (timerState.description || '').trim();
-        const pId = timerState.projectId;
-        const tId = timerState.taskId || 0;
-        const activeKey = `${pId}_${tId}_${timerDescClean.toLowerCase()}`;
-        if (!taskMap.has(activeKey)) {
-            let partnerId = 0;
-            if (window.projectPartnerMap && window.projectPartnerMap[pId]) {
-                partnerId = window.projectPartnerMap[pId];
-            }
-            taskMap.set(activeKey, {
-                key: activeKey,
-                projectId: pId,
-                projectName: timerState.projectName || `Proyecto #${pId}`,
-                partnerId: partnerId,
-                taskId: tId,
-                taskName: (timerState.taskName && timerState.taskName.trim()) ? timerState.taskName.trim() : '',
-                lastDate: timerState.date || todayStr,
-                lastDescription: timerDescClean,
-                lastTimesheetId: timerState.timesheetId,
-                totalHours: 0,
-                todayTimesheetId: timerState.timesheetId,
-                todayHours: (timerState.unitAmount || 0),
-                yesterdayHours: 0,
-                hasTodayEntry: true,
-                hasYesterdayEntry: false,
-                hasRunningTimer: true
             });
-        } else {
-            const activeItem = taskMap.get(activeKey);
-            activeItem.todayTimesheetId = timerState.timesheetId;
-            activeItem.hasTodayEntry = true;
-            activeItem.hasRunningTimer = true;
-            activeItem.lastDate = todayStr;
-            if (timerDescClean) activeItem.lastDescription = timerDescClean;
+            return map;
         }
-    }
+
+        let taskMap = buildTaskMap(true);
+        // Si filtrar por empleado dejó 0 resultados pero hay datos generales, relajar el filtro
+        if (taskMap.size === 0 && allEntries.length > 0 && employeeVal && !searchVal) {
+            taskMap = buildTaskMap(false);
+        }
+
+        // Incluir tarea activa actual si existe
+        if (timerState && timerState.projectId && timerState.status === 'running') {
+            const timerDescClean = (timerState.description || '').trim();
+            const pId = timerState.projectId;
+            const tId = timerState.taskId || 0;
+            const activeKey = `${pId}_${tId}_${timerDescClean.toLowerCase()}`;
+            if (!taskMap.has(activeKey)) {
+                let partnerId = 0;
+                if (window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                    partnerId = window.projectPartnerMap[pId];
+                }
+                taskMap.set(activeKey, {
+                    key: activeKey,
+                    projectId: pId,
+                    projectName: timerState.projectName || `Proyecto #${pId}`,
+                    partnerId: partnerId,
+                    taskId: tId,
+                    taskName: (timerState.taskName && timerState.taskName.trim()) ? timerState.taskName.trim() : '',
+                    lastDate: timerState.date || todayStr,
+                    lastDescription: timerDescClean,
+                    lastTimesheetId: timerState.timesheetId,
+                    totalHours: 0,
+                    todayTimesheetId: timerState.timesheetId,
+                    todayHours: (timerState.unitAmount || 0),
+                    yesterdayHours: 0,
+                    hasTodayEntry: true,
+                    hasYesterdayEntry: false,
+                    hasRunningTimer: true
+                });
+            } else {
+                const activeItem = taskMap.get(activeKey);
+                activeItem.todayTimesheetId = timerState.timesheetId;
+                activeItem.hasTodayEntry = true;
+                activeItem.hasRunningTimer = true;
+                activeItem.lastDate = todayStr;
+                if (timerDescClean) activeItem.lastDescription = timerDescClean;
+            }
+        }
 
     const tasks = Array.from(taskMap.values());
 
@@ -1726,6 +1743,9 @@ function renderExpressView() {
     });
 
     gridEl.innerHTML = cardsHtml;
+    } catch (err) {
+        console.error('[PlanesGo Express] Error renderizando vista:', err);
+    }
 }
 
 /**

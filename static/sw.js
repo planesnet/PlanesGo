@@ -1,5 +1,5 @@
 // PlanesGo Express Service Worker
-const CACHE_NAME = 'planesgo-express-v1.2.25';
+const CACHE_NAME = 'planesgo-express-v1.2.26';
 const PRECACHE_ASSETS = [
     '/m',
     '/static/manifest.json',
