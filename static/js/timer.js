@@ -188,6 +188,8 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         (!newTsId && current.timesheetId)
     );
 
+    window.__lastTimerActionTime = Date.now();
+
     if (isDifferent) {
         stopPreviousRunningTimer(current);
     }
@@ -1510,7 +1512,10 @@ async function syncActiveTimerFromOdoo() {
                 }
             } else if (act && !act.is_running) {
                 // El servidor indica que el temporizador está pausado (ej. pausado desde el móvil o PC)
-                if (current && current.timesheetId === act.timesheet_id) {
+                const now = Date.now();
+                const isRecentAction = (window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 6000)) ||
+                                       (current && current.lastStartTime && (now - current.lastStartTime < 6000));
+                if (!isRecentAction && current && current.timesheetId === act.timesheet_id) {
                     if (current.status === 'running') {
                         current.status = 'paused';
                         current.lastStartTime = null;
@@ -1527,7 +1532,10 @@ async function syncActiveTimerFromOdoo() {
                 }
             } else {
                 // En el servidor ya no hay temporizador activo ni pausado (se detuvo o completó)
-                if (current && current.status === 'running') {
+                const now = Date.now();
+                const isRecentAction = (window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 6000)) ||
+                                       (current && current.lastStartTime && (now - current.lastStartTime < 6000));
+                if (!isRecentAction && current && current.status === 'running') {
                     saveTimerState(null);
                     stopTimerTicker();
                     stopTitleFlash();

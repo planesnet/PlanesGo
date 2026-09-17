@@ -790,10 +790,6 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		Odoo:   currentOdooCfg,
 	}
 
-	projectPartnerMu.RLock()
-	ppmJSON, _ := json.Marshal(projectPartnerCache)
-	projectPartnerMu.RUnlock()
-
 	workerName := session.UserName
 	if workerName == "" {
 		workerName = session.Username
@@ -822,11 +818,28 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 				activeTimer = timer
 			}
 			cancelTimer()
+
+			// Refrescar projectPartnerCache con los proyectos para que la vista móvil conozca los logos de cliente actualizados
+			ctxProjects, cancelProjects := context.WithTimeout(r.Context(), 5*time.Second)
+			if projects, pErr := client.GetProjects(ctxProjects, nil); pErr == nil {
+				projectPartnerMu.Lock()
+				for _, p := range projects {
+					if p.PartnerID.ID > 0 {
+						projectPartnerCache[p.ID] = p.PartnerID.ID
+					}
+				}
+				projectPartnerMu.Unlock()
+			}
+			cancelProjects()
 		}
 		if activeTimer == nil {
 			activeTimer = state.getActiveTimer(targetUID)
 		}
 	}
+
+	projectPartnerMu.RLock()
+	ppmJSON, _ := json.Marshal(projectPartnerCache)
+	projectPartnerMu.RUnlock()
 
 	data := PageData{
 		Version:               Version,

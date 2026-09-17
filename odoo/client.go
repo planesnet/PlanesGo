@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -598,6 +599,56 @@ func (c *Client) GetEmployees(ctx context.Context, domain []interface{}) ([]Empl
 	}
 
 	return employees, nil
+}
+
+// GetPartnerAvatar obtiene el logotipo de un partner/cliente desde res.partner en base64 y lo decodifica.
+func (c *Client) GetPartnerAvatar(ctx context.Context, partnerID int) ([]byte, string, error) {
+	if partnerID <= 0 {
+		return nil, "", errors.New("ID de partner inválido")
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("no se pudo autenticar para leer avatar de partner: %w", err)
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"res.partner",
+		"read",
+		[]interface{}{[]int{partnerID}},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "image_128"},
+	}
+
+	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		return nil, "", fmt.Errorf("error llamando a res.partner: %w", err)
+	}
+
+	var records []struct {
+		ID       int         `json:"id"`
+		Image128 interface{} `json:"image_128"`
+	}
+	if err := json.Unmarshal(raw, &records); err != nil || len(records) == 0 {
+		return nil, "", errors.New("partner no encontrado")
+	}
+
+	imgStr, ok := records[0].Image128.(string)
+	if !ok || strings.TrimSpace(imgStr) == "" {
+		return nil, "", errors.New("partner sin imagen")
+	}
+
+	imgData, err := base64.StdEncoding.DecodeString(imgStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("error decodificando imagen base64: %w", err)
+	}
+
+	cType := http.DetectContentType(imgData)
+	return imgData, cType, nil
 }
 
 // UID devuelve el UID del usuario autenticado en Odoo.

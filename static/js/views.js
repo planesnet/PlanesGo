@@ -1467,8 +1467,8 @@ function renderExpressView() {
                         lastTimesheetId: entry.id,
                         totalHours: 0,
                         todayTimesheetId: isToday ? entry.id : null,
-                        todayHours: isToday ? (entry.hours || 0) : 0,
-                        yesterdayHours: isYesterday ? (entry.hours || 0) : 0,
+                        todayHours: 0,
+                        yesterdayHours: 0,
                         hasTodayEntry: isToday,
                         hasYesterdayEntry: isYesterday,
                         hasRunningTimer: Boolean(entry.isTimerRunning)
@@ -1650,7 +1650,7 @@ function renderExpressView() {
 
         const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
         const partnerLogoHtml = partnerId > 0
-            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-4.5 h-4.5 sm:w-5 sm:h-5 rounded object-cover bg-slate-900 border border-slate-700/80 shrink-0 shadow-sm" loading="lazy" onerror="this.style.display='none'">`
+            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-3.5 h-3.5 rounded object-cover shrink-0" loading="lazy" onerror="this.remove()">`
             : '';
 
         const isRunning = item.isRunning;
@@ -1792,6 +1792,8 @@ function handleExpressCardClick(cardEl) {
         }
         return;
     }
+
+    window.__lastTimerActionTime = Date.now();
 
     if (!hasToday) {
         // La fecha es anterior a hoy: duplicar para hoy e iniciar sin modales ni alertas

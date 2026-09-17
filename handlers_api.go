@@ -5,7 +5,6 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -146,16 +145,18 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		// Enriquecer imputaciones con PartnerID si viene vacío
-		projectPartnerMu.RLock()
+		// Enriquecer y actualizar projectPartnerCache con PartnerID
+		projectPartnerMu.Lock()
 		for i := range entries {
-			if entries[i].PartnerID.ID == 0 && entries[i].ProjectID.ID > 0 {
+			if entries[i].PartnerID.ID > 0 && entries[i].ProjectID.ID > 0 {
+				projectPartnerCache[entries[i].ProjectID.ID] = entries[i].PartnerID.ID
+			} else if entries[i].PartnerID.ID == 0 && entries[i].ProjectID.ID > 0 {
 				if partID, ok := projectPartnerCache[entries[i].ProjectID.ID]; ok && partID > 0 {
 					entries[i].PartnerID = odoo.Many2One{ID: partID}
 				}
 			}
 		}
-		projectPartnerMu.RUnlock()
+		projectPartnerMu.Unlock()
 
 		json.NewEncoder(w).Encode(entries)
 
@@ -1041,7 +1042,14 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	if userUID == 0 {
 		userUID = client.UID()
 	}
-	state.clearActiveTimer(userUID)
+	cur := state.getActiveTimer(userUID)
+	if cur != nil {
+		if (req.TimesheetID > 0 && cur.TimesheetID == req.TimesheetID) ||
+			(req.TaskID > 0 && cur.TaskID == req.TaskID) ||
+			(req.TimesheetID == 0 && req.TaskID == 0) {
+			state.clearActiveTimer(userUID)
+		}
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -1070,7 +1078,7 @@ func (state *AppState) handleServiceWorker(w http.ResponseWriter, r *http.Reques
 	http.ServeFile(w, r, "static/sw.js")
 }
 
-// handleAPIPartnerAvatar sirve y cachea agresivamente el logotipo del partner de Odoo
+// handleAPIPartnerAvatar sirve y cachea el logotipo auténtico del partner desde Odoo
 func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimSpace(r.URL.Query().Get("id"))
 	partnerID, err := strconv.Atoi(idStr)
@@ -1086,6 +1094,12 @@ func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Req
 
 	now := time.Now()
 	if found && now.Before(cached.expiresAt) {
+		if len(cached.data) == 0 {
+			// Negativo en caché: el partner no tiene logotipo. Devolver 404 para no mostrar nada.
+			w.Header().Set("Cache-Control", "public, max-age=60")
+			http.Error(w, "Sin imagen", http.StatusNotFound)
+			return
+		}
 		// Validar ETag del cliente
 		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && ifNoneMatch == cached.etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -1093,70 +1107,55 @@ func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Req
 		}
 		w.Header().Set("Content-Type", cached.contentType)
 		w.Header().Set("ETag", cached.etag)
-		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+		w.Header().Set("Cache-Control", "public, max-age=600")
 		w.Write(cached.data)
 		return
 	}
 
-	// 2. Resolver URL base de Odoo
+	// 2. Resolver configuración de Odoo autenticada
 	var session *SessionData
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 		session, _ = decodeSession(cookie.Value)
 	}
 	odooCfg := state.resolveUserOdooConfig(session)
-	baseURL := strings.TrimRight(odooCfg.URL, "/")
-	if baseURL == "" {
-		baseURL = DefaultOdooURL
-	}
-
-	targetURL := fmt.Sprintf("%s/web/image?model=res.partner&id=%d&field=image_128", baseURL, partnerID)
-	req, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
-	if reqErr != nil {
-		http.Error(w, "Error creando petición", http.StatusInternalServerError)
+	if odooCfg.Password == "" || odooCfg.DB == "" {
+		http.Error(w, "No autenticado", http.StatusUnauthorized)
 		return
 	}
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, respErr := client.Do(req)
-	if respErr != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			resp.Body.Close()
+	client := odoo.GetClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	imgData, cType, imgErr := client.GetPartnerAvatar(ctx, partnerID)
+	if imgErr != nil || len(imgData) == 0 {
+		// Guardar negativo breve (1 minuto) en caché para no saturar Odoo
+		partnerAvatarCacheMu.Lock()
+		partnerAvatarCache[partnerID] = avatarCacheItem{
+			expiresAt: now.Add(1 * time.Minute),
 		}
-		// Servir fallback SVG neutral y guardar negativo breve
-		svgPlaceholder := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" /></svg>`)
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		w.Write(svgPlaceholder)
-		return
-	}
-	defer resp.Body.Close()
+		partnerAvatarCacheMu.Unlock()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil || len(bodyBytes) == 0 {
-		http.Error(w, "Error leyendo imagen", http.StatusInternalServerError)
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		http.Error(w, "Sin imagen", http.StatusNotFound)
 		return
 	}
 
-	cType := resp.Header.Get("Content-Type")
-	if cType == "" || strings.Contains(cType, "text/html") {
-		cType = "image/png"
-	}
-	etag := fmt.Sprintf(`"%x"`, md5.Sum(bodyBytes))
+	etag := fmt.Sprintf(`"%x"`, md5.Sum(imgData))
 
-	// Almacenar en caché en memoria por 24 horas
-	item := avatarCacheItem{
-		data:        bodyBytes,
+	// Almacenar en caché en memoria por 10 minutos (permite actualizar logotipos sin demora excesiva)
+	partnerAvatarCacheMu.Lock()
+	partnerAvatarCache[partnerID] = avatarCacheItem{
+		data:        imgData,
 		contentType: cType,
 		etag:        etag,
-		expiresAt:   now.Add(24 * time.Hour),
+		expiresAt:   now.Add(10 * time.Minute),
 	}
-	partnerAvatarCacheMu.Lock()
-	partnerAvatarCache[partnerID] = item
 	partnerAvatarCacheMu.Unlock()
 
 	w.Header().Set("Content-Type", cType)
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
-	w.Write(bodyBytes)
+	w.Header().Set("Cache-Control", "public, max-age=600")
+	w.Write(imgData)
 }
 
