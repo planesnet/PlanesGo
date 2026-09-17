@@ -938,8 +938,206 @@ function renderGanttView(matchingRows) {
 }
 
 // ============================================================================
-// VISTA EXPRESS: BOTONERA DE TAREAS RECIENTES (ÚLTIMAS 2 SEMANAS)
+// VISTA Y VENTANA FLOTANTE EXPRESS: BOTONERA DE MÁQUINA CONCENTRADA
 // ============================================================================
+
+let isExpressMinimized = false;
+
+/**
+ * Abre o cierra la ventana flotante de la botonera Express.
+ */
+function toggleExpressFloating() {
+    const win = document.getElementById('express-floating-window');
+    const btn = document.getElementById('btn-view-express');
+    if (!win) return;
+
+    const isHidden = win.classList.contains('hidden');
+    if (isHidden) {
+        win.classList.remove('hidden');
+        if (btn) {
+            btn.classList.add('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
+            btn.classList.remove('text-slate-600');
+        }
+        loadExpressTimesheets();
+        initExpressWindowInteractions();
+    } else {
+        closeExpressFloating();
+    }
+}
+
+/**
+ * Cierra la ventana flotante Express.
+ */
+function closeExpressFloating() {
+    const win = document.getElementById('express-floating-window');
+    const btn = document.getElementById('btn-view-express');
+    if (win) win.classList.add('hidden');
+    if (btn) {
+        btn.classList.remove('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
+        btn.classList.add('text-slate-600');
+    }
+}
+
+/**
+ * Minimiza o restaura la ventana flotante Express.
+ */
+function toggleMinimizeExpress() {
+    const win = document.getElementById('express-floating-window');
+    const body = document.getElementById('express-window-body');
+    const minBtn = document.getElementById('btn-minimize-express');
+    if (!win || !body) return;
+
+    isExpressMinimized = !isExpressMinimized;
+    if (isExpressMinimized) {
+        body.classList.add('hidden');
+        win.style.height = 'auto';
+        win.style.minHeight = 'auto';
+        win.style.resize = 'none';
+        if (minBtn) {
+            minBtn.innerHTML = `
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                </svg>
+            `;
+            minBtn.title = 'Restaurar ventana';
+        }
+    } else {
+        body.classList.remove('hidden');
+        const savedSize = localStorage.getItem('planesgo_express_size');
+        if (savedSize) {
+            try {
+                const size = JSON.parse(savedSize);
+                if (size.height) win.style.height = size.height;
+                if (size.width) win.style.width = size.width;
+            } catch (e) {}
+        } else {
+            win.style.height = '530px';
+        }
+        win.style.minHeight = '200px';
+        win.style.resize = 'both';
+        if (minBtn) {
+            minBtn.innerHTML = `
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            `;
+            minBtn.title = 'Minimizar ventana';
+        }
+    }
+}
+
+/**
+ * Desacopla la botonera Express abriéndola en una mini-ventana nativa independiente de escritorio (pop-out).
+ */
+function openExpressPopout() {
+    const w = 480;
+    const h = 640;
+    const left = Math.max(0, (window.screen.width - w) / 2);
+    const top = Math.max(0, (window.screen.height - h) / 2);
+
+    const win = window.open(
+        '/express',
+        'PlanesGoExpress',
+        `width=${w},height=${h},top=${top},left=${left},menubar=no,status=no,toolbar=no,location=no,resizable=yes,scrollbars=yes`
+    );
+
+    if (win) {
+        win.focus();
+        closeExpressFloating();
+    } else if (typeof showToast === 'function') {
+        showToast('El navegador bloqueó la ventana emergente. Por favor, permite ventanas emergentes para PlanesGo.', 'warning');
+    }
+}
+
+let expressDraggableInitialized = false;
+
+/**
+ * Inicializa el comportamiento de arrastre (drag) y redimensión para la ventana flotante.
+ */
+function initExpressWindowInteractions() {
+    const win = document.getElementById('express-floating-window');
+    const header = document.getElementById('express-drag-handle');
+    if (!win || !header || expressDraggableInitialized) return;
+
+    expressDraggableInitialized = true;
+
+    // Restaurar posición guardada
+    const savedPos = localStorage.getItem('planesgo_express_pos');
+    if (savedPos) {
+        try {
+            const pos = JSON.parse(savedPos);
+            if (pos.top && pos.left) {
+                win.style.top = pos.top;
+                win.style.left = pos.left;
+                win.style.right = 'auto';
+            }
+        } catch (e) {}
+    }
+
+    // Restaurar tamaño guardado
+    const savedSize = localStorage.getItem('planesgo_express_size');
+    if (savedSize) {
+        try {
+            const size = JSON.parse(savedSize);
+            if (size.width) win.style.width = size.width;
+            if (size.height) win.style.height = size.height;
+        } catch (e) {}
+    }
+
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    let initialLeft = 0, initialTop = 0;
+
+    header.addEventListener('mousedown', function(e) {
+        if (e.target.closest('button') || e.target.closest('input')) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        const rect = win.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+
+        win.style.right = 'auto';
+        win.style.left = `${initialLeft}px`;
+        win.style.top = `${initialTop}px`;
+
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+
+        let newLeft = initialLeft + deltaX;
+        let newTop = initialTop + deltaY;
+
+        // Limitar dentro de la pantalla
+        newLeft = Math.max(10, Math.min(window.innerWidth - win.offsetWidth - 10, newLeft));
+        newTop = Math.max(10, Math.min(window.innerHeight - 50, newTop));
+
+        win.style.left = `${newLeft}px`;
+        win.style.top = `${newTop}px`;
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            document.body.style.userSelect = '';
+            localStorage.setItem('planesgo_express_pos', JSON.stringify({
+                left: win.style.left,
+                top: win.style.top
+            }));
+        }
+        // Guardar tamaño si el usuario redimensionó
+        if (win && win.style.width && win.style.height) {
+            localStorage.setItem('planesgo_express_size', JSON.stringify({
+                width: win.style.width,
+                height: win.style.height
+            }));
+        }
+    });
+}
 
 /**
  * Carga desde el servidor las imputaciones de las dos últimas semanas.
@@ -962,7 +1160,6 @@ function loadExpressTimesheets(forceReload) {
 
     isExpressLoading = true;
 
-    // Calcular rango de 2 semanas: desde hace 14 días (o lunes de hace 2 semanas) hasta hoy
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
@@ -993,7 +1190,7 @@ function loadExpressTimesheets(forceReload) {
 }
 
 /**
- * Formatea una fecha para mostrar en las tarjetas de la botonera.
+ * Formatea una fecha para mostrar en las teclas de la botonera.
  */
 function formatCardDate(dateStr) {
     if (!dateStr) return '';
@@ -1015,7 +1212,7 @@ function formatCardDate(dateStr) {
 }
 
 /**
- * Renderiza la cuadrícula de la botonera Express con las tareas de las últimas 2 semanas.
+ * Renderiza la matriz concentrada de la botonera tipo máquina.
  */
 function renderExpressView() {
     const gridEl = document.getElementById('express-grid-container');
@@ -1023,7 +1220,6 @@ function renderExpressView() {
     const countBadge = document.getElementById('express-tasks-count-badge');
     if (!gridEl) return;
 
-    // Si aún no hemos cargado los datos de las últimas 2 semanas, disparar la carga
     if (!expressTimesheets && !isExpressLoading) {
         loadExpressTimesheets();
         return;
@@ -1032,17 +1228,17 @@ function renderExpressView() {
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
-    // Filtros activos actuales
+    // Filtros activos
     const searchInput = document.getElementById('filter-search');
     const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
     const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
     const employeeSelect = document.getElementById('filter-employee');
     const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : '')).toLowerCase().trim();
 
-    const targetProjectId = activeSidebarProjectId;
+    const targetProjectId = (typeof activeSidebarProjectId !== 'undefined') ? activeSidebarProjectId : null;
     const targetProjectName = (typeof activeSidebarProjectName !== 'undefined' ? activeSidebarProjectName : '').toLowerCase().trim();
 
-    // 1. Recopilar datos de expressTimesheets y de las filas actuales del DOM
+    // 1. Recopilar datos
     const allEntries = [];
 
     if (Array.isArray(expressTimesheets)) {
@@ -1064,7 +1260,7 @@ function renderExpressView() {
         });
     }
 
-    // Integrar filas del DOM (incluidas imputaciones creadas u optimistas hoy)
+    // Integrar filas del DOM
     const existingIds = new Set(allEntries.map(e => String(e.id)));
     document.querySelectorAll('#timesheet-table .timesheet-row').forEach(row => {
         const id = row.dataset.id;
@@ -1084,10 +1280,9 @@ function renderExpressView() {
         }
     });
 
-    // 2. Comprobar estado actual del temporizador
     const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
 
-    // 3. Agrupar por tarea única (o proyecto si no hay tarea)
+    // 2. Agrupar por tarea única (o proyecto si no tiene tarea)
     const taskMap = new Map();
 
     allEntries.forEach(entry => {
@@ -1108,7 +1303,7 @@ function renderExpressView() {
             if (!pNameLower.includes(targetProjectName)) return;
         }
 
-        // Filtro por buscador de texto
+        // Filtro por buscador
         if (searchVal) {
             const descLower = (entry.desc || '').toLowerCase();
             const taskLower = (entry.taskName || '').toLowerCase();
@@ -1130,7 +1325,8 @@ function renderExpressView() {
                 projectId: pId,
                 projectName: entry.projectName || `Proyecto #${pId}`,
                 taskId: tId,
-                taskName: entry.taskName || (tId ? `Tarea #${tId}` : 'General (Sin tarea)'),
+                // REGLA: Si la tarea no está informada, NO poner ninguna etiqueta ni texto de relleno
+                taskName: (entry.taskName && entry.taskName.trim()) ? entry.taskName.trim() : '',
                 lastDate: entry.date || '',
                 lastDescription: entry.desc || '',
                 lastTimesheetId: entry.id,
@@ -1157,7 +1353,7 @@ function renderExpressView() {
         }
     });
 
-    // Asegurarse de que si hay un temporizador activo en marcha, su tarea aparezca en la botonera
+    // Incluir tarea activa actual si existe
     if (timerState && timerState.projectId) {
         const activeKey = `${timerState.projectId}_${timerState.taskId || 0}`;
         if (!taskMap.has(activeKey)) {
@@ -1166,7 +1362,8 @@ function renderExpressView() {
                 projectId: timerState.projectId,
                 projectName: timerState.projectName || `Proyecto #${timerState.projectId}`,
                 taskId: timerState.taskId || 0,
-                taskName: timerState.taskName || (timerState.taskId ? `Tarea #${timerState.taskId}` : 'General (Sin tarea)'),
+                // REGLA: Si la tarea no está informada, NO poner etiqueta
+                taskName: (timerState.taskName && timerState.taskName.trim()) ? timerState.taskName.trim() : '',
                 lastDate: timerState.date || todayStr,
                 lastDescription: timerState.description || '',
                 lastTimesheetId: timerState.timesheetId,
@@ -1180,7 +1377,7 @@ function renderExpressView() {
 
     const tasks = Array.from(taskMap.values());
 
-    // Marcar si está corriendo actualmente
+    // Marcar si está corriendo
     tasks.forEach(t => {
         let isRunning = false;
         if (timerState && timerState.status === 'running') {
@@ -1197,7 +1394,6 @@ function renderExpressView() {
         t.isRunning = isRunning;
     });
 
-    // Ordenación: 1º En marcha, 2º Fecha más reciente desc, 3º Horas hoy desc
     tasks.sort((a, b) => {
         if (a.isRunning && !b.isRunning) return -1;
         if (!a.isRunning && b.isRunning) return 1;
@@ -1207,7 +1403,7 @@ function renderExpressView() {
     });
 
     if (countBadge) {
-        countBadge.textContent = `${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'}`;
+        countBadge.textContent = `${tasks.length}`;
     }
 
     if (tasks.length === 0) {
@@ -1218,7 +1414,6 @@ function renderExpressView() {
 
     if (emptyEl) emptyEl.classList.add('hidden');
 
-    // Tiempo transcurrido formateado para el timer activo
     let liveClockStr = '00:00:00';
     if (timerState) {
         const totalMs = (timerState.accumulatedMs || 0) + (timerState.status === 'running' && timerState.lastStartTime ? (Date.now() - timerState.lastStartTime) : 0);
@@ -1229,40 +1424,39 @@ function renderExpressView() {
 
     let cardsHtml = '';
     tasks.forEach(item => {
+        const hasTask = item.taskName && item.taskName.trim().length > 0;
         const safeProj = escapeHtml(item.projectName);
-        const safeTask = escapeHtml(item.taskName);
-        const safeDesc = escapeHtml(item.lastDescription);
+        const safeTask = hasTask ? escapeHtml(item.taskName) : '';
 
         let dateBadgeHtml = '';
         if (item.hasTodayEntry) {
             dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                    <span>Hoy</span>
-                    ${item.todayHours > 0 ? `<span class="font-mono">(${item.todayHours.toFixed(2)}h)</span>` : ''}
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 font-mono">
+                    <span>HOY</span>
+                    ${item.todayHours > 0 ? `<span>${item.todayHours.toFixed(1)}h</span>` : ''}
                 </span>
             `;
         } else if (item.lastDate) {
             dateBadgeHtml = `
-                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
-                    <svg class="w-2.5 h-2.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/></svg>
+                <span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-800 text-slate-400 border border-slate-700 font-mono" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
                     <span>${formatCardDate(item.lastDate)}</span>
                 </span>
             `;
         }
 
         const isRunning = item.isRunning;
-        const cardBorderClass = isRunning 
-            ? 'border-emerald-400 ring-2 ring-emerald-300 shadow-md bg-emerald-50/25'
-            : 'border-slate-200/80 hover:border-sky-300 hover:shadow-md bg-white';
+        const cardBorderClass = isRunning
+            ? 'border-emerald-400 ring-2 ring-emerald-500/50 shadow-lg bg-emerald-950/40 text-emerald-200'
+            : 'border-slate-700/80 hover:border-slate-500 shadow-sm bg-slate-800/90 hover:bg-slate-750 text-slate-100';
 
         cardsHtml += `
-            <div class="express-card group relative rounded-2xl border ${cardBorderClass} p-4 transition-all duration-150 flex flex-col justify-between cursor-pointer select-none"
+            <div class="express-card group relative rounded-xl border ${cardBorderClass} p-2.5 transition-all duration-100 flex flex-col justify-between cursor-pointer select-none active:scale-[0.98]"
                  role="button" tabindex="0"
                  data-project-id="${item.projectId}"
                  data-project-name="${escapeAttr(item.projectName)}"
                  data-task-id="${item.taskId || 0}"
-                 data-task-name="${escapeAttr(item.taskName)}"
-                 data-description="${escapeAttr(item.lastDescription)}"
+                 data-task-name="${escapeAttr(item.taskName || '')}"
+                 data-description="${escapeAttr(item.lastDescription || '')}"
                  data-timesheet-id="${item.lastTimesheetId || 0}"
                  data-today-timesheet-id="${item.todayTimesheetId || 0}"
                  data-today-hours="${item.todayHours || 0}"
@@ -1271,15 +1465,15 @@ function renderExpressView() {
                  onclick="handleExpressCardClick(this)"
                  onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleExpressCardClick(this); }">
                 
-                <!-- Cabecera de la tarjeta: Proyecto y Estado/Fecha -->
-                <div class="flex items-start justify-between gap-2">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-sky-50 text-sky-800 border border-sky-100 truncate max-w-[62%]" title="${safeProj}">
+                <!-- Encabezado de la tecla: Proyecto y Estado -->
+                <div class="flex items-center justify-between gap-1.5 mb-1">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-sky-400 truncate max-w-[70%]" title="${safeProj}">
                         ${safeProj}
                     </span>
                     <div class="shrink-0">
-                        <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            <span>EN MARCHA</span>
+                        <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            <span>ACTIVO</span>
                         </span>
                         <span class="express-badge-idle ${isRunning ? 'hidden' : ''}">
                             ${dateBadgeHtml}
@@ -1287,42 +1481,33 @@ function renderExpressView() {
                     </div>
                 </div>
 
-                <!-- Cuerpo de la tarjeta: Tarea y Descripción previa -->
-                <div class="my-2.5">
-                    <h4 class="text-sm font-bold text-slate-800 group-hover:text-sky-700 leading-snug line-clamp-2 transition-colors" title="${safeTask}">
+                <!-- Cuerpo de la tecla: Tarea (SOLO SI ESTÁ INFORMADA; si no, sin ninguna etiqueta) -->
+                ${hasTask ? `
+                <div class="mb-2">
+                    <h4 class="text-xs font-bold text-slate-100 group-hover:text-amber-300 leading-tight line-clamp-2 transition-colors" title="${safeTask}">
                         ${safeTask}
                     </h4>
-                    <p class="text-xs text-slate-500 line-clamp-2 italic font-normal mt-1 min-h-[1.75rem]" title="${safeDesc}">
-                        ${safeDesc || '<span class="text-slate-300 not-italic">Sin descripción previa</span>'}
-                    </p>
                 </div>
+                ` : `
+                <div class="mb-1"></div>
+                `}
 
-                <!-- Pie de la tarjeta: Métricas / Reloj y Botón de Acción -->
-                <div class="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 mt-auto">
+                <!-- Pie de la tecla: Reloj / Horas y Botón de 1-clic -->
+                <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between gap-1 mt-auto">
                     <div class="min-w-0">
-                        <div class="express-live-clock-container ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 text-emerald-800 font-mono font-bold text-xs bg-emerald-100/90 px-2 py-0.5 rounded-lg border border-emerald-200">
-                            <span class="relative flex h-1.5 w-1.5">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                            <span class="express-live-clock font-mono font-bold text-emerald-900">${liveClockStr}</span>
+                        <div class="express-live-clock-container ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 text-emerald-400 font-mono font-bold text-[11px]">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                            <span class="express-live-clock font-mono">${liveClockStr}</span>
                         </div>
-                        <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-[11px] text-slate-400 font-medium">
-                            <span>2 sem: </span>
-                            <span class="font-bold text-slate-600 font-mono">${item.totalHours.toFixed(2)}h</span>
+                        <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-[10px] text-slate-400 font-mono">
+                            ${item.hasTodayEntry && item.todayHours > 0 ? `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h</span>` : `<span class="text-slate-500">${item.totalHours.toFixed(1)}h (2s)</span>`}
                         </div>
                     </div>
 
                     <div class="shrink-0">
-                        <button type="button" class="express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${isRunning ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white'}">
-                            ${isRunning ? `
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6"/></svg>
-                                <span>Pausar</span>
-                            ` : `
-                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                <span>${item.hasTodayEntry ? 'Reanudar' : 'Iniciar'}</span>
-                            `}
-                        </button>
+                        <span class="express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition ${isRunning ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold' : 'bg-slate-700/80 hover:bg-sky-600 text-slate-200 hover:text-white'}">
+                            ${isRunning ? 'PAUSAR' : (item.hasTodayEntry ? 'REANUDAR' : 'INICIAR')}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -1365,18 +1550,14 @@ function handleExpressCardClick(cardEl) {
     }
 
     if (isThisCardActive) {
-        // Pausar o reanudar el cronómetro actual
         if (typeof togglePauseTimer === 'function') {
             togglePauseTimer();
         }
         return;
     }
 
-    // Si había otro cronómetro en marcha, startWorkTimer lo detiene automáticamente (stopPreviousRunningTimer).
-    // Comprobamos si tiene fecha anterior a hoy:
     if (!hasToday) {
-        // La fecha es anterior a hoy (o no tiene registro hoy):
-        // Hacemos el duplicado para poner la fecha de hoy, iniciando el cronómetro sin abrir modales
+        // La fecha es anterior a hoy: duplicar para hoy e iniciar sin modales
         const initialDesc = desc || 'Trabajo en curso';
         if (typeof startWorkTimer === 'function') {
             startWorkTimer(
@@ -1395,8 +1576,7 @@ function handleExpressCardClick(cardEl) {
             showToast(`⏱️ Tarea duplicada para hoy. Cronómetro iniciado en "${pName}"`, 'success');
         }
     } else {
-        // Ya tiene imputación para hoy:
-        // Iniciar / reanudar en la imputación de hoy sin abrir modales
+        // Ya tiene imputación para hoy: reanudarla
         const targetTsId = todayTsId || tsId;
         const accumMs = Math.round(todayHours * 3600 * 1000);
         if (typeof startWorkTimer === 'function') {
@@ -1417,7 +1597,11 @@ function handleExpressCardClick(cardEl) {
         }
     }
 
-    // Refrescar el estado visual de la botonera express de inmediato
+    // Sincronización entre pestañas / ventanas
+    try {
+        localStorage.setItem('planesgo_timer_action', JSON.stringify({ action: 'start', ts: Date.now() }));
+    } catch (e) {}
+
     setTimeout(() => {
         updateExpressTimerState();
     }, 50);
@@ -1457,8 +1641,8 @@ function updateExpressTimerState() {
         const btnAction = card.querySelector('.express-btn-action');
 
         if (isMatch && isRunning) {
-            card.classList.add('border-emerald-400', 'ring-2', 'ring-emerald-300', 'shadow-md', 'bg-emerald-50/25');
-            card.classList.remove('border-slate-200/80', 'bg-white');
+            card.classList.add('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200');
+            card.classList.remove('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100');
 
             if (clockEl) clockEl.textContent = formattedClock;
             if (clockContainer) clockContainer.classList.remove('hidden');
@@ -1467,15 +1651,12 @@ function updateExpressTimerState() {
             if (badgeIdle) badgeIdle.classList.add('hidden');
 
             if (btnAction) {
-                btnAction.className = 'express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs bg-amber-500 hover:bg-amber-600 text-white';
-                btnAction.innerHTML = `
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6"/></svg>
-                    <span>Pausar</span>
-                `;
+                btnAction.className = 'express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold';
+                btnAction.textContent = 'PAUSAR';
             }
         } else {
-            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-300', 'shadow-md', 'bg-emerald-50/25');
-            card.classList.add('border-slate-200/80', 'bg-white');
+            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200');
+            card.classList.add('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100');
 
             if (clockContainer) clockContainer.classList.add('hidden');
             if (hoursSummary) hoursSummary.classList.remove('hidden');
@@ -1484,11 +1665,8 @@ function updateExpressTimerState() {
 
             if (btnAction) {
                 const hasToday = card.dataset.hasToday === 'true';
-                btnAction.className = 'express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white';
-                btnAction.innerHTML = `
-                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    <span>${hasToday ? 'Reanudar' : 'Iniciar'}</span>
-                `;
+                btnAction.className = 'express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition bg-slate-700/80 hover:bg-sky-600 text-slate-200 hover:text-white';
+                btnAction.textContent = hasToday ? 'REANUDAR' : 'INICIAR';
             }
         }
     });
@@ -1496,8 +1674,13 @@ function updateExpressTimerState() {
 
 // Exportar globalmente para vistas y temporizador
 window.switchView = switchView;
+window.toggleExpressFloating = toggleExpressFloating;
+window.closeExpressFloating = closeExpressFloating;
+window.toggleMinimizeExpress = toggleMinimizeExpress;
+window.openExpressPopout = openExpressPopout;
 window.loadExpressTimesheets = loadExpressTimesheets;
 window.renderExpressView = renderExpressView;
 window.handleExpressCardClick = handleExpressCardClick;
 window.updateExpressTimerState = updateExpressTimerState;
+window.initExpressWindowInteractions = initExpressWindowInteractions;
 

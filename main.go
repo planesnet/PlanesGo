@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.21"
+var Version = "1.2.22"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -33,8 +33,9 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	fs := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 
-	// Dashboard principal
+	// Dashboard principal y vista Express standalone (pop-out)
 	mux.HandleFunc("/", state.handleDashboard)
+	mux.HandleFunc("/express", state.handleExpressStandalone)
 
 	// Autenticación
 	mux.HandleFunc("/login", state.handleLogin)

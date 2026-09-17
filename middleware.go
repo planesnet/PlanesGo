@@ -14,6 +14,10 @@ var (
 	indexTmplOnce   sync.Once
 	cachedIndexTmpl *template.Template
 	cachedIndexErr  error
+
+	expressStandaloneOnce sync.Once
+	cachedExpressTmpl     *template.Template
+	cachedExpressErr      error
 )
 
 func getIndexTemplate() (*template.Template, error) {
@@ -40,6 +44,32 @@ func getIndexTemplate() (*template.Template, error) {
 		cachedIndexTmpl = t
 	})
 	return cachedIndexTmpl, cachedIndexErr
+}
+
+func getExpressStandaloneTemplate() (*template.Template, error) {
+	if os.Getenv("ENV") == "development" {
+		t, err := template.ParseFiles("templates/express_standalone.html")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := t.ParseGlob("templates/partials/*.html"); err != nil {
+			log.Printf("[WARN] Error cargando plantillas parciales para express: %v", err)
+		}
+		return t, nil
+	}
+
+	expressStandaloneOnce.Do(func() {
+		t, err := template.ParseFiles("templates/express_standalone.html")
+		if err != nil {
+			cachedExpressErr = err
+			return
+		}
+		if _, err := t.ParseGlob("templates/partials/*.html"); err != nil {
+			log.Printf("[WARN] Error cargando plantillas parciales para express: %v", err)
+		}
+		cachedExpressTmpl = t
+	})
+	return cachedExpressTmpl, cachedExpressErr
 }
 
 type statusResponseWriter struct {

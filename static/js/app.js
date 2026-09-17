@@ -202,6 +202,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') {
             closeTimesheetModal();
             closeDeleteModal();
+            if (typeof closeExpressFloating === 'function') {
+                closeExpressFloating();
+            }
         }
     });
 
@@ -252,4 +255,18 @@ document.addEventListener('DOMContentLoaded', () => {
     updateWeekControls();
     if (typeof updateStartWorkTimerButton === 'function') updateStartWorkTimerButton();
     applyTimesheetFilters();
+
+    // Inicializar listeners de la ventana flotante Express
+    if (typeof initExpressWindowInteractions === 'function') {
+        initExpressWindowInteractions();
+    }
+
+    // Sincronización entre ventanas (ej. ventana popout y app principal)
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'planesgo_active_timer' || e.key === 'planesgo_timer_action') {
+            if (typeof updateExpressTimerState === 'function') {
+                updateExpressTimerState();
+            }
+        }
+    });
 });

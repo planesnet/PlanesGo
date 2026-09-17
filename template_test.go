@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"pasigo/config"
@@ -191,6 +192,33 @@ func TestLoggingAndRecoveryMiddleware(t *testing.T) {
 	wrappedPanic.ServeHTTP(rrPanic, reqPanic)
 	if rrPanic.Code != http.StatusInternalServerError {
 		t.Fatalf("Se esperaba status 500 tras pánico recuperado, obtenido %d", rrPanic.Code)
+	}
+}
+
+func TestExpressStandaloneTemplateRendering(t *testing.T) {
+	tmpl, err := getExpressStandaloneTemplate()
+	if err != nil {
+		t.Fatalf("Error al compilar plantilla express_standalone: %v", err)
+	}
+	if tmpl == nil {
+		t.Fatalf("Plantilla express_standalone obtenida es nil")
+	}
+
+	data := PageData{
+		Version:       Version,
+		CurrentWorker: "Luis Planes",
+		Today:         "2026-09-17",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		t.Fatalf("Error al ejecutar plantilla express_standalone: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Botonera Express") {
+		t.Errorf("El HTML generado no contiene el título 'Botonera Express'")
+	}
+	if !strings.Contains(buf.String(), "express-grid-container") {
+		t.Errorf("El HTML generado no contiene el contenedor 'express-grid-container'")
 	}
 }
 

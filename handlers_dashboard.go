@@ -719,3 +719,56 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[WARN] Error escribiendo respuesta al cliente: %v", err)
 	}
 }
+
+// handleExpressStandalone renderiza la botonera Express como ventana independiente ligera (pop-out)
+func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Request) {
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	if session == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	currentOdooCfg := state.resolveUserOdooConfig(session)
+
+	state.mu.RLock()
+	serverPort := state.cfg.Server.Port
+	state.mu.RUnlock()
+
+	activeCfg := &config.Config{
+		Server: config.ServerConfig{Port: serverPort},
+		Odoo:   currentOdooCfg,
+	}
+
+	data := PageData{
+		Version:       Version,
+		Config:        activeCfg,
+		Session:       session,
+		HasOdooToken:  (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),
+		CurrentWorker: session.UserName,
+		Today:         time.Now().Format("2006-01-02"),
+	}
+
+	tmpl, err := getExpressStandaloneTemplate()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error al cargar plantilla: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		log.Printf("[ERROR] Renderizado de plantilla express standalone: %v", err)
+		http.Error(w, "Error interno al renderizar la página", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	if _, err := buf.WriteTo(w); err != nil {
+		log.Printf("[WARN] Error escribiendo respuesta al cliente: %v", err)
+	}
+}

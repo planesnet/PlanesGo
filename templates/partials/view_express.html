@@ -1,60 +1,100 @@
 {{ define "view_express" }}
-<!-- VISTA: Express (Botonera de Proyectos y Tareas Recientes - Últimas 2 Semanas) -->
-<div id="view-container-express" class="hidden space-y-4">
-    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5">
-        <!-- Cabecera de la Botonera Express -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-4 border-b border-slate-100">
-            <div class="flex items-center space-x-2.5">
-                <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 border border-amber-200/70 flex items-center justify-center shrink-0 shadow-2xs">
-                    <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                </div>
-                <div>
-                    <div class="flex items-center space-x-2">
-                        <span class="font-bold text-slate-800 text-sm sm:text-base">Botonera Express</span>
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 uppercase tracking-wider">Últimas 2 Semanas</span>
-                    </div>
-                    <p class="text-xs text-slate-500 mt-0.5">
-                        Cambio rápido entre tareas. Pulsa en cualquier botón para alternar el cronómetro. Si la tarea es de días anteriores, se duplica automáticamente para hoy.
-                    </p>
-                </div>
-            </div>
-            <div class="flex items-center space-x-2 self-start sm:self-auto">
-                <span id="express-tasks-count-badge" class="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                    0 tareas
-                </span>
-                <button type="button" onclick="loadExpressTimesheets(true)" class="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer" title="Refrescar tareas recientes">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                </button>
-            </div>
+<!-- VISTA Y VENTANA FLOTANTE: Botonera Express Concentrada -->
+<div id="view-container-express" class="hidden"></div>
+
+<!-- Ventana Flotante Arrastrable y Redimensionable (Panel de Control de Máquina) -->
+<div id="express-floating-window"
+     class="hidden fixed z-50 flex flex-col bg-slate-900/95 backdrop-blur-md text-slate-100 rounded-2xl shadow-2xl border border-slate-700/80 transition-shadow select-none"
+     style="top: 85px; right: 28px; width: 440px; height: 530px; min-width: 320px; min-height: 200px; max-width: 96vw; max-height: 92vh; resize: both; overflow: hidden;">
+
+    <!-- Barra de Cabecera Arrastrable (Drag Handle) -->
+    <div id="express-drag-handle"
+         class="flex items-center justify-between px-3.5 py-2.5 bg-slate-800/95 border-b border-slate-700/80 cursor-move rounded-t-2xl shrink-0">
+        <div class="flex items-center space-x-2 min-w-0 pointer-events-none">
+            <!-- Icono tirador de arrastre -->
+            <svg class="w-4 h-4 text-slate-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
+            </svg>
+            <span class="inline-flex items-center justify-center w-5 h-5 rounded-md bg-amber-500/20 text-amber-400 font-bold text-xs shrink-0">
+                ⚡
+            </span>
+            <span class="text-xs font-bold tracking-wide text-slate-100 uppercase truncate">Botonera Express</span>
+            <span id="express-tasks-count-badge" class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950/80 text-sky-400 border border-slate-700">
+                0
+            </span>
         </div>
 
+        <!-- Botones de Acción de la Ventana -->
+        <div class="flex items-center space-x-1 shrink-0">
+            <!-- Botón Refrescar -->
+            <button type="button" onclick="loadExpressTimesheets(true)"
+                    class="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700/60 transition cursor-pointer"
+                    title="Recargar tareas recientes">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </button>
+            <!-- Botón Desacoplar (Pop-out a ventana emergente de escritorio) -->
+            <button type="button" onclick="openExpressPopout()"
+                    class="p-1 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-700/60 transition cursor-pointer"
+                    title="Desacoplar a ventana independiente de escritorio (pop-out)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+            </button>
+            <!-- Botón Minimizar / Restaurar -->
+            <button type="button" onclick="toggleMinimizeExpress()" id="btn-minimize-express"
+                    class="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700/60 transition cursor-pointer"
+                    title="Minimizar / Restaurar">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            <!-- Botón Cerrar -->
+            <button type="button" onclick="closeExpressFloating()"
+                    class="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-slate-700/60 transition cursor-pointer"
+                    title="Cerrar ventana">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Contenido y Cuadrícula de la Botonera Concentrada -->
+    <div id="express-window-body" class="flex-1 overflow-y-auto p-2.5 space-y-2">
         <!-- Spinner de Carga -->
-        <div id="express-loading-state" class="hidden py-12 text-center">
-            <div class="inline-block w-8 h-8 border-3 border-sky-600 border-t-transparent rounded-full animate-spin"></div>
-            <p class="text-xs text-slate-500 font-medium mt-3">Cargando tareas de las dos últimas semanas...</p>
-        </div>
-
-        <!-- Contenedor de la Cuadrícula / Botonera -->
-        <div id="express-grid-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
-            <!-- Las tarjetas de la botonera se renderizan dinámicamente -->
+        <div id="express-loading-state" class="hidden py-10 text-center">
+            <div class="inline-block w-6 h-6 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-xs text-slate-400 font-medium mt-2">Cargando botonera...</p>
         </div>
 
         <!-- Estado Vacío -->
-        <div id="express-empty-state" class="hidden py-12 text-center">
-            <div class="w-12 h-12 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div id="express-empty-state" class="hidden py-8 text-center">
+            <div class="w-10 h-10 mx-auto rounded-xl bg-slate-800 text-slate-500 flex items-center justify-center mb-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
             </div>
-            <h3 class="text-sm font-bold text-slate-700">No se encontraron tareas recientes</h3>
-            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                No hay imputaciones en las dos últimas semanas con los filtros actuales.
+            <h3 class="text-xs font-bold text-slate-300">Sin tareas recientes</h3>
+            <p class="text-[11px] text-slate-500 mt-1">
+                No hay imputaciones en las 2 últimas semanas.
             </p>
         </div>
+
+        <!-- Matriz de Botones Concentrados Tipo Máquina -->
+        <div id="express-grid-container" class="grid grid-cols-2 gap-2">
+            <!-- Las teclas de la botonera se renderizan dinámicamente -->
+        </div>
+    </div>
+
+    <!-- Indicador de Redimensión en la Esquina Inferior Derecha -->
+    <div class="pointer-events-none absolute bottom-0.5 right-0.5 text-slate-600">
+        <svg class="w-2.5 h-2.5" viewBox="0 0 6 6" fill="currentColor">
+            <circle cx="5" cy="5" r="0.75" />
+            <circle cx="5" cy="2" r="0.75" />
+            <circle cx="2" cy="5" r="0.75" />
+        </svg>
     </div>
 </div>
 {{ end }}
