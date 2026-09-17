@@ -77,7 +77,8 @@
                 <!-- Barra de Filtros y Selector de Vistas -->
                 {{ template "filters_bar" . }}
 
-                <!-- Vistas Odoo (Lista / Calendario / Gantt) -->
+                <!-- Vistas Odoo (Express / Lista / Calendario / Gantt) -->
+                {{ template "view_express" . }}
                 {{ template "view_list" . }}
                 {{ template "view_calendar" . }}
                 {{ template "view_gantt" . }}

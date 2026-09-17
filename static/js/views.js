@@ -332,13 +332,18 @@ function updateWeekControls() {
     if (kpiEmployeesSub) kpiEmployeesSub.textContent = 'con actividad esta semana';
 }
 
+let expressTimesheets = null;
+let isExpressLoading = false;
+
 function switchView(viewName) {
     currentView = viewName;
 
+    const btnExpress = document.getElementById('btn-view-express');
     const btnList = document.getElementById('btn-view-list');
     const btnCal = document.getElementById('btn-view-calendar');
     const btnGantt = document.getElementById('btn-view-gantt');
 
+    const containerExpress = document.getElementById('view-container-express');
     const containerList = document.getElementById('view-container-list');
     const containerCal = document.getElementById('view-container-calendar');
     const containerGantt = document.getElementById('view-container-gantt');
@@ -360,13 +365,23 @@ function switchView(viewName) {
         }
     }
 
+    applyBtnStyle(btnExpress, viewName === 'express');
     applyBtnStyle(btnList, viewName === 'list');
     applyBtnStyle(btnCal, viewName === 'calendar');
     applyBtnStyle(btnGantt, viewName === 'gantt');
 
+    if (containerExpress) containerExpress.classList.toggle('hidden', viewName !== 'express');
     if (containerList) containerList.classList.toggle('hidden', viewName !== 'list');
     if (containerCal) containerCal.classList.toggle('hidden', viewName !== 'calendar');
     if (containerGantt) containerGantt.classList.toggle('hidden', viewName !== 'gantt');
+
+    if (viewName === 'express') {
+        if (!expressTimesheets && !isExpressLoading) {
+            loadExpressTimesheets();
+        } else {
+            renderExpressView();
+        }
+    }
 
     applyTimesheetFilters();
 }
@@ -514,8 +529,10 @@ function applyTimesheetFilters() {
     highlightSidebarProject(targetProjectName, targetProjectId);
     updateWeekControls();
 
-    // Sincronizar vistas Calendario y Gantt
-    if (currentView === 'calendar') {
+    // Sincronizar vistas (Express, Calendario, Gantt)
+    if (currentView === 'express') {
+        renderExpressView();
+    } else if (currentView === 'calendar') {
         renderCalendarView(matchingRows);
     } else if (currentView === 'gantt') {
         renderGanttView(matchingRows);
@@ -919,3 +936,568 @@ function renderGanttView(matchingRows) {
 
     tableContainer.innerHTML = html;
 }
+
+// ============================================================================
+// VISTA EXPRESS: BOTONERA DE TAREAS RECIENTES (ÚLTIMAS 2 SEMANAS)
+// ============================================================================
+
+/**
+ * Carga desde el servidor las imputaciones de las dos últimas semanas.
+ */
+function loadExpressTimesheets(forceReload) {
+    if (isExpressLoading && !forceReload) return;
+
+    const loadingEl = document.getElementById('express-loading-state');
+    const gridEl = document.getElementById('express-grid-container');
+    const emptyEl = document.getElementById('express-empty-state');
+
+    if (expressTimesheets && !forceReload) {
+        renderExpressView();
+        return;
+    }
+
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (gridEl) gridEl.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    isExpressLoading = true;
+
+    // Calcular rango de 2 semanas: desde hace 14 días (o lunes de hace 2 semanas) hasta hoy
+    const today = new Date();
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
+
+    const twoWeeksAgo = new Date(today);
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(twoWeeksAgo) : twoWeeksAgo.toISOString().split('T')[0];
+
+    fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
+        .then(res => {
+            if (!res.ok) throw new Error('Error al cargar imputaciones de las últimas 2 semanas');
+            return res.json();
+        })
+        .then(data => {
+            expressTimesheets = Array.isArray(data) ? data : [];
+            isExpressLoading = false;
+            if (loadingEl) loadingEl.classList.add('hidden');
+            if (gridEl) gridEl.classList.remove('hidden');
+            renderExpressView();
+        })
+        .catch(err => {
+            console.error('[PlanesGo Express] Error:', err);
+            isExpressLoading = false;
+            if (loadingEl) loadingEl.classList.add('hidden');
+            if (gridEl) gridEl.classList.remove('hidden');
+            expressTimesheets = expressTimesheets || [];
+            renderExpressView();
+        });
+}
+
+/**
+ * Formatea una fecha para mostrar en las tarjetas de la botonera.
+ */
+function formatCardDate(dateStr) {
+    if (!dateStr) return '';
+    const today = new Date();
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
+    if (dateStr === todayStr) return 'Hoy';
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = (typeof formatISODate === 'function') ? formatISODate(yesterday) : yesterday.toISOString().split('T')[0];
+    if (dateStr === yesterdayStr) return 'Ayer';
+
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+    }
+    return dateStr;
+}
+
+/**
+ * Renderiza la cuadrícula de la botonera Express con las tareas de las últimas 2 semanas.
+ */
+function renderExpressView() {
+    const gridEl = document.getElementById('express-grid-container');
+    const emptyEl = document.getElementById('express-empty-state');
+    const countBadge = document.getElementById('express-tasks-count-badge');
+    if (!gridEl) return;
+
+    // Si aún no hemos cargado los datos de las últimas 2 semanas, disparar la carga
+    if (!expressTimesheets && !isExpressLoading) {
+        loadExpressTimesheets();
+        return;
+    }
+
+    const today = new Date();
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
+
+    // Filtros activos actuales
+    const searchInput = document.getElementById('filter-search');
+    const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    const sidebarEmployeeSelect = document.getElementById('sidebar-employee-select');
+    const employeeSelect = document.getElementById('filter-employee');
+    const employeeVal = (sidebarEmployeeSelect ? sidebarEmployeeSelect.value : (employeeSelect ? employeeSelect.value : '')).toLowerCase().trim();
+
+    const targetProjectId = activeSidebarProjectId;
+    const targetProjectName = (typeof activeSidebarProjectName !== 'undefined' ? activeSidebarProjectName : '').toLowerCase().trim();
+
+    // 1. Recopilar datos de expressTimesheets y de las filas actuales del DOM
+    const allEntries = [];
+
+    if (Array.isArray(expressTimesheets)) {
+        expressTimesheets.forEach(ts => {
+            const empName = (ts.employee_id && ts.employee_id.name) ? ts.employee_id.name :
+                            ((ts.user_id && ts.user_id.name) ? ts.user_id.name : '');
+            allEntries.push({
+                id: ts.id,
+                date: ts.date,
+                projectId: ts.project_id ? ts.project_id.id : 0,
+                projectName: ts.project_id ? (ts.project_id.name || '') : '',
+                taskId: ts.task_id ? ts.task_id.id : 0,
+                taskName: ts.task_id ? (ts.task_id.name || '') : '',
+                desc: ts.name || '',
+                hours: typeof ts.unit_amount === 'number' ? ts.unit_amount : 0,
+                employee: empName,
+                isTimerRunning: Boolean(ts.is_timer_running)
+            });
+        });
+    }
+
+    // Integrar filas del DOM (incluidas imputaciones creadas u optimistas hoy)
+    const existingIds = new Set(allEntries.map(e => String(e.id)));
+    document.querySelectorAll('#timesheet-table .timesheet-row').forEach(row => {
+        const id = row.dataset.id;
+        if (id && !existingIds.has(String(id))) {
+            allEntries.push({
+                id: id,
+                date: row.dataset.date,
+                projectId: parseInt(row.dataset.projectId, 10) || 0,
+                projectName: row.dataset.projectName || row.dataset.project || '',
+                taskId: parseInt(row.dataset.taskId, 10) || 0,
+                taskName: row.dataset.taskName || row.dataset.task || '',
+                desc: row.dataset.desc || '',
+                hours: parseFloat(row.dataset.hours) || 0,
+                employee: row.dataset.employee || '',
+                isTimerRunning: row.dataset.timerRunning === 'true'
+            });
+        }
+    });
+
+    // 2. Comprobar estado actual del temporizador
+    const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
+
+    // 3. Agrupar por tarea única (o proyecto si no hay tarea)
+    const taskMap = new Map();
+
+    allEntries.forEach(entry => {
+        const emp = (entry.employee || '').toLowerCase();
+        if (employeeVal) {
+            const matchEmp = emp.includes(employeeVal) || employeeVal.includes(emp) || (entry.isTimerRunning && (emp === 'yo' || !emp));
+            if (!matchEmp) return;
+        }
+
+        // Filtro por proyecto del sidebar
+        const pIdStr = String(entry.projectId || '');
+        const pNameLower = (entry.projectName || '').toLowerCase();
+        if (targetProjectId && targetProjectId !== '0') {
+            if (pIdStr !== String(targetProjectId)) {
+                if (!targetProjectName || !pNameLower.includes(targetProjectName)) return;
+            }
+        } else if (targetProjectName) {
+            if (!pNameLower.includes(targetProjectName)) return;
+        }
+
+        // Filtro por buscador de texto
+        if (searchVal) {
+            const descLower = (entry.desc || '').toLowerCase();
+            const taskLower = (entry.taskName || '').toLowerCase();
+            const projLower = (entry.projectName || '').toLowerCase();
+            if (!descLower.includes(searchVal) && !taskLower.includes(searchVal) && !projLower.includes(searchVal)) {
+                return;
+            }
+        }
+
+        const pId = entry.projectId || 0;
+        const tId = entry.taskId || 0;
+        if (!pId) return;
+
+        const key = `${pId}_${tId}`;
+
+        if (!taskMap.has(key)) {
+            taskMap.set(key, {
+                key: key,
+                projectId: pId,
+                projectName: entry.projectName || `Proyecto #${pId}`,
+                taskId: tId,
+                taskName: entry.taskName || (tId ? `Tarea #${tId}` : 'General (Sin tarea)'),
+                lastDate: entry.date || '',
+                lastDescription: entry.desc || '',
+                lastTimesheetId: entry.id,
+                totalHours: 0,
+                todayTimesheetId: (entry.date === todayStr) ? entry.id : null,
+                todayHours: (entry.date === todayStr) ? entry.hours : 0,
+                hasTodayEntry: (entry.date === todayStr)
+            });
+        }
+
+        const item = taskMap.get(key);
+        item.totalHours += (entry.hours || 0);
+
+        if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
+            item.lastDate = entry.date;
+            item.lastDescription = entry.desc || item.lastDescription;
+            item.lastTimesheetId = entry.id;
+        }
+
+        if (entry.date === todayStr) {
+            item.hasTodayEntry = true;
+            item.todayTimesheetId = entry.id;
+            item.todayHours = Math.max(item.todayHours, entry.hours);
+        }
+    });
+
+    // Asegurarse de que si hay un temporizador activo en marcha, su tarea aparezca en la botonera
+    if (timerState && timerState.projectId) {
+        const activeKey = `${timerState.projectId}_${timerState.taskId || 0}`;
+        if (!taskMap.has(activeKey)) {
+            taskMap.set(activeKey, {
+                key: activeKey,
+                projectId: timerState.projectId,
+                projectName: timerState.projectName || `Proyecto #${timerState.projectId}`,
+                taskId: timerState.taskId || 0,
+                taskName: timerState.taskName || (timerState.taskId ? `Tarea #${timerState.taskId}` : 'General (Sin tarea)'),
+                lastDate: timerState.date || todayStr,
+                lastDescription: timerState.description || '',
+                lastTimesheetId: timerState.timesheetId,
+                totalHours: 0,
+                todayTimesheetId: timerState.timesheetId,
+                todayHours: 0,
+                hasTodayEntry: (timerState.date === todayStr)
+            });
+        }
+    }
+
+    const tasks = Array.from(taskMap.values());
+
+    // Marcar si está corriendo actualmente
+    tasks.forEach(t => {
+        let isRunning = false;
+        if (timerState && timerState.status === 'running') {
+            if (t.todayTimesheetId && timerState.timesheetId && String(t.todayTimesheetId) === String(timerState.timesheetId)) {
+                isRunning = true;
+            } else if (t.lastTimesheetId && timerState.timesheetId && String(t.lastTimesheetId) === String(timerState.timesheetId)) {
+                isRunning = true;
+            } else if (t.taskId && timerState.taskId && t.taskId === timerState.taskId) {
+                isRunning = true;
+            } else if (!t.taskId && !timerState.taskId && t.projectId === timerState.projectId) {
+                isRunning = true;
+            }
+        }
+        t.isRunning = isRunning;
+    });
+
+    // Ordenación: 1º En marcha, 2º Fecha más reciente desc, 3º Horas hoy desc
+    tasks.sort((a, b) => {
+        if (a.isRunning && !b.isRunning) return -1;
+        if (!a.isRunning && b.isRunning) return 1;
+        if (a.lastDate > b.lastDate) return -1;
+        if (a.lastDate < b.lastDate) return 1;
+        return (b.todayHours || 0) - (a.todayHours || 0);
+    });
+
+    if (countBadge) {
+        countBadge.textContent = `${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'}`;
+    }
+
+    if (tasks.length === 0) {
+        gridEl.innerHTML = '';
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    // Tiempo transcurrido formateado para el timer activo
+    let liveClockStr = '00:00:00';
+    if (timerState) {
+        const totalMs = (timerState.accumulatedMs || 0) + (timerState.status === 'running' && timerState.lastStartTime ? (Date.now() - timerState.lastStartTime) : 0);
+        if (typeof formatElapsedMs === 'function') {
+            liveClockStr = formatElapsedMs(totalMs);
+        }
+    }
+
+    let cardsHtml = '';
+    tasks.forEach(item => {
+        const safeProj = escapeHtml(item.projectName);
+        const safeTask = escapeHtml(item.taskName);
+        const safeDesc = escapeHtml(item.lastDescription);
+
+        let dateBadgeHtml = '';
+        if (item.hasTodayEntry) {
+            dateBadgeHtml = `
+                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                    <span>Hoy</span>
+                    ${item.todayHours > 0 ? `<span class="font-mono">(${item.todayHours.toFixed(2)}h)</span>` : ''}
+                </span>
+            `;
+        } else if (item.lastDate) {
+            dateBadgeHtml = `
+                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80" title="Última fecha: ${item.lastDate}. Se duplicará para hoy al pulsar">
+                    <svg class="w-2.5 h-2.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/></svg>
+                    <span>${formatCardDate(item.lastDate)}</span>
+                </span>
+            `;
+        }
+
+        const isRunning = item.isRunning;
+        const cardBorderClass = isRunning 
+            ? 'border-emerald-400 ring-2 ring-emerald-300 shadow-md bg-emerald-50/25'
+            : 'border-slate-200/80 hover:border-sky-300 hover:shadow-md bg-white';
+
+        cardsHtml += `
+            <div class="express-card group relative rounded-2xl border ${cardBorderClass} p-4 transition-all duration-150 flex flex-col justify-between cursor-pointer select-none"
+                 role="button" tabindex="0"
+                 data-project-id="${item.projectId}"
+                 data-project-name="${escapeAttr(item.projectName)}"
+                 data-task-id="${item.taskId || 0}"
+                 data-task-name="${escapeAttr(item.taskName)}"
+                 data-description="${escapeAttr(item.lastDescription)}"
+                 data-timesheet-id="${item.lastTimesheetId || 0}"
+                 data-today-timesheet-id="${item.todayTimesheetId || 0}"
+                 data-today-hours="${item.todayHours || 0}"
+                 data-last-date="${item.lastDate || ''}"
+                 data-has-today="${item.hasTodayEntry ? 'true' : 'false'}"
+                 onclick="handleExpressCardClick(this)"
+                 onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleExpressCardClick(this); }">
+                
+                <!-- Cabecera de la tarjeta: Proyecto y Estado/Fecha -->
+                <div class="flex items-start justify-between gap-2">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-sky-50 text-sky-800 border border-sky-100 truncate max-w-[62%]" title="${safeProj}">
+                        ${safeProj}
+                    </span>
+                    <div class="shrink-0">
+                        <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            <span>EN MARCHA</span>
+                        </span>
+                        <span class="express-badge-idle ${isRunning ? 'hidden' : ''}">
+                            ${dateBadgeHtml}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Cuerpo de la tarjeta: Tarea y Descripción previa -->
+                <div class="my-2.5">
+                    <h4 class="text-sm font-bold text-slate-800 group-hover:text-sky-700 leading-snug line-clamp-2 transition-colors" title="${safeTask}">
+                        ${safeTask}
+                    </h4>
+                    <p class="text-xs text-slate-500 line-clamp-2 italic font-normal mt-1 min-h-[1.75rem]" title="${safeDesc}">
+                        ${safeDesc || '<span class="text-slate-300 not-italic">Sin descripción previa</span>'}
+                    </p>
+                </div>
+
+                <!-- Pie de la tarjeta: Métricas / Reloj y Botón de Acción -->
+                <div class="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 mt-auto">
+                    <div class="min-w-0">
+                        <div class="express-live-clock-container ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 text-emerald-800 font-mono font-bold text-xs bg-emerald-100/90 px-2 py-0.5 rounded-lg border border-emerald-200">
+                            <span class="relative flex h-1.5 w-1.5">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                            <span class="express-live-clock font-mono font-bold text-emerald-900">${liveClockStr}</span>
+                        </div>
+                        <div class="express-hours-summary ${isRunning ? 'hidden' : ''} text-[11px] text-slate-400 font-medium">
+                            <span>2 sem: </span>
+                            <span class="font-bold text-slate-600 font-mono">${item.totalHours.toFixed(2)}h</span>
+                        </div>
+                    </div>
+
+                    <div class="shrink-0">
+                        <button type="button" class="express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${isRunning ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white'}">
+                            ${isRunning ? `
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6"/></svg>
+                                <span>Pausar</span>
+                            ` : `
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                <span>${item.hasTodayEntry ? 'Reanudar' : 'Iniciar'}</span>
+                            `}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    gridEl.innerHTML = cardsHtml;
+}
+
+/**
+ * Gestiona el click en una tarjeta de la botonera Express.
+ * Inicia el cronómetro deteniendo el anterior sin mostrar modales.
+ * Si la fecha de la imputación es anterior a hoy, realiza un duplicado automático para hoy.
+ */
+function handleExpressCardClick(cardEl) {
+    if (!cardEl) return;
+    const pId = parseInt(cardEl.dataset.projectId, 10) || 0;
+    const pName = cardEl.dataset.projectName || '';
+    const tId = parseInt(cardEl.dataset.taskId, 10) || 0;
+    const tName = cardEl.dataset.taskName || '';
+    const desc = cardEl.dataset.description || '';
+    const tsId = parseInt(cardEl.dataset.timesheetId, 10) || 0;
+    const todayTsId = parseInt(cardEl.dataset.todayTimesheetId, 10) || 0;
+    const todayHours = parseFloat(cardEl.dataset.todayHours) || 0;
+    const hasToday = (cardEl.dataset.hasToday === 'true') || Boolean(todayTsId);
+
+    const current = (typeof getTimerState === 'function') ? getTimerState() : null;
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
+
+    // Verificar si esta tarjeta es la que está activa
+    let isThisCardActive = false;
+    if (current) {
+        if (current.timesheetId && (current.timesheetId === todayTsId || current.timesheetId === tsId)) {
+            isThisCardActive = true;
+        } else if (tId && current.taskId && current.taskId === tId) {
+            isThisCardActive = true;
+        } else if (!tId && !current.taskId && current.projectId === pId) {
+            isThisCardActive = true;
+        }
+    }
+
+    if (isThisCardActive) {
+        // Pausar o reanudar el cronómetro actual
+        if (typeof togglePauseTimer === 'function') {
+            togglePauseTimer();
+        }
+        return;
+    }
+
+    // Si había otro cronómetro en marcha, startWorkTimer lo detiene automáticamente (stopPreviousRunningTimer).
+    // Comprobamos si tiene fecha anterior a hoy:
+    if (!hasToday) {
+        // La fecha es anterior a hoy (o no tiene registro hoy):
+        // Hacemos el duplicado para poner la fecha de hoy, iniciando el cronómetro sin abrir modales
+        const initialDesc = desc || 'Trabajo en curso';
+        if (typeof startWorkTimer === 'function') {
+            startWorkTimer(
+                pId,
+                pName,
+                tId || null,
+                tName,
+                initialDesc,
+                null, // null fuerza creación de nueva línea para hoy
+                0,    // 0 horas acumuladas
+                todayStr,
+                true  // fromModal = true: NO abre modal ni ventana de detalle
+            );
+        }
+        if (typeof showToast === 'function') {
+            showToast(`⏱️ Tarea duplicada para hoy. Cronómetro iniciado en "${pName}"`, 'success');
+        }
+    } else {
+        // Ya tiene imputación para hoy:
+        // Iniciar / reanudar en la imputación de hoy sin abrir modales
+        const targetTsId = todayTsId || tsId;
+        const accumMs = Math.round(todayHours * 3600 * 1000);
+        if (typeof startWorkTimer === 'function') {
+            startWorkTimer(
+                pId,
+                pName,
+                tId || null,
+                tName,
+                desc,
+                targetTsId,
+                accumMs,
+                todayStr,
+                true // fromModal = true: NO abre modal ni ventana de detalle
+            );
+        }
+        if (typeof showToast === 'function') {
+            showToast(`⏱️ Cronómetro iniciado en "${pName}"`, 'success');
+        }
+    }
+
+    // Refrescar el estado visual de la botonera express de inmediato
+    setTimeout(() => {
+        updateExpressTimerState();
+    }, 50);
+}
+
+/**
+ * Sincroniza en tiempo real el reloj y las clases activas de la botonera Express.
+ */
+function updateExpressTimerState() {
+    const current = (typeof getTimerState === 'function') ? getTimerState() : null;
+    const isRunning = current && current.status === 'running';
+    const totalMs = current ? ((current.accumulatedMs || 0) + (isRunning && current.lastStartTime ? (Date.now() - current.lastStartTime) : 0)) : 0;
+    const formattedClock = (typeof formatElapsedMs === 'function') ? formatElapsedMs(totalMs) : '00:00:00';
+
+    document.querySelectorAll('.express-card').forEach(card => {
+        const pId = parseInt(card.dataset.projectId, 10) || 0;
+        const tId = parseInt(card.dataset.taskId, 10) || 0;
+        const tsId = parseInt(card.dataset.timesheetId, 10) || 0;
+        const todayTsId = parseInt(card.dataset.todayTimesheetId, 10) || 0;
+
+        let isMatch = false;
+        if (current) {
+            if (current.timesheetId && (current.timesheetId === todayTsId || current.timesheetId === tsId)) {
+                isMatch = true;
+            } else if (tId && current.taskId && current.taskId === tId) {
+                isMatch = true;
+            } else if (!tId && !current.taskId && current.projectId === pId) {
+                isMatch = true;
+            }
+        }
+
+        const clockEl = card.querySelector('.express-live-clock');
+        const clockContainer = card.querySelector('.express-live-clock-container');
+        const hoursSummary = card.querySelector('.express-hours-summary');
+        const badgeRunning = card.querySelector('.express-badge-running');
+        const badgeIdle = card.querySelector('.express-badge-idle');
+        const btnAction = card.querySelector('.express-btn-action');
+
+        if (isMatch && isRunning) {
+            card.classList.add('border-emerald-400', 'ring-2', 'ring-emerald-300', 'shadow-md', 'bg-emerald-50/25');
+            card.classList.remove('border-slate-200/80', 'bg-white');
+
+            if (clockEl) clockEl.textContent = formattedClock;
+            if (clockContainer) clockContainer.classList.remove('hidden');
+            if (hoursSummary) hoursSummary.classList.add('hidden');
+            if (badgeRunning) badgeRunning.classList.remove('hidden');
+            if (badgeIdle) badgeIdle.classList.add('hidden');
+
+            if (btnAction) {
+                btnAction.className = 'express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs bg-amber-500 hover:bg-amber-600 text-white';
+                btnAction.innerHTML = `
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6"/></svg>
+                    <span>Pausar</span>
+                `;
+            }
+        } else {
+            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-300', 'shadow-md', 'bg-emerald-50/25');
+            card.classList.add('border-slate-200/80', 'bg-white');
+
+            if (clockContainer) clockContainer.classList.add('hidden');
+            if (hoursSummary) hoursSummary.classList.remove('hidden');
+            if (badgeRunning) badgeRunning.classList.add('hidden');
+            if (badgeIdle) badgeIdle.classList.remove('hidden');
+
+            if (btnAction) {
+                const hasToday = card.dataset.hasToday === 'true';
+                btnAction.className = 'express-btn-action inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white';
+                btnAction.innerHTML = `
+                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <span>${hasToday ? 'Reanudar' : 'Iniciar'}</span>
+                `;
+            }
+        }
+    });
+}
+
+// Exportar globalmente para vistas y temporizador
+window.switchView = switchView;
+window.loadExpressTimesheets = loadExpressTimesheets;
+window.renderExpressView = renderExpressView;
+window.handleExpressCardClick = handleExpressCardClick;
+window.updateExpressTimerState = updateExpressTimerState;
+

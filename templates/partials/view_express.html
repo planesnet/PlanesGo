@@ -1,0 +1,60 @@
+{{ define "view_express" }}
+<!-- VISTA: Express (Botonera de Proyectos y Tareas Recientes - Últimas 2 Semanas) -->
+<div id="view-container-express" class="hidden space-y-4">
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5">
+        <!-- Cabecera de la Botonera Express -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-4 border-b border-slate-100">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 border border-amber-200/70 flex items-center justify-center shrink-0 shadow-2xs">
+                    <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="font-bold text-slate-800 text-sm sm:text-base">Botonera Express</span>
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 uppercase tracking-wider">Últimas 2 Semanas</span>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-0.5">
+                        Cambio rápido entre tareas. Pulsa en cualquier botón para alternar el cronómetro. Si la tarea es de días anteriores, se duplica automáticamente para hoy.
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2 self-start sm:self-auto">
+                <span id="express-tasks-count-badge" class="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                    0 tareas
+                </span>
+                <button type="button" onclick="loadExpressTimesheets(true)" class="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition cursor-pointer" title="Refrescar tareas recientes">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Spinner de Carga -->
+        <div id="express-loading-state" class="hidden py-12 text-center">
+            <div class="inline-block w-8 h-8 border-3 border-sky-600 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-xs text-slate-500 font-medium mt-3">Cargando tareas de las dos últimas semanas...</p>
+        </div>
+
+        <!-- Contenedor de la Cuadrícula / Botonera -->
+        <div id="express-grid-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+            <!-- Las tarjetas de la botonera se renderizan dinámicamente -->
+        </div>
+
+        <!-- Estado Vacío -->
+        <div id="express-empty-state" class="hidden py-12 text-center">
+            <div class="w-12 h-12 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+            </div>
+            <h3 class="text-sm font-bold text-slate-700">No se encontraron tareas recientes</h3>
+            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                No hay imputaciones en las dos últimas semanas con los filtros actuales.
+            </p>
+        </div>
+    </div>
+</div>
+{{ end }}

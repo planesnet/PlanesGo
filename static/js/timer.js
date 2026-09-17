@@ -780,6 +780,11 @@ function updateTimerTick() {
             })
         }).catch(() => {});
     }
+
+    // Mantener sincronizado el estado visual y reloj en vivo de la botonera Express
+    if (typeof updateExpressTimerState === 'function') {
+        updateExpressTimerState();
+    }
 }
 
 /**
@@ -1951,6 +1956,10 @@ function updateAllRowTimerButtonStates() {
             if (stopBtn) stopBtn.classList.add('hidden');
         }
     });
+
+    if (typeof updateExpressTimerState === 'function') {
+        updateExpressTimerState();
+    }
 }
 
 window.startWorkTimer = startWorkTimer;

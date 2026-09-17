@@ -80,6 +80,15 @@ func TestIndexTemplateParsingAndRendering(t *testing.T) {
 	if !bytes.Contains([]byte(rendered), []byte("col-project-cell")) {
 		t.Fatalf("La celda de la columna proyecto debe contener la clase 'col-project-cell'")
 	}
+	if !bytes.Contains([]byte(rendered), []byte("btn-view-express")) {
+		t.Fatalf("El botón 'btn-view-express' debe estar presente en el HTML renderizado")
+	}
+	if !bytes.Contains([]byte(rendered), []byte("view-container-express")) {
+		t.Fatalf("El contenedor 'view-container-express' debe estar presente en el HTML renderizado")
+	}
+	if !bytes.Contains([]byte(rendered), []byte("express-grid-container")) {
+		t.Fatalf("La cuadrícula 'express-grid-container' debe estar presente en el HTML renderizado")
+	}
 }
 
 func TestSettingsTemplateRendering(t *testing.T) {
