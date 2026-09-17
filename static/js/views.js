@@ -1880,7 +1880,7 @@ function updateExpressTimerState() {
 
         if (isMatch && isRunning) {
             card.classList.add('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200');
-            card.classList.remove('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100');
+            card.classList.remove('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100', 'border-amber-500/80', 'bg-amber-950/30');
 
             if (clockEl) clockEl.textContent = formattedClock;
             if (clockContainer) clockContainer.classList.remove('hidden');
@@ -1892,8 +1892,22 @@ function updateExpressTimerState() {
                 btnAction.className = 'express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold';
                 btnAction.textContent = 'PAUSAR';
             }
+        } else if (isMatch && current && current.status === 'paused') {
+            card.classList.add('border-amber-500/80', 'ring-2', 'ring-amber-500/40', 'bg-amber-950/30', 'text-amber-100');
+            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'border-slate-700/80', 'bg-slate-800/90');
+
+            if (clockEl) clockEl.textContent = formattedClock;
+            if (clockContainer) clockContainer.classList.remove('hidden');
+            if (hoursSummary) hoursSummary.classList.add('hidden');
+            if (badgeRunning) badgeRunning.classList.add('hidden');
+            if (badgeIdle) badgeIdle.classList.remove('hidden');
+
+            if (btnAction) {
+                btnAction.className = 'express-btn-action inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase transition bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold';
+                btnAction.textContent = 'REANUDAR';
+            }
         } else {
-            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200');
+            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'border-amber-500/80', 'bg-amber-950/30', 'text-amber-100');
             card.classList.add('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100');
 
             if (clockContainer) clockContainer.classList.add('hidden');

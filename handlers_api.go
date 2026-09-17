@@ -734,6 +734,9 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		userUID = client.UID()
 	}
 
+	nowMs := time.Now().UnixMilli()
+	state.setLastConfirmedAt(userUID, nowMs)
+
 	if activeTimer != nil {
 		if activeTimer.EmployeeName == "" {
 			if session != nil && session.UserName != "" {
@@ -959,6 +962,24 @@ func (state *AppState) handleAPITimerResume(w http.ResponseWriter, r *http.Reque
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+	nowMs := time.Now().UnixMilli()
+	state.setLastConfirmedAt(userUID, nowMs)
+	state.resumeActiveTimer(userUID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }

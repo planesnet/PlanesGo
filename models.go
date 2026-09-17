@@ -80,7 +80,7 @@ func (state *AppState) getActiveTimer(userUID int) *odoo.ActiveTimer {
 		return nil
 	}
 	timer, ok := state.activeTimers[userUID]
-	if !ok || timer == nil || !timer.IsRunning {
+	if !ok || timer == nil {
 		return nil
 	}
 	// Devolver copia superficial
@@ -102,6 +102,16 @@ func (state *AppState) pauseActiveTimer(userUID int) {
 	if state.activeTimers != nil {
 		if t, ok := state.activeTimers[userUID]; ok && t != nil {
 			t.IsRunning = false
+		}
+	}
+}
+
+func (state *AppState) resumeActiveTimer(userUID int) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers != nil {
+		if t, ok := state.activeTimers[userUID]; ok && t != nil {
+			t.IsRunning = true
 		}
 	}
 }
