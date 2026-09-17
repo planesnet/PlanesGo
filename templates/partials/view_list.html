@@ -31,6 +31,7 @@
                             data-task-name="{{.TaskID.Name}}"
                             data-desc="{{.Name}}"
                             data-hours="{{.UnitAmount}}"
+                            data-partner-id="{{.PartnerID.ID}}"
                             data-invoiced="{{if .IsInvoiced}}true{{else}}false{{end}}">
                             <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
                                 <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
@@ -49,9 +50,16 @@
                                         onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
                                         data-project-name="{{.ProjectID.Name}}"
                                         data-project-id="{{.ProjectID.ID}}"
-                                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
+                                        class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
                                         title="Filtrar por este proyecto">
-                                    {{.ProjectID.Name}}
+                                    {{if gt .PartnerID.ID 0}}
+                                    <img src="/api/partner/avatar?id={{.PartnerID.ID}}"
+                                         alt=""
+                                         class="w-4 h-4 rounded-full object-cover bg-white border border-slate-200 shrink-0"
+                                         loading="lazy"
+                                         onerror="this.style.display='none'">
+                                    {{end}}
+                                    <span>{{.ProjectID.Name}}</span>
                                 </button>
                                 {{else}}
                                 <span class="text-slate-400 text-xs">-</span>

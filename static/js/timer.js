@@ -144,7 +144,7 @@ function stopPreviousRunningTimer(prevTimer) {
 /**
  * Inicia o reanuda un temporizador de trabajo (admite imputación existente y fecha de inicio)
  */
-function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal) {
+function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal, silent) {
     // Si no viene confirmado explícitamente desde el modal de imputación y no es reanudar una fila existente con timesheetId,
     // DEBE abrir el diálogo modal para que el usuario pueda revisar o modificar fecha, tarea y notas antes de iniciar
     if (!fromModal && !timesheetId) {
@@ -232,7 +232,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     startTimerTicker();
     updateAllRowTimerButtonStates();
 
-    if (typeof showToast === 'function') {
+    if (!silent && typeof showToast === 'function') {
         showToast(`⏱️ Cronómetro iniciado en "${state.projectName}"`, 'success');
     }
 

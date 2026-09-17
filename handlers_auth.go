@@ -41,6 +41,17 @@ func (state *AppState) handleGoogleAuth(w http.ResponseWriter, r *http.Request) 
 		SameSite: http.SameSiteLaxMode,
 	})
 
+	if nextParam := r.URL.Query().Get("next"); nextParam != "" && strings.HasPrefix(nextParam, "/") {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "oauth_next_target",
+			Value:    nextParam,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   300,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+
 	authURL := googleService.GetAuthURL(stateToken, redirectURI)
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 }
@@ -184,7 +195,19 @@ func (state *AppState) handleGoogleCallback(w http.ResponseWriter, r *http.Reque
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	targetURL := "/"
+	if nextCookie, err := r.Cookie("oauth_next_target"); err == nil && nextCookie.Value != "" && strings.HasPrefix(nextCookie.Value, "/") {
+		targetURL = nextCookie.Value
+		http.SetCookie(w, &http.Cookie{
+			Name:     "oauth_next_target",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+	}
+
+	http.Redirect(w, r, targetURL, http.StatusSeeOther)
 }
 
 // handleLogin muestra y procesa el inicio de sesión manual en Odoo o acceso vía Google
@@ -218,6 +241,7 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
 		errorQuery := r.URL.Query().Get("error")
+		nextQuery := r.URL.Query().Get("next")
 		data := LoginPageData{
 			Version:           Version,
 			URL:               DefaultOdooURL,
@@ -228,6 +252,7 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 			GoogleConfigured:  isGoogleConfigured,
 			GoogleConfigError: googleConfigError,
 			Error:             errorQuery,
+			Next:              nextQuery,
 		}
 		tmpl.Execute(w, data)
 		return
@@ -333,7 +358,16 @@ func (state *AppState) handleLogin(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteLaxMode,
 		})
 
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		targetURL := "/"
+		nextParam := r.FormValue("next")
+		if nextParam == "" {
+			nextParam = r.URL.Query().Get("next")
+		}
+		if nextParam != "" && strings.HasPrefix(nextParam, "/") {
+			targetURL = nextParam
+		}
+
+		http.Redirect(w, r, targetURL, http.StatusSeeOther)
 	}
 }
 

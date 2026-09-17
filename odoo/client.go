@@ -328,7 +328,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		limit = 200
 	}
 
-	// Campos base estándar + campos de facturación en Odoo 14 + estado de cronómetro
+	// Campos base estándar + campos de facturación en Odoo 14 + estado de cronómetro + partner
 	fields := []string{
 		"id",
 		"date",
@@ -338,6 +338,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"task_id",
 		"employee_id",
 		"user_id",
+		"partner_id",
 		"timesheet_invoice_id",
 		"billing_ref",
 		"is_timer_running",
@@ -366,7 +367,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
-			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado (manteniendo is_timer_running)
+			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado (manteniendo is_timer_running y partner_id)
 			fallbackFields := []string{
 				"id",
 				"date",
@@ -376,6 +377,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 				"task_id",
 				"employee_id",
 				"user_id",
+				"partner_id",
 				"timesheet_invoice_id",
 				"is_timer_running",
 			}

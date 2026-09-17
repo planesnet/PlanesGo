@@ -2,13 +2,31 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"pasigo/odoo"
+)
+
+type avatarCacheItem struct {
+	data        []byte
+	contentType string
+	etag        string
+	expiresAt   time.Time
+}
+
+var (
+	partnerAvatarCache   = make(map[int]avatarCacheItem)
+	partnerAvatarCacheMu sync.RWMutex
+	projectPartnerCache  = make(map[int]int)
+	projectPartnerMu     sync.RWMutex
 )
 
 // handleAPITimesheets gestiona GET (listar) y POST (crear) partes de horas
@@ -77,6 +95,18 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+
+		// Enriquecer imputaciones con PartnerID si viene vacío
+		projectPartnerMu.RLock()
+		for i := range entries {
+			if entries[i].PartnerID.ID == 0 && entries[i].ProjectID.ID > 0 {
+				if partID, ok := projectPartnerCache[entries[i].ProjectID.ID]; ok && partID > 0 {
+					entries[i].PartnerID = odoo.Many2One{ID: partID}
+				}
+			}
+		}
+		projectPartnerMu.RUnlock()
+
 		json.NewEncoder(w).Encode(entries)
 
 	case http.MethodPost:
@@ -462,6 +492,17 @@ func (state *AppState) handleAPIProjects(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Actualizar caché de relación proyecto -> partner
+	if len(projects) > 0 {
+		projectPartnerMu.Lock()
+		for _, p := range projects {
+			if p.ID > 0 && p.PartnerID.ID > 0 {
+				projectPartnerCache[p.ID] = p.PartnerID.ID
+			}
+		}
+		projectPartnerMu.Unlock()
+	}
+
 	json.NewEncoder(w).Encode(projects)
 }
 
@@ -807,3 +848,118 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
+
+// handleAPIVersion devuelve la versión actual de PlanesGo para auto-recarga PWA
+func (state *AppState) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	json.NewEncoder(w).Encode(map[string]string{
+		"version": Version,
+	})
+}
+
+// handleManifest sirve el manifiesto PWA con el tipo MIME correcto
+func (state *AppState) handleManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFile(w, r, "static/manifest.json")
+}
+
+// handleServiceWorker sirve sw.js permitiendo scope raíz "/"
+func (state *AppState) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript")
+	w.Header().Set("Service-Worker-Allowed", "/")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	http.ServeFile(w, r, "static/sw.js")
+}
+
+// handleAPIPartnerAvatar sirve y cachea agresivamente el logotipo del partner de Odoo
+func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimSpace(r.URL.Query().Get("id"))
+	partnerID, err := strconv.Atoi(idStr)
+	if err != nil || partnerID <= 0 {
+		http.Error(w, "ID de partner no válido", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Comprobar caché en memoria
+	partnerAvatarCacheMu.RLock()
+	cached, found := partnerAvatarCache[partnerID]
+	partnerAvatarCacheMu.RUnlock()
+
+	now := time.Now()
+	if found && now.Before(cached.expiresAt) {
+		// Validar ETag del cliente
+		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && ifNoneMatch == cached.etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", cached.contentType)
+		w.Header().Set("ETag", cached.etag)
+		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+		w.Write(cached.data)
+		return
+	}
+
+	// 2. Resolver URL base de Odoo
+	var session *SessionData
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+	odooCfg := state.resolveUserOdooConfig(session)
+	baseURL := strings.TrimRight(odooCfg.URL, "/")
+	if baseURL == "" {
+		baseURL = DefaultOdooURL
+	}
+
+	targetURL := fmt.Sprintf("%s/web/image?model=res.partner&id=%d&field=image_128", baseURL, partnerID)
+	req, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+	if reqErr != nil {
+		http.Error(w, "Error creando petición", http.StatusInternalServerError)
+		return
+	}
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, respErr := client.Do(req)
+	if respErr != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		// Servir fallback SVG neutral y guardar negativo breve
+		svgPlaceholder := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" /></svg>`)
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Write(svgPlaceholder)
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil || len(bodyBytes) == 0 {
+		http.Error(w, "Error leyendo imagen", http.StatusInternalServerError)
+		return
+	}
+
+	cType := resp.Header.Get("Content-Type")
+	if cType == "" || strings.Contains(cType, "text/html") {
+		cType = "image/png"
+	}
+	etag := fmt.Sprintf(`"%x"`, md5.Sum(bodyBytes))
+
+	// Almacenar en caché en memoria por 24 horas
+	item := avatarCacheItem{
+		data:        bodyBytes,
+		contentType: cType,
+		etag:        etag,
+		expiresAt:   now.Add(24 * time.Hour),
+	}
+	partnerAvatarCacheMu.Lock()
+	partnerAvatarCache[partnerID] = item
+	partnerAvatarCacheMu.Unlock()
+
+	w.Header().Set("Content-Type", cType)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Write(bodyBytes)
+}
+

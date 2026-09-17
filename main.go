@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.22"
+var Version = "1.2.23"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -33,9 +33,10 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	fs := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 
-	// Dashboard principal y vista Express standalone (pop-out)
+	// Dashboard principal y vista Express standalone (pop-out de escritorio o móvil en /m)
 	mux.HandleFunc("/", state.handleDashboard)
 	mux.HandleFunc("/express", state.handleExpressStandalone)
+	mux.HandleFunc("/m", state.handleExpressStandalone)
 
 	// Autenticación
 	mux.HandleFunc("/login", state.handleLogin)
@@ -60,6 +61,12 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/api/timer/pause", state.handleAPITimerPause)
 	mux.HandleFunc("/api/timer/resume", state.handleAPITimerResume)
 	mux.HandleFunc("/api/timer/stop", state.handleAPITimerStop)
+	mux.HandleFunc("/api/version", state.handleAPIVersion)
+	mux.HandleFunc("/api/partner/avatar", state.handleAPIPartnerAvatar)
+
+	// PWA Manifest y Service Worker
+	mux.HandleFunc("/manifest.json", state.handleManifest)
+	mux.HandleFunc("/sw.js", state.handleServiceWorker)
 
 	// Health check y ping
 	mux.HandleFunc("/health", state.handleHealth)

@@ -94,6 +94,9 @@
     {{ template "footer" . }}
 
     <!-- Scripts Modularizados de la Aplicación con Cache-Busting -->
+    <script>
+        window.projectPartnerMap = {{if .ProjectPartnerMapJSON}}{{.ProjectPartnerMapJSON}}{{else}}{}{{end}};
+    </script>
     <script src="/static/js/utils.js?v={{.Version}}"></script>
     <script src="/static/js/timer.js?v={{.Version}}"></script>
     <script src="/static/js/sidebar.js?v={{.Version}}"></script>

@@ -3,10 +3,10 @@
 <div class="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-end space-x-2.5 sm:space-x-3">
     <!-- Botonera estilo Odoo con tipos de vista -->
     <div class="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs" role="group" aria-label="Selector de vistas">
-        <!-- Botón Vista Express (Botonera Flotante) -->
-        <button type="button" id="btn-view-express" onclick="toggleExpressFloating()"
+        <!-- Botón Vista Express (Botonera Desacoplada de Escritorio) -->
+        <button type="button" id="btn-view-express" onclick="openExpressPopout()"
                 class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
-                title="Botonera Express Flotante (Tareas Recientes)">
+                title="Botonera Express Desacoplada (Ventana flotante de escritorio)">
             <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>

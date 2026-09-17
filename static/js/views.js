@@ -1044,8 +1044,11 @@ function openExpressPopout() {
     if (win) {
         win.focus();
         closeExpressFloating();
-    } else if (typeof showToast === 'function') {
-        showToast('El navegador bloqueó la ventana emergente. Por favor, permite ventanas emergentes para PlanesGo.', 'warning');
+    } else {
+        toggleExpressFloating();
+        if (typeof showToast === 'function') {
+            showToast('El navegador bloqueó la ventana emergente. Se abrió la botonera flotante interna.', 'warning');
+        }
     }
 }
 
@@ -1163,9 +1166,9 @@ function loadExpressTimesheets(forceReload) {
     const today = new Date();
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(today) : today.toISOString().split('T')[0];
 
-    const twoWeeksAgo = new Date(today);
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(twoWeeksAgo) : twoWeeksAgo.toISOString().split('T')[0];
+    const fiveDaysAgo = new Date(today);
+    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+    const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(fiveDaysAgo) : fiveDaysAgo.toISOString().split('T')[0];
 
     fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
         .then(res => {
@@ -1245,11 +1248,17 @@ function renderExpressView() {
         expressTimesheets.forEach(ts => {
             const empName = (ts.employee_id && ts.employee_id.name) ? ts.employee_id.name :
                             ((ts.user_id && ts.user_id.name) ? ts.user_id.name : '');
+            const pId = ts.project_id ? ts.project_id.id : 0;
+            let partnerId = (ts.partner_id && ts.partner_id.id) ? ts.partner_id.id : 0;
+            if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                partnerId = window.projectPartnerMap[pId];
+            }
             allEntries.push({
                 id: ts.id,
                 date: ts.date,
-                projectId: ts.project_id ? ts.project_id.id : 0,
+                projectId: pId,
                 projectName: ts.project_id ? (ts.project_id.name || '') : '',
+                partnerId: partnerId,
                 taskId: ts.task_id ? ts.task_id.id : 0,
                 taskName: ts.task_id ? (ts.task_id.name || '') : '',
                 desc: ts.name || '',
@@ -1265,11 +1274,17 @@ function renderExpressView() {
     document.querySelectorAll('#timesheet-table .timesheet-row').forEach(row => {
         const id = row.dataset.id;
         if (id && !existingIds.has(String(id))) {
+            const pId = parseInt(row.dataset.projectId, 10) || 0;
+            let partnerId = parseInt(row.dataset.partnerId, 10) || 0;
+            if (!partnerId && pId && window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                partnerId = window.projectPartnerMap[pId];
+            }
             allEntries.push({
                 id: id,
                 date: row.dataset.date,
-                projectId: parseInt(row.dataset.projectId, 10) || 0,
+                projectId: pId,
                 projectName: row.dataset.projectName || row.dataset.project || '',
+                partnerId: partnerId,
                 taskId: parseInt(row.dataset.taskId, 10) || 0,
                 taskName: row.dataset.taskName || row.dataset.task || '',
                 desc: row.dataset.desc || '',
@@ -1282,7 +1297,7 @@ function renderExpressView() {
 
     const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
 
-    // 2. Agrupar por tarea única (o proyecto si no tiene tarea)
+    // 2. Agrupar por tarea única de la botonera
     const taskMap = new Map();
 
     allEntries.forEach(entry => {
@@ -1315,79 +1330,112 @@ function renderExpressView() {
 
         const pId = entry.projectId || 0;
         const tId = entry.taskId || 0;
+        const descClean = (entry.desc || '').trim();
+        const descKey = descClean.toLowerCase();
         if (!pId) return;
 
-        const key = `${pId}_${tId}`;
+        // Botonera: agrupamos por Proyecto + Tarea (o Proyecto + Descripción si no hay tarea)
+        // Regla: si hoy ya tengo parte de este proyecto y tarea, no repetir los de días anteriores
+        const key = tId > 0 ? `${pId}_${tId}` : `${pId}_0_${descKey}`;
+        const isToday = (entry.date === todayStr);
 
         if (!taskMap.has(key)) {
             taskMap.set(key, {
                 key: key,
                 projectId: pId,
                 projectName: entry.projectName || `Proyecto #${pId}`,
+                partnerId: entry.partnerId || 0,
                 taskId: tId,
-                // REGLA: Si la tarea no está informada, NO poner ninguna etiqueta ni texto de relleno
+                // REGLA: Si la tarea no está informada, NO poner etiqueta
                 taskName: (entry.taskName && entry.taskName.trim()) ? entry.taskName.trim() : '',
                 lastDate: entry.date || '',
-                lastDescription: entry.desc || '',
+                lastDescription: descClean,
                 lastTimesheetId: entry.id,
                 totalHours: 0,
-                todayTimesheetId: (entry.date === todayStr) ? entry.id : null,
-                todayHours: (entry.date === todayStr) ? entry.hours : 0,
-                hasTodayEntry: (entry.date === todayStr)
+                todayTimesheetId: isToday ? entry.id : null,
+                todayHours: isToday ? entry.hours : 0,
+                hasTodayEntry: isToday
             });
         }
 
         const item = taskMap.get(key);
         item.totalHours += (entry.hours || 0);
-
-        if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
-            item.lastDate = entry.date;
-            item.lastDescription = entry.desc || item.lastDescription;
-            item.lastTimesheetId = entry.id;
+        if (entry.partnerId && !item.partnerId) {
+            item.partnerId = entry.partnerId;
         }
 
-        if (entry.date === todayStr) {
+        if (isToday) {
+            // Prioridad absoluta a la imputación de hoy: oculta y reemplaza las referencias pasadas
             item.hasTodayEntry = true;
             item.todayTimesheetId = entry.id;
             item.todayHours = Math.max(item.todayHours, entry.hours);
+            item.lastDate = todayStr;
+            if (descClean) item.lastDescription = descClean;
+            item.lastTimesheetId = entry.id;
+        } else if (!item.hasTodayEntry) {
+            // Solo si aún NO tenemos imputación de hoy guardamos la más reciente de los últimos 5 días
+            if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
+                item.lastDate = entry.date;
+                if (descClean) item.lastDescription = descClean;
+                item.lastTimesheetId = entry.id;
+            }
         }
     });
 
     // Incluir tarea activa actual si existe
     if (timerState && timerState.projectId) {
-        const activeKey = `${timerState.projectId}_${timerState.taskId || 0}`;
+        const timerDescClean = (timerState.description || '').trim();
+        const pId = timerState.projectId;
+        const tId = timerState.taskId || 0;
+        const activeKey = tId > 0 ? `${pId}_${tId}` : `${pId}_0_${timerDescClean.toLowerCase()}`;
         if (!taskMap.has(activeKey)) {
+            let partnerId = 0;
+            if (window.projectPartnerMap && window.projectPartnerMap[pId]) {
+                partnerId = window.projectPartnerMap[pId];
+            }
             taskMap.set(activeKey, {
                 key: activeKey,
-                projectId: timerState.projectId,
-                projectName: timerState.projectName || `Proyecto #${timerState.projectId}`,
-                taskId: timerState.taskId || 0,
-                // REGLA: Si la tarea no está informada, NO poner etiqueta
+                projectId: pId,
+                projectName: timerState.projectName || `Proyecto #${pId}`,
+                partnerId: partnerId,
+                taskId: tId,
                 taskName: (timerState.taskName && timerState.taskName.trim()) ? timerState.taskName.trim() : '',
                 lastDate: timerState.date || todayStr,
-                lastDescription: timerState.description || '',
+                lastDescription: timerDescClean,
                 lastTimesheetId: timerState.timesheetId,
                 totalHours: 0,
                 todayTimesheetId: timerState.timesheetId,
                 todayHours: 0,
                 hasTodayEntry: (timerState.date === todayStr)
             });
+        } else {
+            const activeItem = taskMap.get(activeKey);
+            activeItem.todayTimesheetId = timerState.timesheetId;
+            activeItem.hasTodayEntry = true;
+            activeItem.lastDate = todayStr;
+            if (timerDescClean) activeItem.lastDescription = timerDescClean;
         }
     }
 
     const tasks = Array.from(taskMap.values());
 
-    // Marcar si está corriendo
+    // Marcar si está corriendo (coincidencia por ID o por Proyecto + Tarea + Descripción)
     tasks.forEach(t => {
         let isRunning = false;
         if (timerState && timerState.status === 'running') {
+            const timerDesc = (timerState.description || '').trim().toLowerCase();
+            const tDesc = (t.lastDescription || '').trim().toLowerCase();
+            const descMatches = (!timerDesc && !tDesc) || (timerDesc === tDesc);
+
             if (t.todayTimesheetId && timerState.timesheetId && String(t.todayTimesheetId) === String(timerState.timesheetId)) {
                 isRunning = true;
             } else if (t.lastTimesheetId && timerState.timesheetId && String(t.lastTimesheetId) === String(timerState.timesheetId)) {
                 isRunning = true;
-            } else if (t.taskId && timerState.taskId && t.taskId === timerState.taskId) {
+            } else if (t.taskId && timerState.taskId && t.taskId === timerState.taskId && descMatches) {
                 isRunning = true;
-            } else if (!t.taskId && !timerState.taskId && t.projectId === timerState.projectId) {
+            } else if (!t.taskId && !timerState.taskId && t.projectId === timerState.projectId && descMatches) {
+                isRunning = true;
+            } else if (t.projectId === timerState.projectId && descMatches) {
                 isRunning = true;
             }
         }
@@ -1425,8 +1473,11 @@ function renderExpressView() {
     let cardsHtml = '';
     tasks.forEach(item => {
         const hasTask = item.taskName && item.taskName.trim().length > 0;
+        const hasDesc = item.lastDescription && item.lastDescription.trim().length > 0;
         const safeProj = escapeHtml(item.projectName);
         const safeTask = hasTask ? escapeHtml(item.taskName) : '';
+        // Lo que identifica la tecla es el nombre del proyecto y la descripción de la tarea realizada
+        const safeDesc = hasDesc ? escapeHtml(item.lastDescription) : (hasTask ? safeTask : 'Trabajo general');
 
         let dateBadgeHtml = '';
         if (item.hasTodayEntry) {
@@ -1443,6 +1494,11 @@ function renderExpressView() {
                 </span>
             `;
         }
+
+        const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
+        const partnerLogoHtml = partnerId > 0
+            ? `<img src="/api/partner/avatar?id=${partnerId}" alt="" class="w-4 h-4 sm:w-4.5 sm:h-4.5 rounded object-cover bg-slate-900 border border-slate-700/80 shrink-0 shadow-sm" loading="lazy" onerror="this.style.display='none'">`
+            : '';
 
         const isRunning = item.isRunning;
         const cardBorderClass = isRunning
@@ -1465,11 +1521,15 @@ function renderExpressView() {
                  onclick="handleExpressCardClick(this)"
                  onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleExpressCardClick(this); }">
                 
-                <!-- Encabezado de la tecla: Proyecto y Estado -->
-                <div class="flex items-center justify-between gap-1.5 mb-1">
-                    <span class="text-[10px] uppercase font-bold tracking-wider text-sky-400 truncate max-w-[70%]" title="${safeProj}">
-                        ${safeProj}
-                    </span>
+                <!-- Encabezado de la tecla: Logotipo Partner, Nombre del Proyecto y Estado -->
+                <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                    <div class="flex items-center space-x-1.5 min-w-0">
+                        ${partnerLogoHtml}
+                        <span class="w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-400 animate-ping' : 'bg-sky-400'} shrink-0"></span>
+                        <span class="text-[11px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
+                            ${safeProj}
+                        </span>
+                    </div>
                     <div class="shrink-0">
                         <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -1481,16 +1541,18 @@ function renderExpressView() {
                     </div>
                 </div>
 
-                <!-- Cuerpo de la tecla: Tarea (SOLO SI ESTÁ INFORMADA; si no, sin ninguna etiqueta) -->
-                ${hasTask ? `
-                <div class="mb-2">
-                    <h4 class="text-xs font-bold text-slate-100 group-hover:text-amber-300 leading-tight line-clamp-2 transition-colors" title="${safeTask}">
-                        ${safeTask}
+                <!-- Cuerpo de la tecla: MÁXIMA IMPORTANCIA A LA DESCRIPCIÓN DE LA TAREA REALIZADA -->
+                <div class="mb-2 space-y-0.5">
+                    <h4 class="text-xs sm:text-[13px] font-bold text-slate-100 group-hover:text-amber-300 leading-snug line-clamp-2 transition-colors" title="${safeDesc}">
+                        ${safeDesc}
                     </h4>
+                    ${hasTask ? `
+                    <div class="flex items-center space-x-1 text-[10px] text-slate-400 truncate pt-0.5" title="Tarea: ${safeTask}">
+                        <span class="text-slate-500 font-normal">Tarea:</span>
+                        <span class="font-medium text-slate-300 truncate">${safeTask}</span>
+                    </div>
+                    ` : ''}
                 </div>
-                ` : `
-                <div class="mb-1"></div>
-                `}
 
                 <!-- Pie de la tecla: Reloj / Horas y Botón de 1-clic -->
                 <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between gap-1 mt-auto">
@@ -1540,11 +1602,17 @@ function handleExpressCardClick(cardEl) {
     // Verificar si esta tarjeta es la que está activa
     let isThisCardActive = false;
     if (current) {
+        const cardDesc = (desc || '').trim().toLowerCase();
+        const currentDesc = (current.description || '').trim().toLowerCase();
+        const descMatches = (!currentDesc && !cardDesc) || (currentDesc === cardDesc);
+
         if (current.timesheetId && (current.timesheetId === todayTsId || current.timesheetId === tsId)) {
             isThisCardActive = true;
-        } else if (tId && current.taskId && current.taskId === tId) {
+        } else if (tId && current.taskId && current.taskId === tId && descMatches) {
             isThisCardActive = true;
-        } else if (!tId && !current.taskId && current.projectId === pId) {
+        } else if (!tId && !current.taskId && current.projectId === pId && descMatches) {
+            isThisCardActive = true;
+        } else if (current.projectId === pId && descMatches) {
             isThisCardActive = true;
         }
     }
@@ -1557,8 +1625,8 @@ function handleExpressCardClick(cardEl) {
     }
 
     if (!hasToday) {
-        // La fecha es anterior a hoy: duplicar para hoy e iniciar sin modales
-        const initialDesc = desc || 'Trabajo en curso';
+        // La fecha es anterior a hoy: duplicar para hoy e iniciar sin modales ni alertas
+        const initialDesc = desc || (tName ? tName : 'Trabajo en curso');
         if (typeof startWorkTimer === 'function') {
             startWorkTimer(
                 pId,
@@ -1569,14 +1637,12 @@ function handleExpressCardClick(cardEl) {
                 null, // null fuerza creación de nueva línea para hoy
                 0,    // 0 horas acumuladas
                 todayStr,
-                true  // fromModal = true: NO abre modal ni ventana de detalle
+                true, // fromModal = true: NO abre modal ni ventana de detalle
+                true  // silent = true: NO mostrar mensaje de inicio (solicitud explícita)
             );
         }
-        if (typeof showToast === 'function') {
-            showToast(`⏱️ Tarea duplicada para hoy. Cronómetro iniciado en "${pName}"`, 'success');
-        }
     } else {
-        // Ya tiene imputación para hoy: reanudarla
+        // Ya tiene imputación para hoy: reanudarla sin modales ni alertas
         const targetTsId = todayTsId || tsId;
         const accumMs = Math.round(todayHours * 3600 * 1000);
         if (typeof startWorkTimer === 'function') {
@@ -1589,11 +1655,9 @@ function handleExpressCardClick(cardEl) {
                 targetTsId,
                 accumMs,
                 todayStr,
-                true // fromModal = true: NO abre modal ni ventana de detalle
+                true, // fromModal = true: NO abre modal ni ventana de detalle
+                true  // silent = true: NO mostrar mensaje de inicio (solicitud explícita)
             );
-        }
-        if (typeof showToast === 'function') {
-            showToast(`⏱️ Cronómetro iniciado en "${pName}"`, 'success');
         }
     }
 
@@ -1621,14 +1685,19 @@ function updateExpressTimerState() {
         const tId = parseInt(card.dataset.taskId, 10) || 0;
         const tsId = parseInt(card.dataset.timesheetId, 10) || 0;
         const todayTsId = parseInt(card.dataset.todayTimesheetId, 10) || 0;
+        const cardDesc = (card.dataset.description || '').trim().toLowerCase();
+        const currentDesc = current ? (current.description || '').trim().toLowerCase() : '';
+        const descMatches = (!currentDesc && !cardDesc) || (currentDesc === cardDesc);
 
         let isMatch = false;
         if (current) {
             if (current.timesheetId && (current.timesheetId === todayTsId || current.timesheetId === tsId)) {
                 isMatch = true;
-            } else if (tId && current.taskId && current.taskId === tId) {
+            } else if (tId && current.taskId && current.taskId === tId && descMatches) {
                 isMatch = true;
-            } else if (!tId && !current.taskId && current.projectId === pId) {
+            } else if (!tId && !current.taskId && current.projectId === pId && descMatches) {
+                isMatch = true;
+            } else if (current.projectId === pId && descMatches) {
                 isMatch = true;
             }
         }

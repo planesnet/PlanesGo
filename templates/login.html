@@ -65,7 +65,7 @@
             <!-- Método Prioritario: Google OAuth 2.0 -->
             <div class="space-y-4">
                 {{if .GoogleConfigured}}
-                <a href="/auth/google" id="btn-google"
+                <a href="/auth/google{{if .Next}}?next={{.Next}}{{end}}" id="btn-google"
                    class="w-full flex items-center justify-center py-3 px-4 bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-800 font-semibold text-sm rounded-2xl shadow-lg transition-all border border-slate-200 group">
                     <!-- Google Multi-color SVG Icon -->
                     <svg class="w-5 h-5 mr-3 flex-shrink-0" viewBox="0 0 24 24">
@@ -98,6 +98,7 @@
 
             <!-- Formulario Odoo Directo -->
             <form method="POST" action="/login" class="space-y-4" id="login-form">
+                {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
                 <div>
                     <label class="block text-xs font-medium text-slate-300 mb-1.5" for="username">Usuario o Correo</label>
                     <div class="relative">

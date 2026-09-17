@@ -57,6 +57,7 @@ type TimesheetEntry struct {
 	TaskID             Many2One `json:"task_id"`
 	EmployeeID         Many2One `json:"employee_id"`
 	UserID             Many2One    `json:"user_id"`
+	PartnerID          Many2One    `json:"partner_id"`
 	TimesheetInvoiceID Many2One    `json:"timesheet_invoice_id"`
 	BillingRef         interface{} `json:"billing_ref"` // Indica si está facturado en Odoo 14
 	IsTimerRunning     bool        `json:"is_timer_running"`

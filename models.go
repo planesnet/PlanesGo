@@ -90,6 +90,7 @@ type PageData struct {
 	OdooURL              string
 	Today                string
 	ActiveTimer          *odoo.ActiveTimer
+	ProjectPartnerMapJSON string
 	Error                string
 }
 
@@ -112,6 +113,7 @@ type LoginPageData struct {
 	GoogleConfigured  bool
 	GoogleConfigError string
 	Error             string
+	Next              string
 }
 
 func encodeSession(data SessionData) string {

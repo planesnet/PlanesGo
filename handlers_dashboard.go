@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -677,27 +679,48 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	projectPartnerMap := make(map[int]int)
+	for _, p := range projects {
+		if p.ID > 0 && p.PartnerID.ID > 0 {
+			projectPartnerMap[p.ID] = p.PartnerID.ID
+		}
+	}
+	for i := range entries {
+		if entries[i].PartnerID.ID == 0 && entries[i].ProjectID.ID > 0 {
+			if partID, ok := projectPartnerMap[entries[i].ProjectID.ID]; ok && partID > 0 {
+				entries[i].PartnerID = odoo.Many2One{ID: partID}
+			}
+		}
+	}
+	ppmJSON, _ := json.Marshal(projectPartnerMap)
+	projectPartnerMu.Lock()
+	for k, v := range projectPartnerMap {
+		projectPartnerCache[k] = v
+	}
+	projectPartnerMu.Unlock()
+
 	data := PageData{
-		Version:              Version,
-		Config:               activeCfg,
-		Session:              session,
-		HasOdooToken:         hasOdooToken,
-		Entries:              entries,
-		Projects:             projects,
-		PendingTickets:       pendingTickets,
-		PendingTicketsCount:  len(pendingTickets),
-		OdooURL:              strings.TrimRight(currentOdooCfg.URL, "/"),
-		TotalHours:           totalHours,
-		TotalProjectsCount:   len(projects),
-		UniqueProjectsCount:  len(projectMap),
-		UniqueEmployeesCount: uniqueEmployeesCount,
-		ProjectsList:         projectsList,
-		EmployeesList:        employeesList,
-		CurrentWorker:        currentWorker,
-		RecentProjects:       recentProjects,
-		Today:                time.Now().Format("2006-01-02"),
-		ActiveTimer:          activeTimer,
-		Error:                errMsg,
+		Version:               Version,
+		Config:                activeCfg,
+		Session:               session,
+		HasOdooToken:          hasOdooToken,
+		Entries:               entries,
+		Projects:              projects,
+		PendingTickets:        pendingTickets,
+		PendingTicketsCount:   len(pendingTickets),
+		OdooURL:               strings.TrimRight(currentOdooCfg.URL, "/"),
+		TotalHours:            totalHours,
+		TotalProjectsCount:    len(projects),
+		UniqueProjectsCount:   len(projectMap),
+		UniqueEmployeesCount:  uniqueEmployeesCount,
+		ProjectsList:          projectsList,
+		EmployeesList:         employeesList,
+		CurrentWorker:         currentWorker,
+		RecentProjects:        recentProjects,
+		Today:                 time.Now().Format("2006-01-02"),
+		ActiveTimer:           activeTimer,
+		ProjectPartnerMapJSON: string(ppmJSON),
+		Error:                 errMsg,
 	}
 
 	tmpl, err := getIndexTemplate()
@@ -729,7 +752,11 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 	}
 
 	if session == nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		target := r.URL.RequestURI()
+		if target == "" {
+			target = "/m"
+		}
+		http.Redirect(w, r, "/login?next="+url.QueryEscape(target), http.StatusSeeOther)
 		return
 	}
 
@@ -744,13 +771,18 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		Odoo:   currentOdooCfg,
 	}
 
+	projectPartnerMu.RLock()
+	ppmJSON, _ := json.Marshal(projectPartnerCache)
+	projectPartnerMu.RUnlock()
+
 	data := PageData{
-		Version:       Version,
-		Config:        activeCfg,
-		Session:       session,
-		HasOdooToken:  (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),
-		CurrentWorker: session.UserName,
-		Today:         time.Now().Format("2006-01-02"),
+		Version:               Version,
+		Config:                activeCfg,
+		Session:               session,
+		HasOdooToken:          (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),
+		CurrentWorker:         session.UserName,
+		Today:                 time.Now().Format("2006-01-02"),
+		ProjectPartnerMapJSON: string(ppmJSON),
 	}
 
 	tmpl, err := getExpressStandaloneTemplate()
