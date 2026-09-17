@@ -948,21 +948,35 @@ let isExpressMinimized = false;
  */
 function toggleExpressFloating() {
     const win = document.getElementById('express-floating-window');
-    const btn = document.getElementById('btn-view-express');
     if (!win) return;
 
     const isHidden = win.classList.contains('hidden');
     if (isHidden) {
-        win.classList.remove('hidden');
-        if (btn) {
-            btn.classList.add('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
-            btn.classList.remove('text-slate-600');
-        }
-        loadExpressTimesheets();
-        initExpressWindowInteractions();
+        openExpressFloating();
     } else {
         closeExpressFloating();
     }
+}
+
+/**
+ * Abre y muestra la ventana flotante de la botonera Express en modo ordenador.
+ */
+function openExpressFloating() {
+    const win = document.getElementById('express-floating-window');
+    const btn = document.getElementById('btn-view-express');
+    if (!win) return;
+
+    win.classList.remove('hidden');
+    if (btn) {
+        btn.classList.add('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
+        btn.classList.remove('text-slate-600');
+    }
+    const body = document.getElementById('express-window-body');
+    if (body && body.classList.contains('hidden') && typeof toggleMinimizeExpress === 'function') {
+        toggleMinimizeExpress();
+    }
+    loadExpressTimesheets();
+    initExpressWindowInteractions();
 }
 
 /**
@@ -1932,6 +1946,7 @@ function updateExpressTimerState() {
 // Exportar globalmente para vistas y temporizador
 window.switchView = switchView;
 window.toggleExpressFloating = toggleExpressFloating;
+window.openExpressFloating = openExpressFloating;
 window.closeExpressFloating = closeExpressFloating;
 window.toggleMinimizeExpress = toggleMinimizeExpress;
 window.openExpressPopout = openExpressPopout;

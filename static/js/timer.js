@@ -32,6 +32,59 @@ function isExpressViewActive() {
     return !!(win && !win.classList.contains('hidden'));
 }
 
+/**
+ * Determina si el entorno actual es un dispositivo móvil (app móvil, /m o navegador móvil)
+ */
+function isMobileEnvironment() {
+    if (window.location.pathname === '/m') return true;
+    if (document.body && (document.body.dataset.isStandalone === 'true' || document.body.classList.contains('mobile-body'))) {
+        return true;
+    }
+    if (typeof navigator !== 'undefined' && navigator.userAgent) {
+        if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Abre la botonera Express en modo ordenador (pantalla de escritorio).
+ * Si la ventana flotante existe en el DOM, la hace visible y la enfoca.
+ * Si no está disponible en la página actual, abre la ventana independiente /express.
+ */
+function openExpressInComputerMode() {
+    if (typeof openExpressFloating === 'function') {
+        openExpressFloating();
+    } else if (typeof window.openExpressFloating === 'function') {
+        window.openExpressFloating();
+    } else {
+        const win = document.getElementById('express-floating-window');
+        if (win) {
+            win.classList.remove('hidden');
+            const body = document.getElementById('express-window-body');
+            if (body && body.classList.contains('hidden') && typeof toggleMinimizeExpress === 'function') {
+                toggleMinimizeExpress();
+            }
+            const btn = document.getElementById('btn-view-express');
+            if (btn) {
+                btn.classList.add('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
+                btn.classList.remove('text-slate-600');
+            }
+            if (typeof loadExpressTimesheets === 'function') {
+                loadExpressTimesheets();
+            }
+            if (typeof initExpressWindowInteractions === 'function') {
+                initExpressWindowInteractions();
+            }
+        } else if (typeof openExpressPopout === 'function') {
+            openExpressPopout();
+        } else {
+            window.open('/express', 'PlanesGoExpress');
+        }
+    }
+}
+
 // Inicialización automática al cargar el DOM
 document.addEventListener('DOMContentLoaded', function () {
     originalDocumentTitle = document.title;
@@ -685,88 +738,75 @@ function updateTimerTick() {
 
         // Si hay una alerta de 15 minutos pendiente de confirmación:
         if (state.promptTriggeredAt) {
-            // REGLA: Si la vista Express NO está activa en este navegador/ventana, silenciar y cerrar modal
-            if (!isExpressViewActive()) {
-                hideTimerConfirmModal();
-                stopTitleFlash();
-                if (activeSystemNotification) {
-                    try { activeSystemNotification.close(); } catch (e) {}
-                    activeSystemNotification = null;
-                }
-            } else {
-                // Vista Express SÍ está activa aquí.
-                // Sincronizar periódicamente con el backend para detectar si el usuario confirmó en otro dispositivo (PC o móvil)
-                if (now - lastRemoteSyncTime >= 3000) {
-                    lastRemoteSyncTime = now;
-                    fetch('/api/timer/active?_t=' + now, { cache: 'no-store' })
-                        .then(r => r.json())
-                        .then(data => {
-                            if (!data || !data.active || !data.active.is_running) {
-                                // Se pausó o detuvo desde otro dispositivo
-                                hideTimerConfirmModal();
-                                stopTitleFlash();
-                                if (activeSystemNotification) {
-                                    try { activeSystemNotification.close(); } catch (e) {}
-                                    activeSystemNotification = null;
-                                }
-                                if (typeof syncActiveTimerFromOdoo === 'function') {
-                                    syncActiveTimerFromOdoo();
-                                }
-                                return;
+            // Sincronizar periódicamente con el backend para detectar si el usuario confirmó en otro dispositivo (PC o móvil)
+            if (now - lastRemoteSyncTime >= 3000) {
+                lastRemoteSyncTime = now;
+                fetch('/api/timer/active?_t=' + now, { cache: 'no-store' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data || !data.active || !data.active.is_running) {
+                            // Se pausó o detuvo desde otro dispositivo
+                            hideTimerConfirmModal();
+                            stopTitleFlash();
+                            if (activeSystemNotification) {
+                                try { activeSystemNotification.close(); } catch (e) {}
+                                activeSystemNotification = null;
                             }
-                            if (data.active.timesheet_id !== state.timesheetId) {
-                                // Cambió de tarea desde otro dispositivo
-                                hideTimerConfirmModal();
-                                stopTitleFlash();
-                                if (activeSystemNotification) {
-                                    try { activeSystemNotification.close(); } catch (e) {}
-                                    activeSystemNotification = null;
-                                }
-                                if (typeof syncActiveTimerFromOdoo === 'function') {
-                                    syncActiveTimerFromOdoo();
-                                }
-                                return;
+                            if (typeof syncActiveTimerFromOdoo === 'function') {
+                                syncActiveTimerFromOdoo();
                             }
-                            // Si se confirmó en otro dispositivo con timestamp posterior al prompt
-                            if (data.last_confirmed_at && data.last_confirmed_at > state.promptTriggeredAt) {
-                                state.promptTriggeredAt = null;
-                                state.promptSnapshotMs = null;
-                                state.lastPromptAccumulatedMs = totalMs;
-                                state.lastPromptTime = Date.now();
-                                saveTimerState(state);
-                                hideTimerConfirmModal();
-                                stopTitleFlash();
-                                if (activeSystemNotification) {
-                                    try { activeSystemNotification.close(); } catch (e) {}
-                                    activeSystemNotification = null;
-                                }
-                                if (typeof showToast === 'function') {
-                                    showToast('✅ Tarea reconfirmada desde otro dispositivo', 'info');
-                                }
+                            return;
+                        }
+                        if (data.active.timesheet_id !== state.timesheetId) {
+                            // Cambió de tarea desde otro dispositivo
+                            hideTimerConfirmModal();
+                            stopTitleFlash();
+                            if (activeSystemNotification) {
+                                try { activeSystemNotification.close(); } catch (e) {}
+                                activeSystemNotification = null;
                             }
-                        })
-                        .catch(() => {});
-                }
+                            if (typeof syncActiveTimerFromOdoo === 'function') {
+                                syncActiveTimerFromOdoo();
+                            }
+                            return;
+                        }
+                        // Si se confirmó en otro dispositivo con timestamp posterior al prompt
+                        if (data.last_confirmed_at && data.last_confirmed_at > state.promptTriggeredAt) {
+                            state.promptTriggeredAt = null;
+                            state.promptSnapshotMs = null;
+                            state.lastPromptAccumulatedMs = totalMs;
+                            state.lastPromptTime = Date.now();
+                            saveTimerState(state);
+                            hideTimerConfirmModal();
+                            stopTitleFlash();
+                            if (activeSystemNotification) {
+                                try { activeSystemNotification.close(); } catch (e) {}
+                                activeSystemNotification = null;
+                            }
+                            if (typeof showToast === 'function') {
+                                showToast('✅ Tarea reconfirmada desde otro dispositivo', 'info');
+                            }
+                        }
+                    })
+                    .catch(() => {});
+            }
 
-                const timeSinceAlert = now - state.promptTriggeredAt;
-                const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
+            const timeSinceAlert = now - state.promptTriggeredAt;
+            const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
 
-                // Actualizar cuenta regresiva en el modal si está visible
-                const countdownEl = document.getElementById('confirm-modal-countdown');
-                if (countdownEl) {
-                    const totalSec = Math.ceil(remainingTimeoutMs / 1000);
-                    const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
-                    const sec = String(totalSec % 60).padStart(2, '0');
-                    countdownEl.textContent = `${min}:${sec}`;
-                }
+            // Actualizar cuenta regresiva en el modal si está visible
+            const countdownEl = document.getElementById('confirm-modal-countdown');
+            if (countdownEl) {
+                const totalSec = Math.ceil(remainingTimeoutMs / 1000);
+                const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                const sec = String(totalSec % 60).padStart(2, '0');
+                countdownEl.textContent = `${min}:${sec}`;
+            }
 
-                // El aviso acústico suave solo suena 1 vez al disparar la alerta (no cada 20s)
-
-                if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
-                    // El usuario no confirmó en los próximos 5 minutos en ningún dispositivo.
-                    autoStopTimerDueToInactivity(state);
-                    return;
-                }
+            if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
+                // El usuario no confirmó en los próximos 5 minutos en ningún dispositivo.
+                autoStopTimerDueToInactivity(state);
+                return;
             }
         } else {
             // Comprobar si han transcurrido los 15 minutos de TRABAJO REAL desde el último prompt o confirmación
@@ -782,9 +822,14 @@ function updateTimerTick() {
             const wallClockSincePrompt = now - lastPromptTime;
 
             if (workDoneSincePrompt >= TIMER_PROMPT_INTERVAL_MS || wallClockSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
-                // REGLA: Sólo disparar recordatorio si la vista Express está activa
-                if (isExpressViewActive()) {
+                // Notificaciones activas en entorno web (ordenador) y desactivadas en móvil
+                if (!isMobileEnvironment()) {
                     trigger15MinuteReminder(state, totalMs);
+                } else {
+                    // En móvil: sin notificaciones, avanzar timestamp para no acumular
+                    state.lastPromptAccumulatedMs = totalMs;
+                    state.lastPromptTime = now;
+                    saveTimerState(state);
                 }
             }
         }
@@ -887,7 +932,6 @@ function updateTimerTick() {
  */
 function autoStopTimerDueToInactivity(state) {
     if (!state || state.status !== 'running') return;
-    if (!isExpressViewActive()) return;
 
     console.warn(`[PlanesGo Timer] ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos sin confirmar alerta de ${TIMER_PROMPT_MINUTES} minutos. Auto-pausando y fijando en ${TIMER_PROMPT_MINUTES} minutos.`);
 
@@ -960,7 +1004,7 @@ function autoStopTimerDueToInactivity(state) {
  * Dispara la alerta periódica (sonido, notificación estándar del sistema y modal)
  */
 function trigger15MinuteReminder(state, currentTotalMs) {
-    if (!isExpressViewActive()) return;
+    if (isMobileEnvironment()) return; // Notificaciones desactivadas en entorno móvil
 
     // Fijar el snapshot exacto de la alerta y la marca de activación
     state.promptTriggeredAt = Date.now();
@@ -979,8 +1023,10 @@ function trigger15MinuteReminder(state, currentTotalMs) {
     // 3. Parpadeo del título de la pestaña
     startTitleFlash();
 
-    // 4. Mostrar modal interactivo en pantalla
-    showTimerConfirmModal(state, currentTotalMs);
+    // 4. Mostrar modal interactivo en pantalla si la vista Express está activa
+    if (isExpressViewActive()) {
+        showTimerConfirmModal(state, currentTotalMs);
+    }
 }
 
 /**
@@ -1024,7 +1070,7 @@ function loadTasksForConfirmModal(projectId, currentTaskId) {
  * Muestra el modal de confirmación con el botón Continuar enfocado por defecto
  */
 function showTimerConfirmModal(state, totalMs) {
-    if (!isExpressViewActive()) return;
+    if (isMobileEnvironment()) return; // No mostrar modal en móvil
     if (!state) state = getTimerState();
     if (!state) return;
 
@@ -1621,7 +1667,7 @@ function getAudioContext() {
  * @param {boolean} isGentleReminder Si es true, reproduce un bip suave de recordatorio en lugar del acorde completo
  */
 function playChimeSound(isGentleReminder = false) {
-    if (!isExpressViewActive()) return;
+    if (isMobileEnvironment()) return; // Notificaciones desactivadas en móvil
     try {
         const ctx = getAudioContext();
         if (!ctx) return;
@@ -1664,6 +1710,7 @@ function playChimeSound(isGentleReminder = false) {
  * Solicita permiso de notificaciones nativas de escritorio
  */
 function requestNotificationPermission() {
+    if (isMobileEnvironment()) return; // Notificaciones desactivadas en móvil
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission().catch(e => console.log('Permiso de notificaciones denegado o cerrado:', e));
     }
@@ -1674,7 +1721,7 @@ function requestNotificationPermission() {
  * Permite hacer clic directamente en la notificación para reconfirmar el trabajo en curso
  */
 function triggerSystemNotification(title, body) {
-    if (!isExpressViewActive()) return;
+    if (isMobileEnvironment()) return; // Notificaciones desactivadas en móvil
     if (!('Notification' in window)) return;
 
     const displayNotif = () => {
@@ -1698,6 +1745,11 @@ function triggerSystemNotification(title, body) {
                 try {
                     window.focus();
                 } catch (e) {}
+
+                // Si no está activa la pantalla express en el ordenador, abrirla en modo ordenador
+                if (!isExpressViewActive()) {
+                    openExpressInComputerMode();
+                }
 
                 // Al hacer clic en la notificación, abrir el diálogo del parte de horas con el botón Continuar por defecto
                 showTimerConfirmModal();
@@ -1770,7 +1822,7 @@ window.testTimerNotification = async function () {
  * Muestra un aviso emergente visual (toast) no intrusivo en la interfaz
  */
 function showNotificationToast(message) {
-    if (!isExpressViewActive()) return;
+    if (isMobileEnvironment()) return;
     let toast = document.getElementById('planesgo-toast');
     if (!toast) {
         toast = document.createElement('div');
