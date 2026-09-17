@@ -106,7 +106,11 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 		if targetUID == 0 {
 			targetUID = client.UID()
 		}
-		if timer, tErr := client.GetActiveTimer(ctx, targetUID); tErr == nil && timer != nil {
+		timer, tErr := client.GetActiveTimer(ctx, targetUID)
+		if tErr != nil || timer == nil || !timer.IsRunning {
+			timer = state.getActiveTimer(targetUID)
+		}
+		if timer != nil && timer.IsRunning {
 			found := false
 			for i := range entries {
 				if (timer.TimesheetID > 0 && entries[i].ID == timer.TimesheetID) ||
@@ -121,6 +125,13 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 				if tDate == "" {
 					tDate = time.Now().Format("2006-01-02")
 				}
+				empName := timer.EmployeeName
+				if empName == "" && session != nil {
+					empName = session.UserName
+					if empName == "" {
+						empName = session.Username
+					}
+				}
 				entries = append([]odoo.TimesheetEntry{{
 					ID:             timer.TimesheetID,
 					Date:           tDate,
@@ -128,6 +139,8 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 					UnitAmount:     timer.UnitAmount,
 					ProjectID:      odoo.Many2One{ID: timer.ProjectID, Name: timer.ProjectName},
 					TaskID:         odoo.Many2One{ID: timer.TaskID, Name: timer.TaskName},
+					EmployeeID:     odoo.Many2One{Name: empName},
+					UserID:         odoo.Many2One{ID: targetUID, Name: empName},
 					IsTimerRunning: true,
 				}}, entries...)
 			}
@@ -641,7 +654,13 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 	}
 
 	timer, err := client.GetActiveTimer(ctx, userUID)
-	if err != nil || timer == nil {
+	if err == nil && timer != nil && timer.IsRunning {
+		state.setActiveTimer(userUID, timer)
+	} else {
+		timer = state.getActiveTimer(userUID)
+	}
+
+	if timer == nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"active": nil})
 		return
 	}
@@ -700,12 +719,30 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if activeTimer != nil && activeTimer.EmployeeName == "" {
-		if session != nil && session.UserName != "" {
-			activeTimer.EmployeeName = session.UserName
-		} else if odooCfg.Username != "" {
-			activeTimer.EmployeeName = odooCfg.Username
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
 		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+
+	if activeTimer != nil {
+		if activeTimer.EmployeeName == "" {
+			if session != nil && session.UserName != "" {
+				activeTimer.EmployeeName = session.UserName
+			} else if odooCfg.Username != "" {
+				activeTimer.EmployeeName = odooCfg.Username
+			}
+		}
+		state.setActiveTimer(userUID, activeTimer)
 	}
 
 	json.NewEncoder(w).Encode(activeTimer)
@@ -863,6 +900,22 @@ func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+	state.pauseActiveTimer(userUID)
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
@@ -952,6 +1005,22 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+	state.clearActiveTimer(userUID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }

@@ -249,6 +249,9 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     renderTimerBar(state);
     startTimerTicker();
     updateAllRowTimerButtonStates();
+    if (typeof renderExpressView === 'function') {
+        renderExpressView();
+    }
 
     if (!silent && typeof showToast === 'function') {
         showToast(`⏱️ Cronómetro iniciado en "${state.projectName}"`, 'success');
@@ -422,6 +425,9 @@ function togglePauseTimer() {
     saveTimerState(state);
     renderTimerBar(state);
     updateAllRowTimerButtonStates();
+    if (typeof renderExpressView === 'function') {
+        renderExpressView();
+    }
 }
 
 /**
@@ -633,6 +639,9 @@ function clearTimer(skipOdooSync) {
     hideTimerConfirmModal();
 
     updateAllRowTimerButtonStates();
+    if (typeof renderExpressView === 'function') {
+        renderExpressView();
+    }
 }
 
 /**
@@ -1486,6 +1495,9 @@ async function syncActiveTimerFromOdoo() {
                 startTimerTicker();
                 ensureTimesheetRowExists(act, serverState);
                 updateAllRowTimerButtonStates();
+                if (typeof renderExpressView === 'function') {
+                    renderExpressView();
+                }
 
                 if (serverState.promptTriggeredAt) {
                     showTimerConfirmModal();

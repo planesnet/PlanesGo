@@ -38,6 +38,8 @@ type AppState struct {
 	userStore               *store.UserSettingsStore
 	lastTimerConfirmMu      sync.RWMutex
 	lastTimerConfirmedTimes map[int]int64
+	activeTimersMu          sync.RWMutex
+	activeTimers            map[int]*odoo.ActiveTimer
 }
 
 func (state *AppState) setLastConfirmedAt(userUID int, ts int64) {
@@ -56,6 +58,52 @@ func (state *AppState) getLastConfirmedAt(userUID int) int64 {
 		return 0
 	}
 	return state.lastTimerConfirmedTimes[userUID]
+}
+
+func (state *AppState) setActiveTimer(userUID int, timer *odoo.ActiveTimer) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers == nil {
+		state.activeTimers = make(map[int]*odoo.ActiveTimer)
+	}
+	if timer == nil {
+		delete(state.activeTimers, userUID)
+	} else {
+		state.activeTimers[userUID] = timer
+	}
+}
+
+func (state *AppState) getActiveTimer(userUID int) *odoo.ActiveTimer {
+	state.activeTimersMu.RLock()
+	defer state.activeTimersMu.RUnlock()
+	if state.activeTimers == nil {
+		return nil
+	}
+	timer, ok := state.activeTimers[userUID]
+	if !ok || timer == nil || !timer.IsRunning {
+		return nil
+	}
+	// Devolver copia superficial
+	tCopy := *timer
+	return &tCopy
+}
+
+func (state *AppState) clearActiveTimer(userUID int) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers != nil {
+		delete(state.activeTimers, userUID)
+	}
+}
+
+func (state *AppState) pauseActiveTimer(userUID int) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers != nil {
+		if t, ok := state.activeTimers[userUID]; ok && t != nil {
+			t.IsRunning = false
+		}
+	}
 }
 
 type WorkerRecentProject struct {

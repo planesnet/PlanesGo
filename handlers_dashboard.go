@@ -806,10 +806,13 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 		}
 		if client != nil {
 			ctxTimer, cancelTimer := context.WithTimeout(r.Context(), 5*time.Second)
-			if timer, tErr := client.GetActiveTimer(ctxTimer, targetUID); tErr == nil && timer != nil {
+			if timer, tErr := client.GetActiveTimer(ctxTimer, targetUID); tErr == nil && timer != nil && timer.IsRunning {
 				activeTimer = timer
 			}
 			cancelTimer()
+		}
+		if activeTimer == nil {
+			activeTimer = state.getActiveTimer(targetUID)
 		}
 	}
 

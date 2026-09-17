@@ -1170,13 +1170,84 @@ function loadExpressTimesheets(forceReload) {
     fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
     const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(fiveDaysAgo) : fiveDaysAgo.toISOString().split('T')[0];
 
-    return fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
+    const pTimesheets = fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${todayStr}`)
         .then(res => {
-            if (!res.ok) throw new Error('Error al cargar imputaciones de las últimas 2 semanas');
+            if (!res.ok) throw new Error('Error al cargar imputaciones');
             return res.json();
         })
-        .then(data => {
+        .catch(err => {
+            console.error('[PlanesGo Express] Error cargando imputaciones:', err);
+            return [];
+        });
+
+    const pActive = fetch('/api/timer/active', { cache: 'no-store' })
+        .then(res => res.ok ? res.json() : null)
+        .catch(err => null);
+
+    return Promise.all([pTimesheets, pActive])
+        .then(([data, activeData]) => {
             expressTimesheets = Array.isArray(data) ? data : [];
+
+            if (activeData && activeData.active && activeData.active.is_running) {
+                const act = activeData.active;
+                const accumulatedMs = Math.round((act.unit_amount || 0) * 3600 * 1000);
+                let startedAt = act.started_at || (Date.now() - accumulatedMs);
+                if (startedAt > 0 && startedAt < 1000000000000) {
+                    startedAt *= 1000;
+                }
+                const serverState = {
+                    timesheetId: act.timesheet_id,
+                    projectId: act.project_id,
+                    projectName: act.project_name || ('Proyecto #' + act.project_id),
+                    taskId: act.task_id || null,
+                    taskName: act.task_name || '',
+                    description: act.description || '',
+                    status: 'running',
+                    startedAt: startedAt,
+                    lastStartTime: Date.now(),
+                    accumulatedMs: accumulatedMs,
+                    lastPromptAccumulatedMs: accumulatedMs,
+                    lastPromptTime: Date.now(),
+                    promptTriggeredAt: null,
+                    promptSnapshotMs: null
+                };
+                if (typeof saveTimerState === 'function') {
+                    saveTimerState(serverState);
+                }
+                if (typeof renderTimerBar === 'function') {
+                    renderTimerBar(serverState);
+                }
+                if (typeof startTimerTicker === 'function') {
+                    startTimerTicker();
+                }
+
+                // Inyectar o asegurar en expressTimesheets
+                const found = expressTimesheets.some(ts =>
+                    (act.timesheet_id > 0 && ts.id === act.timesheet_id) ||
+                    (act.task_id > 0 && ts.task_id && ts.task_id.id === act.task_id)
+                );
+                if (!found) {
+                    expressTimesheets.unshift({
+                        id: act.timesheet_id,
+                        date: act.date || todayStr,
+                        name: act.description || '',
+                        unit_amount: act.unit_amount || 0,
+                        project_id: { id: act.project_id, name: act.project_name || ('Proyecto #' + act.project_id) },
+                        task_id: { id: act.task_id, name: act.task_name || '' },
+                        employee_id: { name: act.employee_name || '' },
+                        user_id: { name: act.employee_name || '' },
+                        is_timer_running: true
+                    });
+                } else {
+                    expressTimesheets.forEach(ts => {
+                        if ((act.timesheet_id > 0 && ts.id === act.timesheet_id) ||
+                            (act.task_id > 0 && ts.task_id && ts.task_id.id === act.task_id)) {
+                            ts.is_timer_running = true;
+                        }
+                    });
+                }
+            }
+
             isExpressLoading = false;
             if (loadingEl) loadingEl.classList.add('hidden');
             if (gridEl) gridEl.classList.remove('hidden');
@@ -1312,11 +1383,11 @@ function renderExpressView() {
         // Filtro por proyecto del sidebar
         const pIdStr = String(entry.projectId || '');
         const pNameLower = (entry.projectName || '').toLowerCase();
-        if (targetProjectId && targetProjectId !== '0') {
+        if (targetProjectId && targetProjectId !== '0' && !entry.isTimerRunning) {
             if (pIdStr !== String(targetProjectId)) {
                 if (!targetProjectName || !pNameLower.includes(targetProjectName)) return;
             }
-        } else if (targetProjectName) {
+        } else if (targetProjectName && !entry.isTimerRunning) {
             if (!pNameLower.includes(targetProjectName)) return;
         }
 
@@ -1325,10 +1396,14 @@ function renderExpressView() {
             const descLower = (entry.desc || '').toLowerCase();
             const taskLower = (entry.taskName || '').toLowerCase();
             const projLower = (entry.projectName || '').toLowerCase();
-            const combined = `${descLower} ${taskLower} ${projLower}`;
+            let partnerName = '';
+            if (entry.partnerId && window.partnersMap && window.partnersMap[entry.partnerId]) {
+                partnerName = (window.partnersMap[entry.partnerId].name || '').toLowerCase();
+            }
+            const combined = `${descLower} ${taskLower} ${projLower} ${partnerName}`;
             const tokens = searchVal.split(/\s+/).filter(Boolean);
             const matchesAll = tokens.every(token => combined.includes(token));
-            if (!matchesAll) return;
+            if (!matchesAll && !entry.isTimerRunning) return;
         }
 
         const pId = entry.projectId || 0;
@@ -1357,12 +1432,16 @@ function renderExpressView() {
                 totalHours: 0,
                 todayTimesheetId: isToday ? entry.id : null,
                 todayHours: isToday ? entry.hours : 0,
-                hasTodayEntry: isToday
+                hasTodayEntry: isToday,
+                hasRunningTimer: Boolean(entry.isTimerRunning)
             });
         }
 
         const item = taskMap.get(key);
         item.totalHours += (entry.hours || 0);
+        if (entry.isTimerRunning) {
+            item.hasRunningTimer = true;
+        }
         if (entry.partnerId && !item.partnerId) {
             item.partnerId = entry.partnerId;
         }
@@ -1386,7 +1465,7 @@ function renderExpressView() {
     });
 
     // Incluir tarea activa actual si existe
-    if (timerState && timerState.projectId) {
+    if (timerState && timerState.projectId && timerState.status === 'running') {
         const timerDescClean = (timerState.description || '').trim();
         const pId = timerState.projectId;
         const tId = timerState.taskId || 0;
@@ -1408,13 +1487,15 @@ function renderExpressView() {
                 lastTimesheetId: timerState.timesheetId,
                 totalHours: 0,
                 todayTimesheetId: timerState.timesheetId,
-                todayHours: 0,
-                hasTodayEntry: (timerState.date === todayStr)
+                todayHours: (timerState.unitAmount || 0),
+                hasTodayEntry: true,
+                hasRunningTimer: true
             });
         } else {
             const activeItem = taskMap.get(activeKey);
             activeItem.todayTimesheetId = timerState.timesheetId;
             activeItem.hasTodayEntry = true;
+            activeItem.hasRunningTimer = true;
             activeItem.lastDate = todayStr;
             if (timerDescClean) activeItem.lastDescription = timerDescClean;
         }
@@ -1424,7 +1505,7 @@ function renderExpressView() {
 
     // Marcar si está corriendo (coincidencia por ID o por Proyecto + Tarea + Descripción)
     tasks.forEach(t => {
-        let isRunning = false;
+        let isRunning = Boolean(t.hasRunningTimer);
         if (timerState && timerState.status === 'running') {
             const timerDesc = (timerState.description || '').trim().toLowerCase();
             const tDesc = (t.lastDescription || '').trim().toLowerCase();
