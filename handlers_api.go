@@ -697,30 +697,21 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 
 	// Consultar el estado real en Odoo
 	odooTimer, err := client.GetActiveTimer(ctx, userUID)
-	if err == nil {
-		if odooTimer != nil && odooTimer.IsRunning {
-			if cur == nil {
-				// No teníamos temporizador en memoria local: adoptar el de Odoo
-				state.setActiveTimer(userUID, odooTimer)
-				cur = odooTimer
-			} else if cur.TimesheetID != odooTimer.TimesheetID || cur.TaskID != odooTimer.TaskID {
-				// El usuario cambió de tarea/imputación en Odoo o desde otro cliente: actualizar
-				state.setActiveTimer(userUID, odooTimer)
-				cur = odooTimer
-			} else if !cur.IsRunning {
-				// En memoria estaba pausado pero en Odoo se reanudó: reanudar
-				state.resumeActiveTimer(userUID)
-				cur = state.getActiveTimer(userUID)
-			}
-			// Si coincide con cur y cur.IsRunning, se conserva cur en memoria (StartedAt y AccumulatedMs exactos)
-		} else if odooTimer == nil || !odooTimer.IsRunning {
-			// En Odoo no hay temporizador corriendo
-			if cur != nil && cur.IsRunning {
-				// Se pausó o detuvo directamente en Odoo
-				state.pauseActiveTimer(userUID, 0)
-				cur = state.getActiveTimer(userUID)
-			}
+	if err == nil && odooTimer != nil && odooTimer.IsRunning {
+		if cur == nil {
+			// No teníamos temporizador en memoria local: adoptar el de Odoo
+			state.setActiveTimer(userUID, odooTimer)
+			cur = odooTimer
+		} else if cur.TimesheetID != odooTimer.TimesheetID || cur.TaskID != odooTimer.TaskID {
+			// El usuario cambió de tarea/imputación en Odoo o desde otro cliente: actualizar
+			state.setActiveTimer(userUID, odooTimer)
+			cur = odooTimer
+		} else if !cur.IsRunning {
+			// En memoria estaba pausado pero en Odoo se reanudó: reanudar
+			state.resumeActiveTimer(userUID)
+			cur = state.getActiveTimer(userUID)
 		}
+		// Si coincide con cur y cur.IsRunning, se conserva cur en memoria (StartedAt y AccumulatedMs exactos)
 	}
 
 	serverNowMs := time.Now().UnixMilli()

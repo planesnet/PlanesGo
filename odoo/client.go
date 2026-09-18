@@ -363,6 +363,9 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// Reintento con autenticación si expiró sesión
 		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
 			args[1] = newUID
@@ -452,9 +455,7 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 		"display_name",
 		"user_id",
 		"partner_id",
-		"task_count",
 		"active",
-		"privacy_visibility",
 	}
 
 	kwargs := map[string]interface{}{
@@ -473,15 +474,12 @@ func (c *Client) GetProjects(ctx context.Context, domain []interface{}) ([]Proje
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// Reintento con autenticación forzada si expiró la sesión
 		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
 			args[1] = newUID
-			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
-		}
-		// Fallback con menos campos si algún campo opcional falló
-		if err != nil {
-			fallbackFields := []string{"id", "name", "display_name", "user_id", "partner_id", "active"}
-			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
