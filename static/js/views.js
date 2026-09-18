@@ -334,6 +334,7 @@ function updateWeekControls() {
 
 let expressTimesheets = null;
 let isExpressLoading = false;
+let isExpressSilentLoading = false;
 
 function switchView(viewName) {
     currentView = viewName;
@@ -1155,8 +1156,6 @@ function initExpressWindowInteractions() {
         }
     });
 }
-let isExpressLoading = false;
-let isExpressSilentLoading = false;
 
 /**
  * Carga desde el servidor las imputaciones de las dos últimas semanas.
@@ -1171,12 +1170,22 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
     const emptyEl = document.getElementById('express-empty-state');
 
     if (expressTimesheets && !forceReload && !isSilent) {
+        if (loadingEl) {
+            loadingEl.classList.add('hidden');
+            loadingEl.classList.remove('flex');
+            loadingEl.style.display = 'none';
+        }
+        if (gridEl) gridEl.classList.remove('hidden');
         renderExpressView(false);
         return;
     }
 
     if (!isSilent) {
-        if (loadingEl) loadingEl.classList.remove('hidden');
+        if (loadingEl) {
+            loadingEl.classList.remove('hidden');
+            loadingEl.classList.add('flex');
+            loadingEl.style.display = '';
+        }
         if (gridEl) gridEl.classList.add('hidden');
         if (emptyEl) emptyEl.classList.add('hidden');
         isExpressLoading = true;
@@ -1284,7 +1293,11 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
 
             if (!isSilent) {
                 isExpressLoading = false;
-                if (loadingEl) loadingEl.classList.add('hidden');
+                if (loadingEl) {
+                    loadingEl.classList.add('hidden');
+                    loadingEl.classList.remove('flex');
+                    loadingEl.style.display = 'none';
+                }
                 if (gridEl) gridEl.classList.remove('hidden');
             } else {
                 isExpressSilentLoading = false;
@@ -1295,7 +1308,11 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
             console.error('[PlanesGo Express] Error:', err);
             if (!isSilent) {
                 isExpressLoading = false;
-                if (loadingEl) loadingEl.classList.add('hidden');
+                if (loadingEl) {
+                    loadingEl.classList.add('hidden');
+                    loadingEl.classList.remove('flex');
+                    loadingEl.style.display = 'none';
+                }
                 if (gridEl) gridEl.classList.remove('hidden');
             } else {
                 isExpressSilentLoading = false;
@@ -1354,8 +1371,15 @@ function formatCardDate(dateStr) {
 function renderExpressView(isSilent = false) {
     const gridEl = document.getElementById('express-grid-container');
     const emptyEl = document.getElementById('express-empty-state');
+    const loadingEl = document.getElementById('express-loading-state');
     const countBadge = document.getElementById('express-tasks-count-badge');
     if (!gridEl) return;
+
+    if (!isSilent && loadingEl) {
+        loadingEl.classList.add('hidden');
+        loadingEl.classList.remove('flex');
+        loadingEl.style.display = 'none';
+    }
 
     if (!expressTimesheets && !isExpressLoading) {
         loadExpressTimesheets();
