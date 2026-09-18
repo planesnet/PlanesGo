@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', function () {
     initTimerFromStorage();
     setupGlobalTimerKeyboardShortcut();
     setupConfirmModalKeyboardListener();
+    initRealtimeSync();
 });
 
 /**
@@ -395,6 +396,9 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         const workerVal = document.getElementById('sidebar-employee-select')?.value || '';
         rebuildSidebarProjects(workerVal);
     }
+    if (typeof broadcastLocalSync === 'function') {
+        broadcastLocalSync('timer_start', state);
+    }
 }
 
 /**
@@ -444,6 +448,7 @@ function togglePauseTimer() {
             }
         }
 
+        window.__lastTimerActionTime = now;
         stopTimerTicker();
         if (typeof showToast === 'function') {
             showToast(`⏸️ Cronómetro pausado (${totalHoursDecimal.toFixed(2)}h)`, 'warning');
@@ -453,6 +458,7 @@ function togglePauseTimer() {
         state.status = 'running';
         state.lastStartTime = now;
         state.lastPromptTime = now;
+        window.__lastTimerActionTime = now;
 
         if (state.timesheetId) {
             const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
@@ -461,7 +467,7 @@ function togglePauseTimer() {
             }
         }
 
-        // Sincronizar reanudación con Odoo (action_timer_resume / is_timer_running=true)
+        // Sincronizar reanudación con Odoo (action_timer_start / is_timer_running=true)
         fetch('/api/timer/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -480,6 +486,9 @@ function togglePauseTimer() {
     saveTimerState(state);
     renderTimerBar(state);
     updateAllRowTimerButtonStates();
+    if (typeof applyTimesheetFilters === 'function') {
+        applyTimesheetFilters();
+    }
     if (typeof updateExpressTimerState === 'function') {
         updateExpressTimerState();
     }
@@ -487,6 +496,9 @@ function togglePauseTimer() {
         loadExpressTimesheets(true, true);
     } else if (typeof renderExpressView === 'function') {
         renderExpressView();
+    }
+    if (typeof broadcastLocalSync === 'function') {
+        broadcastLocalSync(state.status === 'running' ? 'timer_resume' : 'timer_pause', state);
     }
 }
 
@@ -693,12 +705,16 @@ function clearTimer(skipOdooSync) {
         }
     }
 
+    window.__lastTimerActionTime = Date.now();
     saveTimerState(null);
     stopTimerTicker();
     stopTitleFlash();
     hideTimerConfirmModal();
 
     updateAllRowTimerButtonStates();
+    if (typeof applyTimesheetFilters === 'function') {
+        applyTimesheetFilters();
+    }
     if (typeof updateExpressTimerState === 'function') {
         updateExpressTimerState();
     }
@@ -706,6 +722,9 @@ function clearTimer(skipOdooSync) {
         loadExpressTimesheets(true, true);
     } else if (typeof renderExpressView === 'function') {
         renderExpressView();
+    }
+    if (typeof broadcastLocalSync === 'function') {
+        broadcastLocalSync('timer_stop', null);
     }
 }
 
@@ -2006,6 +2025,9 @@ function ensureTimesheetRowExists(serverData, timerState) {
     if (row) {
         row.dataset.timerRunning = 'true';
         row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+        if (typeof applyTimesheetFilters === 'function') {
+            applyTimesheetFilters();
+        }
         return;
     }
 
@@ -2205,6 +2227,140 @@ function updateAllRowTimerButtonStates() {
     }
 }
 
+let planesSSE = null;
+let planesBroadcastChannel = null;
+
+/**
+ * Inicializa los canales de sincronización en tiempo real:
+ * 1. BroadcastChannel: comunicación inmediata (0ms) entre pestañas/ventanas del mismo navegador (PC).
+ * 2. Server-Sent Events (SSE): comunicación bidireccional instantánea (<50ms) entre móvil y PC.
+ */
+function initRealtimeSync() {
+    // 1. BroadcastChannel local
+    try {
+        if ('BroadcastChannel' in window && !planesBroadcastChannel) {
+            planesBroadcastChannel = new BroadcastChannel('planesgo_sync_channel');
+            window.__planesChannel = planesBroadcastChannel;
+            planesBroadcastChannel.onmessage = function (event) {
+                const data = event.data;
+                if (!data || !data.type) return;
+                handleSyncEvent(data.type, data.payload, 'broadcast');
+            };
+        }
+    } catch (e) {
+        console.warn('[PlanesGo Sync] BroadcastChannel no disponible:', e);
+    }
+
+    // 2. Conexión Server-Sent Events (SSE)
+    initSSEConnection();
+
+    // 3. Reactivación al volver a primer plano (especialmente en móviles al desbloquear la pantalla)
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+            if (!planesSSE || planesSSE.readyState === EventSource.CLOSED) {
+                initSSEConnection();
+            }
+            if (typeof syncActiveTimerFromOdoo === 'function') {
+                syncActiveTimerFromOdoo();
+            }
+            if (typeof loadExpressTimesheets === 'function') {
+                loadExpressTimesheets(true, true);
+            }
+        }
+    });
+}
+
+/**
+ * Establece o restablece la conexión SSE con el servidor Go (/api/events)
+ */
+function initSSEConnection() {
+    if (!('EventSource' in window)) {
+        return;
+    }
+
+    if (planesSSE) {
+        try { planesSSE.close(); } catch (e) {}
+    }
+
+    try {
+        planesSSE = new EventSource('/api/events');
+
+        planesSSE.onopen = function () {
+            // Conexión activa
+        };
+
+        planesSSE.onmessage = function (e) {
+            if (!e.data) return;
+            try {
+                const evt = JSON.parse(e.data);
+                if (evt && evt.type) {
+                    handleSyncEvent(evt.type, evt.payload, 'sse');
+                }
+            } catch (err) {
+                console.warn('[PlanesGo SSE] Error decodificando evento:', err);
+            }
+        };
+
+        planesSSE.onerror = function () {
+            // EventSource del navegador reintenta automáticamente con backoff
+        };
+    } catch (e) {
+        console.warn('[PlanesGo SSE] Error conectando a /api/events:', e);
+    }
+}
+
+/**
+ * Procesa un evento en tiempo real recibido por SSE o BroadcastChannel
+ */
+function handleSyncEvent(type, payload, source) {
+    const now = Date.now();
+    const isRecentLocalAction = window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 3500);
+
+    // Eventos de cambios en partes de horas (creación, edición, eliminación o inicio de trabajo)
+    if (type === 'timesheets_changed' || type === 'timer_start' || type === 'timer_resume' || type === 'timer_stop') {
+        // Actualizar la botonera Express silenciosamente y sin parpadeos
+        if (typeof loadExpressTimesheets === 'function') {
+            loadExpressTimesheets(true, true);
+        } else if (typeof renderExpressView === 'function') {
+            renderExpressView(true);
+        }
+
+        // Si el usuario está viendo la lista de partes, actualizarla
+        if (typeof fetchTimesheets === 'function') {
+            if (!isRecentLocalAction) {
+                fetchTimesheets(true);
+            }
+        }
+    }
+
+    // Eventos de cambio en el estado del cronómetro
+    if (type === 'timer_start' || type === 'timer_resume' || type === 'timer_pause' || type === 'timer_stop') {
+        if (!isRecentLocalAction && typeof syncActiveTimerFromOdoo === 'function') {
+            syncActiveTimerFromOdoo();
+        }
+        if (typeof updateExpressTimerState === 'function') {
+            updateExpressTimerState();
+        }
+        if (typeof updateAllRowTimerButtonStates === 'function') {
+            updateAllRowTimerButtonStates();
+        }
+        if (typeof applyTimesheetFilters === 'function') {
+            applyTimesheetFilters();
+        }
+    }
+}
+
+/**
+ * Emite un evento a las demás pestañas o ventanas del navegador local
+ */
+function broadcastLocalSync(type, payload) {
+    if (planesBroadcastChannel) {
+        try {
+            planesBroadcastChannel.postMessage({ type, payload, timestamp: Date.now() });
+        } catch (e) {}
+    }
+}
+
 window.startWorkTimer = startWorkTimer;
 window.togglePauseTimer = togglePauseTimer;
 window.finalizeActiveTimer = finalizeActiveTimer;
@@ -2219,3 +2375,5 @@ window.clearTimer = clearTimer;
 window.toggleTimesheetRowTimer = toggleTimesheetRowTimer;
 window.updateAllRowTimerButtonStates = updateAllRowTimerButtonStates;
 window.getTimerState = getTimerState;
+window.initRealtimeSync = initRealtimeSync;
+window.broadcastLocalSync = broadcastLocalSync;

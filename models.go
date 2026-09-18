@@ -37,6 +37,7 @@ type AppState struct {
 	mu                      sync.RWMutex
 	cfg                     *config.Config
 	userStore               *store.UserSettingsStore
+	sseHub                  *SSEHub
 	lastTimerConfirmMu      sync.RWMutex
 	lastTimerConfirmedTimes map[int]int64
 	activeTimersMu          sync.RWMutex
@@ -102,11 +103,13 @@ func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
 	defer state.activeTimersMu.Unlock()
 	if state.activeTimers != nil {
 		if t, ok := state.activeTimers[userUID]; ok && t != nil {
-			t.IsRunning = false
-			nowMs := time.Now().UnixMilli()
-			if t.StartedAt > 0 && nowMs > t.StartedAt {
-				t.AccumulatedMs += (nowMs - t.StartedAt)
+			if t.IsRunning && t.StartedAt > 0 {
+				elapsed := time.Now().UnixMilli() - t.StartedAt
+				if elapsed > 0 {
+					t.AccumulatedMs += elapsed
+				}
 			}
+			t.IsRunning = false
 			t.StartedAt = 0
 			if unitAmount > 0 {
 				t.UnitAmount = unitAmount
@@ -119,12 +122,31 @@ func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
 }
 
 func (state *AppState) resumeActiveTimer(userUID int) {
+	state.resumeActiveTimerWithTimesheet(userUID, 0, 0)
+}
+
+func (state *AppState) resumeActiveTimerWithTimesheet(userUID int, timesheetID int, taskID int) {
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
-	if state.activeTimers != nil {
-		if t, ok := state.activeTimers[userUID]; ok && t != nil {
-			t.IsRunning = true
-			t.StartedAt = time.Now().UnixMilli()
+	if state.activeTimers == nil {
+		state.activeTimers = make(map[int]*odoo.ActiveTimer)
+	}
+	nowMs := time.Now().UnixMilli()
+	if t, ok := state.activeTimers[userUID]; ok && t != nil {
+		t.IsRunning = true
+		t.StartedAt = nowMs
+		if timesheetID > 0 {
+			t.TimesheetID = timesheetID
+		}
+		if taskID > 0 {
+			t.TaskID = taskID
+		}
+	} else {
+		state.activeTimers[userUID] = &odoo.ActiveTimer{
+			TimesheetID: timesheetID,
+			TaskID:      taskID,
+			IsRunning:   true,
+			StartedAt:   nowMs,
 		}
 	}
 }

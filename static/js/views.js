@@ -381,6 +381,7 @@ function switchView(viewName) {
             loadExpressTimesheets();
         } else {
             renderExpressView();
+            loadExpressTimesheets(true, true);
         }
     }
 
@@ -1233,7 +1234,8 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
                     startedAt *= 1000;
                 }
                 const cur = (typeof getTimerState === 'function') ? getTimerState() : null;
-                if (!cur || cur.timesheetId !== act.timesheet_id || cur.status !== 'running') {
+                const isLocalRecent = window.__lastTimerActionTime && (Date.now() - window.__lastTimerActionTime < 4000);
+                if (!isLocalRecent && (!cur || cur.timesheetId !== act.timesheet_id || cur.status !== 'running')) {
                     const serverState = {
                         timesheetId: act.timesheet_id,
                         projectId: act.project_id,

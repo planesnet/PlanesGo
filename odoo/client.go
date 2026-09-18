@@ -1582,7 +1582,7 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 	return nil
 }
 
-// ResumeTimer reanuda el cronómetro activo en Odoo ejecutando action_timer_resume / action_timer_start
+// ResumeTimer reanuda el cronómetro activo en Odoo ejecutando action_timer_start / action_timer_resume
 func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) error {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
@@ -1590,30 +1590,52 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 	}
 
 	if timesheetID > 0 {
-		resumeArgs := []interface{}{
+		// Método nativo y estándar de Odoo timer.mixin: action_timer_start
+		startArgs := []interface{}{
 			c.config.DB,
 			uid,
 			c.config.Password,
 			"account.analytic.line",
-			"action_timer_resume",
+			"action_timer_start",
 			[]interface{}{[]int{timesheetID}},
 		}
-		_, _ = c.call(ctx, "object", "execute_kw", resumeArgs, nil)
+		if _, callErr := c.call(ctx, "object", "execute_kw", startArgs, nil); callErr != nil {
+			// Fallback: probar action_timer_resume si está definido por un módulo custom
+			resumeArgs := []interface{}{
+				c.config.DB,
+				uid,
+				c.config.Password,
+				"account.analytic.line",
+				"action_timer_resume",
+				[]interface{}{[]int{timesheetID}},
+			}
+			_, _ = c.call(ctx, "object", "execute_kw", resumeArgs, nil)
+		}
 	}
 
 	if taskID > 0 {
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			taskResumeArgs := []interface{}{
+			taskStartArgs := []interface{}{
 				c.config.DB,
 				uID,
 				c.config.Password,
 				"project.task",
-				"action_timer_resume",
+				"action_timer_start",
 				[]interface{}{[]int{tID}},
 			}
-			_, _ = c.call(taskCtx, "object", "execute_kw", taskResumeArgs, nil)
+			if _, tErr := c.call(taskCtx, "object", "execute_kw", taskStartArgs, nil); tErr != nil {
+				taskResumeArgs := []interface{}{
+					c.config.DB,
+					uID,
+					c.config.Password,
+					"project.task",
+					"action_timer_resume",
+					[]interface{}{[]int{tID}},
+				}
+				_, _ = c.call(taskCtx, "object", "execute_kw", taskResumeArgs, nil)
+			}
 		}(taskID, uid)
 	}
 

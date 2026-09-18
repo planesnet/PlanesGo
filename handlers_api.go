@@ -200,6 +200,20 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		userUID := client.UID()
+		if session != nil && session.UserEmail != "" {
+			if resolvedUID, err := client.ResolveUserUIDByEmail(ctx, session.UserEmail); err == nil && resolvedUID > 0 {
+				userUID = resolvedUID
+			}
+		}
+		state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+			"action":     "create",
+			"id":         newID,
+			"project_id": req.ProjectID,
+			"task_id":    req.TaskID,
+			"date":       req.Date,
+		})
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -274,6 +288,20 @@ func (state *AppState) handleAPITimesheetsUpdate(w http.ResponseWriter, r *http.
 		return
 	}
 
+	userUID := client.UID()
+	if session != nil && session.UserEmail != "" {
+		if resolvedUID, err := client.ResolveUserUIDByEmail(ctx, session.UserEmail); err == nil && resolvedUID > 0 {
+			userUID = resolvedUID
+		}
+	}
+	state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+		"action":      "update",
+		"id":          req.ID,
+		"date":        req.Date,
+		"task_id":     req.TaskID,
+		"unit_amount": req.UnitAmount,
+	})
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Parte de horas actualizado correctamente en Odoo.",
@@ -339,6 +367,17 @@ func (state *AppState) handleAPITimesheetsDelete(w http.ResponseWriter, r *http.
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error al eliminar parte de horas en Odoo: " + errMsg})
 		return
 	}
+
+	userUID := client.UID()
+	if session != nil && session.UserEmail != "" {
+		if resolvedUID, err := client.ResolveUserUIDByEmail(ctx, session.UserEmail); err == nil && resolvedUID > 0 {
+			userUID = resolvedUID
+		}
+	}
+	state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+		"action": "delete",
+		"id":     req.ID,
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -775,6 +814,13 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		state.setActiveTimer(userUID, activeTimer)
+		state.broadcastUserEvent(userUID, "timer_start", activeTimer)
+		state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+			"action":       "timer_start",
+			"timesheet_id": activeTimer.TimesheetID,
+			"project_id":   activeTimer.ProjectID,
+			"task_id":      activeTimer.TaskID,
+		})
 	}
 
 	json.NewEncoder(w).Encode(activeTimer)
@@ -947,6 +993,10 @@ func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Reques
 		userUID = client.UID()
 	}
 	state.pauseActiveTimer(userUID, req.UnitAmount)
+	state.broadcastUserEvent(userUID, "timer_pause", map[string]interface{}{
+		"timesheet_id": req.TimesheetID,
+		"unit_amount":  req.UnitAmount,
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -1008,7 +1058,15 @@ func (state *AppState) handleAPITimerResume(w http.ResponseWriter, r *http.Reque
 	}
 	nowMs := time.Now().UnixMilli()
 	state.setLastConfirmedAt(userUID, nowMs)
-	state.resumeActiveTimer(userUID)
+	state.resumeActiveTimerWithTimesheet(userUID, req.TimesheetID, req.TaskID)
+	state.broadcastUserEvent(userUID, "timer_resume", map[string]interface{}{
+		"timesheet_id": req.TimesheetID,
+		"task_id":      req.TaskID,
+	})
+	state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+		"action":       "timer_resume",
+		"timesheet_id": req.TimesheetID,
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -1078,6 +1136,17 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 			state.clearActiveTimer(userUID)
 		}
 	}
+
+	state.broadcastUserEvent(userUID, "timer_stop", map[string]interface{}{
+		"timesheet_id": req.TimesheetID,
+		"task_id":      req.TaskID,
+		"unit_amount":  req.UnitAmount,
+	})
+	state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+		"action":       "timer_stop",
+		"timesheet_id": req.TimesheetID,
+		"unit_amount":  req.UnitAmount,
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
