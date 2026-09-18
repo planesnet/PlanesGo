@@ -1202,7 +1202,7 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
     const dateToStr = (typeof formatISODate === 'function') ? formatISODate(tomorrow) : tomorrow.toISOString().split('T')[0];
 
     const pastDays = new Date(today);
-    pastDays.setDate(pastDays.getDate() - 14);
+    pastDays.setDate(pastDays.getDate() - 30);
     const dateFromStr = (typeof formatISODate === 'function') ? formatISODate(pastDays) : pastDays.toISOString().split('T')[0];
 
     const pTimesheets = fetch(`/api/timesheets?date_from=${dateFromStr}&date_to=${dateToStr}`, { cache: 'no-store' })
@@ -1466,6 +1466,13 @@ function renderExpressView(isSilent = false) {
 
         const timerState = (typeof getTimerState === 'function') ? getTimerState() : null;
 
+        // Ordenar allEntries de más recientes a menos recientes (fecha desc, id desc)
+        allEntries.sort((a, b) => {
+            if (a.date > b.date) return -1;
+            if (a.date < b.date) return 1;
+            return (parseInt(b.id, 10) || 0) - (parseInt(a.id, 10) || 0);
+        });
+
         // 2. Agrupar por tarea única de la botonera con función reutilizable
         function buildTaskMap(applyEmployeeFilter) {
             const map = new Map();
@@ -1555,27 +1562,18 @@ function renderExpressView(isSilent = false) {
 
                 if (isToday) {
                     item.hasTodayEntry = true;
-                    item.todayTimesheetId = entry.id;
+                    if (!item.todayTimesheetId) item.todayTimesheetId = entry.id;
                     item.todayHours += (entry.hours || 0);
-                    item.lastDate = todayStr;
-                    if (descClean) item.lastDescription = descClean;
-                    item.lastTimesheetId = entry.id;
                 } else if (isYesterday) {
                     item.hasYesterdayEntry = true;
                     item.yesterdayHours += (entry.hours || 0);
-                    if (!item.hasTodayEntry) {
-                        item.lastDate = entry.date;
-                        if (descClean) item.lastDescription = descClean;
-                        item.lastTimesheetId = entry.id;
-                    }
-                } else {
-                    if (!item.hasTodayEntry && !item.hasYesterdayEntry) {
-                        if (entry.date && (!item.lastDate || entry.date > item.lastDate)) {
-                            item.lastDate = entry.date;
-                            if (descClean) item.lastDescription = descClean;
-                            item.lastTimesheetId = entry.id;
-                        }
-                    }
+                }
+
+                // Mantener siempre la referencia al parte de trabajo más reciente
+                if (entry.date > item.lastDate || (entry.date === item.lastDate && (parseInt(entry.id, 10) || 0) > (parseInt(item.lastTimesheetId, 10) || 0))) {
+                    item.lastDate = entry.date;
+                    item.lastTimesheetId = entry.id;
+                    if (descClean) item.lastDescription = descClean;
                 }
             });
             return map;
@@ -1626,7 +1624,7 @@ function renderExpressView(isSilent = false) {
             }
         }
 
-    const tasks = Array.from(taskMap.values());
+    let tasks = Array.from(taskMap.values());
 
     // Marcar si está corriendo (coincidencia por ID o por Proyecto + Tarea + Descripción)
     tasks.forEach(t => {
@@ -1651,19 +1649,28 @@ function renderExpressView(isSilent = false) {
         t.isRunning = isRunning;
     });
 
-    tasks.sort((a, b) => {
-        if (a.isRunning && !b.isRunning) return -1;
-        if (!a.isRunning && b.isRunning) return 1;
-        if (a.hasTodayEntry && !b.hasTodayEntry) return -1;
-        if (!a.hasTodayEntry && b.hasTodayEntry) return 1;
-        if (a.hasYesterdayEntry && !b.hasYesterdayEntry) return -1;
-        if (!a.hasYesterdayEntry && b.hasYesterdayEntry) return 1;
+    // Ordenación y filtrado:
+    // 1. En primer lugar saldrá la tarjeta que está en ejecución si es que hay alguna.
+    // 2. A continuación el resto de tarjetas asociadas a los 15 últimos partes de hora, en orden de más recientes a menos.
+    const runningTasks = tasks.filter(t => t.isRunning);
+    const nonRunningTasks = tasks.filter(t => !t.isRunning);
+
+    nonRunningTasks.sort((a, b) => {
+        // Orden estrictamente por fecha más reciente a menos reciente
         if (a.lastDate > b.lastDate) return -1;
         if (a.lastDate < b.lastDate) return 1;
+        // Si coinciden en fecha, por ID de parte más reciente a menos reciente
+        const aId = parseInt(a.lastTimesheetId, 10) || 0;
+        const bId = parseInt(b.lastTimesheetId, 10) || 0;
+        if (aId !== bId) return bId - aId;
+        // Desempate por horas
         const aH = (a.todayHours || 0) + (a.yesterdayHours || 0) + (a.totalHours || 0);
         const bH = (b.todayHours || 0) + (b.yesterdayHours || 0) + (b.totalHours || 0);
         return bH - aH;
     });
+
+    const top15NonRunning = nonRunningTasks.slice(0, 15);
+    tasks = [...runningTasks, ...top15NonRunning];
 
     if (countBadge) {
         countBadge.textContent = `${tasks.length}`;
