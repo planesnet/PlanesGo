@@ -1777,12 +1777,12 @@ function renderExpressView(isSilent = false) {
 
         const partnerId = item.partnerId || (window.projectPartnerMap && window.projectPartnerMap[item.projectId]) || 0;
         const partnerLogoHtml = (partnerId > 0 || item.projectId > 0)
-            ? `<img src="/api/partner/avatar?id=${partnerId}&project_id=${item.projectId || 0}" alt="" class="w-3.5 h-3.5 rounded object-cover shrink-0 inline-block" loading="lazy" onerror="this.remove()">`
+            ? `<span class="inline-flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white/95 p-0.5 shadow-sm border border-slate-600/50 shrink-0 overflow-hidden"><img src="/api/partner/avatar?id=${partnerId}&project_id=${item.projectId || 0}" alt="" class="w-full h-full object-contain" loading="lazy" onerror="this.parentElement.remove()"></span>`
             : '';
 
         const isRunning = item.isRunning;
         const cardBorderClass = isRunning
-            ? 'border-emerald-400 ring-2 ring-emerald-500/50 shadow-lg bg-emerald-950/40 text-emerald-200'
+            ? 'express-card-running border-emerald-400 text-emerald-100'
             : 'border-slate-700/80 hover:border-slate-500 shadow-sm bg-slate-800/90 hover:bg-slate-750 text-slate-100';
 
         cardsHtml += `
@@ -1804,13 +1804,15 @@ function renderExpressView(isSilent = false) {
                  onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleExpressCardClick(this); }">
                 
                 <!-- Encabezado de la tecla: Logotipo Partner, Nombre del Proyecto y Estado -->
-                <div class="flex items-center justify-between gap-1.5 mb-1.5">
-                    <div class="flex items-center space-x-1.5 min-w-0">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="flex items-center space-x-2 min-w-0">
                         ${partnerLogoHtml}
-                        <span class="w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-sky-400'} shrink-0"></span>
-                        <span class="text-xs sm:text-[13px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
-                            ${safeProj}
-                        </span>
+                        <div class="min-w-0 flex items-center space-x-1.5">
+                            <span class="w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-sky-400'} shrink-0"></span>
+                            <span class="text-xs sm:text-[13px] uppercase font-black tracking-wider text-sky-400 truncate" title="${safeProj}">
+                                ${safeProj}
+                            </span>
+                        </div>
                     </div>
                     <div class="shrink-0">
                         <span class="express-badge-running ${isRunning ? '' : 'hidden'} inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
@@ -1825,7 +1827,7 @@ function renderExpressView(isSilent = false) {
 
                 <!-- Cuerpo de la tecla: MÁXIMA IMPORTANCIA A LA DESCRIPCIÓN DE LA TAREA REALIZADA -->
                 <div class="mb-2.5 space-y-1">
-                    <h4 class="text-sm sm:text-base font-bold text-slate-100 group-hover:text-amber-300 leading-snug line-clamp-2 transition-colors" title="${safeDesc}">
+                    <h4 class="express-card-title text-sm sm:text-base font-bold text-slate-100 group-hover:text-amber-300 leading-snug line-clamp-2 transition-colors" title="${safeDesc}">
                         ${safeDesc}
                     </h4>
                     ${hasTask ? `
@@ -1997,8 +1999,8 @@ function updateExpressTimerState() {
         const btnAction = card.querySelector('.express-btn-action');
 
         if (isMatch && isRunning) {
-            card.classList.add('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200');
-            card.classList.remove('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100', 'border-amber-500/80', 'bg-amber-950/30');
+            card.classList.add('express-card-running', 'border-emerald-400', 'text-emerald-100');
+            card.classList.remove('express-card-paused', 'border-slate-700/80', 'bg-slate-800/90', 'text-slate-100', 'border-amber-500/80', 'bg-amber-950/30', 'text-amber-100');
 
             if (clockEl) clockEl.textContent = formattedClock;
             if (clockContainer) clockContainer.classList.remove('hidden');
@@ -2011,8 +2013,8 @@ function updateExpressTimerState() {
                 btnAction.textContent = 'PAUSAR';
             }
         } else if (isMatch && current && current.status === 'paused') {
-            card.classList.add('border-amber-500/80', 'ring-2', 'ring-amber-500/40', 'bg-amber-950/30', 'text-amber-100');
-            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'border-slate-700/80', 'bg-slate-800/90');
+            card.classList.add('express-card-paused', 'border-amber-500/80', 'text-amber-100');
+            card.classList.remove('express-card-running', 'border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'text-emerald-100', 'border-slate-700/80', 'bg-slate-800/90');
 
             if (clockEl) clockEl.textContent = formattedClock;
             if (clockContainer) clockContainer.classList.remove('hidden');
@@ -2025,7 +2027,7 @@ function updateExpressTimerState() {
                 btnAction.textContent = 'REANUDAR';
             }
         } else {
-            card.classList.remove('border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'border-amber-500/80', 'bg-amber-950/30', 'text-amber-100');
+            card.classList.remove('express-card-running', 'express-card-paused', 'border-emerald-400', 'ring-2', 'ring-emerald-500/50', 'shadow-lg', 'bg-emerald-950/40', 'text-emerald-200', 'text-emerald-100', 'border-amber-500/80', 'bg-amber-950/30', 'text-amber-100');
             card.classList.add('border-slate-700/80', 'bg-slate-800/90', 'text-slate-100');
 
             if (clockContainer) clockContainer.classList.add('hidden');
