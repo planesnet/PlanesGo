@@ -2,6 +2,7 @@
 pasigo
 planesgo
 Migrar1
+bin/
 *.exe
 *.exe~
 *.dll

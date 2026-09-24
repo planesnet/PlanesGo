@@ -551,3 +551,74 @@ func formatHoursDuration(hours float64) string {
 	s := totalSec % 60
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
+
+// handleAntigravityTasks lista las tareas de un proyecto para el usuario autenticado con Antigravity
+func (state *AppState) handleAntigravityTasks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+
+	sess, err := state.resolveAntigravitySession(r, "", "")
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	odooCfg := state.resolveUserOdooConfig(sess)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Credenciales de Odoo no disponibles para este usuario"})
+		return
+	}
+
+	client := odoo.GetClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	userEmail := sess.UserEmail
+	if userEmail == "" {
+		userEmail = sess.Username
+	}
+	userUID, _ := client.ResolveUserUIDByEmail(ctx, userEmail)
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+
+	projectIDStr := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	projectID, _ := strconv.Atoi(projectIDStr)
+
+	if projectID <= 0 {
+		projectName := strings.TrimSpace(r.URL.Query().Get("project_name"))
+		if projectName != "" {
+			projects, pErr := client.GetProjects(ctx, nil)
+			if pErr == nil {
+				for _, p := range projects {
+					if projectNamesMatch(projectName, p.Name) {
+						projectID = p.ID
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if projectID <= 0 {
+		json.NewEncoder(w).Encode([]odoo.Task{})
+		return
+	}
+
+	tasks, err := client.GetTasks(ctx, projectID, userUID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Error al consultar tareas en Odoo: " + err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(tasks)
+}

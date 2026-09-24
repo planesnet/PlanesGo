@@ -48,43 +48,6 @@ function isMobileEnvironment() {
     return false;
 }
 
-/**
- * Abre la botonera Express en modo ordenador (pantalla de escritorio).
- * Si la ventana flotante existe en el DOM, la hace visible y la enfoca.
- * Si no está disponible en la página actual, abre la ventana independiente /express.
- */
-function openExpressInComputerMode() {
-    if (typeof openExpressFloating === 'function') {
-        openExpressFloating();
-    } else if (typeof window.openExpressFloating === 'function') {
-        window.openExpressFloating();
-    } else {
-        const win = document.getElementById('express-floating-window');
-        if (win) {
-            win.classList.remove('hidden');
-            const body = document.getElementById('express-window-body');
-            if (body && body.classList.contains('hidden') && typeof toggleMinimizeExpress === 'function') {
-                toggleMinimizeExpress();
-            }
-            const btn = document.getElementById('btn-view-express');
-            if (btn) {
-                btn.classList.add('bg-white', 'text-amber-600', 'shadow-2xs', 'border-amber-200/80', 'font-bold');
-                btn.classList.remove('text-slate-600');
-            }
-            if (typeof loadExpressTimesheets === 'function') {
-                loadExpressTimesheets();
-            }
-            if (typeof initExpressWindowInteractions === 'function') {
-                initExpressWindowInteractions();
-            }
-        } else if (typeof openExpressPopout === 'function') {
-            openExpressPopout();
-        } else {
-            window.open('/express', 'PlanesGoExpress');
-        }
-    }
-}
-
 // Inicialización automática al cargar el DOM
 document.addEventListener('DOMContentLoaded', function () {
     originalDocumentTitle = document.title;
@@ -247,9 +210,6 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     if (isDifferent) {
         stopPreviousRunningTimer(current);
     }
-
-    // Solicitar permiso de notificaciones de forma proactiva al iniciar
-    requestNotificationPermission();
 
     // Determinar la fecha objetivo de trabajo (parámetro, input modal o hoy)
     const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || new Date().toISOString().split('T')[0];
@@ -1019,18 +979,12 @@ function autoStopTimerDueToInactivity(state) {
         })
     }).catch(err => console.warn('[PlanesGo Timer] Error sincronizando auto-pausa con Odoo:', err));
 
-    // 5. Notificación estándar del sistema informando que se detuvo
-    triggerSystemNotification(
-        'PlanesGo: Cronómetro parado por inactividad',
-        `No se confirmó en los últimos ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} minutos. El cronómetro se ha pausado fijado en los ${TIMER_PROMPT_MINUTES} minutos (${hoursDecimal}h).`
-    );
-
-    // 6. Mensaje emergente en pantalla
+    // 5. Mensaje emergente en pantalla
     showNotificationToast(`Cronómetro pausado por inactividad a los ${TIMER_PROMPT_MINUTES} minutos (${hoursDecimal}h)`);
 }
 
 /**
- * Dispara la alerta periódica (sonido, notificación estándar del sistema y modal)
+ * Dispara la alerta periódica (sonido suave, parpadeo de pestaña y modal)
  */
 function trigger15MinuteReminder(state, currentTotalMs) {
     if (isMobileEnvironment()) return; // Notificaciones desactivadas en entorno móvil
@@ -1043,16 +997,10 @@ function trigger15MinuteReminder(state, currentTotalMs) {
     // 1. Reproducir sonido suave de aviso (Web Audio API)
     playChimeSound();
 
-    // 2. Disparar notificación estándar del sistema operativo con clic para abrir diálogo
-    triggerSystemNotification(
-        `⏱️ PlanesGo: ¿Sigues en "${state.projectName}"?`,
-        `Han transcurrido ${TIMER_PROMPT_MINUTES} minutos de trabajo. Haz clic aquí para confirmar que sigues con este trabajo (se detendrá si no se confirma en ${TIMER_UNCONFIRMED_TIMEOUT_MINUTES} min).`
-    );
-
-    // 3. Parpadeo del título de la pestaña
+    // 2. Parpadeo del título de la pestaña
     startTitleFlash();
 
-    // 4. Mostrar modal interactivo en pantalla si la vista Express está activa
+    // 3. Mostrar modal interactivo en pantalla si la vista Express está activa
     if (isExpressViewActive()) {
         showTimerConfirmModal(state, currentTotalMs);
     }
@@ -1533,8 +1481,6 @@ async function initTimerFromStorage() {
             }
         }
     });
-
-    requestNotificationPermission();
 }
 
 /**
@@ -1741,114 +1687,21 @@ function playChimeSound(isGentleReminder = false) {
 }
 
 /**
- * Solicita permiso de notificaciones nativas de escritorio
- */
-function requestNotificationPermission() {
-    if (isMobileEnvironment()) return; // Notificaciones desactivadas en móvil
-    if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(e => console.log('Permiso de notificaciones denegado o cerrado:', e));
-    }
-}
-
-/**
- * Muestra notificación de escritorio estándar del sistema operativo
- * Permite hacer clic directamente en la notificación para reconfirmar el trabajo en curso
- */
-function triggerSystemNotification(title, body) {
-    if (isMobileEnvironment()) return; // Notificaciones desactivadas en móvil
-    if (!('Notification' in window)) return;
-
-    const displayNotif = () => {
-        try {
-            if (activeSystemNotification) {
-                try { activeSystemNotification.close(); } catch (e) {}
-                activeSystemNotification = null;
-            }
-
-            const notif = new Notification(title, {
-                body: body,
-                icon: '/static/img/logo.png',
-                tag: 'planesgo-timer-alert',
-                renotify: true,
-                requireInteraction: true // Notificación persistente en el sistema operativo
-            });
-
-            activeSystemNotification = notif;
-
-            notif.onclick = function () {
-                try {
-                    window.focus();
-                } catch (e) {}
-
-                // Si no está activa la pantalla express en el ordenador, abrirla en modo ordenador
-                if (!isExpressViewActive()) {
-                    openExpressInComputerMode();
-                }
-
-                // Al hacer clic en la notificación, abrir el diálogo del parte de horas con el botón Continuar por defecto
-                showTimerConfirmModal();
-                try { notif.close(); } catch (e) {}
-                activeSystemNotification = null;
-            };
-
-            notif.onclose = function () {
-                if (activeSystemNotification === notif) {
-                    activeSystemNotification = null;
-                }
-            };
-        } catch (e) {
-            console.warn('Error al mostrar notificación de escritorio:', e);
-        }
-    };
-
-    if (Notification.permission === 'granted') {
-        displayNotif();
-    } else if (Notification.permission !== 'denied') {
-        Notification.requestPermission().then(permission => {
-            if (permission === 'granted') {
-                displayNotif();
-            }
-        });
-    }
-}
-
-/**
- * Diagnóstico interactivo para comprobar sonidos y notificaciones nativas del cronómetro
+ * Diagnóstico interactivo para comprobar avisos sonoros y visuales del cronómetro
  */
 window.testTimerNotification = async function () {
     // 1. Probar sonido armónico inmediatamente
     playChimeSound(false);
 
-    // 2. Verificar o solicitar permiso de notificación
-    if (!('Notification' in window)) {
-        if (typeof showToast === 'function') {
-            showToast('⚠️ Tu navegador no soporta notificaciones de escritorio nativas.', 'warning', 5000);
-        }
-        return;
-    }
+    // 2. Parpadeo visual del título de la pestaña durante 5 segundos
+    startTitleFlash();
+    setTimeout(stopTitleFlash, 5000);
 
-    if (Notification.permission === 'denied') {
-        if (typeof showToast === 'function') {
-            showToast('🚫 Las notificaciones están bloqueadas en los ajustes del navegador.', 'error', 6000);
-        }
-        return;
-    }
-
-    if (Notification.permission === 'default') {
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') {
-            if (typeof showToast === 'function') {
-                showToast('ℹ️ Permiso de notificaciones no concedido.', 'warning', 4000);
-            }
-            return;
-        }
-    }
-
-    // 3. Emitir notificación de prueba
-    triggerSystemNotification('🔔 PlanesGo - Prueba de Notificación', '¡El sistema de avisos sonoros y de escritorio está activo y funcionando correctamente!');
+    // 3. Aviso emergente tipo toast
+    showNotificationToast('🔔 Aviso sonoro emitido correctamente');
 
     if (typeof showToast === 'function') {
-        showToast('🔔 Aviso emitido: sonido reproducido y notificación de escritorio enviada.', 'success', 5000);
+        showToast('🔔 Aviso emitido: sonido reproducido y pestaña parpadeando.', 'success', 4000);
     }
 };
 

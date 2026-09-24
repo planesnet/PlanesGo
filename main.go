@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.38"
+var Version = "1.2.41"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -70,6 +70,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	// Controlador de Integración Antigravity (Latidos continuos, verificación previa y telemetría)
 	mux.HandleFunc("/antigravity", state.handleAntigravity)
 	mux.HandleFunc("/antigravity/status", state.handleAntigravityStatus)
+	mux.HandleFunc("/antigravity/tasks", state.handleAntigravityTasks)
 	mux.HandleFunc("/antigravity/update_tasks", state.handleAntigravityUpdateTasks)
 	mux.HandleFunc("/antigravity/update_parts", state.handleAntigravityUpdateTasks)
 
