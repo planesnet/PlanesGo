@@ -249,6 +249,10 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     }
 
     saveTimerState(state);
+    if (state.timesheetId) {
+        if (!window.__activeTimersMap) window.__activeTimersMap = new Map();
+        window.__activeTimersMap.set(state.timesheetId, state);
+    }
     renderTimerBar(state);
     startTimerTicker();
     updateAllRowTimerButtonStates();
@@ -395,8 +399,16 @@ function togglePauseTimer() {
             }
         }
 
+        if (state.timesheetId && window.__activeTimersMap) {
+            const tEntry = window.__activeTimersMap.get(state.timesheetId);
+            if (tEntry) {
+                tEntry.status = 'paused';
+                tEntry.lastStartTime = null;
+                tEntry.accumulatedMs = state.accumulatedMs;
+            }
+        }
         window.__lastTimerActionTime = now;
-        stopTimerTicker();
+        checkAndStopTimerTicker();
         if (typeof showToast === 'function') {
             showToast(`⏸️ Cronómetro pausado (${totalHoursDecimal.toFixed(2)}h)`, 'warning');
         }
@@ -406,6 +418,14 @@ function togglePauseTimer() {
         state.lastStartTime = now;
         state.lastPromptTime = now;
         window.__lastTimerActionTime = now;
+
+        if (state.timesheetId && window.__activeTimersMap) {
+            const tEntry = window.__activeTimersMap.get(state.timesheetId);
+            if (tEntry) {
+                tEntry.status = 'running';
+                tEntry.lastStartTime = now;
+            }
+        }
 
         if (state.timesheetId) {
             const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
@@ -475,7 +495,6 @@ function finalizeActiveTimer(btn) {
 
     // Detener parpadeo de título, tickers y notificaciones pendientes
     stopTitleFlash();
-    stopTimerTicker();
     hideTimerConfirmModal();
 
     if (activeSystemNotification) {
@@ -500,6 +519,15 @@ function finalizeActiveTimer(btn) {
     state.status = 'paused';
     state.accumulatedMs = totalMs;
     state.lastStartTime = null;
+    if (state.timesheetId && window.__activeTimersMap) {
+        const tEntry = window.__activeTimersMap.get(state.timesheetId);
+        if (tEntry) {
+            tEntry.status = 'paused';
+            tEntry.lastStartTime = null;
+            tEntry.accumulatedMs = totalMs;
+        }
+    }
+    checkAndStopTimerTicker();
     saveTimerState(state);
     if (typeof renderTimerBar === 'function') {
         renderTimerBar(state);
@@ -676,6 +704,91 @@ function clearTimer(skipOdooSync) {
 }
 
 /**
+ * Mapa global de cronómetros activos concurrentes en memoria
+ * Clave: timesheet_id (número entero)
+ * Valor: { timesheetId, status, lastStartTime, accumulatedMs, ... }
+ */
+window.__activeTimersMap = window.__activeTimersMap || new Map();
+
+/**
+ * Actualiza de forma suave y sin parpadeos los elementos visuales de una fila de imputación
+ */
+function updateRowLiveDisplay(row, totalMs, isRunning) {
+    if (!row) return;
+
+    const hoursDecimal = (totalMs / 3600000).toFixed(2);
+    const formattedClock = formatElapsedMs(totalMs);
+
+    if (row.dataset.hours !== hoursDecimal) {
+        row.dataset.hours = hoursDecimal;
+        row.querySelectorAll('[data-hours]').forEach(el => {
+            el.dataset.hours = hoursDecimal;
+        });
+    }
+    const runningStr = isRunning ? 'true' : 'false';
+    if (row.dataset.timerRunning !== runningStr) {
+        row.dataset.timerRunning = runningStr;
+    }
+
+    const hoursBadge = row.querySelector('.timesheet-hours-badge');
+    if (hoursBadge) {
+        if (isRunning) {
+            const liveClock = hoursBadge.querySelector('.timer-live-clock');
+            const decSpan = hoursBadge.querySelector('.timer-dec-hours');
+            if (liveClock && decSpan) {
+                if (liveClock.textContent !== formattedClock) {
+                    liveClock.textContent = formattedClock;
+                }
+                const decText = `(${hoursDecimal}h)`;
+                if (decSpan.textContent !== decText) {
+                    decSpan.textContent = decText;
+                }
+            } else {
+                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs';
+                hoursBadge.innerHTML = `
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span class="timer-live-clock font-mono font-bold text-emerald-900">${formattedClock}</span>
+                    <span class="timer-dec-hours text-[10px] text-emerald-700 font-medium">(${hoursDecimal}h)</span>
+                `;
+            }
+        } else {
+            const liveClock = hoursBadge.querySelector('.timer-live-clock');
+            if (liveClock) {
+                if (liveClock.textContent !== formattedClock) {
+                    liveClock.textContent = formattedClock;
+                }
+            } else {
+                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono';
+                hoursBadge.innerHTML = `
+                    <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    <span class="font-mono font-bold text-amber-900">${formattedClock}</span>
+                    <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado)</span>
+                `;
+            }
+        }
+    }
+}
+
+/**
+ * Comprueba si queda algún cronómetro corriendo (en memoria, mapa o DOM) antes de detener el ticker
+ */
+function checkAndStopTimerTicker() {
+    const current = getTimerState();
+    if (current && current.status === 'running') return;
+    if (window.__activeTimersMap) {
+        for (const [id, t] of window.__activeTimersMap.entries()) {
+            if (t.status === 'running') return;
+        }
+    }
+    const anyDomRunning = document.querySelector('.timesheet-row[data-timer-running="true"]');
+    if (anyDomRunning) return;
+    stopTimerTicker();
+}
+
+/**
  * Inicia el loop del ticker que actualiza el reloj y comprueba los 15 minutos
  */
 function startTimerTicker() {
@@ -700,163 +813,176 @@ let lastAlertChimeSec = -1;
  * Actualiza cada segundo el cronómetro en pantalla y evalúa el recordatorio
  */
 function updateTimerTick() {
-    const state = getTimerState();
-    if (!state) {
-        stopTimerTicker();
-        return;
-    }
-
     const now = Date.now();
-    let totalMs = state.accumulatedMs || 0;
+    const state = getTimerState();
+    let hasRunningTimer = false;
 
-    if (state.status === 'running' && state.lastStartTime) {
-        totalMs += (now - state.lastStartTime);
-
-        // Si hay una alerta de 15 minutos pendiente de confirmación:
-        if (state.promptTriggeredAt) {
-            // Sincronizar periódicamente con el backend para detectar si el usuario confirmó en otro dispositivo (PC o móvil)
-            if (now - lastRemoteSyncTime >= 3000) {
-                lastRemoteSyncTime = now;
-                fetch('/api/timer/active?_t=' + now, { cache: 'no-store' })
-                    .then(r => r.json())
-                    .then(data => {
-                        if (!data || !data.active || !data.active.is_running) {
-                            // Se pausó o detuvo desde otro dispositivo
-                            hideTimerConfirmModal();
-                            stopTitleFlash();
-                            if (activeSystemNotification) {
-                                try { activeSystemNotification.close(); } catch (e) {}
-                                activeSystemNotification = null;
-                            }
-                            if (typeof syncActiveTimerFromOdoo === 'function') {
-                                syncActiveTimerFromOdoo();
-                            }
-                            return;
-                        }
-                        if (data.active.timesheet_id !== state.timesheetId) {
-                            // Cambió de tarea desde otro dispositivo
-                            hideTimerConfirmModal();
-                            stopTitleFlash();
-                            if (activeSystemNotification) {
-                                try { activeSystemNotification.close(); } catch (e) {}
-                                activeSystemNotification = null;
-                            }
-                            if (typeof syncActiveTimerFromOdoo === 'function') {
-                                syncActiveTimerFromOdoo();
-                            }
-                            return;
-                        }
-                        // Si se confirmó en otro dispositivo con timestamp posterior al prompt
-                        if (data.last_confirmed_at && data.last_confirmed_at > state.promptTriggeredAt) {
-                            state.promptTriggeredAt = null;
-                            state.promptSnapshotMs = null;
-                            state.lastPromptAccumulatedMs = totalMs;
-                            state.lastPromptTime = Date.now();
-                            saveTimerState(state);
-                            hideTimerConfirmModal();
-                            stopTitleFlash();
-                            if (activeSystemNotification) {
-                                try { activeSystemNotification.close(); } catch (e) {}
-                                activeSystemNotification = null;
-                            }
-                            if (typeof showToast === 'function') {
-                                showToast('✅ Tarea reconfirmada desde otro dispositivo', 'info');
-                            }
-                        }
-                    })
-                    .catch(() => {});
+    // 1. Cronómetro principal (barra superior, avisos de 15 min, modal)
+    let totalMs = 0;
+    if (state) {
+        totalMs = state.accumulatedMs || 0;
+        if (state.status === 'running') {
+            hasRunningTimer = true;
+            if (state.lastStartTime) {
+                totalMs += (now - state.lastStartTime);
             }
 
-            const timeSinceAlert = now - state.promptTriggeredAt;
-            const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
+            // Si hay una alerta de 15 minutos pendiente de confirmación:
+            if (state.promptTriggeredAt) {
+                // Sincronizar periódicamente con el backend para detectar si el usuario confirmó en otro dispositivo (PC o móvil)
+                if (now - lastRemoteSyncTime >= 3000) {
+                    lastRemoteSyncTime = now;
+                    fetch('/api/timer/active?_t=' + now, { cache: 'no-store' })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (!data || !data.active || !data.active.is_running) {
+                                // Se pausó o detuvo desde otro dispositivo
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof syncActiveTimerFromOdoo === 'function') {
+                                    syncActiveTimerFromOdoo();
+                                }
+                                return;
+                            }
+                            if (data.active.timesheet_id !== state.timesheetId) {
+                                // Cambió de tarea desde otro dispositivo
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof syncActiveTimerFromOdoo === 'function') {
+                                    syncActiveTimerFromOdoo();
+                                }
+                                return;
+                            }
+                            // Si se confirmó en otro dispositivo con timestamp posterior al prompt
+                            if (data.last_confirmed_at && data.last_confirmed_at > state.promptTriggeredAt) {
+                                state.promptTriggeredAt = null;
+                                state.promptSnapshotMs = null;
+                                state.lastPromptAccumulatedMs = totalMs;
+                                state.lastPromptTime = Date.now();
+                                saveTimerState(state);
+                                hideTimerConfirmModal();
+                                stopTitleFlash();
+                                if (activeSystemNotification) {
+                                    try { activeSystemNotification.close(); } catch (e) {}
+                                    activeSystemNotification = null;
+                                }
+                                if (typeof showToast === 'function') {
+                                    showToast('✅ Tarea reconfirmada desde otro dispositivo', 'info');
+                                }
+                            }
+                        })
+                        .catch(() => {});
+                }
 
-            // Actualizar cuenta regresiva en el modal si está visible
-            const countdownEl = document.getElementById('confirm-modal-countdown');
-            if (countdownEl) {
-                const totalSec = Math.ceil(remainingTimeoutMs / 1000);
-                const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
-                const sec = String(totalSec % 60).padStart(2, '0');
-                countdownEl.textContent = `${min}:${sec}`;
-            }
+                const timeSinceAlert = now - state.promptTriggeredAt;
+                const remainingTimeoutMs = Math.max(0, TIMER_UNCONFIRMED_TIMEOUT_MS - timeSinceAlert);
 
-            if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
-                // El usuario no confirmó en los próximos 5 minutos en ningún dispositivo.
-                autoStopTimerDueToInactivity(state);
-                return;
-            }
-        } else {
-            // Comprobar si han transcurrido los 15 minutos de TRABAJO REAL desde el último prompt o confirmación
-            const lastPromptAccum = (typeof state.lastPromptAccumulatedMs === 'number')
-                ? state.lastPromptAccumulatedMs
-                : totalMs;
+                // Actualizar cuenta regresiva en el modal si está visible
+                const countdownEl = document.getElementById('confirm-modal-countdown');
+                if (countdownEl) {
+                    const totalSec = Math.ceil(remainingTimeoutMs / 1000);
+                    const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                    const sec = String(totalSec % 60).padStart(2, '0');
+                    countdownEl.textContent = `${min}:${sec}`;
+                }
 
-            const lastPromptTime = (typeof state.lastPromptTime === 'number' && state.lastPromptTime > 0)
-                ? state.lastPromptTime
-                : now;
+                if (timeSinceAlert >= TIMER_UNCONFIRMED_TIMEOUT_MS) {
+                    // El usuario no confirmó en los próximos 5 minutos en ningún dispositivo.
+                    autoStopTimerDueToInactivity(state);
+                    return;
+                }
+            } else {
+                // Comprobar si han transcurrido los 15 minutos de TRABAJO REAL desde el último prompt o confirmación
+                const lastPromptAccum = (typeof state.lastPromptAccumulatedMs === 'number')
+                    ? state.lastPromptAccumulatedMs
+                    : totalMs;
 
-            const workDoneSincePrompt = totalMs - lastPromptAccum;
-            const wallClockSincePrompt = now - lastPromptTime;
+                const lastPromptTime = (typeof state.lastPromptTime === 'number' && state.lastPromptTime > 0)
+                    ? state.lastPromptTime
+                    : now;
 
-            if (workDoneSincePrompt >= TIMER_PROMPT_INTERVAL_MS || wallClockSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
-                // Notificaciones activas en entorno web (ordenador) y desactivadas en móvil
-                if (!isMobileEnvironment()) {
-                    trigger15MinuteReminder(state, totalMs);
-                } else {
-                    // En móvil: sin notificaciones, avanzar timestamp para no acumular
-                    state.lastPromptAccumulatedMs = totalMs;
-                    state.lastPromptTime = now;
-                    saveTimerState(state);
+                const workDoneSincePrompt = totalMs - lastPromptAccum;
+                const wallClockSincePrompt = now - lastPromptTime;
+
+                if (workDoneSincePrompt >= TIMER_PROMPT_INTERVAL_MS || wallClockSincePrompt >= TIMER_PROMPT_INTERVAL_MS) {
+                    // Notificaciones activas en entorno web (ordenador) y desactivadas en móvil
+                    if (!isMobileEnvironment()) {
+                        trigger15MinuteReminder(state, totalMs);
+                    } else {
+                        // En móvil: sin notificaciones, avanzar timestamp para no acumular
+                        state.lastPromptAccumulatedMs = totalMs;
+                        state.lastPromptTime = now;
+                        saveTimerState(state);
+                    }
                 }
             }
         }
-    }
 
-    // Si el modal de confirmación de 15 minutos está visible en pantalla, mantener su contador activo en tiempo real
-    const modalTimeEl = document.getElementById('confirm-modal-time');
-    if (modalTimeEl) {
-        modalTimeEl.textContent = formatElapsedMs(totalMs);
-    }
+        // Si el modal de confirmación de 15 minutos está visible en pantalla, mantener su contador activo en tiempo real
+        const modalTimeEl = document.getElementById('confirm-modal-time');
+        if (modalTimeEl) {
+            modalTimeEl.textContent = formatElapsedMs(totalMs);
+        }
 
-    // Actualizar directamente la fila activa de la tarea / imputación
-    const hoursDecimal = (totalMs / 3600000).toFixed(2);
-    const formattedClock = formatElapsedMs(totalMs);
-
-    let row = null;
-    if (state.timesheetId) {
-        row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
-    }
-    if (!row) {
-        row = document.querySelector(`.timesheet-row[data-timer-running="true"]`);
-    }
-
-    if (row) {
-        row.dataset.hours = hoursDecimal;
-        row.dataset.timerRunning = (state.status === 'running') ? 'true' : 'false';
-        row.querySelectorAll('[data-hours]').forEach(el => {
-            el.dataset.hours = hoursDecimal;
-        });
-
-        const hoursBadge = row.querySelector('.timesheet-hours-badge');
-        if (hoursBadge) {
-            if (state.status === 'running') {
-                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono shadow-xs';
-                hoursBadge.innerHTML = `
-                    <span class="relative flex h-2 w-2">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                    <span class="timer-live-clock font-mono font-bold text-emerald-900">${formattedClock}</span>
-                    <span class="text-[10px] text-emerald-700 font-medium">(${hoursDecimal}h)</span>
-                `;
-            } else {
-                hoursBadge.className = 'timesheet-hours-badge inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono';
-                hoursBadge.innerHTML = `
-                    <span class="inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                    <span class="font-mono font-bold text-amber-900">${formattedClock}</span>
-                    <span class="text-[10px] text-amber-700 font-medium">(${hoursDecimal}h - Pausado)</span>
-                `;
+        // Actualizar fila del cronómetro principal si existe
+        if (state.timesheetId) {
+            const row = document.querySelector(`.timesheet-row[data-id="${state.timesheetId}"]`);
+            if (row) {
+                updateRowLiveDisplay(row, totalMs, state.status === 'running');
             }
         }
+    }
+
+    // 2. Cronómetros concurrentes adicionales (en __activeTimersMap)
+    if (!window.__activeTimersMap) {
+        window.__activeTimersMap = new Map();
+    }
+
+    // Auto-registrar filas del DOM que vengan marcadas con data-timer-running="true" (ej. SSR)
+    document.querySelectorAll('.timesheet-row[data-timer-running="true"]').forEach(r => {
+        const rowId = parseInt(r.dataset.id, 10);
+        if (rowId && (!state || state.timesheetId !== rowId) && !window.__activeTimersMap.has(rowId)) {
+            const h = parseFloat(r.dataset.hours) || 0;
+            const accum = Math.round(h * 3600 * 1000);
+            window.__activeTimersMap.set(rowId, {
+                timesheetId: rowId,
+                status: 'running',
+                lastStartTime: now,
+                accumulatedMs: accum
+            });
+        }
+    });
+
+    // Iterar sobre todos los cronómetros concurrentes en el mapa y actualizar sus filas de forma independiente
+    for (const [tsId, timer] of window.__activeTimersMap.entries()) {
+        if (state && state.timesheetId === tsId) continue;
+
+        const row = document.querySelector(`.timesheet-row[data-id="${tsId}"]`);
+        if (timer.status === 'running') {
+            hasRunningTimer = true;
+            const timerMs = (timer.accumulatedMs || 0) + (now - (timer.lastStartTime || now));
+            if (row) {
+                updateRowLiveDisplay(row, timerMs, true);
+            }
+        } else if (timer.status === 'paused') {
+            if (row) {
+                updateRowLiveDisplay(row, timer.accumulatedMs || 0, false);
+            }
+        }
+    }
+
+    // Si no queda ningún cronómetro en marcha, detener el ticker
+    if (!hasRunningTimer && (!state || state.status !== 'running')) {
+        stopTimerTicker();
+        return;
     }
 
     // Si el modal de imputación está abierto, mantener sincronizado el campo de horas con el tiempo del cronómetro activo
@@ -1424,6 +1550,7 @@ async function initTimerFromStorage() {
             startTimerTicker();
         }
         updateAllRowTimerButtonStates();
+        await syncActiveTimerFromOdoo();
     } else {
         const local = getTimerState();
         if (local) {
@@ -1480,7 +1607,59 @@ async function syncActiveTimerFromOdoo() {
             const data = await resp.json();
             if (data && data.active_list) {
                 window.__activeTimersList = data.active_list;
+                if (!window.__activeTimersMap) {
+                    window.__activeTimersMap = new Map();
+                }
+                const activeIds = new Set();
+                for (const item of data.active_list) {
+                    const tsId = item.timesheet_id;
+                    if (!tsId) continue;
+                    activeIds.add(tsId);
+
+                    let itemStartedAt = item.started_at || serverTime;
+                    if (itemStartedAt > 0 && itemStartedAt < 1000000000000) {
+                        itemStartedAt *= 1000;
+                    }
+                    const itemLocalStartTime = itemStartedAt - clockOffset;
+                    const itemAccumMs = (typeof item.accumulated_ms === 'number' && item.accumulated_ms >= 0)
+                        ? item.accumulated_ms
+                        : Math.round((item.unit_amount || 0) * 3600 * 1000);
+
+                    const existing = window.__activeTimersMap.get(tsId);
+                    if (!existing) {
+                        window.__activeTimersMap.set(tsId, {
+                            timesheetId: tsId,
+                            projectId: item.project_id,
+                            projectName: item.project_name || ('Proyecto #' + item.project_id),
+                            taskId: item.task_id || null,
+                            taskName: item.task_name || '',
+                            description: item.description || '',
+                            status: item.is_running ? 'running' : 'paused',
+                            startedAt: itemStartedAt,
+                            lastStartTime: itemLocalStartTime,
+                            accumulatedMs: itemAccumMs,
+                            unitAmount: item.unit_amount
+                        });
+                    } else {
+                        existing.status = item.is_running ? 'running' : 'paused';
+                        if (!existing.lastStartTime || Math.abs(existing.lastStartTime - itemLocalStartTime) > 3000) {
+                            existing.lastStartTime = itemLocalStartTime;
+                        }
+                        if (Math.abs((existing.accumulatedMs || 0) - itemAccumMs) > 3000) {
+                            existing.accumulatedMs = itemAccumMs;
+                        }
+                        existing.unitAmount = item.unit_amount;
+                    }
+                }
+
+                // Limpiar entradas que ya no están activas en Odoo
+                for (const [id, timer] of window.__activeTimersMap.entries()) {
+                    if (!activeIds.has(id)) {
+                        window.__activeTimersMap.delete(id);
+                    }
+                }
             }
+
             const act = data ? data.active : null;
             const lastConfirmedAt = data ? data.last_confirmed_at : 0;
             const current = getTimerState();
@@ -1488,7 +1667,56 @@ async function syncActiveTimerFromOdoo() {
             const serverTime = (data && data.server_time) ? data.server_time : now;
             const clockOffset = serverTime - now;
 
-            if (act && act.is_running) {
+            // Comprobar si el temporizador principal local actual existe en la lista activa del servidor
+            const currentItemInList = (data && data.active_list && current && current.timesheetId)
+                ? data.active_list.find(t => t.timesheet_id === current.timesheetId)
+                : null;
+
+            if (currentItemInList) {
+                // El temporizador principal sigue activo en Odoo; lo mantenemos sin sustituirlo por otro concurrente
+                let startedAt = currentItemInList.started_at || serverTime;
+                if (startedAt > 0 && startedAt < 1000000000000) {
+                    startedAt *= 1000;
+                }
+                const localStartTime = startedAt - clockOffset;
+                const accumulatedMs = (typeof currentItemInList.accumulated_ms === 'number' && currentItemInList.accumulated_ms >= 0)
+                    ? currentItemInList.accumulated_ms
+                    : Math.round((currentItemInList.unit_amount || 0) * 3600 * 1000);
+
+                current.startedAt = startedAt;
+                if (!current.lastStartTime || Math.abs(current.lastStartTime - localStartTime) > 3000) {
+                    current.lastStartTime = localStartTime;
+                }
+                if (Math.abs((current.accumulatedMs || 0) - accumulatedMs) > 3000) {
+                    current.accumulatedMs = accumulatedMs;
+                }
+                current.unitAmount = currentItemInList.unit_amount;
+
+                if (currentItemInList.is_running) {
+                    if (current.status !== 'running') {
+                        current.status = 'running';
+                        startTimerTicker();
+                    }
+                } else {
+                    current.status = 'paused';
+                    current.lastStartTime = null;
+                }
+
+                if (lastConfirmedAt && current.promptTriggeredAt && lastConfirmedAt > current.promptTriggeredAt) {
+                    current.promptTriggeredAt = null;
+                    current.promptSnapshotMs = null;
+                    current.lastPromptAccumulatedMs = (current.accumulatedMs || 0) + (now - (current.lastStartTime || now));
+                    current.lastPromptTime = now;
+                    hideTimerConfirmModal();
+                    stopTitleFlash();
+                }
+
+                saveTimerState(current);
+                renderTimerBar(current);
+                updateAllRowTimerButtonStates();
+                if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
+            } else if (act && act.is_running) {
+                // No teníamos temporizador principal local, o el anterior se detuvo y en el servidor hay uno nuevo corriendo
                 const accumulatedMs = (typeof act.accumulated_ms === 'number' && act.accumulated_ms >= 0)
                     ? act.accumulated_ms
                     : Math.round((act.unit_amount || 0) * 3600 * 1000);
@@ -1499,35 +1727,6 @@ async function syncActiveTimerFromOdoo() {
                 }
                 const localStartTime = startedAt - clockOffset;
 
-                // Si ya coincide con el temporizador actual
-                if (current && current.timesheetId === act.timesheet_id) {
-                    current.startedAt = startedAt;
-                    current.accumulatedMs = accumulatedMs;
-                    current.lastStartTime = localStartTime;
-                    current.unitAmount = act.unit_amount;
-
-                    if (current.status !== 'running') {
-                        // Se reanudó desde otro dispositivo (ej. desde el PC o desde el móvil)
-                        current.status = 'running';
-                        startTimerTicker();
-                    }
-                    // Si se confirmó o reanudó en otro dispositivo
-                    if (lastConfirmedAt && current.promptTriggeredAt && lastConfirmedAt > current.promptTriggeredAt) {
-                        current.promptTriggeredAt = null;
-                        current.promptSnapshotMs = null;
-                        current.lastPromptAccumulatedMs = (current.accumulatedMs || 0) + (now - (current.lastStartTime || now));
-                        current.lastPromptTime = now;
-                        hideTimerConfirmModal();
-                        stopTitleFlash();
-                    }
-                    saveTimerState(current);
-                    renderTimerBar(current);
-                    updateAllRowTimerButtonStates();
-                    if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
-                    return;
-                }
-
-                // Es un temporizador iniciado en otro dispositivo (ej. activado en PC y abierto en móvil)
                 const serverState = {
                     timesheetId: act.timesheet_id,
                     projectId: act.project_id,
@@ -1540,7 +1739,6 @@ async function syncActiveTimerFromOdoo() {
                     lastStartTime: localStartTime,
                     accumulatedMs: accumulatedMs,
                     unitAmount: act.unit_amount,
-                    // Inicializar prompts limpios para no disparar alertas acústicas prematuras al abrir el móvil
                     lastPromptAccumulatedMs: accumulatedMs,
                     lastPromptTime: (lastConfirmedAt && (now - lastConfirmedAt < TIMER_PROMPT_INTERVAL_MS)) ? lastConfirmedAt : now,
                     promptTriggeredAt: null,
@@ -1560,7 +1758,7 @@ async function syncActiveTimerFromOdoo() {
                     renderExpressView();
                 }
             } else if (act && !act.is_running) {
-                // El servidor indica que el temporizador está pausado (ej. pausado desde el móvil o PC)
+                // El servidor indica que el temporizador está pausado
                 const isRecentAction = (window.__lastTimerActionTime && (now - window.__lastTimerActionTime < 6000)) ||
                                        (current && current.lastStartTime && (now - current.lastStartTime < 6000));
                 if (!isRecentAction && current && current.timesheetId === act.timesheet_id) {
@@ -1572,12 +1770,12 @@ async function syncActiveTimerFromOdoo() {
                         current.lastStartTime = null;
                         current.accumulatedMs = accumulatedMs;
                         current.promptTriggeredAt = null;
-                        stopTimerTicker();
                         stopTitleFlash();
                         hideTimerConfirmModal();
                         saveTimerState(current);
                         renderTimerBar(current);
                         updateAllRowTimerButtonStates();
+                        checkAndStopTimerTicker();
                         if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
                         if (typeof loadExpressTimesheets === 'function') loadExpressTimesheets(true, true);
                     }
@@ -1588,15 +1786,34 @@ async function syncActiveTimerFromOdoo() {
                                        (current && current.lastStartTime && (now - current.lastStartTime < 6000));
                 if (!isRecentAction && current && current.status === 'running') {
                     saveTimerState(null);
-                    stopTimerTicker();
                     stopTitleFlash();
                     hideTimerConfirmModal();
                     const container = document.getElementById('active-timer-container');
                     if (container) container.classList.add('hidden');
                     updateAllRowTimerButtonStates();
+                    checkAndStopTimerTicker();
                     if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
                     if (typeof loadExpressTimesheets === 'function') loadExpressTimesheets(true, true);
                 }
+            }
+
+            // Asegurar que si hay cualquier temporizador corriendo en __activeTimersMap o getTimerState, el ticker esté activo
+            let hasAnyRunning = (current && current.status === 'running');
+            if (!hasAnyRunning && window.__activeTimersMap) {
+                for (const t of window.__activeTimersMap.values()) {
+                    if (t.status === 'running') {
+                        hasAnyRunning = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasAnyRunning && document.querySelector('.timesheet-row[data-timer-running="true"]')) {
+                hasAnyRunning = true;
+            }
+            if (hasAnyRunning) {
+                startTimerTicker();
+            } else {
+                checkAndStopTimerTicker();
             }
         }
     } catch (e) {
@@ -1855,6 +2072,17 @@ function toggleTimesheetRowTimer(btn) {
     const activeItem = activeList.find(t => t.timesheet_id === tsId);
     if (activeItem && activeItem.is_running) {
         // Pausar esta tarea específica
+        activeItem.is_running = false;
+        if (window.__activeTimersMap && window.__activeTimersMap.has(tsId)) {
+            const t = window.__activeTimersMap.get(tsId);
+            t.status = 'paused';
+            t.lastStartTime = null;
+        }
+        if (row) {
+            row.dataset.timerRunning = 'false';
+        }
+        updateAllRowTimerButtonStates();
+        checkAndStopTimerTicker();
         fetch('/api/timer/pause', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1864,8 +2092,6 @@ function toggleTimesheetRowTimer(btn) {
                 unit_amount: hours
             })
         }).then(() => {
-            activeItem.is_running = false;
-            updateAllRowTimerButtonStates();
             if (typeof syncActiveTimerFromOdoo === 'function') {
                 syncActiveTimerFromOdoo();
             }

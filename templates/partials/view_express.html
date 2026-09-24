@@ -1,6 +1,6 @@
 {{ define "view_express" }}
 <!-- VISTA Y VENTANA FLOTANTE: Botonera Express Concentrada -->
-<div id="view-container-express" class="hidden"></div>
+<div id="view-container-express" class="{{if ne .CurrentView "express"}}hidden{{end}}"></div>
 
 <!-- Ventana Flotante Arrastrable y Redimensionable (Panel de Control de Máquina) -->
 <div id="express-floating-window"

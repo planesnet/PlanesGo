@@ -1,6 +1,6 @@
 {{ define "view_calendar" }}
 <!-- VISTA 2: Calendario (Semanal - Cuadrícula / Hoja de Datos) -->
-<div id="view-container-calendar" class="hidden space-y-4">
+<div id="view-container-calendar" class="{{if ne .CurrentView "calendar"}}hidden {{end}}space-y-4">
     <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-4 sm:px-6 sm:py-4 border-b border-slate-100">
             <div class="flex items-center space-x-2">

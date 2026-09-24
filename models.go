@@ -482,6 +482,7 @@ func (r WorkerRecentProject) FormattedDate() string {
 
 type PageData struct {
 	Version              string
+	CurrentView          string
 	Config               *config.Config
 	Session              *SessionData
 	HasOdooToken         bool

@@ -6,7 +6,28 @@
 
 const currentMonday = getMonday(new Date());
 let selectedWeekMonday = new Date(currentMonday);
-let currentView = 'list';
+function getSavedView() {
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlView = urlParams.get('view');
+        if (urlView && ['list', 'calendar', 'gantt', 'express'].includes(urlView)) {
+            return urlView;
+        }
+        const saved = localStorage.getItem('planesgo_active_view');
+        if (saved && ['list', 'calendar', 'gantt', 'express'].includes(saved)) {
+            return saved;
+        }
+        const match = document.cookie.match(/(?:^|;\s*)planesgo_view=([^;]+)/);
+        if (match && ['list', 'calendar', 'gantt', 'express'].includes(match[1])) {
+            return match[1];
+        }
+    } catch (e) {
+        console.warn('[PlanesGo] Error obteniendo vista guardada:', e);
+    }
+    return 'list';
+}
+
+let currentView = getSavedView();
 
 // Registro de semanas ya cargadas en el DOM (clave: YYYY-MM-DD del lunes)
 const loadedWeeks = new Set();
@@ -337,7 +358,24 @@ let isExpressLoading = false;
 let isExpressSilentLoading = false;
 
 function switchView(viewName) {
+    if (!['list', 'calendar', 'gantt', 'express'].includes(viewName)) {
+        viewName = 'list';
+    }
     currentView = viewName;
+
+    try {
+        localStorage.setItem('planesgo_active_view', viewName);
+        document.cookie = `planesgo_view=${viewName}; path=/; max-age=31536000; SameSite=Lax`;
+        const url = new URL(window.location);
+        if (viewName === 'list') {
+            url.searchParams.delete('view');
+        } else {
+            url.searchParams.set('view', viewName);
+        }
+        window.history.replaceState({ view: viewName }, '', url.toString());
+    } catch (e) {
+        console.warn('[PlanesGo] Error guardando vista activa:', e);
+    }
 
     const btnExpress = document.getElementById('btn-view-express');
     const btnList = document.getElementById('btn-view-list');
@@ -387,6 +425,13 @@ function switchView(viewName) {
 
     applyTimesheetFilters();
 }
+
+window.addEventListener('popstate', (e) => {
+    const v = (e.state && e.state.view) || getSavedView();
+    if (v && v !== currentView && typeof switchView === 'function') {
+        switchView(v);
+    }
+});
 
 function applyTimesheetFilters() {
     const searchInput = document.getElementById('filter-search');

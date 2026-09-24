@@ -254,7 +254,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Inicializar controles de semana y filtros iniciales
     updateWeekControls();
     if (typeof updateStartWorkTimerButton === 'function') updateStartWorkTimerButton();
-    applyTimesheetFilters();
+    if (typeof switchView === 'function') {
+        switchView(currentView);
+    } else {
+        applyTimesheetFilters();
+    }
 
     // Inicializar listeners de la ventana flotante Express
     if (typeof initExpressWindowInteractions === 'function') {

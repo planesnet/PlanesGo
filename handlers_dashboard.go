@@ -55,6 +55,19 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Odoo:   currentOdooCfg,
 	}
 
+	activeView := strings.TrimSpace(r.URL.Query().Get("view"))
+	if activeView == "" {
+		if c, err := r.Cookie("planesgo_view"); err == nil && c != nil {
+			activeView = strings.TrimSpace(c.Value)
+		}
+	}
+	switch activeView {
+	case "calendar", "gantt", "express":
+		// válido
+	default:
+		activeView = "list"
+	}
+
 	var entries []odoo.TimesheetEntry
 	var projects []odoo.Project
 	var activeEmployees []odoo.Employee
@@ -708,6 +721,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	data := PageData{
 		Version:               Version,
+		CurrentView:           activeView,
 		Config:                activeCfg,
 		Session:               session,
 		HasOdooToken:          hasOdooToken,
@@ -844,6 +858,7 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 
 	data := PageData{
 		Version:               Version,
+		CurrentView:           "express",
 		Config:                activeCfg,
 		Session:               session,
 		HasOdooToken:          (currentOdooCfg.Password != "" && currentOdooCfg.DB != ""),

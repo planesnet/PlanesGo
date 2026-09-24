@@ -1,6 +1,6 @@
 {{ define "view_list" }}
 <!-- VISTA 1: Lista (Tabla de Registros de Horas) -->
-<div id="view-container-list" class="space-y-4">
+<div id="view-container-list" class="{{if and .CurrentView (ne .CurrentView "list")}}hidden {{end}}space-y-4">
     <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse text-xs sm:text-sm" id="timesheet-table">

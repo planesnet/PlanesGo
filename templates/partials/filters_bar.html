@@ -5,36 +5,36 @@
     <div class="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs" role="group" aria-label="Selector de vistas">
         <!-- Botón Vista Express (Botonera Desacoplada de Escritorio) -->
         <button type="button" id="btn-view-express" onclick="openExpressPopout()"
-                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if eq .CurrentView "express"}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"
                 title="Botonera Express Desacoplada (Ventana flotante de escritorio)">
-            <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5 {{if eq .CurrentView "express"}}text-sky-600{{else}}text-amber-500{{end}}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             <span class="text-[11px] font-semibold">Express</span>
         </button>
         <!-- Botón Vista Lista -->
         <button type="button" id="btn-view-list" onclick="switchView('list')"
-                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70 transition-all cursor-pointer flex items-center space-x-1.5"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if or (eq .CurrentView "list") (not .CurrentView)}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"
                 title="Vista Lista de Partes de Horas">
-            <svg class="w-3.5 h-3.5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5 {{if or (eq .CurrentView "list") (not .CurrentView)}}text-sky-600{{else}}text-slate-500{{end}}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
             </svg>
             <span class="text-[11px]">Lista</span>
         </button>
         <!-- Botón Vista Calendario (Semanal) -->
         <button type="button" id="btn-view-calendar" onclick="switchView('calendar')"
-                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if eq .CurrentView "calendar"}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"
                 title="Vista Calendario Semanal">
-            <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5 {{if eq .CurrentView "calendar"}}text-sky-600{{else}}text-slate-500{{end}}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z" />
             </svg>
             <span class="text-[11px]">Calendario</span>
         </button>
         <!-- Botón Vista Gantt -->
         <button type="button" id="btn-view-gantt" onclick="switchView('gantt')"
-                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 transition-all cursor-pointer flex items-center space-x-1.5"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if eq .CurrentView "gantt"}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"
                 title="Vista Gantt (Timeline semanal de tareas)">
-            <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5 {{if eq .CurrentView "gantt"}}text-sky-600{{else}}text-slate-500{{end}}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M3 8h10M3 12h14M3 16h6M3 20h12" />
             </svg>
             <span class="text-[11px]">Gantt</span>
