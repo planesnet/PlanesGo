@@ -137,16 +137,17 @@ func projectNamesMatch(name1, name2 string) bool {
 	return c1 != "" && c1 == c2
 }
 
-// CanonicalTaskTypes define los 5 tipos normalizados de tareas de Antigravity
+// CanonicalTaskTypes define los tipos normalizados de tareas de Antigravity
 const (
-	TaskTypeDesarrollo = "Desarrollo"
-	TaskTypeAnalisis   = "Análisis"
-	TaskTypeAjustes    = "Ajustes"
-	TaskTypeServidor   = "Servidor"
-	TaskTypeCliente    = "Cliente"
+	TaskTypeImplementacion = "Implementación"
+	TaskTypeDesarrollo     = "Desarrollo"
+	TaskTypeAnalisis       = "Análisis"
+	TaskTypeAjustes        = "Ajustes"
+	TaskTypeServidor       = "Servidor"
+	TaskTypeCliente        = "Cliente"
 )
 
-// matchCanonicalType normaliza un texto a uno de los 5 tipos canónicos si coincide.
+// matchCanonicalType normaliza un texto a uno de los tipos canónicos si coincide.
 func matchCanonicalType(t string) (string, bool) {
 	norm := strings.ToLower(strings.TrimSpace(t))
 	norm = strings.ReplaceAll(norm, "á", "a")
@@ -156,6 +157,8 @@ func matchCanonicalType(t string) (string, bool) {
 	norm = strings.ReplaceAll(norm, "ú", "u")
 
 	switch norm {
+	case "implementacion", "implementación", "impl":
+		return TaskTypeImplementacion, true
 	case "desarrollo", "dev", "development":
 		return TaskTypeDesarrollo, true
 	case "analisis", "analysis", "investigacion", "auditoria":
@@ -198,22 +201,20 @@ func cleanAntigravityTaskName(taskName string) string {
 }
 
 // NormalizeTaskType analiza la tarea, la descripción y el tipo explícito para determinar
-// de forma normalizada uno de los 5 valores canónicos (Desarrollo, Análisis, Ajustes, Servidor, Cliente)
-// y devuelve el tipo canónico y el nombre de la tarea con el formato canónico "[AGY] [Tipo] <Nombre>".
+// de forma normalizada uno de los tipos canónicos (Implementación, Desarrollo, Análisis, Ajustes, Servidor, Cliente)
+// y devuelve el tipo canónico y el nombre de la tarea canónico sin prefijos técnicos.
 func NormalizeTaskType(taskName, description, explicitType string) (string, string) {
 	raw := cleanAntigravityTaskName(taskName)
 
 	var detectedType string
-	var nameBody string = raw
 
-	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Desarrollo] o [Analisis]
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Implementación] o [Desarrollo]
 	if strings.HasPrefix(raw, "[") {
 		idx := strings.Index(raw, "]")
 		if idx > 1 {
 			bracketContent := raw[1:idx]
 			if canon, ok := matchCanonicalType(bracketContent); ok {
 				detectedType = canon
-				nameBody = strings.TrimSpace(raw[idx+1:])
 			}
 		}
 	}
@@ -225,36 +226,63 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		}
 	}
 
-	// 3. Inferencia automática por heurística semántica a partir de título y descripción
+	// 3. Inferencia automática por heurística semántica:
+	// REGLA CLAVE: Analizar PRIMERO el título/nombre (raw) para no ser falseado por palabras accesorias de la descripción.
 	if detectedType == "" {
-		corpus := strings.ToLower(raw + " " + description)
-		corpus = strings.ReplaceAll(corpus, "á", "a")
-		corpus = strings.ReplaceAll(corpus, "é", "e")
-		corpus = strings.ReplaceAll(corpus, "í", "i")
-		corpus = strings.ReplaceAll(corpus, "ó", "o")
-		corpus = strings.ReplaceAll(corpus, "ú", "u")
+		rawNorm := strings.ToLower(raw)
+		rawNorm = strings.ReplaceAll(rawNorm, "á", "a")
+		rawNorm = strings.ReplaceAll(rawNorm, "é", "e")
+		rawNorm = strings.ReplaceAll(rawNorm, "í", "i")
+		rawNorm = strings.ReplaceAll(rawNorm, "ó", "o")
+		rawNorm = strings.ReplaceAll(rawNorm, "ú", "u")
 
-		// Servidor (palabras altamente específicas de sistemas/infraestructura)
-		if containsAny(corpus, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "virtualhost") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(corpus, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "facturacion") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(corpus, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion", "plan") {
-			detectedType = TaskTypeAnalisis
-		} else if containsAny(corpus, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia", "formato") {
-			detectedType = TaskTypeAjustes
-		} else {
-			// Por defecto Desarrollo
+		// Evaluar prioridad sobre el título de la tarea
+		if containsAny(rawNorm, "implementac") {
+			detectedType = TaskTypeImplementacion
+		} else if containsAny(rawNorm, "desarroll") {
 			detectedType = TaskTypeDesarrollo
+		} else if containsAny(rawNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(rawNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(rawNorm, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
+			detectedType = TaskTypeAjustes
+		} else if containsAny(rawNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion") {
+			detectedType = TaskTypeAnalisis
 		}
 	}
 
-	if strings.TrimSpace(nameBody) == "" {
-		nameBody = fmt.Sprintf("Tarea de %s", strings.ToLower(detectedType))
+	// 4. Si el título no arrojó coincidencias, inspeccionar la descripción
+	if detectedType == "" && description != "" {
+		descNorm := strings.ToLower(description)
+		descNorm = strings.ReplaceAll(descNorm, "á", "a")
+		descNorm = strings.ReplaceAll(descNorm, "é", "e")
+		descNorm = strings.ReplaceAll(descNorm, "í", "i")
+		descNorm = strings.ReplaceAll(descNorm, "ó", "o")
+		descNorm = strings.ReplaceAll(descNorm, "ú", "u")
+
+		if containsAny(descNorm, "implementac") {
+			detectedType = TaskTypeImplementacion
+		} else if containsAny(descNorm, "desarroll") {
+			detectedType = TaskTypeDesarrollo
+		} else if containsAny(descNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(descNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "tarifa") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(descNorm, "ajuste", "ajustes", "fix", "bug", "correccion", "corregir", "refactor", "tweak", "patch", "css") {
+			detectedType = TaskTypeAjustes
+		} else if containsAny(descNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio") {
+			detectedType = TaskTypeAnalisis
+		}
 	}
 
-	formattedName := fmt.Sprintf("[AGY] [%s] %s", detectedType, strings.TrimSpace(nameBody))
-	return detectedType, formattedName
+	// 5. Fallback por defecto: Desarrollo
+	if detectedType == "" {
+		detectedType = TaskTypeDesarrollo
+	}
+
+	// El nombre canónico en Odoo es exclusivamente el tipo canónico (ej. "Implementación", "Desarrollo", etc.)
+	return detectedType, detectedType
 }
 
 // handleAntigravityStatus implementa el Handshake y verificación previa obligatoria (Fase 0 de PSF).
@@ -469,32 +497,49 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		}
 	}
 
-	// 1. Normalización y Aislamiento Estricto Antigravity vs Manual:
-	// Las tareas gestionadas desde Antigravity se clasifican en los 5 tipos normalizados
-	// (Desarrollo, Análisis, Ajustes, Servidor, Cliente) y siguen el formato canónico [AGY] [Tipo] Nombre.
-	canonicalType, formattedName := NormalizeTaskType(payload.TaskName, payload.Description, payload.TaskType)
+	// 1. Normalización y Aislamiento Estricto Antigravity:
+	// Las tareas gestionadas desde Antigravity se clasifican en los tipos normalizados
+	// (Implementación, Desarrollo, Análisis, Ajustes, Servidor, Cliente) y utilizan exclusivamente
+	// el nombre canónico sin prefijos técnicos, registrando la procedencia de Antigravity en tag_ids.
+	canonicalType, canonicalName := NormalizeTaskType(payload.TaskName, payload.Description, payload.TaskType)
 	payload.TaskType = canonicalType
-	payload.TaskName = formattedName
+	payload.TaskName = canonicalName
 
 	// Creación o búsqueda dinámica de tarea en Odoo si no viene con task_id
 	if payload.ProjectID > 0 && payload.TaskID <= 0 && payload.TaskName != "" {
 		tasks, err := client.GetTasks(ctx, payload.ProjectID, 0)
 		if err == nil {
+			// 1.1 Coincidencia exacta con el nombre canónico
 			for _, t := range tasks {
 				if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(payload.TaskName)) {
 					payload.TaskID = t.ID
 					break
 				}
 			}
+			// 1.2 Si es Implementación o Desarrollo, reutilizar tareas estándar existentes (ej. DESARROLLO)
+			if payload.TaskID <= 0 && (payload.TaskType == TaskTypeImplementacion || payload.TaskType == TaskTypeDesarrollo) {
+				for _, t := range tasks {
+					tUpper := strings.ToUpper(strings.TrimSpace(t.Name))
+					if tUpper == "DESARROLLO" || tUpper == "IMPLEMENTACIÓN" || tUpper == "IMPLEMENTACION" {
+						payload.TaskID = t.ID
+						break
+					}
+				}
+			}
 		}
 		if payload.TaskID <= 0 {
-			newID, createErr := client.CreateTask(ctx, payload.ProjectID, payload.TaskName, userUID)
+			newID, createErr := client.CreateTaskWithTag(ctx, payload.ProjectID, payload.TaskName, userUID, "Antigravity")
 			if createErr == nil && newID > 0 {
 				payload.TaskID = newID
-				log.Printf("[Antigravity Gateway] Tarea creada dinámicamente en Odoo: ID %d ('%s') en proyecto %d", newID, payload.TaskName, payload.ProjectID)
+				log.Printf("[Antigravity Gateway] Tarea canónica creada en Odoo: ID %d ('%s') con tag 'Antigravity' en proyecto %d", newID, payload.TaskName, payload.ProjectID)
 			} else {
-				log.Printf("[Antigravity Gateway] Advertencia al crear tarea dinámica en Odoo: %v", createErr)
+				log.Printf("[Antigravity Gateway] Advertencia al crear tarea canónica en Odoo: %v", createErr)
 			}
+		} else {
+			// Asegurar que la tarea asignada tenga el tag Antigravity
+			go func(tID int) {
+				_ = client.EnsureTaskTag(context.Background(), tID, "Antigravity")
+			}(payload.TaskID)
 		}
 	}
 

@@ -18,17 +18,19 @@ import (
 )
 
 const (
-	Version       = "1.2.42"
+	Version       = "1.2.43"
 	DefaultServer = "https://planesgo.autopyme.com"
 
-	TaskTypeDesarrollo = "Desarrollo"
-	TaskTypeAnalisis   = "Análisis"
-	TaskTypeAjustes    = "Ajustes"
-	TaskTypeServidor   = "Servidor"
-	TaskTypeCliente    = "Cliente"
+	TaskTypeImplementacion = "Implementación"
+	TaskTypeDesarrollo     = "Desarrollo"
+	TaskTypeAnalisis       = "Análisis"
+	TaskTypeAjustes        = "Ajustes"
+	TaskTypeServidor       = "Servidor"
+	TaskTypeCliente        = "Cliente"
 )
 
 var CanonicalTaskTypes = []string{
+	TaskTypeImplementacion,
 	TaskTypeDesarrollo,
 	TaskTypeAnalisis,
 	TaskTypeAjustes,
@@ -45,6 +47,8 @@ func matchCanonicalType(t string) (string, bool) {
 	norm = strings.ReplaceAll(norm, "ú", "u")
 
 	switch norm {
+	case "implementacion", "implementación", "impl":
+		return TaskTypeImplementacion, true
 	case "desarrollo", "dev", "development":
 		return TaskTypeDesarrollo, true
 	case "analisis", "analysis", "investigacion", "auditoria":
@@ -89,16 +93,14 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 	raw := cleanAntigravityTaskName(taskName)
 
 	var detectedType string
-	var nameBody string = raw
 
-	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Desarrollo] o [Analisis]
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Implementación] o [Desarrollo]
 	if strings.HasPrefix(raw, "[") {
 		idx := strings.Index(raw, "]")
 		if idx > 1 {
 			bracketContent := raw[1:idx]
 			if canon, ok := matchCanonicalType(bracketContent); ok {
 				detectedType = canon
-				nameBody = strings.TrimSpace(raw[idx+1:])
 			}
 		}
 	}
@@ -110,36 +112,62 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		}
 	}
 
-	// 3. Inferencia automática por heurística semántica a partir de título y descripción
+	// 3. Inferencia automática por heurística semántica:
+	// Priorizar análisis del título/nombre para evitar que palabras accesorias de la descripción sobreescriban el tipo.
 	if detectedType == "" {
-		corpus := strings.ToLower(raw + " " + description)
-		corpus = strings.ReplaceAll(corpus, "á", "a")
-		corpus = strings.ReplaceAll(corpus, "é", "e")
-		corpus = strings.ReplaceAll(corpus, "í", "i")
-		corpus = strings.ReplaceAll(corpus, "ó", "o")
-		corpus = strings.ReplaceAll(corpus, "ú", "u")
+		rawNorm := strings.ToLower(raw)
+		rawNorm = strings.ReplaceAll(rawNorm, "á", "a")
+		rawNorm = strings.ReplaceAll(rawNorm, "é", "e")
+		rawNorm = strings.ReplaceAll(rawNorm, "í", "i")
+		rawNorm = strings.ReplaceAll(rawNorm, "ó", "o")
+		rawNorm = strings.ReplaceAll(rawNorm, "ú", "u")
 
-		// Servidor (palabras altamente específicas de sistemas/infraestructura)
-		if containsAny(corpus, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "virtualhost") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(corpus, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "facturacion") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(corpus, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion", "plan") {
-			detectedType = TaskTypeAnalisis
-		} else if containsAny(corpus, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia", "formato") {
-			detectedType = TaskTypeAjustes
-		} else {
-			// Por defecto Desarrollo
+		if containsAny(rawNorm, "implementac") {
+			detectedType = TaskTypeImplementacion
+		} else if containsAny(rawNorm, "desarroll") {
 			detectedType = TaskTypeDesarrollo
+		} else if containsAny(rawNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(rawNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(rawNorm, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
+			detectedType = TaskTypeAjustes
+		} else if containsAny(rawNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion") {
+			detectedType = TaskTypeAnalisis
 		}
 	}
 
-	if strings.TrimSpace(nameBody) == "" {
-		nameBody = fmt.Sprintf("Tarea de %s", strings.ToLower(detectedType))
+	// 4. Si el título no arrojó coincidencias, inspeccionar la descripción
+	if detectedType == "" && description != "" {
+		descNorm := strings.ToLower(description)
+		descNorm = strings.ReplaceAll(descNorm, "á", "a")
+		descNorm = strings.ReplaceAll(descNorm, "é", "e")
+		descNorm = strings.ReplaceAll(descNorm, "í", "i")
+		descNorm = strings.ReplaceAll(descNorm, "ó", "o")
+		descNorm = strings.ReplaceAll(descNorm, "ú", "u")
+
+		if containsAny(descNorm, "implementac") {
+			detectedType = TaskTypeImplementacion
+		} else if containsAny(descNorm, "desarroll") {
+			detectedType = TaskTypeDesarrollo
+		} else if containsAny(descNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(descNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "tarifa") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(descNorm, "ajuste", "ajustes", "fix", "bug", "correccion", "corregir", "refactor", "tweak", "patch", "css") {
+			detectedType = TaskTypeAjustes
+		} else if containsAny(descNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio") {
+			detectedType = TaskTypeAnalisis
+		}
 	}
 
-	formattedName := fmt.Sprintf("[AGY] [%s] %s", detectedType, strings.TrimSpace(nameBody))
-	return detectedType, formattedName
+	// 5. Fallback por defecto: Desarrollo
+	if detectedType == "" {
+		detectedType = TaskTypeDesarrollo
+	}
+
+	// El nombre de la tarea es exclusivamente el nombre canónico sin prefijos [AGY]
+	return detectedType, detectedType
 }
 
 // Config representa el archivo .planesgo.json encontrado en el proyecto
@@ -556,8 +584,8 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		taskType, _ := args["task_type"].(string)
 		desc, _ := args["description"].(string)
 		if taskName != "" && taskName != "Pendiente de asignar en latido" {
-			canonicalType, normName := NormalizeTaskType(taskName, desc, taskType)
-			taskName = fmt.Sprintf("%s (Tipo: %s)", normName, canonicalType)
+			_, normName := NormalizeTaskType(taskName, desc, taskType)
+			taskName = normName
 		}
 
 		projStr := "No detectado"
@@ -660,7 +688,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
 		finalDesc := strings.TrimSpace(desc)
 		if finalDesc == "" || finalDesc == "Trabajo en curso" {
-			finalDesc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(taskName))
+			finalDesc = cleanAntigravityTaskName(taskName)
 		}
 
 		res, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType)

@@ -185,3 +185,66 @@ func TestProjectNamesMatchAndTaskIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeTaskType(t *testing.T) {
+	testCases := []struct {
+		rawTitle    string
+		realWork    string
+		wantType    string
+		wantClean   string
+	}{
+		{
+			rawTitle:  "Implementación de tag_ids y vistas en PlanesGo",
+			realWork:  "Añadiendo soporte de tags y columnas en la interfaz",
+			wantType:  "Implementación",
+			wantClean: "Implementación",
+		},
+		{
+			rawTitle:  "Desarrollo de nuevo endpoint REST",
+			realWork:  "Creando handler y pruebas unitarias",
+			wantType:  "Desarrollo",
+			wantClean: "Desarrollo",
+		},
+		{
+			rawTitle:  "Auditoría y análisis de base de datos",
+			realWork:  "Inspeccionando índices en PostgreSQL",
+			wantType:  "Análisis",
+			wantClean: "Análisis",
+		},
+		{
+			rawTitle:  "Ajustes menores de diseño",
+			realWork:  "Corrigiendo espaciado y márgenes",
+			wantType:  "Ajustes",
+			wantClean: "Ajustes",
+		},
+		{
+			rawTitle:  "Mantenimiento de servidor y Docker",
+			realWork:  "Reiniciando contenedores y Nginx",
+			wantType:  "Servidor",
+			wantClean: "Servidor",
+		},
+		{
+			rawTitle:  "Soporte cliente y resolución de dudas",
+			realWork:  "Atendiendo consulta funcional",
+			wantType:  "Cliente",
+			wantClean: "Cliente",
+		},
+		{
+			rawTitle:  "[AGY] Implementación de vistas",
+			realWork:  "",
+			wantType:  "Implementación",
+			wantClean: "Implementación",
+		},
+	}
+
+	for _, tc := range testCases {
+		gotType, gotClean := NormalizeTaskType(tc.rawTitle, tc.realWork, "")
+		if gotType != tc.wantType {
+			t.Errorf("NormalizeTaskType(%q, %q) type = %q; want %q", tc.rawTitle, tc.realWork, gotType, tc.wantType)
+		}
+		if gotClean != tc.wantClean {
+			t.Errorf("NormalizeTaskType(%q, %q) cleanName = %q; want %q", tc.rawTitle, tc.realWork, gotClean, tc.wantClean)
+		}
+	}
+}
+

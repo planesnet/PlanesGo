@@ -1947,7 +1947,10 @@ function ensureTimesheetRowExists(serverData, timerState) {
             </button>
         </td>
         <td class="py-3 px-4 whitespace-nowrap">
-            ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName, desc) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${taskName}</span>` : '<span class="text-slate-400 text-xs">-</span>')}
+            ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${taskName}</span>` : '<span class="text-slate-400 text-xs">-</span>')}
+        </td>
+        <td class="py-3 px-4 whitespace-nowrap">
+            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(null, (typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc))) : `<span class="text-slate-300 text-xs">-</span>`}
         </td>
         <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${desc || 'Sin descripción'}">
             ${desc || '<span class="italic text-slate-400">Sin descripción</span>'}

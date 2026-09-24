@@ -10,6 +10,7 @@
                         <th class="py-3 px-4">Miembro</th>
                         <th class="py-3 px-4 col-project-header">Proyecto</th>
                         <th class="py-3 px-4">Tarea</th>
+                        <th class="py-3 px-4">Etiquetas</th>
                         <th class="py-3 px-4">Descripción</th>
                         <th class="py-3 px-4 sm:px-6 text-right">Horas</th>
                         <th class="py-3 px-3 text-right">Acciones</th>
@@ -67,22 +68,43 @@
                             </td>
                             <td class="py-3 px-4 whitespace-nowrap">
                                 {{if .TaskID.Name}}
-                                    {{if .IsAntigravity}}
-                                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Tarea gestionada automáticamente por Antigravity">
-                                        <svg class="w-3.5 h-3.5 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
-                                            <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
-                                        </svg>
-                                        <span class="font-bold tracking-tight text-purple-800">{{.CleanTaskName}}</span>
-                                    </span>
-                                    {{else}}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                                        {{.TaskID.Name}}
-                                    </span>
-                                    {{end}}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                    {{.CleanTaskName}}
+                                </span>
                                 {{else}}
                                 <span class="text-slate-400 text-xs">-</span>
                                 {{end}}
+                            </td>
+                            <td class="py-3 px-4 whitespace-nowrap">
+                                <div class="inline-flex items-center gap-1 flex-wrap">
+                                    {{if .Tags}}
+                                        {{range .Tags}}
+                                            {{if or (eq .Name "Antigravity") (eq .Name "AGY")}}
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
+                                                <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
+                                                    <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
+                                                </svg>
+                                                <span>Antigravity</span>
+                                            </span>
+                                            {{else}}
+                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">
+                                                {{.Name}}
+                                            </span>
+                                            {{end}}
+                                        {{end}}
+                                    {{else if .IsAntigravity}}
+                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
+                                            <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
+                                                <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
+                                            </svg>
+                                            <span>Antigravity</span>
+                                        </span>
+                                    {{else}}
+                                        <span class="text-slate-300 text-xs">-</span>
+                                    {{end}}
+                                </div>
                             </td>
                             <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="{{.Name}}">
                                 {{if .Name}}{{.Name}}{{else}}<span class="italic text-slate-400">Sin descripción</span>{{end}}
@@ -198,7 +220,7 @@
                         {{end}}
                     {{else}}
                         <tr id="empty-row">
-                            <td colspan="7" class="py-12 text-center text-slate-400">
+                            <td colspan="8" class="py-12 text-center text-slate-400">
                                 <svg class="mx-auto h-10 w-10 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
@@ -208,7 +230,7 @@
                         </tr>
                     {{end}}
                     <tr id="empty-filter-row" class="hidden">
-                        <td colspan="7" class="py-12 text-center text-slate-400">
+                        <td colspan="8" class="py-12 text-center text-slate-400">
                             <svg class="mx-auto h-9 w-9 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2z"/>
                             </svg>

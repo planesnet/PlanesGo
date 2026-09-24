@@ -47,20 +47,29 @@ func (m Many2One) String() string {
 	return "-"
 }
 
+// Tag representa una etiqueta de tarea en Odoo (project.tags).
+type Tag struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Color int    `json:"color,omitempty"`
+}
+
 // TimesheetEntry representa un registro de horas de Odoo (account.analytic.line).
 type TimesheetEntry struct {
-	ID                 int      `json:"id"`
-	Date               string   `json:"date"`
-	Name               string   `json:"name"`
-	UnitAmount         float64  `json:"unit_amount"`
-	ProjectID          Many2One `json:"project_id"`
-	TaskID             Many2One `json:"task_id"`
-	EmployeeID         Many2One `json:"employee_id"`
+	ID                 int         `json:"id"`
+	Date               string      `json:"date"`
+	Name               string      `json:"name"`
+	UnitAmount         float64     `json:"unit_amount"`
+	ProjectID          Many2One    `json:"project_id"`
+	TaskID             Many2One    `json:"task_id"`
+	EmployeeID         Many2One    `json:"employee_id"`
 	UserID             Many2One    `json:"user_id"`
 	PartnerID          Many2One    `json:"partner_id"`
 	TimesheetInvoiceID Many2One    `json:"timesheet_invoice_id"`
 	BillingRef         interface{} `json:"billing_ref"` // Indica si está facturado en Odoo 14
 	IsTimerRunning     bool        `json:"is_timer_running"`
+	Tags               []Tag       `json:"tags,omitempty"`
+	TagIDs             []int       `json:"tag_ids,omitempty"`
 }
 
 // IsInvoiced indica si la imputación de horas ya ha sido facturada en Odoo.
@@ -99,6 +108,11 @@ func (t *TimesheetEntry) DisplayEmployee() string {
 
 // IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.
 func (t *TimesheetEntry) IsAntigravity() bool {
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Antigravity") || strings.EqualFold(tag.Name, "AGY") {
+			return true
+		}
+	}
 	taskName := strings.ToUpper(t.TaskID.Name)
 	desc := strings.ToUpper(t.Name)
 	return strings.HasPrefix(taskName, "[AGY]") ||
@@ -203,6 +217,8 @@ type Task struct {
 	ProjectID   Many2One `json:"project_id"`
 	UserID      Many2One `json:"user_id"`
 	Active      bool     `json:"active"`
+	TagIDs      []int    `json:"tag_ids,omitempty"`
+	Tags        []Tag    `json:"tags,omitempty"`
 }
 
 func (t *Task) DisplayNameOrName() string {
@@ -301,12 +317,18 @@ type ActiveTimer struct {
 	Date          string   `json:"date,omitempty"`
 	Source        string   `json:"source,omitempty"`        // Origen del temporizador: "antigravity", "web", "extension"
 	EmployeeName  string   `json:"employee_name,omitempty"`
+	Tags          []Tag    `json:"tags,omitempty"`
 }
 
 // IsAntigravity indica si el temporizador activo proviene de Antigravity.
 func (t *ActiveTimer) IsAntigravity() bool {
 	if strings.EqualFold(t.Source, "antigravity") {
 		return true
+	}
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Antigravity") || strings.EqualFold(tag.Name, "AGY") {
+			return true
+		}
 	}
 	taskName := strings.ToUpper(t.TaskName)
 	desc := strings.ToUpper(t.Description)

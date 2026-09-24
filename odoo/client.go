@@ -422,6 +422,9 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		}
 	}
 
+	// Cargar etiquetas (tags) de las tareas asociadas a las imputaciones
+	c.populateTimesheetTags(ctx, uid, unInvoiced)
+
 	return unInvoiced, nil
 }
 
@@ -905,6 +908,7 @@ func (c *Client) GetTasks(ctx context.Context, projectID int, userUID int) ([]Ta
 		"project_id",
 		"user_id",
 		"active",
+		"tag_ids",
 	}
 
 	kwargs := map[string]interface{}{
@@ -1132,6 +1136,231 @@ func (c *Client) CreateTask(ctx context.Context, projectID int, name string, use
 	}
 
 	return newID, nil
+}
+
+// GetOrCreateTag busca o crea una etiqueta en project.tags de Odoo y devuelve su ID.
+func (c *Client) GetOrCreateTag(ctx context.Context, tagName string) (int, error) {
+	tagName = strings.TrimSpace(tagName)
+	if tagName == "" {
+		return 0, errors.New("el nombre de la etiqueta no puede estar vacío")
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error de autenticación al resolver tag: %w", err)
+	}
+
+	domain := []interface{}{
+		[]interface{}{"name", "=ilike", tagName},
+	}
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.tags",
+		"search_read",
+		[]interface{}{domain},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "name"},
+		"limit":  1,
+	}
+
+	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err == nil {
+		var tags []Tag
+		if err := json.Unmarshal(raw, &tags); err == nil && len(tags) > 0 {
+			return tags[0].ID, nil
+		}
+	}
+
+	// Si no existe, crear el tag en project.tags
+	createVals := map[string]interface{}{
+		"name": tagName,
+	}
+	createArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.tags",
+		"create",
+		[]interface{}{createVals},
+	}
+	createRaw, createErr := c.call(ctx, "object", "execute_kw", createArgs, nil)
+	if createErr != nil {
+		return 0, fmt.Errorf("error al crear tag '%s' en Odoo: %w", tagName, createErr)
+	}
+
+	var newTagID int
+	if err := json.Unmarshal(createRaw, &newTagID); err == nil && newTagID > 0 {
+		return newTagID, nil
+	}
+	return 0, fmt.Errorf("no se pudo parsear el ID del tag creado: %s", string(createRaw))
+}
+
+// EnsureTaskTag asegura que una tarea de Odoo tenga asignada una etiqueta específica en tag_ids.
+func (c *Client) EnsureTaskTag(ctx context.Context, taskID int, tagName string) error {
+	if taskID <= 0 || tagName == "" {
+		return nil
+	}
+	tagID, err := c.GetOrCreateTag(ctx, tagName)
+	if err != nil {
+		return err
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Añadir el tag con el comando ORM (4, id) en tag_ids
+	writeVals := map[string]interface{}{
+		"tag_ids": []interface{}{
+			[]interface{}{4, tagID},
+		},
+	}
+	writeArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.task",
+		"write",
+		[]interface{}{
+			[]int{taskID},
+			writeVals,
+		},
+	}
+	_, err = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	return err
+}
+
+// CreateTaskWithTag crea una nueva tarea con el nombre canónico y la etiqueta indicada en tag_ids.
+func (c *Client) CreateTaskWithTag(ctx context.Context, projectID int, name string, userUID int, tagName string) (int, error) {
+	taskID, err := c.CreateTask(ctx, projectID, name, userUID)
+	if err != nil {
+		return 0, err
+	}
+	if tagName != "" {
+		_ = c.EnsureTaskTag(ctx, taskID, tagName)
+	}
+	return taskID, nil
+}
+
+// populateTimesheetTags consulta en lote las etiquetas de las tareas de los partes de horas y las asigna.
+func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []TimesheetEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	taskIDMap := make(map[int]bool)
+	for _, e := range entries {
+		if e.TaskID.ID > 0 {
+			taskIDMap[e.TaskID.ID] = true
+		}
+	}
+	if len(taskIDMap) == 0 {
+		return
+	}
+
+	taskIDs := make([]int, 0, len(taskIDMap))
+	for id := range taskIDMap {
+		taskIDs = append(taskIDs, id)
+	}
+
+	taskDomain := []interface{}{
+		[]interface{}{"id", "in", taskIDs},
+	}
+	taskArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"project.task",
+		"search_read",
+		[]interface{}{taskDomain},
+	}
+	taskKwargs := map[string]interface{}{
+		"fields": []string{"id", "tag_ids"},
+	}
+	resRaw, err := c.call(ctx, "object", "execute_kw", taskArgs, taskKwargs)
+	if err != nil {
+		return
+	}
+
+	type taskTagResp struct {
+		ID     int   `json:"id"`
+		TagIDs []int `json:"tag_ids"`
+	}
+	var taskTags []taskTagResp
+	if err := json.Unmarshal(resRaw, &taskTags); err != nil {
+		return
+	}
+
+	allTagIDsMap := make(map[int]bool)
+	taskToTagIDs := make(map[int][]int)
+	for _, tt := range taskTags {
+		taskToTagIDs[tt.ID] = tt.TagIDs
+		for _, tagID := range tt.TagIDs {
+			allTagIDsMap[tagID] = true
+		}
+	}
+
+	tagMetaMap := make(map[int]Tag)
+	if len(allTagIDsMap) > 0 {
+		tagIDs := make([]int, 0, len(allTagIDsMap))
+		for tid := range allTagIDsMap {
+			tagIDs = append(tagIDs, tid)
+		}
+		tagDomain := []interface{}{
+			[]interface{}{"id", "in", tagIDs},
+		}
+		tagArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.tags",
+			"search_read",
+			[]interface{}{tagDomain},
+		}
+		tagKwargs := map[string]interface{}{
+			"fields": []string{"id", "name", "color"},
+		}
+		tagResRaw, err := c.call(ctx, "object", "execute_kw", tagArgs, tagKwargs)
+		if err == nil {
+			var fetchedTags []Tag
+			if err := json.Unmarshal(tagResRaw, &fetchedTags); err == nil {
+				for _, ft := range fetchedTags {
+					tagMetaMap[ft.ID] = ft
+				}
+			}
+		}
+	}
+
+	for i := range entries {
+		tID := entries[i].TaskID.ID
+		if tID > 0 {
+			if tIDs, ok := taskToTagIDs[tID]; ok {
+				entries[i].TagIDs = tIDs
+				for _, tid := range tIDs {
+					if tag, ok := tagMetaMap[tid]; ok {
+						entries[i].Tags = append(entries[i].Tags, tag)
+					} else {
+						entries[i].Tags = append(entries[i].Tags, Tag{ID: tid, Name: fmt.Sprintf("Tag #%d", tid)})
+					}
+				}
+			}
+		}
+		if entries[i].IsAntigravity() {
+			hasAgyTag := false
+			for _, tg := range entries[i].Tags {
+				if strings.EqualFold(tg.Name, "Antigravity") || strings.EqualFold(tg.Name, "AGY") {
+					hasAgyTag = true
+					break
+				}
+			}
+			if !hasAgyTag {
+				entries[i].Tags = append(entries[i].Tags, Tag{Name: "Antigravity"})
+			}
+		}
+	}
 }
 
 // CreateTimesheet crea un nuevo parte de horas (account.analytic.line) en Odoo.

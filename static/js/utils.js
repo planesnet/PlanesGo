@@ -328,24 +328,53 @@ function cleanAntigravityTaskName(taskName) {
     return String(taskName).replace(/^\[(?:AGY|ANTIGRAVITY)\]\s*/i, '').trim();
 }
 
-function renderTaskBadgeHTML(taskName, description) {
+function renderTaskBadgeHTML(taskName) {
     if (!taskName) return '<span class="text-slate-400 text-xs">-</span>';
-    const safeRaw = (typeof escapeHtml === 'function') ? escapeHtml(taskName) : taskName;
-    if (isAntigravityTask(taskName, description)) {
-        const clean = cleanAntigravityTaskName(taskName);
-        const safeClean = (typeof escapeHtml === 'function') ? escapeHtml(clean) : clean;
-        return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Tarea gestionada automáticamente por Antigravity">
-            <svg class="w-3.5 h-3.5 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    const clean = cleanAntigravityTaskName(taskName);
+    const safeClean = (typeof escapeHtml === 'function') ? escapeHtml(clean) : clean;
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeClean}</span>`;
+}
+
+function renderTagsHTML(tags, isAgy) {
+    let html = '<div class="inline-flex items-center gap-1 flex-wrap">';
+    let renderedCount = 0;
+    if (Array.isArray(tags) && tags.length > 0) {
+        tags.forEach(t => {
+            const name = (typeof t === 'string') ? t : (t.Name || t.name || '');
+            if (!name) return;
+            const safeName = (typeof escapeHtml === 'function') ? escapeHtml(name) : name;
+            if (name.toLowerCase() === 'antigravity' || name.toLowerCase() === 'agy') {
+                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
+                    <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
+                        <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
+                    </svg>
+                    <span>Antigravity</span>
+                </span>`;
+            } else {
+                html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">${safeName}</span>`;
+            }
+            renderedCount++;
+        });
+    } else if (isAgy) {
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
+            <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
                 <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
             </svg>
-            <span class="font-bold tracking-tight text-purple-800">${safeClean || safeRaw}</span>
+            <span>Antigravity</span>
         </span>`;
+        renderedCount++;
     }
-    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeRaw}</span>`;
+    if (renderedCount === 0) {
+        html += '<span class="text-slate-300 text-xs">-</span>';
+    }
+    html += '</div>';
+    return html;
 }
 
 window.isAntigravityTask = isAntigravityTask;
 window.cleanAntigravityTaskName = cleanAntigravityTaskName;
 window.renderTaskBadgeHTML = renderTaskBadgeHTML;
+window.renderTagsHTML = renderTagsHTML;
 
