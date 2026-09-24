@@ -166,15 +166,6 @@
                             {{end}}
                         </div>
                     </div>
-                    {{if .TicketTitle}}
-                    <div class="text-[10px] text-amber-700 bg-amber-50/70 border border-amber-100 px-1.5 py-0.5 rounded font-medium truncate" title="{{.TicketTitle}}">
-                        🎫 {{.TicketTitle}}
-                    </div>
-                    {{else if .LastTask}}
-                    <div class="text-[10px] text-slate-500 truncate bg-slate-100/80 px-1.5 py-0.5 rounded font-mono">
-                        ↳ {{.LastTask}}
-                    </div>
-                    {{end}}
                 </button>
                 {{end}}
             {{else}}
