@@ -366,36 +366,36 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
         isHuman = false;
     }
 
-    let html = '<div class="inline-flex items-center gap-1 flex-wrap">';
+    let html = '<div class="inline-flex items-center gap-1 flex-nowrap whitespace-nowrap">';
 
     // 1. Badge principal: Hora Máquina vs Hora Hombre
     if (isMachine) {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/90 shadow-2xs" title="Hora Máquina (Cómputo / IA / Antigravity)">
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/90 shadow-2xs shrink-0" title="Hora Máquina (Cómputo / IA / Antigravity)">
             <svg class="w-3 h-3 text-sky-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="4" y="4" width="16" height="16" rx="2"/>
                 <rect x="9" y="9" width="6" height="6"/>
                 <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
             </svg>
-            <span>Hora Máquina</span>
+            <span>hM</span>
         </span>`;
     } else {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/90 shadow-2xs" title="Hora Hombre (Trabajo humano / supervisión)">
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/90 shadow-2xs shrink-0" title="Hora Hombre (Trabajo humano / supervisión)">
             <svg class="w-3 h-3 text-emerald-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                 <circle cx="12" cy="7" r="4"/>
             </svg>
-            <span>Hora Hombre</span>
+            <span>hH</span>
         </span>`;
     }
 
     // 2. Si proviene de Antigravity, mostrar insignia Antigravity
     if (isAgy) {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs shrink-0" title="Antigravity (Imputación automática por IA)">
             <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
                 <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
             </svg>
-            <span>Antigravity</span>
+            <span>AG</span>
         </span>`;
     }
 
@@ -409,7 +409,7 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
                 return;
             }
             const safeName = (typeof escapeHtml === 'function') ? escapeHtml(name) : name;
-            html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">${safeName}</span>`;
+            html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60 whitespace-nowrap shrink-0">${safeName}</span>`;
         });
     }
 

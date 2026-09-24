@@ -482,7 +482,7 @@ function applyTimesheetFilters() {
 
         const isTimerRunning = (row.dataset.timerRunning === 'true');
         const isMaquina = (row.dataset.horaMaquina === 'true');
-        const typeSearch = isMaquina ? 'hora máquina maquina antigravity agy computo ia' : 'hora hombre humano persona';
+        const typeSearch = isMaquina ? 'hora máquina maquina antigravity agy hm ag computo ia' : 'hora hombre humano persona hh';
 
         const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal) || typeSearch.includes(searchVal);
 
