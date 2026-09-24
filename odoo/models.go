@@ -132,14 +132,32 @@ func (t *TimesheetEntry) IsHoraMaquina() bool {
 	return t.IsAntigravity()
 }
 
-// IsHoraHombre indica si la imputación tiene la etiqueta Hora Hombre.
+// IsHoraHombre indica si la imputación es de trabajo humano (no es de máquina/IA).
 func (t *TimesheetEntry) IsHoraHombre() bool {
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Hora Hombre") {
 			return true
 		}
 	}
-	return false
+	return !t.IsHoraMaquina()
+}
+
+// MarshalJSON serializa TimesheetEntry agregando campos calculados para la API y vistas cliente.
+func (t TimesheetEntry) MarshalJSON() ([]byte, error) {
+	type Alias TimesheetEntry
+	return json.Marshal(&struct {
+		Alias
+		IsAntigravity bool   `json:"is_antigravity"`
+		IsHoraMaquina bool   `json:"is_hora_maquina"`
+		IsHoraHombre  bool   `json:"is_hora_hombre"`
+		CleanTaskName string `json:"clean_task_name"`
+	}{
+		Alias:         Alias(t),
+		IsAntigravity: t.IsAntigravity(),
+		IsHoraMaquina: t.IsHoraMaquina(),
+		IsHoraHombre:  t.IsHoraHombre(),
+		CleanTaskName: t.CleanTaskName(),
+	})
 }
 
 // CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].

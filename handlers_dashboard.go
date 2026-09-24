@@ -216,11 +216,18 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	projectNameLastTaskMap := make(map[string]string)
 
 	var totalHours float64
+	var totalHorasHombre float64
+	var totalHorasMaquina float64
 	projectMap := make(map[string]bool)
 	employeeMap := make(map[string]bool)
 
 	for _, entry := range entries {
 		totalHours += entry.UnitAmount
+		if entry.IsHoraMaquina() {
+			totalHorasMaquina += entry.UnitAmount
+		} else {
+			totalHorasHombre += entry.UnitAmount
+		}
 		if entry.ProjectID.ID > 0 {
 			projectHoursMap[entry.ProjectID.ID] += entry.UnitAmount
 			projectCountMap[entry.ProjectID.ID]++
@@ -731,6 +738,8 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		PendingTicketsCount:   len(pendingTickets),
 		OdooURL:               strings.TrimRight(currentOdooCfg.URL, "/"),
 		TotalHours:            totalHours,
+		TotalHorasHombre:      totalHorasHombre,
+		TotalHorasMaquina:     totalHorasMaquina,
 		TotalProjectsCount:    len(projects),
 		UniqueProjectsCount:   len(projectMap),
 		UniqueEmployeesCount:  uniqueEmployeesCount,

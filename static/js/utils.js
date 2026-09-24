@@ -335,45 +335,61 @@ function renderTaskBadgeHTML(taskName) {
     return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeClean}</span>`;
 }
 
-function renderTagsHTML(tags, isAgy) {
-    let html = '<div class="inline-flex items-center gap-1 flex-wrap">';
-    let renderedCount = 0;
+function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
+    let isMachine = false;
+    let isHuman = false;
+
     if (Array.isArray(tags) && tags.length > 0) {
         tags.forEach(t => {
             const name = (typeof t === 'string') ? t : (t.Name || t.name || '');
             if (!name) return;
-            const safeName = (typeof escapeHtml === 'function') ? escapeHtml(name) : name;
-            if (name.toLowerCase() === 'antigravity' || name.toLowerCase() === 'agy') {
-                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
-                    <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
-                        <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
-                    </svg>
-                    <span>Antigravity</span>
-                </span>`;
-            } else if (name.toLowerCase() === 'hora máquina' || name.toLowerCase() === 'hora maquina') {
-                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/90 shadow-2xs" title="Hora Máquina (Cómputo / IA)">
-                    <svg class="w-3 h-3 text-sky-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="4" y="4" width="16" height="16" rx="2"/>
-                        <rect x="9" y="9" width="6" height="6"/>
-                        <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
-                    </svg>
-                    <span>Hora Máquina</span>
-                </span>`;
-            } else if (name.toLowerCase() === 'hora hombre') {
-                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/90 shadow-2xs" title="Hora Hombre (Trabajo humano / supervisión)">
-                    <svg class="w-3 h-3 text-emerald-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                        <circle cx="12" cy="7" r="4"/>
-                    </svg>
-                    <span>Hora Hombre</span>
-                </span>`;
-            } else {
-                html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">${safeName}</span>`;
+            const lower = name.toLowerCase().trim();
+            if (lower === 'hora máquina' || lower === 'hora maquina') {
+                isMachine = true;
+            } else if (lower === 'hora hombre') {
+                isHuman = true;
             }
-            renderedCount++;
         });
-    } else if (isAgy) {
+    }
+
+    if (isAgy || isHoraMaquina) {
+        isMachine = true;
+    }
+
+    if (isHoraHombre !== undefined) {
+        if (isHoraHombre) isHuman = true;
+    }
+
+    if (!isMachine && !isHuman) {
+        isHuman = true;
+    } else if (isMachine) {
+        isHuman = false;
+    }
+
+    let html = '<div class="inline-flex items-center gap-1 flex-wrap">';
+
+    // 1. Badge principal: Hora Máquina vs Hora Hombre
+    if (isMachine) {
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/90 shadow-2xs" title="Hora Máquina (Cómputo / IA / Antigravity)">
+            <svg class="w-3 h-3 text-sky-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="2"/>
+                <rect x="9" y="9" width="6" height="6"/>
+                <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
+            </svg>
+            <span>Hora Máquina</span>
+        </span>`;
+    } else {
+        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/90 shadow-2xs" title="Hora Hombre (Trabajo humano / supervisión)">
+            <svg class="w-3 h-3 text-emerald-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Hora Hombre</span>
+        </span>`;
+    }
+
+    // 2. Si proviene de Antigravity, mostrar insignia Antigravity
+    if (isAgy) {
         html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Imputado desde Antigravity">
             <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
@@ -381,11 +397,22 @@ function renderTagsHTML(tags, isAgy) {
             </svg>
             <span>Antigravity</span>
         </span>`;
-        renderedCount++;
     }
-    if (renderedCount === 0) {
-        html += '<span class="text-slate-300 text-xs">-</span>';
+
+    // 3. Renderizar el resto de etiquetas de Odoo si las hay
+    if (Array.isArray(tags) && tags.length > 0) {
+        tags.forEach(t => {
+            const name = (typeof t === 'string') ? t : (t.Name || t.name || '');
+            if (!name) return;
+            const lower = name.toLowerCase().trim();
+            if (lower === 'antigravity' || lower === 'agy' || lower === 'hora máquina' || lower === 'hora maquina' || lower === 'hora hombre') {
+                return;
+            }
+            const safeName = (typeof escapeHtml === 'function') ? escapeHtml(name) : name;
+            html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">${safeName}</span>`;
+        });
     }
+
     html += '</div>';
     return html;
 }

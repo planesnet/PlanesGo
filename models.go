@@ -489,6 +489,8 @@ type PageData struct {
 	Entries              []odoo.TimesheetEntry
 	Projects             []odoo.Project
 	TotalHours           float64
+	TotalHorasHombre     float64
+	TotalHorasMaquina    float64
 	TotalProjectsCount   int
 	UniqueProjectsCount  int
 	UniqueEmployeesCount int

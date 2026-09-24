@@ -665,6 +665,10 @@ function insertOptimisticTimesheetRow(data) {
     const hoursFormatted = parseFloat(data.hours || 0).toFixed(2);
     const isRunning = Boolean(data.timerRunning || data.isRunning);
 
+    const isAgy = Boolean(data.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(data.taskName, data.desc)));
+    const isMaquina = Boolean(data.is_hora_maquina || isAgy);
+    const isHombre = data.is_hora_hombre !== undefined ? data.is_hora_hombre : !isMaquina;
+
     const tr = document.createElement('tr');
     tr.className = `timesheet-row hover:bg-slate-50/80 transition-colors ${isRunning ? 'bg-emerald-50/70 ring-1 ring-emerald-300' : 'bg-emerald-100/80'}`;
     tr.dataset.id = data.id;
@@ -680,6 +684,9 @@ function insertOptimisticTimesheetRow(data) {
     tr.dataset.desc = data.desc || '';
     tr.dataset.hours = hoursFormatted;
     tr.dataset.invoiced = 'false';
+    tr.dataset.horaMaquina = isMaquina ? 'true' : 'false';
+    tr.dataset.horaHombre = isHombre ? 'true' : 'false';
+    tr.dataset.isAntigravity = isAgy ? 'true' : 'false';
 
     tr.innerHTML = `
         <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
@@ -708,7 +715,7 @@ function insertOptimisticTimesheetRow(data) {
             ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(data.taskName) : (data.taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${data.taskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
         </td>
         <td class="py-3 px-4 whitespace-nowrap">
-            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(data.tags, data.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(data.taskName, data.desc))) : `<span class="text-slate-300 text-xs">-</span>`}
+            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(data.tags, isAgy, isMaquina, isHombre) : `<span class="text-slate-300 text-xs">-</span>`}
         </td>
         <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${data.desc || ''}">
             ${data.desc ? data.desc : `<span class="italic text-slate-400">Sin descripción</span>`}

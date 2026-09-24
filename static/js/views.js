@@ -93,6 +93,10 @@ function insertWeekEntriesIntoTable(entries) {
         const isInvoiced = Boolean(entry.timesheet_invoice_id && entry.timesheet_invoice_id.id);
         const invoiceName = entry.timesheet_invoice_id ? (entry.timesheet_invoice_id.name || `#${entry.timesheet_invoice_id.id}`) : '';
 
+        const isAgy = Boolean(entry.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc)));
+        const isMaquina = Boolean(entry.is_hora_maquina || isAgy);
+        const isHombre = entry.is_hora_hombre !== undefined ? entry.is_hora_hombre : !isMaquina;
+
         const tr = document.createElement('tr');
         tr.className = `timesheet-row hover:bg-slate-50/80 transition-colors ${isRunning ? 'bg-emerald-50/70 ring-1 ring-emerald-300' : ''}`;
         tr.dataset.id = entry.id;
@@ -108,6 +112,9 @@ function insertWeekEntriesIntoTable(entries) {
         tr.dataset.desc = desc;
         tr.dataset.hours = hoursFormatted;
         tr.dataset.invoiced = isInvoiced ? 'true' : 'false';
+        tr.dataset.horaMaquina = isMaquina ? 'true' : 'false';
+        tr.dataset.horaHombre = isHombre ? 'true' : 'false';
+        tr.dataset.isAntigravity = isAgy ? 'true' : 'false';
 
         const safeEmpName = (typeof escapeHtml === 'function') ? escapeHtml(empName) : empName;
         const safeProjName = (typeof escapeHtml === 'function') ? escapeHtml(projName) : projName;
@@ -142,7 +149,7 @@ function insertWeekEntriesIntoTable(entries) {
                 ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeTaskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
             </td>
             <td class="py-3 px-4 whitespace-nowrap">
-                ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(entry.tags, entry.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc))) : `<span class="text-slate-300 text-xs">-</span>`}
+                ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(entry.tags, isAgy, isMaquina, isHombre) : `<span class="text-slate-300 text-xs">-</span>`}
             </td>
             <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${safeDesc}">
                 ${desc ? safeDesc : `<span class="italic text-slate-400">Sin descripción</span>`}
@@ -454,6 +461,8 @@ function applyTimesheetFilters() {
     const targetProjectName = (projectVal || activeSidebarProjectName).toLowerCase().trim();
 
     let visibleHours = 0;
+    let visibleHoursHombre = 0;
+    let visibleHoursMaquina = 0;
     let visibleCount = 0;
     const visibleProjects = new Set();
     const visibleEmployees = new Set();
@@ -472,8 +481,10 @@ function applyTimesheetFilters() {
         const rowDateStr = row.dataset.date || '';
 
         const isTimerRunning = (row.dataset.timerRunning === 'true');
+        const isMaquina = (row.dataset.horaMaquina === 'true');
+        const typeSearch = isMaquina ? 'hora máquina maquina antigravity agy computo ia' : 'hora hombre humano persona';
 
-        const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal);
+        const matchSearch = !searchVal || desc.includes(searchVal) || task.includes(searchVal) || project.includes(searchVal) || projectName.includes(searchVal) || typeSearch.includes(searchVal);
 
         let matchProject = true;
         const hasProjectFilter = Boolean((targetProjectId && targetProjectId !== '0') || targetProjectName);
@@ -504,6 +515,11 @@ function applyTimesheetFilters() {
         if (shouldShow) {
             row.style.display = '';
             visibleHours += hours;
+            if (isMaquina) {
+                visibleHoursMaquina += hours;
+            } else {
+                visibleHoursHombre += hours;
+            }
             visibleCount++;
             if (row.dataset.project) visibleProjects.add(row.dataset.project);
             if (row.dataset.employee) visibleEmployees.add(row.dataset.employee);
@@ -568,6 +584,10 @@ function applyTimesheetFilters() {
 
     // Actualizar KPIs superiores
     if (kpiHours) kpiHours.textContent = visibleHours.toFixed(2);
+    const kpiHoursHombre = document.getElementById('kpi-hours-hombre');
+    const kpiHoursMaquina = document.getElementById('kpi-hours-maquina');
+    if (kpiHoursHombre) kpiHoursHombre.textContent = visibleHoursHombre.toFixed(2);
+    if (kpiHoursMaquina) kpiHoursMaquina.textContent = visibleHoursMaquina.toFixed(2);
     if (kpiEntries) kpiEntries.textContent = visibleCount;
     if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
     if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
