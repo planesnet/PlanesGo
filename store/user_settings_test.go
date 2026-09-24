@@ -101,3 +101,82 @@ func TestUserSettingsStoreSanitizePasi(t *testing.T) {
 	}
 }
 
+func TestGenerateAntigravityToken(t *testing.T) {
+	tempDir := t.TempDir()
+	jsonPath := filepath.Join(tempDir, "user_settings.json")
+
+	store, err := NewUserSettingsStore(jsonPath)
+	if err != nil {
+		t.Fatalf("error creando almacén: %v", err)
+	}
+
+	userEmail := "dev@planesnet.com"
+	token, err := store.GenerateAntigravityToken(userEmail)
+	if err != nil {
+		t.Fatalf("error generando token: %v", err)
+	}
+
+	if len(token) != 40 || token[:8] != "plg_sec_" {
+		t.Fatalf("formato de token inválido: %s", token)
+	}
+
+	// Comprobar que se guardó en el store
+	settings, ok := store.GetSettings(userEmail)
+	if !ok {
+		t.Fatalf("no se encontró configuración guardada para el usuario")
+	}
+	if settings.AntigravityToken != token {
+		t.Fatalf("token en store no coincide: esperado %s, obtenido %s", token, settings.AntigravityToken)
+	}
+
+	// Comprobar búsqueda inversa por token
+	foundUser, found := store.GetUserByAntigravityToken(token)
+	if !found {
+		t.Fatalf("no se encontró usuario por token")
+	}
+	if foundUser.Email != userEmail {
+		t.Fatalf("email de usuario por token incorrecto: %s", foundUser.Email)
+	}
+}
+
+func TestSaveSettingsPreservesAntigravityToken(t *testing.T) {
+	tempDir := t.TempDir()
+	jsonPath := filepath.Join(tempDir, "user_settings.json")
+
+	store, err := NewUserSettingsStore(jsonPath)
+	if err != nil {
+		t.Fatalf("error creando almacén: %v", err)
+	}
+
+	userEmail := "dev@planesnet.com"
+	token, err := store.GenerateAntigravityToken(userEmail)
+	if err != nil {
+		t.Fatalf("error generando token: %v", err)
+	}
+
+	// Guardar nuevos ajustes de Odoo omitiendo el token de Antigravity
+	newOdooSettings := UserSettings{
+		Email:     userEmail,
+		OdooUser:  "dev@planesnet.com",
+		OdooToken: "new_api_key",
+		OdooDB:    "ap113",
+		OdooURL:   "https://planesnet.autopyme.com",
+	}
+
+	if err := store.SaveSettings(newOdooSettings); err != nil {
+		t.Fatalf("error guardando nuevos ajustes: %v", err)
+	}
+
+	// Verificar que el token de Antigravity se preservó
+	updated, ok := store.GetSettings(userEmail)
+	if !ok {
+		t.Fatalf("no se encontraron ajustes")
+	}
+	if updated.AntigravityToken != token {
+		t.Fatalf("el token de Antigravity no fue preservado: esperado %s, obtenido %s", token, updated.AntigravityToken)
+	}
+	if updated.OdooToken != "new_api_key" {
+		t.Fatalf("el nuevo OdooToken no se actualizó: %s", updated.OdooToken)
+	}
+}
+

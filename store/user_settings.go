@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -126,10 +128,50 @@ func (s *UserSettingsStore) SaveSettings(settings UserSettings) error {
 		settings.OdooDB = ""
 	}
 
+	// Preservar el token de Antigravity si no se especifica uno nuevo y ya existía previamente
+	if settings.AntigravityToken == "" {
+		if existing, exists := s.settings[key]; exists && existing.AntigravityToken != "" {
+			settings.AntigravityToken = existing.AntigravityToken
+		}
+	}
+
 	settings.UpdatedAt = time.Now()
 	s.settings[key] = settings
 
 	return s.save()
+}
+
+// GenerateAntigravityToken genera un nuevo token único de Antigravity (formato plg_sec_<32-hex>) y lo persiste.
+func (s *UserSettingsStore) GenerateAntigravityToken(email string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := strings.ToLower(strings.TrimSpace(email))
+	if key == "" {
+		return "", fmt.Errorf("el email del usuario no puede estar vacío")
+	}
+
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("error generando bytes aleatorios: %w", err)
+	}
+	token := "plg_sec_" + hex.EncodeToString(b)
+
+	setting, ok := s.settings[key]
+	if !ok {
+		setting = UserSettings{
+			Email: key,
+		}
+	}
+	setting.AntigravityToken = token
+	setting.UpdatedAt = time.Now()
+	s.settings[key] = setting
+
+	if err := s.save(); err != nil {
+		return "", err
+	}
+
+	return token, nil
 }
 
 // GetAllSettings devuelve una copia de todos los ajustes guardados.

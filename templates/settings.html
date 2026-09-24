@@ -133,6 +133,27 @@
                         </span>
                     </button>
 
+                    <button type="button" onclick="switchSettingsTab('tab-antigravity')" id="btn-tab-antigravity" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2 rounded-xl bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition shadow-xs">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-bold">Token Antigravity</div>
+                                <div class="text-[10px] text-slate-400 font-normal">Telemetría e Imputación PSF</div>
+                            </div>
+                        </div>
+                        <span id="antigravity-nav-badge">
+                            {{if .Settings.AntigravityToken}}
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Token Antigravity activo"></span>
+                            {{else}}
+                            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block" title="Token Antigravity pendiente"></span>
+                            {{end}}
+                        </span>
+                    </button>
+
                     <button type="button" onclick="switchSettingsTab('tab-guide')" id="btn-tab-guide" class="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition text-left group">
                         <div class="flex items-center space-x-3">
                             <div class="p-2 rounded-xl bg-slate-100 text-slate-600 group-hover:bg-slate-200">
@@ -193,7 +214,25 @@
                         </span>
                     </div>
 
+                    <!-- Banner de acceso rápido a Token Antigravity -->
+                    <div class="mb-6 p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-indigo-900">
+                        <div class="flex items-center space-x-3">
+                            <span class="p-2 bg-indigo-100 text-indigo-700 rounded-xl flex-shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            </span>
+                            <div>
+                                <span class="font-bold">¿Desarrollas con Antigravity e IA?</span>
+                                <div class="text-[11px] text-indigo-700 font-normal">Tu token de empleado para telemetría e imputación horaria en Odoo está listo para copiar.</div>
+                            </div>
+                        </div>
+                        <button type="button" onclick="switchSettingsTab('tab-antigravity')" class="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex-shrink-0 cursor-pointer">
+                            <span>Ver y Copiar Token</span>
+                            <span>→</span>
+                        </button>
+                    </div>
+
                     <form action="/settings" method="POST" class="space-y-6">
+                        <input type="hidden" name="antigravity_token" value="{{.Settings.AntigravityToken}}">
                         <!-- Dirección del Servidor Odoo (URL) -->
                         <div>
                             <div class="flex items-center justify-between mb-2">
@@ -281,6 +320,115 @@
                     </form>
                 </div>
 
+                <!-- SECCIÓN 2: Token Antigravity (PSF) -->
+                <div id="tab-antigravity-content" class="settings-content-pane hidden bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-4 mb-6">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-lg font-bold text-slate-900">Token de Empleado para Antigravity</h3>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">PSF Fase 0</span>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-1">Credencial criptográfica para telemetría, imputación horaria en Odoo y vinculación de proyectos en Planes Software Factory.</p>
+                        </div>
+                        <span class="p-3 bg-indigo-50 text-indigo-600 rounded-2xl self-start sm:self-center">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                        </span>
+                    </div>
+
+                    <!-- Mensaje / Alerta dinámica -->
+                    <div id="antigravity-alert" class="hidden p-4 rounded-2xl text-xs font-medium border mb-6 transition-all"></div>
+
+                    <!-- Token Principal con Botón Copiar y Generar -->
+                    <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-4 mb-6">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                                Tu Clave de Acceso Personal (X-Antigravity-Token)
+                            </label>
+                            <span class="text-[11px] text-slate-500 font-mono" id="token-status-label">
+                                {{if .Settings.AntigravityToken}}Activo y listo{{else}}Sin token generado{{end}}
+                            </span>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                            <div class="relative flex-1">
+                                <input type="text" id="antigravity_token_display" value="{{.Settings.AntigravityToken}}" readonly
+                                       placeholder="Pulsa en Generar Token para obtener tu clave..."
+                                       class="w-full pl-4 pr-12 py-3 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs select-all">
+                                <button type="button" onclick="toggleTokenMask(this)" title="Mostrar / Ocultar" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none">
+                                    <svg class="w-5 h-5 token-eye" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <!-- Botón Copiar Token -->
+                            <button type="button" onclick="copyAntigravityToken(this)" id="btn-copy-token" class="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm hover:shadow flex items-center justify-center space-x-2 flex-shrink-0 cursor-pointer">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                <span class="btn-text">Copiar Token</span>
+                            </button>
+
+                            <!-- Botón Generar / Regenerar -->
+                            <button type="button" onclick="generateAntigravityToken(this)" id="btn-generate-token" class="px-4 py-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center space-x-1.5 flex-shrink-0 cursor-pointer" title="Generar un nuevo token aleatorio">
+                                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                <span>{{if .Settings.AntigravityToken}}Regenerar{{else}}Generar{{end}}</span>
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-400 font-light">Este token identifica de forma única tu usuario ante PlanesGo y Odoo sin necesidad de compartir contraseñas.</p>
+                    </div>
+
+                    <!-- Snippets de Configuración Rápida -->
+                    <div class="space-y-4">
+                        <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Dónde y cómo configurar tu token</h4>
+
+                        <!-- Snippet 1: ~/.planesgo_auth.json -->
+                        <div class="p-4 rounded-2xl bg-slate-900 text-slate-200 border border-slate-800 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-indigo-400"></span>
+                                    <span class="text-xs font-mono font-bold text-slate-300">~/.planesgo_auth.json (Recomendado)</span>
+                                </div>
+                                <button type="button" onclick="copySnippetJson(this)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium transition flex items-center space-x-1 cursor-pointer">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    <span>Copiar JSON</span>
+                                </button>
+                            </div>
+                            <pre id="snippet-json" class="p-3 bg-slate-950/70 rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">{
+  "email": "{{if .Settings.Email}}{{.Settings.Email}}{{else}}{{.Session.Username}}{{end}}",
+  "antigravity_token": "{{.Settings.AntigravityToken}}",
+  "planesgo_url": "https://planesgo.autopyme.com"
+}</pre>
+                            <p class="text-[11px] text-slate-400 mt-1 font-light">Guarda este archivo en tu carpeta de usuario local (<code>~/.planesgo_auth.json</code>) para que Antigravity lo reconozca de manera automática y global.</p>
+                        </div>
+
+                        <!-- Snippet 2: Variable de Entorno -->
+                        <div class="p-4 rounded-2xl bg-slate-900 text-slate-200 border border-slate-800 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+                                    <span class="text-xs font-mono font-bold text-slate-300">Variable de Entorno (Terminal / Bash)</span>
+                                </div>
+                                <button type="button" onclick="copySnippetEnv(this)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium transition flex items-center space-x-1 cursor-pointer">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    <span>Copiar Comando</span>
+                                </button>
+                            </div>
+                            <pre id="snippet-env" class="p-3 bg-slate-950/70 rounded-xl text-xs font-mono text-sky-300 overflow-x-auto">export ANTIGRAVITY_TOKEN="{{.Settings.AntigravityToken}}"</pre>
+                            <p class="text-[11px] text-slate-400 mt-1 font-light">Alternativa para entornos CI/CD o sesiones efímeras donde no se utilice archivo físico.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- SECCIÓN 3: Guía de Ayuda Paso a Paso -->
                 <div id="tab-guide-content" class="settings-content-pane hidden bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 sm:p-8">
                     <div class="flex items-center justify-between pb-6 border-b border-slate-100 mb-6">
@@ -352,11 +500,13 @@
             // Quitar estilos activos de todos los botones
             const buttons = [
                 { id: 'btn-tab-odoo-token', tab: 'tab-odoo-token', content: 'tab-odoo-token-content', activeColor: 'text-sky-700 bg-sky-50/80' },
+                { id: 'btn-tab-antigravity', tab: 'tab-antigravity', content: 'tab-antigravity-content', activeColor: 'text-indigo-700 bg-indigo-50/80' },
                 { id: 'btn-tab-guide', tab: 'tab-guide', content: 'tab-guide-content', activeColor: 'text-emerald-700 bg-emerald-50/80' }
             ];
 
             buttons.forEach(b => {
                 const btn = document.getElementById(b.id);
+                if (!btn) return;
                 if (b.tab === tabId) {
                     btn.className = `w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold ${b.activeColor} transition text-left group`;
                     const contentEl = document.getElementById(b.content);
@@ -375,6 +525,122 @@
             } else {
                 input.type = 'password';
                 btn.innerHTML = `<svg class="w-5 h-5 text-slate-400 hover:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>`;
+            }
+        }
+
+        function toggleTokenMask(btn) {
+            const input = document.getElementById('antigravity_token_display');
+            if (!input) return;
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.innerHTML = `<svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>`;
+            } else {
+                input.type = 'password';
+                btn.innerHTML = `<svg class="w-5 h-5 text-slate-400 hover:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>`;
+            }
+        }
+
+        function showAlert(elementId, type, message) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            el.classList.remove('hidden');
+            if (type === 'success') {
+                el.className = "p-4 rounded-2xl text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-200 block shadow-sm mb-6";
+            } else {
+                el.className = "p-4 rounded-2xl text-xs font-medium border bg-red-50 text-red-800 border-red-200 block mb-6";
+            }
+            el.innerHTML = message;
+        }
+
+        function copyAntigravityToken(btn) {
+            const tokenInput = document.getElementById('antigravity_token_display');
+            const token = tokenInput ? tokenInput.value.trim() : '';
+            if (!token) {
+                showAlert('antigravity-alert', 'error', 'No hay token generado para copiar. Pulsa en "Generar" primero.');
+                return;
+            }
+            navigator.clipboard.writeText(token).then(() => {
+                const originalHtml = btn.innerHTML;
+                btn.className = "px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center space-x-2 flex-shrink-0 cursor-pointer";
+                btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg><span>¡Copiado!</span>`;
+                showAlert('antigravity-alert', 'success', '✓ <strong>¡Token copiado al portapapeles!</strong> Pégalo en tu archivo <code>~/.planesgo_auth.json</code> o en la variable <code>ANTIGRAVITY_TOKEN</code>.');
+                setTimeout(() => {
+                    btn.className = "px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm hover:shadow flex items-center justify-center space-x-2 flex-shrink-0 cursor-pointer";
+                    btn.innerHTML = originalHtml;
+                }, 2500);
+            }).catch(() => {
+                tokenInput.select();
+                document.execCommand('copy');
+                showAlert('antigravity-alert', 'success', '✓ Token copiado al portapapeles.');
+            });
+        }
+
+        function copySnippetJson(btn) {
+            const el = document.getElementById('snippet-json');
+            if (!el) return;
+            navigator.clipboard.writeText(el.innerText.trim()).then(() => {
+                const original = btn.innerHTML;
+                btn.innerHTML = `✓ Copiado`;
+                setTimeout(() => { btn.innerHTML = original; }, 2000);
+            });
+        }
+
+        function copySnippetEnv(btn) {
+            const el = document.getElementById('snippet-env');
+            if (!el) return;
+            navigator.clipboard.writeText(el.innerText.trim()).then(() => {
+                const original = btn.innerHTML;
+                btn.innerHTML = `✓ Copiado`;
+                setTimeout(() => { btn.innerHTML = original; }, 2000);
+            });
+        }
+
+        async function generateAntigravityToken(btn) {
+            const currentToken = document.getElementById('antigravity_token_display').value.trim();
+            if (currentToken && !confirm('¿Deseas regenerar tu token de Antigravity? Tu clave anterior dejará de ser válida.')) {
+                return;
+            }
+
+            btn.disabled = true;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = `<svg class="animate-spin w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> <span>Generando...</span>`;
+
+            try {
+                const response = await fetch('/api/settings/generate-antigravity-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (data.success && data.token) {
+                    document.getElementById('antigravity_token_display').value = data.token;
+                    const hiddenToken = document.querySelector('input[name="antigravity_token"]');
+                    if (hiddenToken) hiddenToken.value = data.token;
+
+                    // Actualizar snippets
+                    const userEmail = data.email || '{{if .Settings.Email}}{{.Settings.Email}}{{else}}{{.Session.Username}}{{end}}';
+                    const jsonSnippet = {
+                        "email": userEmail,
+                        "antigravity_token": data.token,
+                        "planesgo_url": "https://planesgo.autopyme.com"
+                    };
+                    document.getElementById('snippet-json').innerText = JSON.stringify(jsonSnippet, null, 2);
+                    document.getElementById('snippet-env').innerText = `export ANTIGRAVITY_TOKEN="${data.token}"`;
+
+                    // Actualizar badge en menú
+                    const navBadge = document.getElementById('antigravity-nav-badge');
+                    if (navBadge) navBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Token Antigravity activo"></span>`;
+                    const statusLabel = document.getElementById('token-status-label');
+                    if (statusLabel) statusLabel.innerText = "Activo y listo";
+
+                    showAlert('antigravity-alert', 'success', '✓ <strong>¡Nuevo token generado y guardado con éxito!</strong> Cópialo con el botón "Copiar Token".');
+                } else {
+                    showAlert('antigravity-alert', 'error', '❌ Error al generar token: ' + (data.error || 'Desconocido'));
+                }
+            } catch (err) {
+                showAlert('antigravity-alert', 'error', '❌ Error de red: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
             }
         }
 

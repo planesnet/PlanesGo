@@ -1005,9 +1005,10 @@ func (state *AppState) handleAPITimerPause(w http.ResponseWriter, r *http.Reques
 	if userUID == 0 {
 		userUID = client.UID()
 	}
-	state.pauseActiveTimer(userUID, req.UnitAmount)
+	state.pauseActiveTimerForTask(userUID, req.TaskID, req.TimesheetID, req.UnitAmount)
 	state.broadcastUserEvent(userUID, "timer_pause", map[string]interface{}{
 		"timesheet_id": req.TimesheetID,
+		"task_id":      req.TaskID,
 		"unit_amount":  req.UnitAmount,
 	})
 

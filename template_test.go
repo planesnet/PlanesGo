@@ -148,6 +148,20 @@ func TestSettingsTemplateRendering(t *testing.T) {
 	if bufUser.Len() == 0 {
 		t.Fatalf("El contenido renderizado para usuario está vacío")
 	}
+
+	renderedUser := bufUser.String()
+	if !strings.Contains(renderedUser, "btn-tab-antigravity") {
+		t.Fatalf("El botón 'btn-tab-antigravity' debe estar presente en el HTML")
+	}
+	if !strings.Contains(renderedUser, "tab-antigravity-content") {
+		t.Fatalf("El panel 'tab-antigravity-content' debe estar presente en el HTML")
+	}
+	if !strings.Contains(renderedUser, "btn-copy-token") {
+		t.Fatalf("El botón 'btn-copy-token' debe estar presente en el HTML")
+	}
+	if !strings.Contains(renderedUser, "antigravity_token_display") {
+		t.Fatalf("El campo 'antigravity_token_display' debe estar presente en el HTML")
+	}
 }
 
 func TestGetIndexTemplateCache(t *testing.T) {

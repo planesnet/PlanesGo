@@ -105,6 +105,14 @@ func (state *AppState) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Si el usuario está autenticado y no tiene token de Antigravity todavía, generarlo automáticamente
+	if state.userStore != nil && !isAnonymous && userEmail != "" && userEmail != "default" && userSettings.AntigravityToken == "" {
+		if token, err := state.userStore.GenerateAntigravityToken(userEmail); err == nil {
+			userSettings.AntigravityToken = token
+			log.Printf("[SETTINGS] Token de Antigravity generado automáticamente para %s", userEmail)
+		}
+	}
+
 	tmpl, err := template.ParseFiles("templates/settings.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error al cargar plantilla settings.html: %v", err), http.StatusInternalServerError)
@@ -168,13 +176,19 @@ func (state *AppState) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		antigravityToken := strings.TrimSpace(r.FormValue("antigravity_token"))
+		if antigravityToken == "" {
+			antigravityToken = userSettings.AntigravityToken
+		}
+
 		updatedSettings := store.UserSettings{
-			Email:     targetEmail,
-			OdooUser:  odooUser,
-			OdooToken: odooToken,
-			OdooURL:   odooURL,
-			OdooDB:    odooDB,
-			PageLimit: limit,
+			Email:            targetEmail,
+			OdooUser:         odooUser,
+			OdooToken:        odooToken,
+			OdooURL:          odooURL,
+			OdooDB:           odooDB,
+			PageLimit:        limit,
+			AntigravityToken: antigravityToken,
 		}
 
 		var errMsg string
@@ -343,3 +357,54 @@ func (state *AppState) handleTestConnection(w http.ResponseWriter, r *http.Reque
 		"saved":          true,
 	})
 }
+
+// handleGenerateAntigravityToken genera un nuevo token de Antigravity para el usuario autenticado
+func (state *AppState) handleGenerateAntigravityToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	if session == nil || (session.UserEmail == "" && session.Username == "") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Debes iniciar sesión para generar o renovar tu token."})
+		return
+	}
+
+	userEmail := session.UserEmail
+	if userEmail == "" {
+		userEmail = session.Username
+	}
+
+	if state.userStore == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Almacén de usuarios no disponible."})
+		return
+	}
+
+	token, err := state.userStore.GenerateAntigravityToken(userEmail)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+
+	log.Printf("[SETTINGS] Nuevo token de Antigravity generado para %s (%s)", userEmail, token)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   token,
+		"email":   userEmail,
+	})
+}
+

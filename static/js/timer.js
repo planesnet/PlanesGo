@@ -194,22 +194,9 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         return;
     }
 
-    // Si ya existe un cronómetro previo activo y es diferente al que vamos a arrancar,
-    // detener el cronómetro anterior y sincronizar sus horas en Odoo
-    const current = getTimerState();
-    const newTsId = timesheetId ? parseInt(timesheetId, 10) : null;
-    const isDifferent = current && (
-        (newTsId && current.timesheetId && String(current.timesheetId) !== String(newTsId)) ||
-        (!newTsId && current.projectId && String(current.projectId) !== String(projectId)) ||
-        (newTsId && !current.timesheetId) ||
-        (!newTsId && current.timesheetId)
-    );
-
+    // Concurrencia habilitada: No detenemos el cronómetro previo, permitiendo que coexistan
+    // múltiples tareas y procesos (como Antigravity u otras tareas) simultáneamente.
     window.__lastTimerActionTime = Date.now();
-
-    if (isDifferent) {
-        stopPreviousRunningTimer(current);
-    }
 
     // Determinar la fecha objetivo de trabajo (parámetro, input modal o hoy)
     const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || new Date().toISOString().split('T')[0];
@@ -1491,6 +1478,9 @@ async function syncActiveTimerFromOdoo() {
         const resp = await fetch('/api/timer/active', { cache: 'no-store' });
         if (resp.ok) {
             const data = await resp.json();
+            if (data && data.active_list) {
+                window.__activeTimersList = data.active_list;
+            }
             const act = data ? data.active : null;
             const lastConfirmedAt = data ? data.last_confirmed_at : 0;
             const current = getTimerState();
@@ -1860,7 +1850,30 @@ function toggleTimesheetRowTimer(btn) {
         return;
     }
 
-    // Iniciar o reanudar el cronómetro para esta imputación concreta (startWorkTimer detiene el anterior limpiamente)
+    // Comprobar si esta fila está actualmente corriendo en la lista activa concurrente
+    const activeList = window.__activeTimersList || [];
+    const activeItem = activeList.find(t => t.timesheet_id === tsId);
+    if (activeItem && activeItem.is_running) {
+        // Pausar esta tarea específica
+        fetch('/api/timer/pause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timesheet_id: tsId || 0,
+                task_id: taskId || 0,
+                unit_amount: hours
+            })
+        }).then(() => {
+            activeItem.is_running = false;
+            updateAllRowTimerButtonStates();
+            if (typeof syncActiveTimerFromOdoo === 'function') {
+                syncActiveTimerFromOdoo();
+            }
+        }).catch(err => console.warn('[PlanesGo] Error pausando tarea concurrente:', err));
+        return;
+    }
+
+    // Iniciar o reanudar el cronómetro para esta imputación concreta
     const rowDate = btn.dataset.date || (row ? row.dataset.date : '') || '';
     const accumulatedMs = Math.round(hours * 3600 * 1000);
     startWorkTimer(pId, pName, taskId, taskName, desc, tsId, accumulatedMs, rowDate, false);
@@ -2037,6 +2050,7 @@ function updateAllRowTimerButtonStates() {
     const current = getTimerState();
     const activeTsId = current ? current.timesheetId : null;
     const isRunning = current && current.status === 'running';
+    const activeList = window.__activeTimersList || [];
 
     document.querySelectorAll('.timesheet-row').forEach(row => {
         const rowId = parseInt(row.dataset.id, 10);
@@ -2047,24 +2061,28 @@ function updateAllRowTimerButtonStates() {
         const iconPlay = playBtn.querySelector('.icon-play');
         const iconPause = playBtn.querySelector('.icon-pause');
 
-        if (activeTsId && rowId === activeTsId) {
-            if (isRunning) {
-                // Fila activa corriendo
-                row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
-                playBtn.classList.remove('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
-                playBtn.classList.add('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
-                playBtn.title = 'Pausar cronómetro de esta imputación';
-                if (iconPlay) iconPlay.classList.add('hidden');
-                if (iconPause) iconPause.classList.remove('hidden');
-            } else {
-                // Fila activa pero en pausa
-                row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
-                playBtn.classList.remove('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
-                playBtn.classList.add('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
-                playBtn.title = 'Reanudar cronómetro en esta imputación';
-                if (iconPlay) iconPlay.classList.remove('hidden');
-                if (iconPause) iconPause.classList.add('hidden');
-            }
+        const isCurRunning = (activeTsId && rowId === activeTsId && isRunning);
+        const activeItem = activeList.find(t => t.timesheet_id === rowId);
+        const isItemRunning = activeItem && activeItem.is_running;
+        const isItemPaused = (activeTsId && rowId === activeTsId && !isRunning) || (activeItem && !activeItem.is_running);
+
+        if (isCurRunning || isItemRunning) {
+            // Fila activa corriendo
+            row.classList.add('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            playBtn.classList.remove('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+            playBtn.classList.add('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+            playBtn.title = 'Pausar cronómetro de esta imputación';
+            if (iconPlay) iconPlay.classList.add('hidden');
+            if (iconPause) iconPause.classList.remove('hidden');
+            if (stopBtn) stopBtn.classList.remove('hidden');
+        } else if (isItemPaused) {
+            // Fila activa pero en pausa
+            row.classList.remove('bg-emerald-50/70', 'ring-1', 'ring-emerald-300');
+            playBtn.classList.remove('text-amber-700', 'bg-amber-100', 'hover:bg-amber-200', 'border-amber-300', 'animate-pulse');
+            playBtn.classList.add('text-emerald-600', 'bg-emerald-50', 'hover:bg-emerald-100', 'border-emerald-200/80');
+            playBtn.title = 'Reanudar cronómetro en esta imputación';
+            if (iconPlay) iconPlay.classList.remove('hidden');
+            if (iconPause) iconPause.classList.add('hidden');
             if (stopBtn) stopBtn.classList.remove('hidden');
         } else {
             // Fila normal inactiva

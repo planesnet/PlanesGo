@@ -256,6 +256,45 @@ func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
 	state.pauseActiveTimerByKey(userUID, "", unitAmount)
 }
 
+// pauseActiveTimerForTask pausa el temporizador específico asociado a una tarea o parte de horas.
+func (state *AppState) pauseActiveTimerForTask(userUID int, taskID int, timesheetID int, unitAmount float64) {
+	if taskID == 0 && timesheetID == 0 {
+		state.pauseActiveTimer(userUID, unitAmount)
+		return
+	}
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers == nil {
+		return
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok {
+		return
+	}
+	nowMs := time.Now().UnixMilli()
+	for _, t := range userMap {
+		if t == nil {
+			continue
+		}
+		if (taskID > 0 && t.TaskID == taskID) || (timesheetID > 0 && t.TimesheetID == timesheetID) {
+			if t.IsRunning && t.StartedAt > 0 {
+				elapsed := nowMs - t.StartedAt
+				if elapsed > 0 {
+					t.AccumulatedMs += elapsed
+				}
+			}
+			t.IsRunning = false
+			t.StartedAt = 0
+			if unitAmount > 0 {
+				t.UnitAmount = unitAmount
+				t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
+			} else {
+				t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
+			}
+		}
+	}
+}
+
 // pauseActiveTimerByKey pausa un temporizador específico por su clave (o todos si clave es vacía).
 func (state *AppState) pauseActiveTimerByKey(userUID int, timerKey string, unitAmount float64) {
 	state.activeTimersMu.Lock()

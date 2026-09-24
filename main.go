@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.43"
+var Version = "1.2.44"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -47,6 +47,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	// Configuración y ajustes
 	mux.HandleFunc("/settings", state.handleSettings)
 	mux.HandleFunc("/api/settings/test-connection", state.handleTestConnection)
+	mux.HandleFunc("/api/settings/generate-antigravity-token", state.handleGenerateAntigravityToken)
 
 	// API REST
 	mux.HandleFunc("/api/timesheets", state.handleAPITimesheets)
