@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.43"
+	Version       = "1.2.44"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeImplementacion = "Implementación"
@@ -485,7 +485,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 	}
 
 	client, cfg, err := newClient(customPath)
-	if err != nil {
+	if err != nil && name != "planesgo_set_project" {
 		return ToolCallResult{
 			Content: []ToolContent{{
 				Type: "text",
@@ -770,6 +770,132 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			IsError: false,
 		}
 
+	case "planesgo_set_project":
+		targetProjName, _ := args["project_name"].(string)
+		targetProjID := 0
+		if val, ok := args["project_id"]; ok {
+			switch v := val.(type) {
+			case float64:
+				targetProjID = int(v)
+			case int:
+				targetProjID = v
+			case string:
+				if id, err := strconv.Atoi(v); err == nil {
+					targetProjID = id
+				}
+			}
+		}
+
+		if strings.TrimSpace(targetProjName) == "" && targetProjID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ Debe indicar 'project_name' o 'project_id' para configurar el proyecto en PlanesGo.",
+				}},
+				IsError: true,
+			}
+		}
+
+		token, apiURL, authErr := getAuth(cfg)
+		if authErr != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ Error de autenticación: %v", authErr),
+				}},
+				IsError: true,
+			}
+		}
+
+		if client == nil {
+			client = &PlanesGoClient{
+				BaseURL:    apiURL,
+				Token:      token,
+				HTTPClient: &http.Client{Timeout: 15 * time.Second},
+			}
+		}
+
+		res, err := client.CheckStatus(targetProjID, targetProjName)
+		if err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ Error al validar el proyecto '%s' en PlanesGo / Odoo: %v", targetProjName, err),
+				}},
+				IsError: true,
+			}
+		}
+
+		resolvedName, _ := res["project_name"].(string)
+		if resolvedName == "" {
+			resolvedName = targetProjName
+		}
+		resolvedID := targetProjID
+		if idVal, ok := res["project_id"].(float64); ok && int(idVal) > 0 {
+			resolvedID = int(idVal)
+		}
+
+		targetDir := customPath
+		if targetDir == "" {
+			if wd, err := os.Getwd(); err == nil && wd != "" {
+				targetDir = wd
+			} else if pwd := os.Getenv("PWD"); pwd != "" {
+				targetDir = pwd
+			}
+		}
+		targetDir, _ = filepath.Abs(targetDir)
+
+		newCfg := Config{
+			OdooProjectID:   resolvedID,
+			OdooProjectName: resolvedName,
+			PlanesGoURL:     apiURL,
+		}
+		data, mErr := json.MarshalIndent(newCfg, "", "  ")
+		if mErr != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error serializando configuración: %v", mErr)}},
+				IsError: true,
+			}
+		}
+		data = append(data, '\n')
+
+		mainFilePath := filepath.Join(targetDir, ".planesgo.json")
+		if err := os.WriteFile(mainFilePath, data, 0644); err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ Error al guardar archivo %s: %v", mainFilePath, err),
+				}},
+				IsError: true,
+			}
+		}
+
+		syncedFiles := []string{mainFilePath}
+		customSubdir := filepath.Join(targetDir, "custom")
+		if info, err := os.Stat(customSubdir); err == nil && info.IsDir() {
+			customPath := filepath.Join(customSubdir, ".planesgo.json")
+			if err := os.WriteFile(customPath, data, 0644); err == nil {
+				syncedFiles = append(syncedFiles, customPath)
+			}
+		} else if filepath.Base(targetDir) == "custom" {
+			parentPath := filepath.Join(filepath.Dir(targetDir), ".planesgo.json")
+			if err := os.WriteFile(parentPath, data, 0644); err == nil {
+				syncedFiles = append(syncedFiles, parentPath)
+			}
+		}
+
+		var sb strings.Builder
+		sb.WriteString("✅ [PlanesGo] Configuración de proyecto vinculada con éxito:\n")
+		sb.WriteString(fmt.Sprintf("- Proyecto: %s (ID Odoo: %d)\n", resolvedName, resolvedID))
+		sb.WriteString(fmt.Sprintf("- Servidor: %s\n", apiURL))
+		sb.WriteString(fmt.Sprintf("- Archivos configurados: %s\n", strings.Join(syncedFiles, ", ")))
+		sb.WriteString("- Estado: Vinculación activa y operativa para imputación horaria.")
+
+		return ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: sb.String()}},
+			IsError: false,
+		}
+
 	default:
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Herramienta '%s' no reconocida", name)}},
@@ -892,6 +1018,28 @@ func getToolsDefinition() []map[string]interface{} {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			"name":        "planesgo_set_project",
+			"description": "Vincula o actualiza el proyecto activo de PlanesGo (.planesgo.json) resolviendo automáticamente el ID y nombre oficial desde Odoo en un solo paso rápido.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto en Odoo/PlanesGo (ej: 'FLY-PYR - CESCONILLO', 'PLANESGO', 'AUTOPYME LOGISTICS')",
+					},
+					"project_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "ID numérico de Odoo si se conoce directamente (opcional)",
+					},
+					"project_path": map[string]interface{}{
+						"type":        "string",
+						"description": "Ruta al directorio raíz del proyecto donde se ubicará .planesgo.json (opcional, por defecto el directorio actual)",
+					},
+				},
+				"required": []string{"project_name"},
+			},
+		},
 	}
 }
 
@@ -1008,6 +1156,9 @@ func main() {
 	beatFlag := flag.Bool("beat", false, "Envía un latido para la tarea indicada")
 	stopFlag := flag.Bool("stop", false, "Detiene la tarea indicada")
 	listFlag := flag.Bool("list", false, "Lista tareas de Odoo para el proyecto actual")
+	setProjFlag := flag.String("set-project", "", "Vincula y configura el proyecto indicado en .planesgo.json")
+	initFlag := flag.String("init", "", "Alias de --set-project para inicializar/vincular proyecto")
+	projectFlag := flag.String("project", "", "Alias de --set-project")
 	taskFlag := flag.String("task", "", "Nombre de la tarea")
 	typeFlag := flag.String("type", "", "Tipo de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional)")
 	descFlag := flag.String("desc", "", "Descripción del trabajo")
@@ -1099,6 +1250,31 @@ func main() {
 			args["project_path"] = *pathFlag
 		}
 		res := executeToolCall("planesgo_list_tasks", args)
+		if len(res.Content) > 0 {
+			fmt.Println(res.Content[0].Text)
+		}
+		if res.IsError {
+			os.Exit(1)
+		}
+		return
+	}
+
+	targetProj := *setProjFlag
+	if targetProj == "" && *initFlag != "" {
+		targetProj = *initFlag
+	}
+	if targetProj == "" && *projectFlag != "" && !*checkFlag && !*beatFlag && !*stopFlag && !*listFlag {
+		targetProj = *projectFlag
+	}
+
+	if targetProj != "" {
+		args := map[string]interface{}{
+			"project_name": targetProj,
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		res := executeToolCall("planesgo_set_project", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}
