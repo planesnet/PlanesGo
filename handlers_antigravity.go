@@ -638,7 +638,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				desc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(payload.TaskName))
 			}
 
-			activeTimer, startErr := client.StartTimer(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, payload.UnitAmount, "")
+			activeTimer, startErr := client.StartTimerExtended(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, payload.UnitAmount, "", true)
 			if startErr != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar tarea en Odoo: " + startErr.Error()})

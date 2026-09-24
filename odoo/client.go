@@ -1365,6 +1365,11 @@ func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []T
 
 // CreateTimesheet crea un nuevo parte de horas (account.analytic.line) en Odoo.
 func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int, taskID int, unitAmount float64, description string) (int, error) {
+	return c.CreateTimesheetExtended(ctx, date, projectID, taskID, unitAmount, description, false)
+}
+
+// CreateTimesheetExtended crea un nuevo parte de horas en Odoo indicando si proviene de Antigravity (Hora Máquina).
+func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, projectID int, taskID int, unitAmount float64, description string, isAntigravity bool) (int, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("no se pudo autenticar antes de crear parte de horas: %w", err)
@@ -1391,6 +1396,9 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 	}
 	if taskID > 0 {
 		vals["task_id"] = taskID
+	}
+	if isAntigravity {
+		vals["is_antigravity"] = true
 	}
 
 	args := []interface{}{
@@ -1608,6 +1616,11 @@ func (c *Client) GetServerVersion(ctx context.Context) (string, error) {
 // StartTimer inicia un temporizador de trabajo en Odoo llamando a action_timer_start en account.analytic.line o project.task,
 // o marcando is_timer_running = true. Es acumulativo sobre las horas ya imputadas en la tarea o proyecto en la fecha especificada.
 func (c *Client) StartTimer(ctx context.Context, projectID int, projectName string, taskID int, taskName string, timesheetID int, description string, initialHours float64, workDate string) (*ActiveTimer, error) {
+	return c.StartTimerExtended(ctx, projectID, projectName, taskID, taskName, timesheetID, description, initialHours, workDate, false)
+}
+
+// StartTimerExtended inicia un temporizador de trabajo indicando si proviene de Antigravity (Hora Máquina).
+func (c *Client) StartTimerExtended(ctx context.Context, projectID int, projectName string, taskID int, taskName string, timesheetID int, description string, initialHours float64, workDate string, isAntigravity bool) (*ActiveTimer, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo autenticar antes de iniciar cronómetro: %w", err)
@@ -1627,7 +1640,7 @@ func (c *Client) StartTimer(ctx context.Context, projectID int, projectName stri
 
 	// 1. Si no se proporcionó un timesheetID (iniciando un nuevo trabajo), crear la imputación directamente en account.analytic.line
 	if actualTimesheetID <= 0 {
-		newID, createErr := c.CreateTimesheet(ctx, targetDate, projectID, taskID, currentHours, description)
+		newID, createErr := c.CreateTimesheetExtended(ctx, targetDate, projectID, taskID, currentHours, description, isAntigravity)
 		if createErr != nil {
 			log.Printf("[PlanesGo Odoo] Error al crear parte de horas en Odoo al iniciar temporizador: %v", createErr)
 			return nil, fmt.Errorf("error al crear parte de horas en Odoo: %w", createErr)

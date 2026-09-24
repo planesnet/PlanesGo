@@ -122,6 +122,26 @@ func (t *TimesheetEntry) IsAntigravity() bool {
 		strings.HasPrefix(desc, "[AGY]")
 }
 
+// IsHoraMaquina indica si la imputación tiene la etiqueta Hora Máquina o proviene de Antigravity.
+func (t *TimesheetEntry) IsHoraMaquina() bool {
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Hora Máquina") || strings.EqualFold(tag.Name, "Hora Maquina") {
+			return true
+		}
+	}
+	return t.IsAntigravity()
+}
+
+// IsHoraHombre indica si la imputación tiene la etiqueta Hora Hombre.
+func (t *TimesheetEntry) IsHoraHombre() bool {
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Hora Hombre") {
+			return true
+		}
+	}
+	return false
+}
+
 // CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].
 func (t *TimesheetEntry) CleanTaskName() string {
 	name := strings.TrimSpace(t.TaskID.Name)

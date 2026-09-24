@@ -26,16 +26,17 @@ func TestCleanURL(t *testing.T) {
 
 func TestToolsDefinition(t *testing.T) {
 	tools := getToolsDefinition()
-	if len(tools) != 5 {
-		t.Fatalf("expected 5 tools defined, got %d", len(tools))
+	if len(tools) != 6 {
+		t.Fatalf("expected 6 tools defined, got %d", len(tools))
 	}
 
 	expectedNames := map[string]bool{
-		"planesgo_check":      false,
-		"planesgo_beat":       false,
-		"planesgo_stop":       false,
-		"planesgo_list_tasks": false,
-		"planesgo_status":     false,
+		"planesgo_check":       false,
+		"planesgo_beat":        false,
+		"planesgo_stop":        false,
+		"planesgo_list_tasks":  false,
+		"planesgo_status":      false,
+		"planesgo_set_project": false,
 	}
 
 	for _, tool := range tools {

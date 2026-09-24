@@ -351,6 +351,23 @@ function renderTagsHTML(tags, isAgy) {
                     </svg>
                     <span>Antigravity</span>
                 </span>`;
+            } else if (name.toLowerCase() === 'hora máquina' || name.toLowerCase() === 'hora maquina') {
+                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200/90 shadow-2xs" title="Hora Máquina (Cómputo / IA)">
+                    <svg class="w-3 h-3 text-sky-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="4" y="4" width="16" height="16" rx="2"/>
+                        <rect x="9" y="9" width="6" height="6"/>
+                        <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
+                    </svg>
+                    <span>Hora Máquina</span>
+                </span>`;
+            } else if (name.toLowerCase() === 'hora hombre') {
+                html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/90 shadow-2xs" title="Hora Hombre (Trabajo humano / supervisión)">
+                    <svg class="w-3 h-3 text-emerald-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    <span>Hora Hombre</span>
+                </span>`;
             } else {
                 html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">${safeName}</span>`;
             }
