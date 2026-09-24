@@ -69,8 +69,8 @@ func TestNormalizeTaskType(t *testing.T) {
 		{
 			rawTitle:  "Implementación de tag_ids y vistas en PlanesGo",
 			realWork:  "Añadiendo soporte de tags y columnas en la interfaz",
-			wantType:  "Implementación",
-			wantClean: "Implementación",
+			wantType:  "Desarrollo",
+			wantClean: "Desarrollo",
 		},
 		{
 			rawTitle:  "Desarrollo de nuevo endpoint REST",
@@ -81,8 +81,26 @@ func TestNormalizeTaskType(t *testing.T) {
 		{
 			rawTitle:  "[AGY] Implementación de vistas",
 			realWork:  "",
-			wantType:  "Implementación",
-			wantClean: "Implementación",
+			wantType:  "Desarrollo",
+			wantClean: "Desarrollo",
+		},
+		{
+			rawTitle:  "Análisis y diseño de la arquitectura de pasigo",
+			realWork:  "Investigando patrones y diseño de endpoints",
+			wantType:  "Análisis y diseño",
+			wantClean: "Análisis y diseño",
+		},
+		{
+			rawTitle:  "Batería de pruebas unitarias y de integración",
+			realWork:  "Ejecutando tests de concurrencia y validación",
+			wantType:  "Pruebas",
+			wantClean: "Pruebas",
+		},
+		{
+			rawTitle:  "[Pruebas] Verificación de suite Odoo",
+			realWork:  "",
+			wantType:  "Pruebas",
+			wantClean: "Pruebas",
 		},
 	}
 

@@ -18,24 +18,18 @@ import (
 )
 
 const (
-	Version       = "1.2.44"
+	Version       = "1.2.45"
 	DefaultServer = "https://planesgo.autopyme.com"
 
-	TaskTypeImplementacion = "Implementación"
+	TaskTypeAnalisisDiseno = "Análisis y diseño"
 	TaskTypeDesarrollo     = "Desarrollo"
-	TaskTypeAnalisis       = "Análisis"
-	TaskTypeAjustes        = "Ajustes"
-	TaskTypeServidor       = "Servidor"
-	TaskTypeCliente        = "Cliente"
+	TaskTypePruebas        = "Pruebas"
 )
 
 var CanonicalTaskTypes = []string{
-	TaskTypeImplementacion,
+	TaskTypeAnalisisDiseno,
 	TaskTypeDesarrollo,
-	TaskTypeAnalisis,
-	TaskTypeAjustes,
-	TaskTypeServidor,
-	TaskTypeCliente,
+	TaskTypePruebas,
 }
 
 func matchCanonicalType(t string) (string, bool) {
@@ -45,20 +39,15 @@ func matchCanonicalType(t string) (string, bool) {
 	norm = strings.ReplaceAll(norm, "í", "i")
 	norm = strings.ReplaceAll(norm, "ó", "o")
 	norm = strings.ReplaceAll(norm, "ú", "u")
+	norm = strings.ReplaceAll(norm, "ñ", "n")
 
 	switch norm {
-	case "implementacion", "implementación", "impl":
-		return TaskTypeImplementacion, true
-	case "desarrollo", "dev", "development":
+	case "analisis y diseno", "analisis y diseño", "análisis y diseño", "analisis", "análisis", "analysis", "investigacion", "auditoria", "diseno", "diseño", "design", "planificacion", "arquitectura":
+		return TaskTypeAnalisisDiseno, true
+	case "desarrollo", "dev", "development", "implementacion", "implementación", "impl", "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor", "servidor", "server", "infraestructura", "infra", "ops", "cliente", "client", "soporte", "support":
 		return TaskTypeDesarrollo, true
-	case "analisis", "analysis", "investigacion", "auditoria":
-		return TaskTypeAnalisis, true
-	case "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor":
-		return TaskTypeAjustes, true
-	case "servidor", "server", "infraestructura", "infra", "ops":
-		return TaskTypeServidor, true
-	case "cliente", "client", "soporte", "support":
-		return TaskTypeCliente, true
+	case "pruebas", "prueba", "test", "tests", "testing", "qa", "verificacion", "validacion":
+		return TaskTypePruebas, true
 	}
 	return "", false
 }
@@ -94,7 +83,7 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 
 	var detectedType string
 
-	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Implementación] o [Desarrollo]
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Análisis y diseño] o [Desarrollo] o [Pruebas]
 	if strings.HasPrefix(raw, "[") {
 		idx := strings.Index(raw, "]")
 		if idx > 1 {
@@ -121,19 +110,14 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		rawNorm = strings.ReplaceAll(rawNorm, "í", "i")
 		rawNorm = strings.ReplaceAll(rawNorm, "ó", "o")
 		rawNorm = strings.ReplaceAll(rawNorm, "ú", "u")
+		rawNorm = strings.ReplaceAll(rawNorm, "ñ", "n")
 
-		if containsAny(rawNorm, "implementac") {
-			detectedType = TaskTypeImplementacion
-		} else if containsAny(rawNorm, "desarroll") {
+		if containsAny(rawNorm, "prueba", "pruebas", "test", "testing", "tests", "qa", "verificac", "validac") {
+			detectedType = TaskTypePruebas
+		} else if containsAny(rawNorm, "analis", "disen", "design", "investigac", "auditor", "diagnostic", "estudio", "revis", "planificac", "explorac", "research", "benchmark", "inspecc", "arquitect") {
+			detectedType = TaskTypeAnalisisDiseno
+		} else if containsAny(rawNorm, "desarroll", "implementac", "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
 			detectedType = TaskTypeDesarrollo
-		} else if containsAny(rawNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(rawNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(rawNorm, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
-			detectedType = TaskTypeAjustes
-		} else if containsAny(rawNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion") {
-			detectedType = TaskTypeAnalisis
 		}
 	}
 
@@ -145,19 +129,14 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		descNorm = strings.ReplaceAll(descNorm, "í", "i")
 		descNorm = strings.ReplaceAll(descNorm, "ó", "o")
 		descNorm = strings.ReplaceAll(descNorm, "ú", "u")
+		descNorm = strings.ReplaceAll(descNorm, "ñ", "n")
 
-		if containsAny(descNorm, "implementac") {
-			detectedType = TaskTypeImplementacion
-		} else if containsAny(descNorm, "desarroll") {
+		if containsAny(descNorm, "prueba", "pruebas", "test", "testing", "tests", "qa", "verificac", "validac") {
+			detectedType = TaskTypePruebas
+		} else if containsAny(descNorm, "analis", "disen", "design", "investigac", "auditor", "diagnostic", "estudio", "planificac") {
+			detectedType = TaskTypeAnalisisDiseno
+		} else if containsAny(descNorm, "desarroll", "implementac", "servidor", "server", "systemd", "docker", "deploy", "cliente", "ajuste", "fix", "bug") {
 			detectedType = TaskTypeDesarrollo
-		} else if containsAny(descNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(descNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "tarifa") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(descNorm, "ajuste", "ajustes", "fix", "bug", "correccion", "corregir", "refactor", "tweak", "patch", "css") {
-			detectedType = TaskTypeAjustes
-		} else if containsAny(descNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio") {
-			detectedType = TaskTypeAnalisis
 		}
 	}
 
@@ -918,8 +897,8 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
-						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
-						"description": "Tipo normalizado de tarea (opcional, se infiere automáticamente si se omite)",
+						"enum":        []string{"Análisis y diseño", "Desarrollo", "Pruebas"},
+						"description": "Tipo normalizado de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional, se infiere automáticamente si se omite)",
 					},
 					"project_id": map[string]interface{}{
 						"type":        "integer",
@@ -948,8 +927,8 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
-						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
-						"description": "Tipo normalizado de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional, se infiere si se omite)",
+						"enum":        []string{"Análisis y diseño", "Desarrollo", "Pruebas"},
+						"description": "Tipo normalizado de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional, se infiere si se omite)",
 					},
 					"task_id": map[string]interface{}{
 						"type":        "integer",
@@ -979,8 +958,8 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
-						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
-						"description": "Tipo normalizado de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional, se infiere si se omite)",
+						"enum":        []string{"Análisis y diseño", "Desarrollo", "Pruebas"},
+						"description": "Tipo normalizado de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional, se infiere si se omite)",
 					},
 					"task_id": map[string]interface{}{
 						"type":        "integer",
@@ -1160,7 +1139,7 @@ func main() {
 	initFlag := flag.String("init", "", "Alias de --set-project para inicializar/vincular proyecto")
 	projectFlag := flag.String("project", "", "Alias de --set-project")
 	taskFlag := flag.String("task", "", "Nombre de la tarea")
-	typeFlag := flag.String("type", "", "Tipo de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional)")
+	typeFlag := flag.String("type", "", "Tipo de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional)")
 	descFlag := flag.String("desc", "", "Descripción del trabajo")
 	pathFlag := flag.String("path", "", "Ruta personalizada al proyecto (opcional)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")

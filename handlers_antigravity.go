@@ -139,13 +139,16 @@ func projectNamesMatch(name1, name2 string) bool {
 
 // CanonicalTaskTypes define los tipos normalizados de tareas de Antigravity
 const (
-	TaskTypeImplementacion = "Implementación"
+	TaskTypeAnalisisDiseno = "Análisis y diseño"
 	TaskTypeDesarrollo     = "Desarrollo"
-	TaskTypeAnalisis       = "Análisis"
-	TaskTypeAjustes        = "Ajustes"
-	TaskTypeServidor       = "Servidor"
-	TaskTypeCliente        = "Cliente"
+	TaskTypePruebas        = "Pruebas"
 )
+
+var CanonicalTaskTypes = []string{
+	TaskTypeAnalisisDiseno,
+	TaskTypeDesarrollo,
+	TaskTypePruebas,
+}
 
 // matchCanonicalType normaliza un texto a uno de los tipos canónicos si coincide.
 func matchCanonicalType(t string) (string, bool) {
@@ -157,18 +160,12 @@ func matchCanonicalType(t string) (string, bool) {
 	norm = strings.ReplaceAll(norm, "ú", "u")
 
 	switch norm {
-	case "implementacion", "implementación", "impl":
-		return TaskTypeImplementacion, true
-	case "desarrollo", "dev", "development":
+	case "analisis y diseno", "analisis y diseño", "análisis y diseño", "analisis", "análisis", "analysis", "investigacion", "auditoria", "diseno", "diseño", "design", "planificacion", "arquitectura":
+		return TaskTypeAnalisisDiseno, true
+	case "desarrollo", "dev", "development", "implementacion", "implementación", "impl", "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor", "servidor", "server", "infraestructura", "infra", "ops", "cliente", "client", "soporte", "support":
 		return TaskTypeDesarrollo, true
-	case "analisis", "analysis", "investigacion", "auditoria":
-		return TaskTypeAnalisis, true
-	case "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor":
-		return TaskTypeAjustes, true
-	case "servidor", "server", "infraestructura", "infra", "ops":
-		return TaskTypeServidor, true
-	case "cliente", "client", "soporte", "support":
-		return TaskTypeCliente, true
+	case "pruebas", "prueba", "test", "tests", "testing", "qa", "verificacion", "validacion":
+		return TaskTypePruebas, true
 	}
 	return "", false
 }
@@ -201,14 +198,14 @@ func cleanAntigravityTaskName(taskName string) string {
 }
 
 // NormalizeTaskType analiza la tarea, la descripción y el tipo explícito para determinar
-// de forma normalizada uno de los tipos canónicos (Implementación, Desarrollo, Análisis, Ajustes, Servidor, Cliente)
+// de forma normalizada uno de los tipos canónicos (Análisis y diseño, Desarrollo, Pruebas)
 // y devuelve el tipo canónico y el nombre de la tarea canónico sin prefijos técnicos.
 func NormalizeTaskType(taskName, description, explicitType string) (string, string) {
 	raw := cleanAntigravityTaskName(taskName)
 
 	var detectedType string
 
-	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Implementación] o [Desarrollo]
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Análisis y diseño] o [Desarrollo] o [Pruebas]
 	if strings.HasPrefix(raw, "[") {
 		idx := strings.Index(raw, "]")
 		if idx > 1 {
@@ -235,20 +232,15 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		rawNorm = strings.ReplaceAll(rawNorm, "í", "i")
 		rawNorm = strings.ReplaceAll(rawNorm, "ó", "o")
 		rawNorm = strings.ReplaceAll(rawNorm, "ú", "u")
+		rawNorm = strings.ReplaceAll(rawNorm, "ñ", "n")
 
 		// Evaluar prioridad sobre el título de la tarea
-		if containsAny(rawNorm, "implementac") {
-			detectedType = TaskTypeImplementacion
-		} else if containsAny(rawNorm, "desarroll") {
+		if containsAny(rawNorm, "prueba", "pruebas", "test", "testing", "tests", "qa", "verificac", "validac") {
+			detectedType = TaskTypePruebas
+		} else if containsAny(rawNorm, "analis", "disen", "design", "investigac", "auditor", "diagnostic", "estudio", "revis", "planificac", "explorac", "research", "benchmark", "inspecc", "arquitect") {
+			detectedType = TaskTypeAnalisisDiseno
+		} else if containsAny(rawNorm, "desarroll", "implementac", "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
 			detectedType = TaskTypeDesarrollo
-		} else if containsAny(rawNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(rawNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(rawNorm, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia") {
-			detectedType = TaskTypeAjustes
-		} else if containsAny(rawNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion") {
-			detectedType = TaskTypeAnalisis
 		}
 	}
 
@@ -260,19 +252,14 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		descNorm = strings.ReplaceAll(descNorm, "í", "i")
 		descNorm = strings.ReplaceAll(descNorm, "ó", "o")
 		descNorm = strings.ReplaceAll(descNorm, "ú", "u")
+		descNorm = strings.ReplaceAll(descNorm, "ñ", "n")
 
-		if containsAny(descNorm, "implementac") {
-			detectedType = TaskTypeImplementacion
-		} else if containsAny(descNorm, "desarroll") {
+		if containsAny(descNorm, "prueba", "pruebas", "test", "testing", "tests", "qa", "verificac", "validac") {
+			detectedType = TaskTypePruebas
+		} else if containsAny(descNorm, "analis", "disen", "design", "investigac", "auditor", "diagnostic", "estudio", "planificac") {
+			detectedType = TaskTypeAnalisisDiseno
+		} else if containsAny(descNorm, "desarroll", "implementac", "servidor", "server", "systemd", "docker", "deploy", "cliente", "ajuste", "fix", "bug") {
 			detectedType = TaskTypeDesarrollo
-		} else if containsAny(descNorm, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy") {
-			detectedType = TaskTypeServidor
-		} else if containsAny(descNorm, "cliente", "usuario", "soporte", "ticket", "reunion", "tarifa") {
-			detectedType = TaskTypeCliente
-		} else if containsAny(descNorm, "ajuste", "ajustes", "fix", "bug", "correccion", "corregir", "refactor", "tweak", "patch", "css") {
-			detectedType = TaskTypeAjustes
-		} else if containsAny(descNorm, "analisis", "investigacion", "auditoria", "diagnostico", "estudio") {
-			detectedType = TaskTypeAnalisis
 		}
 	}
 
@@ -281,7 +268,7 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 		detectedType = TaskTypeDesarrollo
 	}
 
-	// El nombre canónico en Odoo es exclusivamente el tipo canónico (ej. "Implementación", "Desarrollo", etc.)
+	// El nombre canónico en Odoo es exclusivamente el tipo canónico (ej. "Análisis y diseño", "Desarrollo", "Pruebas")
 	return detectedType, detectedType
 }
 
@@ -498,8 +485,8 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 	}
 
 	// 1. Normalización y Aislamiento Estricto Antigravity:
-	// Las tareas gestionadas desde Antigravity se clasifican en los tipos normalizados
-	// (Implementación, Desarrollo, Análisis, Ajustes, Servidor, Cliente) y utilizan exclusivamente
+	// Las tareas gestionadas desde Antigravity se clasifican en los 3 tipos normalizados
+	// (Análisis y diseño, Desarrollo, Pruebas) y utilizan exclusivamente
 	// el nombre canónico sin prefijos técnicos, registrando la procedencia de Antigravity en tag_ids.
 	canonicalType, canonicalName := NormalizeTaskType(payload.TaskName, payload.Description, payload.TaskType)
 	payload.TaskType = canonicalType
@@ -516,13 +503,29 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 					break
 				}
 			}
-			// 1.2 Si es Implementación o Desarrollo, reutilizar tareas estándar existentes (ej. DESARROLLO)
-			if payload.TaskID <= 0 && (payload.TaskType == TaskTypeImplementacion || payload.TaskType == TaskTypeDesarrollo) {
+			// 1.2 Reutilizar tareas estándar existentes según el tipo canónico
+			if payload.TaskID <= 0 {
 				for _, t := range tasks {
 					tUpper := strings.ToUpper(strings.TrimSpace(t.Name))
-					if tUpper == "DESARROLLO" || tUpper == "IMPLEMENTACIÓN" || tUpper == "IMPLEMENTACION" {
-						payload.TaskID = t.ID
-						break
+					tNorm := strings.ReplaceAll(strings.ReplaceAll(tUpper, "Á", "A"), "É", "E")
+					tNorm = strings.ReplaceAll(strings.ReplaceAll(tNorm, "Í", "I"), "Ó", "O")
+					tNorm = strings.ReplaceAll(strings.ReplaceAll(tNorm, "Ú", "U"), "Ñ", "N")
+
+					if payload.TaskType == TaskTypeAnalisisDiseno {
+						if tNorm == "ANALISIS Y DISENO" || tNorm == "ANALISIS" || tNorm == "DISENO" || strings.HasPrefix(tNorm, "ANALISIS") {
+							payload.TaskID = t.ID
+							break
+						}
+					} else if payload.TaskType == TaskTypeDesarrollo {
+						if tNorm == "DESARROLLO" || tNorm == "IMPLEMENTACION" || strings.HasPrefix(tNorm, "DESARROLLO") {
+							payload.TaskID = t.ID
+							break
+						}
+					} else if payload.TaskType == TaskTypePruebas {
+						if tNorm == "PRUEBAS" || tNorm == "TESTS" || tNorm == "TEST" || tNorm == "TESTING" || tNorm == "QA" || strings.HasPrefix(tNorm, "PRUEBAS") {
+							payload.TaskID = t.ID
+							break
+						}
 					}
 				}
 			}
