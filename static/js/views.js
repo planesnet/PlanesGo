@@ -123,38 +123,38 @@ function insertWeekEntriesIntoTable(entries) {
         const safeInvoice = (typeof escapeHtml === 'function') ? escapeHtml(invoiceName) : invoiceName;
 
         tr.innerHTML = `
-            <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
+            <td class="py-2.5 px-3 whitespace-nowrap">
                 <span class="font-medium text-slate-900 font-mono text-xs">${entry.date}</span>
             </td>
-            <td class="py-3 px-4 whitespace-nowrap">
-                <div class="flex items-center space-x-2">
-                    <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[10px] shrink-0">
+            <td class="py-2.5 px-3 whitespace-nowrap">
+                <div class="flex items-center space-x-1.5">
+                    <div class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-[9px] shrink-0">
                         ${empInitial}
                     </div>
-                    <span class="font-medium text-slate-800">${safeEmpName}</span>
+                    <span class="font-medium text-slate-800 text-xs sm:text-sm">${safeEmpName}</span>
                 </div>
             </td>
-            <td class="py-3 px-4 whitespace-nowrap col-project-cell">
+            <td class="py-2.5 px-3 whitespace-nowrap col-project-cell">
                 ${projName ? `
                 <button type="button"
                         onclick="selectSidebarProject(this.dataset.projectName, this.dataset.projectId)"
                         data-project-name="${safeProjName}"
                         data-project-id="${projId}"
-                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-800 border border-sky-100 hover:bg-sky-100 transition cursor-pointer"
-                        title="Filtrar por este proyecto">
-                    ${safeProjName}
+                        class="inline-flex items-center gap-1.5 font-medium text-slate-800 hover:text-sky-600 transition cursor-pointer text-left truncate max-w-[170px] xl:max-w-[220px]"
+                        title="Filtrar por este proyecto: ${safeProjName}">
+                    <span class="truncate">${safeProjName}</span>
                 </button>` : `<span class="text-slate-400 text-xs">-</span>`}
             </td>
-            <td class="py-3 px-4 whitespace-nowrap">
-                ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeTaskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
+            <td class="py-2.5 px-3 whitespace-nowrap">
+                ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="text-slate-600 font-medium text-xs sm:text-sm truncate block max-w-[150px] xl:max-w-[190px]" title="${safeTaskName}">${safeTaskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
             </td>
-            <td class="py-3 px-4 whitespace-nowrap">
+            <td class="py-2.5 px-2 whitespace-nowrap">
                 ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(entry.tags, isAgy, isMaquina, isHombre) : `<span class="text-slate-300 text-xs">-</span>`}
             </td>
-            <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${safeDesc}">
+            <td class="py-2.5 px-3 text-slate-600 max-w-xs xl:max-w-md truncate" title="${safeDesc}">
                 ${desc ? safeDesc : `<span class="italic text-slate-400">Sin descripción</span>`}
             </td>
-            <td class="py-3 px-4 sm:px-6 text-right whitespace-nowrap">
+            <td class="py-2.5 px-3 text-right whitespace-nowrap">
                 <div class="inline-flex items-center justify-end space-x-1.5">
                     ${isInvoiced ? `
                     <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80" title="Factura: ${safeInvoice}">
@@ -175,7 +175,7 @@ function insertWeekEntriesIntoTable(entries) {
                     </span>
                 </div>
             </td>
-            <td class="py-3 px-3 text-right whitespace-nowrap">
+            <td class="py-2.5 px-3 text-right whitespace-nowrap">
                 <div class="inline-flex items-center justify-end space-x-1">
                     ${(isToday && !isInvoiced) ? `
                     <button type="button"

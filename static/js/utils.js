@@ -332,7 +332,7 @@ function renderTaskBadgeHTML(taskName) {
     if (!taskName) return '<span class="text-slate-400 text-xs">-</span>';
     const clean = cleanAntigravityTaskName(taskName);
     const safeClean = (typeof escapeHtml === 'function') ? escapeHtml(clean) : clean;
-    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeClean}</span>`;
+    return `<span class="text-slate-600 font-medium text-xs sm:text-sm truncate block max-w-[150px] xl:max-w-[190px]" title="${safeClean}">${safeClean}</span>`;
 }
 
 function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {

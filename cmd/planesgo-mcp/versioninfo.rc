@@ -1,8 +1,8 @@
 1 24 "manifest.xml"
 
 1 VERSIONINFO
-FILEVERSION     1,2,49,0
-PRODUCTVERSION  1,2,49,0
+FILEVERSION     1,2,50,0
+PRODUCTVERSION  1,2,50,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0
 FILEOS          0x40004L
@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "PLANES Soluciones Informaticas S.L."
             VALUE "FileDescription",  "PlanesGo MCP Client - Antigravity Telemetry"
-            VALUE "FileVersion",      "1.2.49.0"
+            VALUE "FileVersion",      "1.2.50.0"
             VALUE "InternalName",     "planesgo-mcp"
             VALUE "LegalCopyright",   "Copyright (C) 2026 PLANES Soluciones Informaticas S.L."
             VALUE "OriginalFilename", "planesgo-mcp.exe"
             VALUE "ProductName",      "PlanesGo"
-            VALUE "ProductVersion",   "1.2.49.0"
+            VALUE "ProductVersion",   "1.2.50.0"
         END
     END
     BLOCK "VarFileInfo"
