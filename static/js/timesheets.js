@@ -705,10 +705,7 @@ function insertOptimisticTimesheetRow(data) {
             </button>` : `<span class="text-slate-400 text-xs">-</span>`}
         </td>
         <td class="py-3 px-4 whitespace-nowrap">
-            ${data.taskName ? `
-            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                ${data.taskName}
-            </span>` : `<span class="text-slate-400 text-xs">-</span>`}
+            ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(data.taskName, data.desc) : (data.taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${data.taskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
         </td>
         <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${data.desc || ''}">
             ${data.desc ? data.desc : `<span class="italic text-slate-400">Sin descripción</span>`}

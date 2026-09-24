@@ -118,10 +118,7 @@ function insertWeekEntriesIntoTable(entries) {
                 </button>` : `<span class="text-slate-400 text-xs">-</span>`}
             </td>
             <td class="py-3 px-4 whitespace-nowrap">
-                ${taskName ? `
-                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                    ${safeTaskName}
-                </span>` : `<span class="text-slate-400 text-xs">-</span>`}
+                ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName, desc) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeTaskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
             </td>
             <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${safeDesc}">
                 ${desc ? safeDesc : `<span class="italic text-slate-400">Sin descripción</span>`}

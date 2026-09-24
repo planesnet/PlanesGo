@@ -310,3 +310,42 @@ function showToast(message, type = 'info', duration = 4000) {
 window.showToast = showToast;
 window.showNotificationToast = showToast;
 
+// --- RENDERIZADO Y DISTINCIÓN DE TAREAS ANTIGRAVITY ---
+
+function isAntigravityTask(taskName, description) {
+    if (!taskName && !description) return false;
+    const tn = String(taskName || '').toUpperCase();
+    const ds = String(description || '').toUpperCase();
+    return tn.startsWith('[AGY]') ||
+           tn.startsWith('[ANTIGRAVITY]') ||
+           tn.includes('ANTIGRAVITY') ||
+           ds.startsWith('[ANTIGRAVITY]') ||
+           ds.startsWith('[AGY]');
+}
+
+function cleanAntigravityTaskName(taskName) {
+    if (!taskName) return '';
+    return String(taskName).replace(/^\[(?:AGY|ANTIGRAVITY)\]\s*/i, '').trim();
+}
+
+function renderTaskBadgeHTML(taskName, description) {
+    if (!taskName) return '<span class="text-slate-400 text-xs">-</span>';
+    const safeRaw = (typeof escapeHtml === 'function') ? escapeHtml(taskName) : taskName;
+    if (isAntigravityTask(taskName, description)) {
+        const clean = cleanAntigravityTaskName(taskName);
+        const safeClean = (typeof escapeHtml === 'function') ? escapeHtml(clean) : clean;
+        return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Tarea gestionada automáticamente por Antigravity">
+            <svg class="w-3.5 h-3.5 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
+                <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
+            </svg>
+            <span class="font-bold tracking-tight text-purple-800">${safeClean || safeRaw}</span>
+        </span>`;
+    }
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${safeRaw}</span>`;
+}
+
+window.isAntigravityTask = isAntigravityTask;
+window.cleanAntigravityTaskName = cleanAntigravityTaskName;
+window.renderTaskBadgeHTML = renderTaskBadgeHTML;
+

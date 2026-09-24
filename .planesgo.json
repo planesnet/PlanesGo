@@ -1,0 +1,8 @@
+{
+  "odoo_project_id": 567,
+  "odoo_project_name": "PLANESGO",
+  "planesgo_url": "https://planesgo.autopyme.com",
+  "auto_create_tasks": true,
+  "heartbeat_interval_seconds": 30,
+  "idle_timeout_minutes": 15
+}

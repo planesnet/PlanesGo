@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.36"
+var Version = "1.2.38"
 
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
@@ -62,9 +62,16 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/api/timer/pause", state.handleAPITimerPause)
 	mux.HandleFunc("/api/timer/resume", state.handleAPITimerResume)
 	mux.HandleFunc("/api/timer/stop", state.handleAPITimerStop)
+	mux.HandleFunc("/api/timer/heartbeat", state.handleAPITimerHeartbeat)
 	mux.HandleFunc("/api/events", state.handleAPIEvents)
 	mux.HandleFunc("/api/version", state.handleAPIVersion)
 	mux.HandleFunc("/api/partner/avatar", state.handleAPIPartnerAvatar)
+
+	// Controlador de Integración Antigravity (Latidos continuos, verificación previa y telemetría)
+	mux.HandleFunc("/antigravity", state.handleAntigravity)
+	mux.HandleFunc("/antigravity/status", state.handleAntigravityStatus)
+	mux.HandleFunc("/antigravity/update_tasks", state.handleAntigravityUpdateTasks)
+	mux.HandleFunc("/antigravity/update_parts", state.handleAntigravityUpdateTasks)
 
 	// PWA Manifest y Service Worker
 	mux.HandleFunc("/manifest.json", state.handleManifest)
@@ -105,6 +112,9 @@ func main() {
 		userStore: userStore,
 		sseHub:    NewSSEHub(),
 	}
+
+	// Iniciar Watchdog de inactividad de temporizadores (umbral 15 minutos)
+	state.StartTimerWatchdog(context.Background(), 15*time.Minute)
 
 	mux := http.NewServeMux()
 	setupRoutes(mux, state)

@@ -97,6 +97,29 @@ func (t *TimesheetEntry) DisplayEmployee() string {
 	return "Sin asignar"
 }
 
+// IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.
+func (t *TimesheetEntry) IsAntigravity() bool {
+	taskName := strings.ToUpper(t.TaskID.Name)
+	desc := strings.ToUpper(t.Name)
+	return strings.HasPrefix(taskName, "[AGY]") ||
+		strings.HasPrefix(taskName, "[ANTIGRAVITY]") ||
+		strings.Contains(taskName, "ANTIGRAVITY") ||
+		strings.HasPrefix(desc, "[ANTIGRAVITY]") ||
+		strings.HasPrefix(desc, "[AGY]")
+}
+
+// CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].
+func (t *TimesheetEntry) CleanTaskName() string {
+	name := strings.TrimSpace(t.TaskID.Name)
+	if strings.HasPrefix(strings.ToUpper(name), "[AGY]") {
+		return strings.TrimSpace(name[5:])
+	}
+	if strings.HasPrefix(strings.ToUpper(name), "[ANTIGRAVITY]") {
+		return strings.TrimSpace(name[14:])
+	}
+	return name
+}
+
 // FormattedHours devuelve las horas con 2 decimales y formato amigable (ej: "4.50h" o "4h 30m").
 func (t *TimesheetEntry) FormattedHours() string {
 	hours := int(t.UnitAmount)
@@ -263,6 +286,7 @@ func (t *Ticket) FormattedDate() string {
 
 // ActiveTimer representa el estado del cronómetro de trabajo en vivo sincronizado con Odoo.
 type ActiveTimer struct {
+	TimerKey      string   `json:"timer_key,omitempty"`      // Clave identificadora única del temporizador (ej. task_id o hash)
 	TimesheetID   int      `json:"timesheet_id"`
 	TaskID        int      `json:"task_id"`
 	ProjectID     int      `json:"project_id"`
@@ -271,8 +295,36 @@ type ActiveTimer struct {
 	Description   string   `json:"description"`
 	IsRunning     bool     `json:"is_running"`
 	StartedAt     int64    `json:"started_at"`      // Timestamp unix en milisegundos
+	LastHeartbeat int64    `json:"last_heartbeat,omitempty"` // Timestamp unix del último latido de actividad
 	AccumulatedMs int64    `json:"accumulated_ms"`  // Milisegundos acumulados
 	UnitAmount    float64  `json:"unit_amount"`     // Horas calculadas en decimal
 	Date          string   `json:"date,omitempty"`
+	Source        string   `json:"source,omitempty"`        // Origen del temporizador: "antigravity", "web", "extension"
 	EmployeeName  string   `json:"employee_name,omitempty"`
+}
+
+// IsAntigravity indica si el temporizador activo proviene de Antigravity.
+func (t *ActiveTimer) IsAntigravity() bool {
+	if strings.EqualFold(t.Source, "antigravity") {
+		return true
+	}
+	taskName := strings.ToUpper(t.TaskName)
+	desc := strings.ToUpper(t.Description)
+	return strings.HasPrefix(taskName, "[AGY]") ||
+		strings.HasPrefix(taskName, "[ANTIGRAVITY]") ||
+		strings.Contains(taskName, "ANTIGRAVITY") ||
+		strings.HasPrefix(desc, "[ANTIGRAVITY]") ||
+		strings.HasPrefix(desc, "[AGY]")
+}
+
+// CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].
+func (t *ActiveTimer) CleanTaskName() string {
+	name := strings.TrimSpace(t.TaskName)
+	if strings.HasPrefix(strings.ToUpper(name), "[AGY]") {
+		return strings.TrimSpace(name[5:])
+	}
+	if strings.HasPrefix(strings.ToUpper(name), "[ANTIGRAVITY]") {
+		return strings.TrimSpace(name[14:])
+	}
+	return name
 }

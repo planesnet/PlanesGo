@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -714,10 +715,12 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 		// Si coincide con cur y cur.IsRunning, se conserva cur en memoria (StartedAt y AccumulatedMs exactos)
 	}
 
+	timersList := state.getActiveTimers(userUID)
 	serverNowMs := time.Now().UnixMilli()
-	if cur == nil {
+	if cur == nil && len(timersList) == 0 {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"active":      nil,
+			"active_list": []interface{}{},
 			"server_time": serverNowMs,
 		})
 		return
@@ -725,6 +728,7 @@ func (state *AppState) handleAPITimerActive(w http.ResponseWriter, r *http.Reque
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"active":            cur,
+		"active_list":       timersList,
 		"server_time":       serverNowMs,
 		"last_confirmed_at": state.getLastConfirmedAt(userUID),
 	})
@@ -771,13 +775,6 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description, req.UnitAmount, req.Date)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
-		return
-	}
-
 	userEmail := ""
 	if session != nil {
 		userEmail = session.UserEmail
@@ -791,6 +788,31 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	}
 	if userUID == 0 {
 		userUID = client.UID()
+	}
+
+	// Creación o búsqueda dinámica de tarea en Odoo si no se especificó task_id pero sí task_name
+	if req.ProjectID > 0 && req.TaskID <= 0 && req.TaskName != "" {
+		if tasks, err := client.GetTasks(ctx, req.ProjectID, 0); err == nil {
+			for _, t := range tasks {
+				if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(req.TaskName)) {
+					req.TaskID = t.ID
+					break
+				}
+			}
+		}
+		if req.TaskID <= 0 {
+			if newID, err := client.CreateTask(ctx, req.ProjectID, req.TaskName, userUID); err == nil && newID > 0 {
+				req.TaskID = newID
+				log.Printf("[PlanesGo] Tarea '%s' creada dinámicamente con ID %d para proyecto %d", req.TaskName, newID, req.ProjectID)
+			}
+		}
+	}
+
+	activeTimer, err := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, req.Description, req.UnitAmount, req.Date)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + err.Error()})
+		return
 	}
 
 	nowMs := time.Now().UnixMilli()
@@ -1119,13 +1141,10 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	if userUID == 0 {
 		userUID = client.UID()
 	}
-	cur := state.getActiveTimer(userUID)
-	if cur != nil {
-		if (req.TimesheetID > 0 && cur.TimesheetID == req.TimesheetID) ||
-			(req.TaskID > 0 && cur.TaskID == req.TaskID) ||
-			(req.TimesheetID == 0 && req.TaskID == 0) {
-			state.clearActiveTimer(userUID)
-		}
+	if req.TimesheetID > 0 || req.TaskID > 0 {
+		state.clearActiveTimerForTask(userUID, req.TaskID, req.TimesheetID)
+	} else {
+		state.clearActiveTimer(userUID)
 	}
 
 	state.broadcastUserEvent(userUID, "timer_stop", map[string]interface{}{
@@ -1140,6 +1159,208 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleAPITimerHeartbeat procesa los latidos continuos de actividad (heartbeats) provenientes
+// de Antigravity o procesos locales, sumando tiempo en vivo, resolviendo o creando tareas
+// dinámicamente en Odoo y sincronizando las unidades acumuladas.
+func (state *AppState) handleAPITimerHeartbeat(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ProjectID       int     `json:"project_id"`
+		ProjectName     string  `json:"project_name"`
+		TaskID          int     `json:"task_id"`
+		TaskName        string  `json:"task_name"`
+		TimesheetID     int     `json:"timesheet_id"`
+		Description     string  `json:"description"`
+		Source          string  `json:"source"`
+		ElapsedSeconds  int     `json:"elapsed_seconds"`
+		ClientTimestamp int64   `json:"client_timestamp"`
+		UserEmail       string  `json:"user_email,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	var session *SessionData
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		session, _ = decodeSession(cookie.Value)
+	}
+
+	// Permitir llamadas sin cookie (p.ej. scripts CLI o Antigravity local) usando req.UserEmail o cabecera
+	if session == nil {
+		email := strings.TrimSpace(req.UserEmail)
+		if email == "" {
+			email = strings.TrimSpace(r.Header.Get("X-User-Email"))
+		}
+		if email == "" && state.userStore != nil {
+			for _, u := range state.userStore.GetAllSettings() {
+				if u.Email != "" && u.OdooToken != "" {
+					email = u.Email
+					break
+				}
+			}
+		}
+		if email != "" && state.userStore != nil {
+			if uSettings, ok := state.userStore.GetSettings(email); ok {
+				session = &SessionData{
+					URL:        uSettings.OdooURL,
+					DB:         uSettings.OdooDB,
+					Username:   uSettings.OdooUser,
+					Password:   uSettings.OdooToken,
+					UserEmail:  uSettings.Email,
+					AuthMethod: "cli",
+				}
+			}
+		}
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión o credenciales de Odoo no disponibles"})
+		return
+	}
+
+	client := odoo.GetClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	userEmail := ""
+	if session != nil {
+		userEmail = session.UserEmail
+		if userEmail == "" {
+			userEmail = session.Username
+		}
+	}
+	userUID := 0
+	if userEmail != "" {
+		userUID, _ = client.ResolveUserUIDByEmail(ctx, userEmail)
+	}
+	if userUID == 0 {
+		userUID = client.UID()
+	}
+
+	// 1. Creación o búsqueda dinámica de tarea en Odoo
+	if req.ProjectID > 0 && req.TaskID <= 0 && req.TaskName != "" {
+		tasks, err := client.GetTasks(ctx, req.ProjectID, 0)
+		if err == nil {
+			for _, t := range tasks {
+				if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(req.TaskName)) {
+					req.TaskID = t.ID
+					break
+				}
+			}
+		}
+		if req.TaskID <= 0 {
+			newID, createErr := client.CreateTask(ctx, req.ProjectID, req.TaskName, userUID)
+			if createErr == nil && newID > 0 {
+				req.TaskID = newID
+				log.Printf("[PlanesGo Heartbeat] Tarea creada dinámicamente en Odoo: ID %d ('%s') en proyecto %d", newID, req.TaskName, req.ProjectID)
+			} else {
+				log.Printf("[PlanesGo Heartbeat] Advertencia al crear tarea dinámica en Odoo: %v", createErr)
+			}
+		}
+	}
+
+	nowMs := time.Now().UnixMilli()
+	state.setLastConfirmedAt(userUID, nowMs)
+
+	// Clave identificadora del temporizador
+	timerKey := ""
+	if req.TaskID > 0 {
+		timerKey = fmt.Sprintf("task_%d", req.TaskID)
+	} else if req.TimesheetID > 0 {
+		timerKey = fmt.Sprintf("ts_%d", req.TimesheetID)
+	} else if req.ProjectID > 0 {
+		timerKey = fmt.Sprintf("proj_%d", req.ProjectID)
+	} else {
+		timerKey = "default"
+	}
+
+	cur := state.getActiveTimerByKey(userUID, timerKey)
+	if cur == nil {
+		// Iniciar nuevo temporizador
+		source := req.Source
+		if source == "" {
+			source = "antigravity"
+		}
+		desc := req.Description
+		if desc == "" {
+			if req.TaskName != "" {
+				desc = fmt.Sprintf("[%s] %s", strings.ToUpper(source), req.TaskName)
+			} else {
+				desc = fmt.Sprintf("[%s] Trabajo en curso", strings.ToUpper(source))
+			}
+		}
+
+		activeTimer, startErr := client.StartTimer(ctx, req.ProjectID, req.ProjectName, req.TaskID, req.TaskName, req.TimesheetID, desc, 0, "")
+		if startErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar en Odoo: " + startErr.Error()})
+			return
+		}
+		activeTimer.TimerKey = timerKey
+		activeTimer.Source = source
+		activeTimer.LastHeartbeat = nowMs
+		if activeTimer.EmployeeName == "" && session != nil && session.UserName != "" {
+			activeTimer.EmployeeName = session.UserName
+		}
+		state.setActiveTimer(userUID, activeTimer)
+		state.broadcastUserEvent(userUID, "timer_start", activeTimer)
+		state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
+			"action":       "timer_start",
+			"timesheet_id": activeTimer.TimesheetID,
+			"project_id":   activeTimer.ProjectID,
+			"task_id":      activeTimer.TaskID,
+		})
+		cur = activeTimer
+	} else {
+		// Temporizador existente: registrar latido y acumular tiempo
+		deltaMs := int64(0)
+		if req.ElapsedSeconds > 0 {
+			deltaMs = int64(req.ElapsedSeconds * 1000)
+		} else if cur.LastHeartbeat > 0 {
+			elapsed := nowMs - cur.LastHeartbeat
+			if elapsed > 0 && elapsed <= 15*60*1000 {
+				deltaMs = elapsed
+			}
+		}
+		cur.AccumulatedMs += deltaMs
+		cur.LastHeartbeat = nowMs
+		cur.IsRunning = true
+		cur.UnitAmount = float64(cur.AccumulatedMs) / (3600 * 1000)
+		if req.Description != "" {
+			cur.Description = req.Description
+		}
+		state.setActiveTimer(userUID, cur)
+
+		// Actualizar unidades acumuladas en Odoo de forma asíncrona
+		if cur.TimesheetID > 0 {
+			go func(tID int, units float64) {
+				updateCtx, cancelUpdate := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancelUpdate()
+				_ = client.UpdateTimerUnits(updateCtx, tID, units)
+			}(cur.TimesheetID, cur.UnitAmount)
+		}
+
+		state.broadcastUserEvent(userUID, "timer_tick", cur)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"timer":       cur,
+		"server_time": nowMs,
+		"message":     "Latido registrado correctamente",
+	})
 }
 
 // handleAPIVersion devuelve la versión actual de PlanesGo para auto-recarga PWA

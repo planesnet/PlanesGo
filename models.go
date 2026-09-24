@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -41,7 +42,27 @@ type AppState struct {
 	lastTimerConfirmMu      sync.RWMutex
 	lastTimerConfirmedTimes map[int]int64
 	activeTimersMu          sync.RWMutex
-	activeTimers            map[int]*odoo.ActiveTimer
+	activeTimers            map[int]map[string]*odoo.ActiveTimer // userUID -> timerKey -> timer
+}
+
+// timerKeyFor genera una clave única y estable para un temporizador activo.
+func timerKeyFor(timer *odoo.ActiveTimer) string {
+	if timer == nil {
+		return "default"
+	}
+	if timer.TimerKey != "" {
+		return timer.TimerKey
+	}
+	if timer.TaskID > 0 {
+		return fmt.Sprintf("task_%d", timer.TaskID)
+	}
+	if timer.TimesheetID > 0 {
+		return fmt.Sprintf("ts_%d", timer.TimesheetID)
+	}
+	if timer.ProjectID > 0 {
+		return fmt.Sprintf("proj_%d", timer.ProjectID)
+	}
+	return "default"
 }
 
 func (state *AppState) setLastConfirmedAt(userUID int, ts int64) {
@@ -62,34 +83,127 @@ func (state *AppState) getLastConfirmedAt(userUID int) int64 {
 	return state.lastTimerConfirmedTimes[userUID]
 }
 
+// setActiveTimer registra o actualiza un temporizador activo en memoria.
+// Si timer es nil, limpia los temporizadores del usuario.
 func (state *AppState) setActiveTimer(userUID int, timer *odoo.ActiveTimer) {
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
 	if state.activeTimers == nil {
-		state.activeTimers = make(map[int]*odoo.ActiveTimer)
+		state.activeTimers = make(map[int]map[string]*odoo.ActiveTimer)
 	}
 	if timer == nil {
 		delete(state.activeTimers, userUID)
-	} else {
-		state.activeTimers[userUID] = timer
+		return
 	}
+	if timer.TimerKey == "" {
+		timer.TimerKey = timerKeyFor(timer)
+	}
+	nowMs := time.Now().UnixMilli()
+	if timer.LastHeartbeat == 0 {
+		if timer.StartedAt > 0 {
+			timer.LastHeartbeat = timer.StartedAt
+		} else {
+			timer.LastHeartbeat = nowMs
+		}
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok || userMap == nil {
+		userMap = make(map[string]*odoo.ActiveTimer)
+		state.activeTimers[userUID] = userMap
+	}
+	userMap[timer.TimerKey] = timer
 }
 
+// getActiveTimer devuelve el temporizador activo principal o más recientemente utilizado del usuario.
+// Para retrocompatibilidad con clientes monousuario.
 func (state *AppState) getActiveTimer(userUID int) *odoo.ActiveTimer {
 	state.activeTimersMu.RLock()
 	defer state.activeTimersMu.RUnlock()
 	if state.activeTimers == nil {
 		return nil
 	}
-	timer, ok := state.activeTimers[userUID]
-	if !ok || timer == nil {
+	userMap, ok := state.activeTimers[userUID]
+	if !ok || len(userMap) == 0 {
 		return nil
 	}
-	// Devolver copia superficial
-	tCopy := *timer
+	var best *odoo.ActiveTimer
+	for _, t := range userMap {
+		if t == nil {
+			continue
+		}
+		if best == nil {
+			best = t
+			continue
+		}
+		// Priorizar temporizador en ejecución
+		if t.IsRunning && !best.IsRunning {
+			best = t
+			continue
+		}
+		if !t.IsRunning && best.IsRunning {
+			continue
+		}
+		// Si ambos están en el mismo estado, priorizar el que tenga latido o inicio más reciente
+		tTime := t.LastHeartbeat
+		if tTime == 0 {
+			tTime = t.StartedAt
+		}
+		bestTime := best.LastHeartbeat
+		if bestTime == 0 {
+			bestTime = best.StartedAt
+		}
+		if tTime > bestTime {
+			best = t
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	tCopy := *best
 	return &tCopy
 }
 
+// getActiveTimers devuelve una lista de copias de todos los temporizadores activos del usuario.
+func (state *AppState) getActiveTimers(userUID int) []*odoo.ActiveTimer {
+	state.activeTimersMu.RLock()
+	defer state.activeTimersMu.RUnlock()
+	if state.activeTimers == nil {
+		return nil
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok || len(userMap) == 0 {
+		return nil
+	}
+	res := make([]*odoo.ActiveTimer, 0, len(userMap))
+	for _, t := range userMap {
+		if t != nil {
+			tCopy := *t
+			res = append(res, &tCopy)
+		}
+	}
+	return res
+}
+
+// getActiveTimerByKey busca un temporizador por su clave única.
+func (state *AppState) getActiveTimerByKey(userUID int, timerKey string) *odoo.ActiveTimer {
+	state.activeTimersMu.RLock()
+	defer state.activeTimersMu.RUnlock()
+	if state.activeTimers == nil {
+		return nil
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok {
+		return nil
+	}
+	t, ok := userMap[timerKey]
+	if !ok || t == nil {
+		return nil
+	}
+	tCopy := *t
+	return &tCopy
+}
+
+// clearActiveTimer elimina todos los temporizadores del usuario.
 func (state *AppState) clearActiveTimer(userUID int) {
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
@@ -98,25 +212,82 @@ func (state *AppState) clearActiveTimer(userUID int) {
 	}
 }
 
-func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
+// clearActiveTimerByKey elimina un temporizador concreto por clave.
+func (state *AppState) clearActiveTimerByKey(userUID int, timerKey string) {
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
 	if state.activeTimers != nil {
-		if t, ok := state.activeTimers[userUID]; ok && t != nil {
-			if t.IsRunning && t.StartedAt > 0 {
-				elapsed := time.Now().UnixMilli() - t.StartedAt
-				if elapsed > 0 {
-					t.AccumulatedMs += elapsed
-				}
+		if userMap, ok := state.activeTimers[userUID]; ok {
+			delete(userMap, timerKey)
+			if len(userMap) == 0 {
+				delete(state.activeTimers, userUID)
 			}
-			t.IsRunning = false
-			t.StartedAt = 0
-			if unitAmount > 0 {
-				t.UnitAmount = unitAmount
-				t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
-			} else {
-				t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
+		}
+	}
+}
+
+// clearActiveTimerForTask elimina temporizadores que coincidan con la tarea o parte de horas indicado.
+func (state *AppState) clearActiveTimerForTask(userUID int, taskID int, timesheetID int) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers == nil {
+		return
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok {
+		return
+	}
+	for key, t := range userMap {
+		if t == nil {
+			delete(userMap, key)
+			continue
+		}
+		if (taskID > 0 && t.TaskID == taskID) || (timesheetID > 0 && t.TimesheetID == timesheetID) {
+			delete(userMap, key)
+		}
+	}
+	if len(userMap) == 0 {
+		delete(state.activeTimers, userUID)
+	}
+}
+
+// pauseActiveTimer pausa el temporizador en ejecución (o el principal si no se especifica clave).
+func (state *AppState) pauseActiveTimer(userUID int, unitAmount float64) {
+	state.pauseActiveTimerByKey(userUID, "", unitAmount)
+}
+
+// pauseActiveTimerByKey pausa un temporizador específico por su clave (o todos si clave es vacía).
+func (state *AppState) pauseActiveTimerByKey(userUID int, timerKey string, unitAmount float64) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers == nil {
+		return
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok {
+		return
+	}
+	nowMs := time.Now().UnixMilli()
+	for key, t := range userMap {
+		if t == nil {
+			continue
+		}
+		if timerKey != "" && key != timerKey {
+			continue
+		}
+		if t.IsRunning && t.StartedAt > 0 {
+			elapsed := nowMs - t.StartedAt
+			if elapsed > 0 {
+				t.AccumulatedMs += elapsed
 			}
+		}
+		t.IsRunning = false
+		t.StartedAt = 0
+		if unitAmount > 0 {
+			t.UnitAmount = unitAmount
+			t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
+		} else {
+			t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
 		}
 	}
 }
@@ -129,24 +300,111 @@ func (state *AppState) resumeActiveTimerWithTimesheet(userUID int, timesheetID i
 	state.activeTimersMu.Lock()
 	defer state.activeTimersMu.Unlock()
 	if state.activeTimers == nil {
-		state.activeTimers = make(map[int]*odoo.ActiveTimer)
+		state.activeTimers = make(map[int]map[string]*odoo.ActiveTimer)
+	}
+	userMap, ok := state.activeTimers[userUID]
+	if !ok || userMap == nil {
+		userMap = make(map[string]*odoo.ActiveTimer)
+		state.activeTimers[userUID] = userMap
 	}
 	nowMs := time.Now().UnixMilli()
-	if t, ok := state.activeTimers[userUID]; ok && t != nil {
-		t.IsRunning = true
-		t.StartedAt = nowMs
+
+	// Buscar temporizador existente que coincida con taskID o timesheetID
+	var targetTimer *odoo.ActiveTimer
+	for _, t := range userMap {
+		if t == nil {
+			continue
+		}
+		if (taskID > 0 && t.TaskID == taskID) || (timesheetID > 0 && t.TimesheetID == timesheetID) {
+			targetTimer = t
+			break
+		}
+	}
+
+	if targetTimer != nil {
+		targetTimer.IsRunning = true
+		targetTimer.StartedAt = nowMs
+		targetTimer.LastHeartbeat = nowMs
 		if timesheetID > 0 {
-			t.TimesheetID = timesheetID
+			targetTimer.TimesheetID = timesheetID
 		}
 		if taskID > 0 {
-			t.TaskID = taskID
+			targetTimer.TaskID = taskID
 		}
 	} else {
-		state.activeTimers[userUID] = &odoo.ActiveTimer{
-			TimesheetID: timesheetID,
-			TaskID:      taskID,
-			IsRunning:   true,
-			StartedAt:   nowMs,
+		newTimer := &odoo.ActiveTimer{
+			TimesheetID:   timesheetID,
+			TaskID:        taskID,
+			IsRunning:     true,
+			StartedAt:     nowMs,
+			LastHeartbeat: nowMs,
+		}
+		newTimer.TimerKey = timerKeyFor(newTimer)
+		userMap[newTimer.TimerKey] = newTimer
+	}
+}
+
+// StartTimerWatchdog inicia la supervisión de latidos periódicos para pausar tareas inactivas (umbral 15 min).
+func (state *AppState) StartTimerWatchdog(ctx context.Context, idleTimeout time.Duration) {
+	if idleTimeout <= 0 {
+		idleTimeout = 15 * time.Minute
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case now := <-ticker.C:
+				state.checkIdleTimers(now, idleTimeout)
+			}
+		}
+	}()
+}
+
+// checkIdleTimers inspecciona los temporizadores en curso y pausa aquellos sin latidos recientes.
+func (state *AppState) checkIdleTimers(now time.Time, idleTimeout time.Duration) {
+	state.activeTimersMu.Lock()
+	defer state.activeTimersMu.Unlock()
+	if state.activeTimers == nil {
+		return
+	}
+	nowMs := now.UnixMilli()
+	timeoutMs := idleTimeout.Milliseconds()
+
+	for userUID, userMap := range state.activeTimers {
+		for key, timer := range userMap {
+			if timer == nil || !timer.IsRunning {
+				continue
+			}
+			lastBeat := timer.LastHeartbeat
+			if lastBeat == 0 {
+				lastBeat = timer.StartedAt
+			}
+			if lastBeat > 0 && (nowMs-lastBeat) > timeoutMs {
+				// Pausar temporizador por inactividad
+				elapsed := lastBeat - timer.StartedAt
+				if elapsed > 0 {
+					timer.AccumulatedMs += elapsed
+				}
+				timer.IsRunning = false
+				timer.StartedAt = 0
+				timer.UnitAmount = float64(timer.AccumulatedMs) / (3600 * 1000)
+				log.Printf("[PlanesGo Watchdog] Temporizador '%s' (usuario %d, tarea %d) pausado automáticamente por inactividad (%v sin latidos)", key, userUID, timer.TaskID, idleTimeout)
+
+				// Notificar al usuario mediante evento SSE
+				if state.sseHub != nil {
+					state.broadcastUserEvent(userUID, "timer_timeout", map[string]interface{}{
+						"timer_key":     key,
+						"task_id":       timer.TaskID,
+						"task_name":     timer.TaskName,
+						"unit_amount":   timer.UnitAmount,
+						"accumulated_ms": timer.AccumulatedMs,
+						"reason":        "inactivity_timeout",
+					})
+				}
+			}
 		}
 	}
 }

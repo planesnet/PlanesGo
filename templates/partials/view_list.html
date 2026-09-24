@@ -67,9 +67,19 @@
                             </td>
                             <td class="py-3 px-4 whitespace-nowrap">
                                 {{if .TaskID.Name}}
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
-                                    {{.TaskID.Name}}
-                                </span>
+                                    {{if .IsAntigravity}}
+                                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs" title="Tarea gestionada automáticamente por Antigravity">
+                                        <svg class="w-3.5 h-3.5 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
+                                            <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
+                                        </svg>
+                                        <span class="font-bold tracking-tight text-purple-800">{{.CleanTaskName}}</span>
+                                    </span>
+                                    {{else}}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                        {{.TaskID.Name}}
+                                    </span>
+                                    {{end}}
                                 {{else}}
                                 <span class="text-slate-400 text-xs">-</span>
                                 {{end}}

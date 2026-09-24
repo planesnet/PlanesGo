@@ -12,13 +12,14 @@ import (
 
 // UserSettings representa los ajustes individuales de un usuario.
 type UserSettings struct {
-	Email       string    `json:"email"`
-	OdooUser    string    `json:"odoo_user"`
-	OdooToken   string    `json:"odoo_token"` // Contraseña o API Key de Odoo
-	OdooURL     string    `json:"odoo_url"`
-	OdooDB      string    `json:"odoo_db"`
-	PageLimit   int       `json:"page_limit"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Email            string    `json:"email"`
+	OdooUser         string    `json:"odoo_user"`
+	OdooToken        string    `json:"odoo_token"` // Contraseña o API Key de Odoo
+	OdooURL          string    `json:"odoo_url"`
+	OdooDB           string    `json:"odoo_db"`
+	PageLimit        int       `json:"page_limit"`
+	AntigravityToken string    `json:"antigravity_token,omitempty"` // Token de seguridad para Antigravity
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // UserSettingsStore maneja el almacenamiento persistente y concurrente de ajustes por usuario.
@@ -170,4 +171,23 @@ func (s *UserSettingsStore) GetSharedOdooURL() string {
 	}
 	return "https://planesnet.autopyme.com"
 }
+
+// GetUserByAntigravityToken busca un usuario a partir de su token de seguridad de Antigravity.
+func (s *UserSettingsStore) GetUserByAntigravityToken(token string) (UserSettings, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return UserSettings{}, false
+	}
+
+	for _, setting := range s.settings {
+		if setting.AntigravityToken != "" && setting.AntigravityToken == token {
+			return setting, true
+		}
+	}
+	return UserSettings{}, false
+}
+
 
