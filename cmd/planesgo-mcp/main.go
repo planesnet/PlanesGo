@@ -18,9 +18,129 @@ import (
 )
 
 const (
-	Version       = "1.2.40"
+	Version       = "1.2.42"
 	DefaultServer = "https://planesgo.autopyme.com"
+
+	TaskTypeDesarrollo = "Desarrollo"
+	TaskTypeAnalisis   = "Análisis"
+	TaskTypeAjustes    = "Ajustes"
+	TaskTypeServidor   = "Servidor"
+	TaskTypeCliente    = "Cliente"
 )
+
+var CanonicalTaskTypes = []string{
+	TaskTypeDesarrollo,
+	TaskTypeAnalisis,
+	TaskTypeAjustes,
+	TaskTypeServidor,
+	TaskTypeCliente,
+}
+
+func matchCanonicalType(t string) (string, bool) {
+	norm := strings.ToLower(strings.TrimSpace(t))
+	norm = strings.ReplaceAll(norm, "á", "a")
+	norm = strings.ReplaceAll(norm, "é", "e")
+	norm = strings.ReplaceAll(norm, "í", "i")
+	norm = strings.ReplaceAll(norm, "ó", "o")
+	norm = strings.ReplaceAll(norm, "ú", "u")
+
+	switch norm {
+	case "desarrollo", "dev", "development":
+		return TaskTypeDesarrollo, true
+	case "analisis", "analysis", "investigacion", "auditoria":
+		return TaskTypeAnalisis, true
+	case "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor":
+		return TaskTypeAjustes, true
+	case "servidor", "server", "infraestructura", "infra", "ops":
+		return TaskTypeServidor, true
+	case "cliente", "client", "soporte", "support":
+		return TaskTypeCliente, true
+	}
+	return "", false
+}
+
+func containsAny(text string, keywords ...string) bool {
+	for _, kw := range keywords {
+		if strings.Contains(text, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanAntigravityTaskName(taskName string) string {
+	name := strings.TrimSpace(taskName)
+	for {
+		upper := strings.ToUpper(name)
+		if strings.HasPrefix(upper, "[AGY]") {
+			name = strings.TrimSpace(name[5:])
+			continue
+		}
+		if strings.HasPrefix(upper, "[ANTIGRAVITY]") {
+			name = strings.TrimSpace(name[14:])
+			continue
+		}
+		break
+	}
+	return name
+}
+
+func NormalizeTaskType(taskName, description, explicitType string) (string, string) {
+	raw := cleanAntigravityTaskName(taskName)
+
+	var detectedType string
+	var nameBody string = raw
+
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Desarrollo] o [Analisis]
+	if strings.HasPrefix(raw, "[") {
+		idx := strings.Index(raw, "]")
+		if idx > 1 {
+			bracketContent := raw[1:idx]
+			if canon, ok := matchCanonicalType(bracketContent); ok {
+				detectedType = canon
+				nameBody = strings.TrimSpace(raw[idx+1:])
+			}
+		}
+	}
+
+	// 2. Si no se detectó en corchetes pero se pasó explicitType
+	if detectedType == "" && explicitType != "" {
+		if canon, ok := matchCanonicalType(explicitType); ok {
+			detectedType = canon
+		}
+	}
+
+	// 3. Inferencia automática por heurística semántica a partir de título y descripción
+	if detectedType == "" {
+		corpus := strings.ToLower(raw + " " + description)
+		corpus = strings.ReplaceAll(corpus, "á", "a")
+		corpus = strings.ReplaceAll(corpus, "é", "e")
+		corpus = strings.ReplaceAll(corpus, "í", "i")
+		corpus = strings.ReplaceAll(corpus, "ó", "o")
+		corpus = strings.ReplaceAll(corpus, "ú", "u")
+
+		// Servidor (palabras altamente específicas de sistemas/infraestructura)
+		if containsAny(corpus, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "virtualhost") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(corpus, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "facturacion") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(corpus, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion", "plan") {
+			detectedType = TaskTypeAnalisis
+		} else if containsAny(corpus, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia", "formato") {
+			detectedType = TaskTypeAjustes
+		} else {
+			// Por defecto Desarrollo
+			detectedType = TaskTypeDesarrollo
+		}
+	}
+
+	if strings.TrimSpace(nameBody) == "" {
+		nameBody = fmt.Sprintf("Tarea de %s", strings.ToLower(detectedType))
+	}
+
+	formattedName := fmt.Sprintf("[AGY] [%s] %s", detectedType, strings.TrimSpace(nameBody))
+	return detectedType, formattedName
+}
 
 // Config representa el archivo .planesgo.json encontrado en el proyecto
 type Config struct {
@@ -82,15 +202,19 @@ func findConfig(customDir ...string) (*Config, string, error) {
 			startDirs = append(startDirs, strings.TrimSpace(d))
 		}
 	}
-	if pwd := os.Getenv("PWD"); pwd != "" {
-		startDirs = append(startDirs, pwd)
-	}
-	if wd, err := os.Getwd(); err == nil {
-		startDirs = append(startDirs, wd)
+	if len(startDirs) == 0 {
+		if wd, err := os.Getwd(); err == nil && wd != "" {
+			startDirs = append(startDirs, wd)
+		} else if pwd := os.Getenv("PWD"); pwd != "" {
+			startDirs = append(startDirs, pwd)
+		}
 	}
 
 	for _, dir := range startDirs {
-		curr := dir
+		curr, err := filepath.Abs(dir)
+		if err != nil {
+			curr = dir
+		}
 		for {
 			candidate := filepath.Join(curr, ".planesgo.json")
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -167,10 +291,10 @@ type PlanesGoClient struct {
 }
 
 func newClient(customDir ...string) (*PlanesGoClient, *Config, error) {
-	cfg, _, _ := findConfig(customDir...)
-	token, apiURL, err := getAuth(cfg)
-	if err != nil {
-		return nil, cfg, err
+	cfg, _, findErr := findConfig(customDir...)
+	token, apiURL, authErr := getAuth(cfg)
+	if authErr != nil {
+		return nil, cfg, authErr
 	}
 	return &PlanesGoClient{
 		BaseURL: apiURL,
@@ -178,7 +302,7 @@ func newClient(customDir ...string) (*PlanesGoClient, *Config, error) {
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
-	}, cfg, nil
+	}, cfg, findErr
 }
 
 // CheckStatus ejecuta la verificación de Fase 0
@@ -229,7 +353,7 @@ func (c *PlanesGoClient) CheckStatus(projectID int, projectName string) (map[str
 }
 
 // SendTaskAction envía latido o stop a PlanesGo
-func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, projectID int, projectName, description string) (map[string]interface{}, error) {
+func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, projectID int, projectName, description, taskType string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/antigravity/update_tasks", c.BaseURL)
 
 	payload := map[string]interface{}{
@@ -239,6 +363,7 @@ func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, project
 		"project_id":   projectID,
 		"project_name": projectName,
 		"description":  description,
+		"task_type":    taskType,
 		"token":        c.Token,
 	}
 
@@ -334,7 +459,13 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 	client, cfg, err := newClient(customPath)
 	if err != nil {
 		return ToolCallResult{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error de configuración: %v", err)}},
+			Content: []ToolContent{{
+				Type: "text",
+				Text: fmt.Sprintf("❌ [Fase 0 BLOQUEO MANDATORIO]: Este proyecto no está vinculado con PlanesGo.\n" +
+					"- Detalle: %v\n" +
+					"- Acción requerida: Crear archivo .planesgo.json con odoo_project_id y odoo_project_name válidos.\n" +
+					"Queda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación, ejecución de comandos o desarrollo en este repositorio.", err),
+			}},
 			IsError: true,
 		}
 	}
@@ -365,12 +496,28 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 	switch name {
 	case "planesgo_check":
+		if cfg == nil || projID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: Este proyecto no está vinculado con PlanesGo.\n" +
+						"- Motivo: No se encontró el archivo .planesgo.json en este proyecto (o carece de odoo_project_id válido).\n" +
+						"- Acción requerida: Crear .planesgo.json con odoo_project_id y odoo_project_name antes de operar.\n" +
+						"Queda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación, ejecución de comandos o desarrollo en este repositorio.",
+				}},
+				IsError: true,
+			}
+		}
+
 		taskName, _ := args["task_name"].(string)
 
 		res, err := client.CheckStatus(projID, projName)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ [Fase 0 BLOQUEO]: Error en verificación con PlanesGo: %v", err)}},
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ [Fase 0 BLOQUEO MANDATORIO]: Error en verificación con PlanesGo: %v\nQueda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación o desarrollo en este repositorio.", err),
+				}},
 				IsError: true,
 			}
 		}
@@ -406,8 +553,11 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 
-		if taskName == "" {
-			taskName = "Pendiente de asignar en latido"
+		taskType, _ := args["task_type"].(string)
+		desc, _ := args["description"].(string)
+		if taskName != "" && taskName != "Pendiente de asignar en latido" {
+			canonicalType, normName := NormalizeTaskType(taskName, desc, taskType)
+			taskName = fmt.Sprintf("%s (Tipo: %s)", normName, canonicalType)
 		}
 
 		projStr := "No detectado"
@@ -427,6 +577,16 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_beat":
+		if cfg == nil || projID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se puede registrar latido. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).\nQueda TERMINANTEMENTE PROHIBIDO realizar modificaciones sin imputación horaria activa.",
+				}},
+				IsError: true,
+			}
+		}
+
 		taskName, _ := args["task_name"].(string)
 		if taskName == "" {
 			return ToolCallResult{
@@ -436,6 +596,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 		desc, _ := args["description"].(string)
+		taskType, _ := args["task_type"].(string)
 		taskID := 0
 		if val, ok := args["task_id"]; ok {
 			if idFloat, ok := val.(float64); ok {
@@ -443,7 +604,9 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 
-		res, err := client.SendTaskAction("heartbeat", taskName, taskID, projID, projName, desc)
+		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
+
+		res, err := client.SendTaskAction("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType)
 		if err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al enviar latido a PlanesGo: %v", err)}},
@@ -461,7 +624,10 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = "No detectado"
 		}
 
-		output := fmt.Sprintf("⏱️ [PlanesGo] Latido registrado con éxito.\n- Proyecto: %s\n- Tarea de imputación: %s", projStr, taskName)
+		output := fmt.Sprintf("⏱️ [PlanesGo] Latido registrado con éxito.\n- Proyecto: %s\n- Tarea de imputación: %s\n- Tipo: %s", projStr, normalizedTaskName, canonicalType)
+		if desc != "" {
+			output += fmt.Sprintf("\n- Resumen del parte: %s", desc)
+		}
 		if msg != "" {
 			output += fmt.Sprintf("\n- Estado: %s", msg)
 		}
@@ -471,8 +637,19 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_stop":
+		if cfg == nil || projID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se puede cerrar imputación. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).",
+				}},
+				IsError: true,
+			}
+		}
+
 		taskName, _ := args["task_name"].(string)
 		desc, _ := args["description"].(string)
+		taskType, _ := args["task_type"].(string)
 		taskID := 0
 		if val, ok := args["task_id"]; ok {
 			if idFloat, ok := val.(float64); ok {
@@ -480,7 +657,13 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 
-		res, err := client.SendTaskAction("stop", taskName, taskID, projID, projName, desc)
+		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
+		finalDesc := strings.TrimSpace(desc)
+		if finalDesc == "" || finalDesc == "Trabajo en curso" {
+			finalDesc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(taskName))
+		}
+
+		res, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType)
 		if err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al detener tarea en PlanesGo: %v", err)}},
@@ -498,7 +681,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = "No detectado"
 		}
 
-		output := fmt.Sprintf("⏹️ [PlanesGo] Tarea finalizada e imputada en Odoo.\n- Proyecto: %s\n- Tarea: %s", projStr, taskName)
+		output := fmt.Sprintf("⏹️ [PlanesGo] Tarea finalizada e imputada en Odoo.\n- Proyecto: %s\n- Tarea: %s\n- Tipo: %s\n- Resumen del parte: %s", projStr, normalizedTaskName, canonicalType, finalDesc)
 		if msg != "" {
 			output += fmt.Sprintf("\n- Estado: %s", msg)
 		}
@@ -508,6 +691,15 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_list_tasks":
+		if cfg == nil || projID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se pueden listar tareas. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).",
+				}},
+				IsError: true,
+			}
+		}
 		tasks, err := client.ListTasks(projID, projName)
 		if err != nil {
 			return ToolCallResult{
@@ -570,6 +762,11 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Nombre de la tarea sobre la que se van a imputar horas",
 					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
+						"description": "Tipo normalizado de tarea (opcional, se infiere automáticamente si se omite)",
+					},
 					"project_id": map[string]interface{}{
 						"type":        "integer",
 						"description": "ID numérico del proyecto en Odoo (opcional, se autodetecta de .planesgo.json)",
@@ -595,13 +792,18 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Nombre descriptivo de la tarea que se está ejecutando",
 					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
+						"description": "Tipo normalizado de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional, se infiere si se omite)",
+					},
 					"task_id": map[string]interface{}{
 						"type":        "integer",
 						"description": "ID numérico de la tarea en Odoo si ya existe (opcional)",
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Detalle técnico de los cambios o progreso actual realizado",
+						"description": "Resumen breve del trabajo o progreso actual para el parte de horas en Odoo",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -621,13 +823,18 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Nombre de la tarea a detener",
 					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"},
+						"description": "Tipo normalizado de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional, se infiere si se omite)",
+					},
 					"task_id": map[string]interface{}{
 						"type":        "integer",
 						"description": "ID numérico de la tarea a detener (opcional)",
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Resumen final del trabajo completado para el parte de horas en Odoo",
+						"description": "Resumen breve, claro y sustantivo del trabajo realizado para el parte de horas en Odoo",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -774,7 +981,9 @@ func main() {
 	stopFlag := flag.Bool("stop", false, "Detiene la tarea indicada")
 	listFlag := flag.Bool("list", false, "Lista tareas de Odoo para el proyecto actual")
 	taskFlag := flag.String("task", "", "Nombre de la tarea")
+	typeFlag := flag.String("type", "", "Tipo de tarea: Desarrollo, Análisis, Ajustes, Servidor, Cliente (opcional)")
 	descFlag := flag.String("desc", "", "Descripción del trabajo")
+	pathFlag := flag.String("path", "", "Ruta personalizada al proyecto (opcional)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
 
@@ -791,6 +1000,15 @@ func main() {
 		if *taskFlag != "" {
 			args["task_name"] = *taskFlag
 		}
+		if *typeFlag != "" {
+			args["task_type"] = *typeFlag
+		}
+		if *descFlag != "" {
+			args["description"] = *descFlag
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
 		res := executeToolCall("planesgo_check", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -806,10 +1024,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: debe indicar --task '<nombre>'")
 			os.Exit(1)
 		}
-		res := executeToolCall("planesgo_beat", map[string]interface{}{
+		args := map[string]interface{}{
 			"task_name":   *taskFlag,
 			"description": *descFlag,
-		})
+		}
+		if *typeFlag != "" {
+			args["task_type"] = *typeFlag
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		res := executeToolCall("planesgo_beat", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}
@@ -820,10 +1045,17 @@ func main() {
 	}
 
 	if *stopFlag {
-		res := executeToolCall("planesgo_stop", map[string]interface{}{
+		args := map[string]interface{}{
 			"task_name":   *taskFlag,
 			"description": *descFlag,
-		})
+		}
+		if *typeFlag != "" {
+			args["task_type"] = *typeFlag
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		res := executeToolCall("planesgo_stop", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}
@@ -834,7 +1066,11 @@ func main() {
 	}
 
 	if *listFlag {
-		res := executeToolCall("planesgo_list_tasks", map[string]interface{}{})
+		args := map[string]interface{}{}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		res := executeToolCall("planesgo_list_tasks", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}

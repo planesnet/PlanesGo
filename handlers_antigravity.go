@@ -19,6 +19,7 @@ type AntigravityTaskPayload struct {
 	ProjectName     string  `json:"project_name"`
 	TaskID          int     `json:"task_id"`
 	TaskName        string  `json:"task_name"`
+	TaskType        string  `json:"task_type,omitempty"` // "Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"
 	TimesheetID     int     `json:"timesheet_id"`
 	Description     string  `json:"description"`
 	Action          string  `json:"action"` // "heartbeat" (defecto), "start", "stop", "pause"
@@ -136,16 +137,124 @@ func projectNamesMatch(name1, name2 string) bool {
 	return c1 != "" && c1 == c2
 }
 
-// cleanAntigravityTaskName extrae el nombre legible de una tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY]
+// CanonicalTaskTypes define los 5 tipos normalizados de tareas de Antigravity
+const (
+	TaskTypeDesarrollo = "Desarrollo"
+	TaskTypeAnalisis   = "Análisis"
+	TaskTypeAjustes    = "Ajustes"
+	TaskTypeServidor   = "Servidor"
+	TaskTypeCliente    = "Cliente"
+)
+
+// matchCanonicalType normaliza un texto a uno de los 5 tipos canónicos si coincide.
+func matchCanonicalType(t string) (string, bool) {
+	norm := strings.ToLower(strings.TrimSpace(t))
+	norm = strings.ReplaceAll(norm, "á", "a")
+	norm = strings.ReplaceAll(norm, "é", "e")
+	norm = strings.ReplaceAll(norm, "í", "i")
+	norm = strings.ReplaceAll(norm, "ó", "o")
+	norm = strings.ReplaceAll(norm, "ú", "u")
+
+	switch norm {
+	case "desarrollo", "dev", "development":
+		return TaskTypeDesarrollo, true
+	case "analisis", "analysis", "investigacion", "auditoria":
+		return TaskTypeAnalisis, true
+	case "ajuste", "ajustes", "fix", "fixes", "bugfix", "refactor":
+		return TaskTypeAjustes, true
+	case "servidor", "server", "infraestructura", "infra", "ops":
+		return TaskTypeServidor, true
+	case "cliente", "client", "soporte", "support":
+		return TaskTypeCliente, true
+	}
+	return "", false
+}
+
+func containsAny(text string, keywords ...string) bool {
+	for _, kw := range keywords {
+		if strings.Contains(text, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanAntigravityTaskName extrae el nombre legible de una tarea sin los prefijos técnicos [AGY] o [ANTIGRAVITY]
 func cleanAntigravityTaskName(taskName string) string {
 	name := strings.TrimSpace(taskName)
-	if strings.HasPrefix(strings.ToUpper(name), "[AGY]") {
-		return strings.TrimSpace(name[5:])
-	}
-	if strings.HasPrefix(strings.ToUpper(name), "[ANTIGRAVITY]") {
-		return strings.TrimSpace(name[14:])
+	for {
+		upper := strings.ToUpper(name)
+		if strings.HasPrefix(upper, "[AGY]") {
+			name = strings.TrimSpace(name[5:])
+			continue
+		}
+		if strings.HasPrefix(upper, "[ANTIGRAVITY]") {
+			name = strings.TrimSpace(name[14:])
+			continue
+		}
+		break
 	}
 	return name
+}
+
+// NormalizeTaskType analiza la tarea, la descripción y el tipo explícito para determinar
+// de forma normalizada uno de los 5 valores canónicos (Desarrollo, Análisis, Ajustes, Servidor, Cliente)
+// y devuelve el tipo canónico y el nombre de la tarea con el formato canónico "[AGY] [Tipo] <Nombre>".
+func NormalizeTaskType(taskName, description, explicitType string) (string, string) {
+	raw := cleanAntigravityTaskName(taskName)
+
+	var detectedType string
+	var nameBody string = raw
+
+	// 1. Si el nombre ya comienza por un corchete de tipo ej. [Desarrollo] o [Analisis]
+	if strings.HasPrefix(raw, "[") {
+		idx := strings.Index(raw, "]")
+		if idx > 1 {
+			bracketContent := raw[1:idx]
+			if canon, ok := matchCanonicalType(bracketContent); ok {
+				detectedType = canon
+				nameBody = strings.TrimSpace(raw[idx+1:])
+			}
+		}
+	}
+
+	// 2. Si no se detectó en corchetes pero se pasó explicitType
+	if detectedType == "" && explicitType != "" {
+		if canon, ok := matchCanonicalType(explicitType); ok {
+			detectedType = canon
+		}
+	}
+
+	// 3. Inferencia automática por heurística semántica a partir de título y descripción
+	if detectedType == "" {
+		corpus := strings.ToLower(raw + " " + description)
+		corpus = strings.ReplaceAll(corpus, "á", "a")
+		corpus = strings.ReplaceAll(corpus, "é", "e")
+		corpus = strings.ReplaceAll(corpus, "í", "i")
+		corpus = strings.ReplaceAll(corpus, "ó", "o")
+		corpus = strings.ReplaceAll(corpus, "ú", "u")
+
+		// Servidor (palabras altamente específicas de sistemas/infraestructura)
+		if containsAny(corpus, "servidor", "server", "systemd", "nginx", "apache", "docker", "deploy", "despliegue", "ssh", "puerto", "backup", "cron", "proxy", "daemon", "demon", "firewall", "sysadmin", "virtualhost") {
+			detectedType = TaskTypeServidor
+		} else if containsAny(corpus, "cliente", "usuario", "soporte", "ticket", "reunion", "consulta", "duda", "demo", "capacitacion", "formacion", "funcional", "tarifa", "facturacion") {
+			detectedType = TaskTypeCliente
+		} else if containsAny(corpus, "analisis", "investigacion", "auditoria", "diagnostico", "estudio", "revision", "evaluacion", "planificacion", "exploracion", "research", "benchmark", "inspeccion", "plan") {
+			detectedType = TaskTypeAnalisis
+		} else if containsAny(corpus, "ajuste", "ajustes", "fix", "bug", "error", "correccion", "corregir", "refactor", "tweak", "patch", "parche", "limpieza", "lint", "linter", "estilo", "padding", "css", "tipografia", "formato") {
+			detectedType = TaskTypeAjustes
+		} else {
+			// Por defecto Desarrollo
+			detectedType = TaskTypeDesarrollo
+		}
+	}
+
+	if strings.TrimSpace(nameBody) == "" {
+		nameBody = fmt.Sprintf("Tarea de %s", strings.ToLower(detectedType))
+	}
+
+	formattedName := fmt.Sprintf("[AGY] [%s] %s", detectedType, strings.TrimSpace(nameBody))
+	return detectedType, formattedName
 }
 
 // handleAntigravityStatus implementa el Handshake y verificación previa obligatoria (Fase 0 de PSF).
@@ -360,17 +469,12 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		}
 	}
 
-	// 1. Aislamiento Estricto Antigravity vs Manual:
-	// Las tareas gestionadas desde Antigravity nunca se mezclan con imputaciones manuales.
-	// Se garantiza que el nombre de la tarea en Odoo contenga el prefijo [AGY].
-	if payload.TaskName != "" {
-		tn := strings.TrimSpace(payload.TaskName)
-		if !strings.HasPrefix(strings.ToUpper(tn), "[AGY]") && !strings.HasPrefix(strings.ToUpper(tn), "[ANTIGRAVITY]") {
-			payload.TaskName = fmt.Sprintf("[AGY] %s", tn)
-		}
-	} else if payload.TaskID <= 0 {
-		payload.TaskName = "[AGY] Tarea de desarrollo"
-	}
+	// 1. Normalización y Aislamiento Estricto Antigravity vs Manual:
+	// Las tareas gestionadas desde Antigravity se clasifican en los 5 tipos normalizados
+	// (Desarrollo, Análisis, Ajustes, Servidor, Cliente) y siguen el formato canónico [AGY] [Tipo] Nombre.
+	canonicalType, formattedName := NormalizeTaskType(payload.TaskName, payload.Description, payload.TaskType)
+	payload.TaskType = canonicalType
+	payload.TaskName = formattedName
 
 	// Creación o búsqueda dinámica de tarea en Odoo si no viene con task_id
 	if payload.ProjectID > 0 && payload.TaskID <= 0 && payload.TaskName != "" {
@@ -431,6 +535,14 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				payload.Description = cur.Description
 			}
 		}
+
+		// Resumen breve y sustantivo para el parte de horas en Odoo
+		desc := strings.TrimSpace(payload.Description)
+		if desc == "" || desc == "Trabajo en curso" || strings.HasPrefix(desc, "[ANTIGRAVITY]") || strings.HasPrefix(desc, "[AGY]") {
+			desc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(payload.TaskName))
+		}
+		payload.Description = desc
+
 		if err := client.StopTimer(ctx, payload.TimesheetID, payload.TaskID, payload.UnitAmount, payload.Description); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Error al detener tarea en Odoo: " + err.Error()})
@@ -442,6 +554,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"task_id":      payload.TaskID,
 			"timer_key":    timerKey,
 			"unit_amount":  payload.UnitAmount,
+			"task_type":    canonicalType,
 			"source":       "antigravity",
 		})
 		state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
@@ -450,9 +563,13 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"unit_amount":  payload.UnitAmount,
 		})
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"action":  "stopped",
-			"message": fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
+			"success":     true,
+			"action":      "stopped",
+			"task_id":     payload.TaskID,
+			"task_name":   payload.TaskName,
+			"task_type":   canonicalType,
+			"description": payload.Description,
+			"message":     fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
 		})
 		return
 
@@ -471,13 +588,9 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		cur := state.getActiveTimerByKey(userUID, timerKey)
 		if cur == nil {
 			// Iniciar nuevo temporizador para esta tarea
-			desc := payload.Description
-			if desc == "" {
-				if payload.TaskName != "" {
-					desc = fmt.Sprintf("[ANTIGRAVITY] %s", payload.TaskName)
-				} else {
-					desc = "[ANTIGRAVITY] Tarea activa en IDE"
-				}
+			desc := strings.TrimSpace(payload.Description)
+			if desc == "" || desc == "Trabajo en curso" || strings.HasPrefix(desc, "[ANTIGRAVITY]") || strings.HasPrefix(desc, "[AGY]") {
+				desc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(payload.TaskName))
 			}
 
 			activeTimer, startErr := client.StartTimer(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, payload.UnitAmount, "")
@@ -517,7 +630,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			cur.LastHeartbeat = nowMs
 			cur.IsRunning = true
 			cur.UnitAmount = float64(cur.AccumulatedMs) / (3600 * 1000)
-			if payload.Description != "" {
+			if payload.Description != "" && payload.Description != "Trabajo en curso" {
 				cur.Description = payload.Description
 			}
 			state.setActiveTimer(userUID, cur)
@@ -538,6 +651,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"success":     true,
 			"action":      action,
 			"timer":       cur,
+			"task_type":   canonicalType,
 			"server_time": nowMs,
 			"message":     fmt.Sprintf("Latido procesado para tarea '%s' (%s acumulado)", cur.TaskName, formatHoursDuration(cur.UnitAmount)),
 		})
