@@ -86,12 +86,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ${escapeHTML(pName)}
                                 </span>
                             </div>
+                            ${pPartner ? `
                             <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
-                                <span class="truncate max-w-[150px]" title="${escapeHTML(pPartner)}">
+                                <span class="truncate max-w-[200px]" title="${escapeHTML(pPartner)}">
                                     ${escapeHTML(pPartner)}
                                 </span>
-                                <span class="font-mono text-slate-400">#${pId}</span>
-                            </div>
+                            </div>` : ''}
                         `;
                         allListContainer.appendChild(btn);
                         existing = btn;

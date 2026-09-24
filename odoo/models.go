@@ -217,7 +217,7 @@ func (p *Project) DisplayPartner() string {
 	if p.PartnerID.Name != "" {
 		return p.PartnerID.Name
 	}
-	return "-"
+	return ""
 }
 
 func (p *Project) FormattedTotalHours() string {
