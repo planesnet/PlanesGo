@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.65"
+	Version       = "1.2.66"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -220,12 +220,21 @@ func findConfig(customDir ...string) (*Config, string, error) {
 		}
 	}
 
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		homeDir, _ = filepath.Abs(homeDir)
+	}
+
 	for _, dir := range startDirs {
 		curr, err := filepath.Abs(dir)
 		if err != nil {
 			curr = dir
 		}
 		for {
+			if curr == "/" || (homeDir != "" && curr == homeDir) {
+				break
+			}
+
 			candidate := filepath.Join(curr, ".planesgo.json")
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				data, err := os.ReadFile(candidate)
@@ -636,7 +645,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		return ToolCallResult{
 			Content: []ToolContent{{
 				Type: "text",
-				Text: fmt.Sprintf("❌ PlanesGo: No vinculado (%v)", err),
+				Text: fmt.Sprintf("❌ Proyecto no vinculado (%v)", err),
 			}},
 			IsError: true,
 		}
@@ -747,7 +756,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
+					Text: "❌ Proyecto no vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -760,7 +769,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: fmt.Sprintf("❌ PlanesGo: %v", err),
+					Text: fmt.Sprintf("❌ Error al verificar proyecto: %v", err),
 				}},
 				IsError: true,
 			}
@@ -812,7 +821,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = fmt.Sprintf("ID: %d", pID)
 		}
 
-		msg := fmt.Sprintf("✅ PlanesGo: %s%s | Tarea: %s", projStr, ticketInfoStr, taskName)
+		msg := fmt.Sprintf("✅ %s%s | Tarea: %s", projStr, ticketInfoStr, taskName)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: msg}},
 			IsError: false,
@@ -823,7 +832,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
+					Text: "❌ Proyecto no vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -832,7 +841,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		taskName, _ := args["task_name"].(string)
 		if taskName == "" {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: "❌ PlanesGo: 'task_name' requerido"}},
+				Content: []ToolContent{{Type: "text", Text: "❌ Campo 'task_name' requerido"}},
 				IsError: true,
 			}
 		}
@@ -862,7 +871,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		_, err := client.SendTaskAction("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType, ticketCode)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al registrar latido: %v", err)}},
 				IsError: true,
 			}
 		}
@@ -881,7 +890,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
 
-		output := fmt.Sprintf("⏱️ PlanesGo: OK | %s%s | %s", projStr, ticketPart, normalizedTaskName)
+		output := fmt.Sprintf("⏱️ %s%s | %s", projStr, ticketPart, normalizedTaskName)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
@@ -892,7 +901,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
+					Text: "❌ Proyecto no vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -928,7 +937,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		_, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType, ticketCode)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al consolidar imputación: %v", err)}},
 				IsError: true,
 			}
 		}
@@ -947,7 +956,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
 
-		output := fmt.Sprintf("⏹️ PlanesGo: Imputado | %s%s | %s: %s", projStr, ticketPart, normalizedTaskName, finalDesc)
+		output := fmt.Sprintf("⏹️ Imputado | %s%s | %s: %s", projStr, ticketPart, normalizedTaskName, finalDesc)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
@@ -1009,7 +1018,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
+					Text: "❌ Proyecto no vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -1017,14 +1026,14 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		tasks, err := client.ListTasks(projID, projName)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al listar tareas: %v", err)}},
 				IsError: true,
 			}
 		}
 
 		if len(tasks) == 0 {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("📋 PlanesGo: Sin tareas en %s (ID %d)", projName, projID)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("📋 Sin tareas en %s (ID %d)", projName, projID)}},
 				IsError: false,
 			}
 		}
@@ -1076,7 +1085,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ Debe indicar 'project_name' o 'project_id' para configurar el proyecto en PlanesGo.",
+					Text: "❌ Debe indicar 'project_name' o 'project_id' para configurar el proyecto.",
 				}},
 				IsError: true,
 			}
@@ -1106,7 +1115,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: fmt.Sprintf("❌ Error al validar el proyecto '%s' en PlanesGo / Odoo: %v", targetProjName, err),
+					Text: fmt.Sprintf("❌ Error al validar el proyecto '%s' en Odoo: %v", targetProjName, err),
 				}},
 				IsError: true,
 			}
@@ -1130,6 +1139,20 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 		targetDir, _ = filepath.Abs(targetDir)
+
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			homeDir, _ = filepath.Abs(homeDir)
+		}
+		if targetDir == "/" || (homeDir != "" && targetDir == homeDir) {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ No se puede configurar un proyecto en la raíz del usuario (~). Debe indicar la ruta específica del proyecto.",
+				}},
+				IsError: true,
+			}
+		}
 
 		newCfg := Config{
 			OdooProjectID:   resolvedID,
@@ -1166,7 +1189,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 		return ToolCallResult{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("✅ PlanesGo: %s (ID: %d) vinculado", resolvedName, resolvedID)}},
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("✅ Proyecto: %s (ID: %d) vinculado", resolvedName, resolvedID)}},
 			IsError: false,
 		}
 

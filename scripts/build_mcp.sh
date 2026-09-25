@@ -17,7 +17,7 @@ echo "==> Compilando planesgo-mcp para Linux (amd64)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "$BIN_DIR/planesgo-mcp" "$MCP_DIR/main.go"
 cp "$BIN_DIR/planesgo-mcp" "$BIN_DIR/planesgo-mcp-linux-amd64"
 if [ -d "$HOME/.local/bin" ]; then
-    cp "$BIN_DIR/planesgo-mcp" "$HOME/.local/bin/planesgo-mcp"
+    cp --remove-destination "$BIN_DIR/planesgo-mcp" "$HOME/.local/bin/planesgo-mcp"
 fi
 
 echo "==> Preparando metadatos y manifiesto para Windows (amd64)..."
