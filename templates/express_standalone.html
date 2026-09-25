@@ -519,8 +519,14 @@
                     clearBtn.classList.add('hidden');
                 }
             }
-            if (typeof renderExpressView === 'function') {
-                renderExpressView();
+            if (window.__activeExpressTab === 'tickets') {
+                if (typeof renderTicketsView === 'function') {
+                    renderTicketsView();
+                }
+            } else {
+                if (typeof renderExpressView === 'function') {
+                    renderExpressView();
+                }
             }
         }
 
@@ -532,8 +538,14 @@
                 input.focus();
             }
             if (clearBtn) clearBtn.classList.add('hidden');
-            if (typeof renderExpressView === 'function') {
-                renderExpressView();
+            if (window.__activeExpressTab === 'tickets') {
+                if (typeof renderTicketsView === 'function') {
+                    renderTicketsView();
+                }
+            } else {
+                if (typeof renderExpressView === 'function') {
+                    renderExpressView();
+                }
             }
         }
     </script>
@@ -542,18 +554,29 @@
     <script src="/static/js/views.js?v={{.Version}}"></script>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        function initExpressStandaloneView() {
             // Inicializar carga de la botonera Express o Tickets según query param ?tab=tickets
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('tab') === 'tickets') {
-                switchExpressTab('tickets');
+                if (typeof switchExpressTab === 'function') {
+                    switchExpressTab('tickets');
+                }
             } else {
-                loadExpressTimesheets();
+                if (typeof switchExpressTab === 'function') {
+                    switchExpressTab('express');
+                }
                 // Pre-cargar conteo silencioso de tickets para el badge
                 if (typeof loadTicketsView === 'function') {
                     loadTicketsView(false);
                 }
             }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initExpressStandaloneView);
+        } else {
+            initExpressStandaloneView();
+        }
 
             // Sincronización entre pestañas / ventanas mediante storage event
             window.addEventListener('storage', function(e) {

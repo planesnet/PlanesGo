@@ -109,7 +109,7 @@
                 </svg>
             </button>
             <!-- Botón Desacoplar (Pop-out a ventana emergente de escritorio) -->
-            <button type="button" onclick="openExpressPopout()"
+            <button type="button" onclick="openExpressPopout(window.__activeExpressTab || 'express')"
                     class="p-1 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-700/60 transition cursor-pointer"
                     title="Desacoplar a ventana independiente de escritorio (pop-out)">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

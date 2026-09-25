@@ -1108,27 +1108,40 @@ function toggleMinimizeExpress() {
 }
 
 /**
- * Desacopla la botonera Express abriéndola en una mini-ventana nativa independiente de escritorio (pop-out).
+ * Desacopla la botonera Express o la vista de Tickets abriéndola en una mini-ventana nativa independiente de escritorio (pop-out).
+ * @param {string} initialTab - Pestaña inicial a abrir ('express' o 'tickets')
  */
-function openExpressPopout() {
-    const w = 480;
-    const h = 640;
+function openExpressPopout(initialTab = 'express') {
+    const tab = (initialTab === 'tickets') ? 'tickets' : 'express';
+    const w = 540;
+    const h = 720;
     const left = Math.max(0, (window.screen.width - w) / 2);
     const top = Math.max(0, (window.screen.height - h) / 2);
 
+    const targetUrl = `/express?tab=${tab}`;
     const win = window.open(
-        '/express',
+        targetUrl,
         'PlanesGoExpress',
         `width=${w},height=${h},top=${top},left=${left},menubar=no,status=no,toolbar=no,location=no,resizable=yes,scrollbars=yes`
     );
 
     if (win) {
+        try {
+            if (win.location && win.location.href && !win.location.href.includes(`tab=${tab}`)) {
+                win.location.href = targetUrl;
+            } else if (typeof win.switchExpressTab === 'function') {
+                win.switchExpressTab(tab);
+            }
+        } catch (e) {
+            // Manejo silencioso ante navegación o cross-origin
+        }
         win.focus();
         closeExpressFloating();
     } else {
-        toggleExpressFloating();
+        openExpressFloating();
+        switchExpressTab(tab);
         if (typeof showToast === 'function') {
-            showToast('El navegador bloqueó la ventana emergente. Se abrió la botonera flotante interna.', 'warning');
+            showToast('El navegador bloqueó la ventana emergente. Se abrió el panel flotante integrado.', 'warning');
         }
     }
 }
@@ -2601,6 +2614,15 @@ function switchExpressTab(tabName) {
         if (subtitleInd) subtitleInd.textContent = 'Tickets asignados';
         if (searchInput) searchInput.placeholder = 'Buscar por nº, título, proyecto, cliente...';
 
+        try {
+            document.title = 'Tickets de Soporte - PlanesGo';
+            if (window.location.pathname.startsWith('/express') || window.location.pathname.startsWith('/m')) {
+                const url = new URL(window.location);
+                url.searchParams.set('tab', 'tickets');
+                window.history.replaceState({ tab: 'tickets' }, '', url.toString());
+            }
+        } catch (e) {}
+
         loadTicketsView();
     } else {
         // Estilos pestaña activa: Express
@@ -2630,6 +2652,17 @@ function switchExpressTab(tabName) {
 
         if (subtitleInd) subtitleInd.textContent = 'Tareas recientes';
         if (searchInput) searchInput.placeholder = 'Buscar proyecto o tarea...';
+
+        try {
+            document.title = 'Botonera Express - PlanesGo';
+            if (window.location.pathname.startsWith('/express') || window.location.pathname.startsWith('/m')) {
+                const url = new URL(window.location);
+                if (url.searchParams.has('tab')) {
+                    url.searchParams.set('tab', 'express');
+                    window.history.replaceState({ tab: 'express' }, '', url.toString());
+                }
+            }
+        } catch (e) {}
 
         loadExpressTimesheets(false);
     }
@@ -3234,10 +3267,7 @@ async function submitCloseTicket(event) {
  * Abre el popout de escritorio directamente en la pestaña de tickets
  */
 function openTicketsPopout() {
-    openExpressPopout();
-    setTimeout(() => {
-        switchExpressTab('tickets');
-    }, 120);
+    openExpressPopout('tickets');
 }
 
 // Exportar globalmente para vistas y temporizador
