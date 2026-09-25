@@ -256,5 +256,14 @@
             </table>
         </div>
     </div>
+
+    <!-- Botón Flotante Material Design FAB (+) abajo a la derecha para Imputar Horas -->
+    <button type="button" onclick="openCreateTimesheetModal()" id="fab-create-timesheet-view"
+            class="fixed bottom-8 right-8 z-40 w-14 h-14 rounded-full bg-sky-600 hover:bg-sky-500 active:scale-95 text-white shadow-xl hover:shadow-2xl flex items-center justify-center transition-all cursor-pointer ring-4 ring-sky-500/20"
+            title="Imputar horas (+)">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+        </svg>
+    </button>
 </div>
 {{ end }}

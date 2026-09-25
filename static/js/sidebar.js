@@ -109,6 +109,10 @@ function selectSidebarProject(projectName, projectId) {
     if (btnLabel) {
         btnLabel.innerText = pName ? `Imputar en ${pName.length > 15 ? pName.slice(0, 14) + '...' : pName}` : 'Imputar Horas';
     }
+    const fabTimesheet = document.getElementById('fab-create-timesheet-view');
+    if (fabTimesheet) {
+        fabTimesheet.title = pName ? `Imputar horas en ${pName} (+)` : 'Imputar horas (+)';
+    }
 
     updateStartWorkTimerButton();
     applyTimesheetFilters();
@@ -121,6 +125,8 @@ function clearSidebarProjectFilter() {
 
     const btnLabel = document.getElementById('btn-imputar-label');
     if (btnLabel) btnLabel.innerText = 'Imputar Horas';
+    const fabTimesheetClear = document.getElementById('fab-create-timesheet-view');
+    if (fabTimesheetClear) fabTimesheetClear.title = 'Imputar horas (+)';
 
     const projectSelect = document.getElementById('filter-project');
     if (projectSelect) projectSelect.value = '';

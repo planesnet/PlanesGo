@@ -1307,7 +1307,7 @@ func (c *Client) UpdateTicket(ctx context.Context, ticketID int, vals map[string
 			_, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {
-			return fmt.Errorf("error al actualizar ticket #%d: %w", ticketID, err)
+			return fmt.Errorf("error al actualizar ticket %d: %w", ticketID, err)
 		}
 	}
 

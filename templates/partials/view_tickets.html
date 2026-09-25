@@ -101,7 +101,7 @@
                             <!-- Nº Ticket -->
                             <td class="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
                                 <span class="px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs">
-                                    #{{if .Number}}{{.Number}}{{else if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}
+                                    {{if .Number}}{{.Number}}{{else if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}
                                 </span>
                             </td>
                             <!-- Fecha -->

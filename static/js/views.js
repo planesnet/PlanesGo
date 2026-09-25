@@ -396,6 +396,7 @@ function switchView(viewName) {
     const containerCal = document.getElementById('view-container-calendar');
     const containerGantt = document.getElementById('view-container-gantt');
     const fabTickets = document.getElementById('fab-create-ticket-view');
+    const fabTimesheet = document.getElementById('fab-create-timesheet-view');
 
     const activeClasses = ['bg-white', 'text-sky-700', 'shadow-2xs', 'border-slate-200/80', 'font-bold'];
     const inactiveClasses = ['text-slate-600', 'hover:text-slate-900', 'hover:bg-slate-200/50', 'border-transparent', 'font-medium'];
@@ -426,6 +427,7 @@ function switchView(viewName) {
     if (containerCal) containerCal.classList.toggle('hidden', viewName !== 'calendar');
     if (containerGantt) containerGantt.classList.toggle('hidden', viewName !== 'gantt');
     if (fabTickets) fabTickets.classList.toggle('hidden', viewName !== 'tickets');
+    if (fabTimesheet) fabTimesheet.classList.toggle('hidden', viewName !== 'list');
 
     if (viewName === 'express') {
         if (!expressTimesheets && !isExpressLoading) {
@@ -2904,7 +2906,7 @@ function renderTicketsView() {
                     </div>
                     <!-- Número de Ticket -->
                     <span class="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                        #${ticketRef}
+                        ${ticketRef}
                     </span>
                     <!-- Fecha -->
                     <span class="text-[11px] text-slate-400 font-mono hidden sm:inline">
@@ -3008,10 +3010,10 @@ function startTimerOnTicket(ticketId) {
     if (!ticket) return;
 
     const pId = ticket.project_id ? ticket.project_id.id : 0;
-    const pName = ticket.project_id ? ticket.project_id.name : 'Proyecto Ticket #' + (ticket.ticket_ref || ticket.id);
+    const pName = ticket.project_id ? ticket.project_id.name : 'Proyecto Ticket ' + (ticket.ticket_ref || ticket.id);
     const tId = ticket.task_id ? ticket.task_id.id : null;
     const tName = ticket.task_id ? ticket.task_id.name : '';
-    const desc = `Ticket #${ticket.ticket_ref || ticket.id}: ${ticket.name}`;
+    const desc = `Ticket ${ticket.ticket_ref || ticket.id}: ${ticket.name}`;
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
 
     if (typeof startWorkTimer === 'function') {
@@ -3031,7 +3033,7 @@ function startTimerOnTicket(ticketId) {
     }
 
     if (typeof showToast === 'function') {
-        showToast(`⏱️ Cronómetro iniciado en Ticket #${ticket.ticket_ref || ticket.id}`, 'success');
+        showToast(`⏱️ Cronómetro iniciado en Ticket ${ticket.ticket_ref || ticket.id}`, 'success');
     }
 
     setTimeout(() => {
@@ -3152,7 +3154,7 @@ function renderTicketsTable() {
             </td>
             <td class="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
                 <span class="px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs">
-                    #${ticketRef}
+                    ${ticketRef}
                 </span>
             </td>
             <td class="py-2.5 px-3 whitespace-nowrap text-slate-500 font-mono text-xs">
@@ -3465,7 +3467,7 @@ async function submitCreateTicket(event) {
 
         closeCreateTicketModal();
         if (typeof showToast === 'function') {
-            showToast(`✅ Ticket #${data.ticket_ref || data.id} creado con éxito`, 'success');
+            showToast(`✅ Ticket ${data.ticket_ref || data.id} creado con éxito`, 'success');
         }
 
         // Recargar lista de tickets
@@ -3502,7 +3504,7 @@ async function openEditTicketModal(ticketId) {
 
     const title = ticket ? ticket.name : (row?.dataset?.title || '');
     const desc = ticket ? (ticket.description || '') : (row?.dataset?.desc || '');
-    const number = ticket ? (ticket.number || ticket.ticket_ref || `#${ticket.id}`) : (row?.dataset?.ticketRef || `#${ticketId}`);
+    const number = ticket ? (ticket.number || ticket.ticket_ref || String(ticket.id)) : (row?.dataset?.ticketRef || String(ticketId));
     const priority = ticket ? (ticket.priority || '0') : (row?.dataset?.priority || '0');
     const projId = ticket?.project_id?.id || parseInt(row?.dataset?.projectId, 10) || 0;
     const taskId = ticket?.task_id?.id || parseInt(row?.dataset?.taskId, 10) || 0;
@@ -3720,7 +3722,7 @@ function openCloseTicketModal(ticketId, ticketRef, ticketTitle) {
                 ticketTitle = ticketTitle || row.dataset.title || 'Sin título';
             } else {
                 ticketRef = ticketRef || String(ticketId);
-                ticketTitle = ticketTitle || 'Ticket #' + ticketId;
+                ticketTitle = ticketTitle || 'Ticket ' + ticketId;
             }
         }
     }
@@ -3729,7 +3731,7 @@ function openCloseTicketModal(ticketId, ticketRef, ticketTitle) {
     document.getElementById('close-ticket-ref').value = ticketRef;
     const titleEl = document.getElementById('close-ticket-ref-title');
     if (titleEl) {
-        titleEl.textContent = `Ticket #${ticketRef}: ${ticketTitle}`;
+        titleEl.textContent = `Ticket ${ticketRef}: ${ticketTitle}`;
     }
 
     const subjInput = document.getElementById('close-ticket-subject');
@@ -3785,7 +3787,7 @@ async function submitCloseTicket(event) {
 
         closeCloseTicketModal();
         if (typeof showToast === 'function') {
-            showToast(`🔒 Ticket #${ticketRef || ticketId} cerrado definitivamente`, 'success');
+            showToast(`🔒 Ticket ${ticketRef || ticketId} cerrado definitivamente`, 'success');
         }
 
         // Recargar tickets para quitarlo de pendientes

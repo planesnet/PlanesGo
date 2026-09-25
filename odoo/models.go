@@ -391,7 +391,7 @@ func (t *Ticket) DisplayTitle() string {
 	if t.Name != "" {
 		return t.Name
 	}
-	return fmt.Sprintf("Ticket #%d", t.ID)
+	return fmt.Sprintf("Ticket %d", t.ID)
 }
 
 func (t *Ticket) StageName() string {
