@@ -179,7 +179,7 @@ function stopPreviousRunningTimer(prevTimer) {
 /**
  * Inicia o reanuda un temporizador de trabajo (admite imputación existente y fecha de inicio)
  */
-function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal, silent) {
+function startWorkTimer(projectId, projectName, taskId, taskName, description, timesheetId, accumulatedMs, workDate, fromModal, silent, ticketId) {
     // Si no viene confirmado explícitamente desde el modal de imputación y no es reanudar una fila existente con timesheetId,
     // DEBE abrir el diálogo modal para que el usuario pueda revisar o modificar fecha, tarea y notas antes de iniciar
     if (!fromModal && !timesheetId) {
@@ -214,6 +214,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
         projectName: projectName || (projectId ? 'Proyecto #' + projectId : 'Imputación activa'),
         taskId: taskId ? parseInt(taskId, 10) : null,
         taskName: taskName || '',
+        ticketId: ticketId ? parseInt(ticketId, 10) : 0,
         description: description || '',
         date: targetDate,
         status: 'running', // 'running' | 'paused'
@@ -273,6 +274,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
             project_name: state.projectName || '',
             task_id: state.taskId || 0,
             task_name: state.taskName || '',
+            ticket_id: state.ticketId || 0,
             timesheet_id: isNewTimesheet ? 0 : (parseInt(timesheetId, 10) || 0),
             description: state.description,
             unit_amount: initialHours,
@@ -1625,6 +1627,7 @@ async function syncActiveTimerFromOdoo() {
                         ? item.accumulated_ms
                         : Math.round((item.unit_amount || 0) * 3600 * 1000);
 
+                    const isItemAgy = Boolean(item.source === 'antigravity' || (typeof isAntigravityTask === 'function' && isAntigravityTask(item.task_name, item.description)));
                     const existing = window.__activeTimersMap.get(tsId);
                     if (!existing) {
                         window.__activeTimersMap.set(tsId, {
@@ -1638,7 +1641,9 @@ async function syncActiveTimerFromOdoo() {
                             startedAt: itemStartedAt,
                             lastStartTime: itemLocalStartTime,
                             accumulatedMs: itemAccumMs,
-                            unitAmount: item.unit_amount
+                            unitAmount: item.unit_amount,
+                            source: item.source || '',
+                            isAntigravity: isItemAgy
                         });
                     } else {
                         existing.status = item.is_running ? 'running' : 'paused';
@@ -1649,6 +1654,8 @@ async function syncActiveTimerFromOdoo() {
                             existing.accumulatedMs = itemAccumMs;
                         }
                         existing.unitAmount = item.unit_amount;
+                        existing.source = item.source || existing.source || '';
+                        existing.isAntigravity = isItemAgy || existing.isAntigravity;
                     }
                 }
 

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.45"
+	Version       = "1.2.53"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -153,6 +153,9 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 type Config struct {
 	OdooProjectID            int    `json:"odoo_project_id"`
 	OdooProjectName          string `json:"odoo_project_name"`
+	OdooTicketID             int    `json:"odoo_ticket_id,omitempty"`
+	OdooTicketRef            string `json:"odoo_ticket_ref,omitempty"`
+	OdooTaskID               int    `json:"odoo_task_id,omitempty"`
 	PlanesGoURL              string `json:"planesgo_url"`
 	AutoCreateTasks          bool   `json:"auto_create_tasks"`
 	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
@@ -360,7 +363,7 @@ func (c *PlanesGoClient) CheckStatus(projectID int, projectName string) (map[str
 }
 
 // SendTaskAction envía latido o stop a PlanesGo
-func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, projectID int, projectName, description, taskType string) (map[string]interface{}, error) {
+func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, projectID int, projectName, description, taskType, ticketCode string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/antigravity/update_tasks", c.BaseURL)
 
 	payload := map[string]interface{}{
@@ -371,9 +374,86 @@ func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, project
 		"project_name": projectName,
 		"description":  description,
 		"task_type":    taskType,
+		"ticket_code":  ticketCode,
 		"token":        c.Token,
 	}
 
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Antigravity-Token", c.Token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error de conexión con PlanesGo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var res map[string]interface{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		errMsg := "error desconocido"
+		if msg, ok := res["error"].(string); ok {
+			errMsg = msg
+		}
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+	}
+
+	return res, nil
+}
+
+// GetTicket consulta los datos de un ticket por referencia o ID
+func (c *PlanesGoClient) GetTicket(ticketRef string) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("%s/api/tickets?ref=%s", c.BaseURL, url.QueryEscape(ticketRef))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Antigravity-Token", c.Token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error de conexión con PlanesGo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var res map[string]interface{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		errMsg := "error desconocido"
+		if msg, ok := res["error"].(string); ok {
+			errMsg = msg
+		}
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+	}
+
+	return res, nil
+}
+
+// CloseTicket cierra definitivamente un ticket en Odoo a través de PlanesGo
+func (c *PlanesGoClient) CloseTicket(ticketRef, subject, description string) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("%s/api/tickets/close", c.BaseURL)
+	payload := map[string]interface{}{
+		"ticket_ref":  ticketRef,
+		"subject":     subject,
+		"description": description,
+	}
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -452,6 +532,39 @@ func (c *PlanesGoClient) ListTasks(projectID int, projectName string) ([]map[str
 	return tasks, nil
 }
 
+// saveConfigFile guarda la configuración en .planesgo.json (y custom/.planesgo.json si existe)
+func saveConfigFile(cfg Config, targetDir string) error {
+	if targetDir == "" {
+		if wd, err := os.Getwd(); err == nil && wd != "" {
+			targetDir = wd
+		} else if pwd := os.Getenv("PWD"); pwd != "" {
+			targetDir = pwd
+		}
+	}
+	targetDir, _ = filepath.Abs(targetDir)
+
+	data, mErr := json.MarshalIndent(cfg, "", "  ")
+	if mErr != nil {
+		return mErr
+	}
+	data = append(data, '\n')
+
+	mainFilePath := filepath.Join(targetDir, ".planesgo.json")
+	if err := os.WriteFile(mainFilePath, data, 0644); err != nil {
+		return err
+	}
+
+	customSubdir := filepath.Join(targetDir, "custom")
+	if info, err := os.Stat(customSubdir); err == nil && info.IsDir() {
+		customPath := filepath.Join(customSubdir, ".planesgo.json")
+		_ = os.WriteFile(customPath, data, 0644)
+	} else if filepath.Base(targetDir) == "custom" {
+		parentPath := filepath.Join(filepath.Dir(targetDir), ".planesgo.json")
+		_ = os.WriteFile(parentPath, data, 0644)
+	}
+	return nil
+}
+
 // executeToolCall ejecuta la herramienta solicitada por el protocolo MCP
 func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 	var customPath string
@@ -468,10 +581,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		return ToolCallResult{
 			Content: []ToolContent{{
 				Type: "text",
-				Text: fmt.Sprintf("❌ [Fase 0 BLOQUEO MANDATORIO]: Este proyecto no está vinculado con PlanesGo.\n" +
-					"- Detalle: %v\n" +
-					"- Acción requerida: Crear archivo .planesgo.json con odoo_project_id y odoo_project_name válidos.\n" +
-					"Queda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación, ejecución de comandos o desarrollo en este repositorio.", err),
+				Text: fmt.Sprintf("❌ PlanesGo: No vinculado (%v)", err),
 			}},
 			IsError: true,
 		}
@@ -503,14 +613,86 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 	switch name {
 	case "planesgo_check":
-		if cfg == nil || projID <= 0 {
+		ticketCode := ""
+		if val, ok := args["ticket_code"].(string); ok {
+			ticketCode = strings.TrimSpace(val)
+		}
+		if ticketCode == "" && cfg != nil && cfg.OdooTicketRef != "" {
+			ticketCode = cfg.OdooTicketRef
+		}
+
+		ticketInfoStr := ""
+		if ticketCode != "" {
+			tData, tErr := client.GetTicket(ticketCode)
+			if tErr != nil {
+				return ToolCallResult{
+					Content: []ToolContent{{
+						Type: "text",
+						Text: fmt.Sprintf("❌ Error al consultar ticket '%s': %v", ticketCode, tErr),
+					}},
+					IsError: true,
+				}
+			}
+			isClosed := false
+			if c, ok := tData["is_closed"].(bool); ok && c {
+				isClosed = true
+			}
+			if isClosed {
+				return ToolCallResult{
+					Content: []ToolContent{{
+						Type: "text",
+						Text: fmt.Sprintf("❌ El ticket '%s' está cerrado. Un ticket cerrado no se puede volver a abrir ni imputar tiempos.", ticketCode),
+					}},
+					IsError: true,
+				}
+			}
+
+			// Actualizar proyecto y tarea asociados al ticket
+			if tProj, ok := tData["project_id"].(map[string]interface{}); ok {
+				if idF, ok := tProj["id"].(float64); ok && int(idF) > 0 {
+					projID = int(idF)
+				}
+				if nameS, ok := tProj["name"].(string); ok && nameS != "" {
+					projName = nameS
+				}
+			}
+			ticketRefVal, _ := tData["ticket_ref"].(string)
+			if ticketRefVal == "" {
+				ticketRefVal = ticketCode
+			}
+			ticketNameVal, _ := tData["name"].(string)
+			ticketIDVal := 0
+			if idF, ok := tData["id"].(float64); ok {
+				ticketIDVal = int(idF)
+			}
+			taskIDVal := 0
+			if tTask, ok := tData["task_id"].(map[string]interface{}); ok {
+				if idF, ok := tTask["id"].(float64); ok && int(idF) > 0 {
+					taskIDVal = int(idF)
+				}
+			}
+
+			ticketInfoStr = fmt.Sprintf(" | Ticket: [%s] %s", ticketRefVal, ticketNameVal)
+
+			// Guardar el proyecto y la tarea asociada en .planesgo.json
+			if cfg == nil {
+				cfg = &Config{}
+			}
+			cfg.OdooProjectID = projID
+			cfg.OdooProjectName = projName
+			cfg.OdooTicketID = ticketIDVal
+			cfg.OdooTicketRef = ticketRefVal
+			if taskIDVal > 0 {
+				cfg.OdooTaskID = taskIDVal
+			}
+			_ = saveConfigFile(*cfg, customPath)
+		}
+
+		if (cfg == nil || projID <= 0) && ticketCode == "" {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: Este proyecto no está vinculado con PlanesGo.\n" +
-						"- Motivo: No se encontró el archivo .planesgo.json en este proyecto (o carece de odoo_project_id válido).\n" +
-						"- Acción requerida: Crear .planesgo.json con odoo_project_id y odoo_project_name antes de operar.\n" +
-						"Queda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación, ejecución de comandos o desarrollo en este repositorio.",
+					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -523,13 +705,12 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: fmt.Sprintf("❌ [Fase 0 BLOQUEO MANDATORIO]: Error en verificación con PlanesGo: %v\nQueda TERMINANTEMENTE PROHIBIDO realizar cualquier modificación o desarrollo en este repositorio.", err),
+					Text: fmt.Sprintf("❌ PlanesGo: %v", err),
 				}},
 				IsError: true,
 			}
 		}
 
-		userEmail, _ := res["user_email"].(string)
 		pName, _ := res["project_name"].(string)
 		if pName == "" {
 			pName = projName
@@ -576,8 +757,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = fmt.Sprintf("ID: %d", pID)
 		}
 
-		msg := fmt.Sprintf("✅ [PSF Prerrequisito OK] Conectado exitosamente a PlanesGo.\n- Servidor: %s\n- Empleado: %s\n- Proyecto: %s\n- Tarea de imputación: %s",
-			client.BaseURL, userEmail, projStr, taskName)
+		msg := fmt.Sprintf("✅ PlanesGo: %s%s | Tarea: %s", projStr, ticketInfoStr, taskName)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: msg}},
 			IsError: false,
@@ -588,7 +768,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se puede registrar latido. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).\nQueda TERMINANTEMENTE PROHIBIDO realizar modificaciones sin imputación horaria activa.",
+					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -597,9 +777,17 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		taskName, _ := args["task_name"].(string)
 		if taskName == "" {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: "❌ El argumento 'task_name' es obligatorio para enviar un latido"}},
+				Content: []ToolContent{{Type: "text", Text: "❌ PlanesGo: 'task_name' requerido"}},
 				IsError: true,
 			}
+		}
+
+		ticketCode := ""
+		if val, ok := args["ticket_code"].(string); ok {
+			ticketCode = strings.TrimSpace(val)
+		}
+		if ticketCode == "" && cfg != nil && cfg.OdooTicketRef != "" {
+			ticketCode = cfg.OdooTicketRef
 		}
 
 		desc, _ := args["description"].(string)
@@ -610,18 +798,20 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				taskID = int(idFloat)
 			}
 		}
+		if taskID <= 0 && cfg != nil && cfg.OdooTaskID > 0 {
+			taskID = cfg.OdooTaskID
+		}
 
 		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
 
-		res, err := client.SendTaskAction("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType)
+		_, err := client.SendTaskAction("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType, ticketCode)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al enviar latido a PlanesGo: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
 				IsError: true,
 			}
 		}
 
-		msg, _ := res["message"].(string)
 		projStr := projName
 		if projID > 0 && projName != "" {
 			projStr = fmt.Sprintf("%s (ID: %d)", projName, projID)
@@ -631,13 +821,12 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = "No detectado"
 		}
 
-		output := fmt.Sprintf("⏱️ [PlanesGo] Latido registrado con éxito.\n- Proyecto: %s\n- Tarea de imputación: %s\n- Tipo: %s", projStr, normalizedTaskName, canonicalType)
-		if desc != "" {
-			output += fmt.Sprintf("\n- Resumen del parte: %s", desc)
+		ticketPart := ""
+		if ticketCode != "" {
+			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
-		if msg != "" {
-			output += fmt.Sprintf("\n- Estado: %s", msg)
-		}
+
+		output := fmt.Sprintf("⏱️ PlanesGo: OK | %s%s | %s", projStr, ticketPart, normalizedTaskName)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
@@ -648,7 +837,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se puede cerrar imputación. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).",
+					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -663,6 +852,17 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				taskID = int(idFloat)
 			}
 		}
+		if taskID <= 0 && cfg != nil && cfg.OdooTaskID > 0 {
+			taskID = cfg.OdooTaskID
+		}
+
+		ticketCode := ""
+		if val, ok := args["ticket_code"].(string); ok {
+			ticketCode = strings.TrimSpace(val)
+		}
+		if ticketCode == "" && cfg != nil && cfg.OdooTicketRef != "" {
+			ticketCode = cfg.OdooTicketRef
+		}
 
 		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
 		finalDesc := strings.TrimSpace(desc)
@@ -670,15 +870,14 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			finalDesc = cleanAntigravityTaskName(taskName)
 		}
 
-		res, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType)
+		_, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType, ticketCode)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al detener tarea en PlanesGo: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
 				IsError: true,
 			}
 		}
 
-		msg, _ := res["message"].(string)
 		projStr := projName
 		if projID > 0 && projName != "" {
 			projStr = fmt.Sprintf("%s (ID: %d)", projName, projID)
@@ -688,12 +887,64 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			projStr = "No detectado"
 		}
 
-		output := fmt.Sprintf("⏹️ [PlanesGo] Tarea finalizada e imputada en Odoo.\n- Proyecto: %s\n- Tarea: %s\n- Tipo: %s\n- Resumen del parte: %s", projStr, normalizedTaskName, canonicalType, finalDesc)
-		if msg != "" {
-			output += fmt.Sprintf("\n- Estado: %s", msg)
+		ticketPart := ""
+		if ticketCode != "" {
+			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
+
+		output := fmt.Sprintf("⏹️ PlanesGo: Imputado | %s%s | %s: %s", projStr, ticketPart, normalizedTaskName, finalDesc)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
+			IsError: false,
+		}
+
+	case "planesgo_close_ticket":
+		ticketToClose := ""
+		if val, ok := args["ticket_code"].(string); ok {
+			ticketToClose = strings.TrimSpace(val)
+		}
+		if ticketToClose == "" && cfg != nil && cfg.OdooTicketRef != "" {
+			ticketToClose = cfg.OdooTicketRef
+		}
+		if ticketToClose == "" {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ Debe indicar 'ticket_code' para cerrar el ticket en Odoo.",
+				}},
+				IsError: true,
+			}
+		}
+
+		subject, _ := args["subject"].(string)
+		desc, _ := args["description"].(string)
+		if strings.TrimSpace(subject) == "" {
+			subject = "Resolución de ticket"
+		}
+
+		_, err := client.CloseTicket(ticketToClose, subject, desc)
+		if err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ Error al cerrar el ticket '%s': %v", ticketToClose, err),
+				}},
+				IsError: true,
+			}
+		}
+
+		// Si el ticket cerrado estaba en .planesgo.json, limpiarlo para evitar imputaciones posteriores
+		if cfg != nil && (cfg.OdooTicketRef == ticketToClose || strconv.Itoa(cfg.OdooTicketID) == ticketToClose) {
+			cfg.OdooTicketID = 0
+			cfg.OdooTicketRef = ""
+			_ = saveConfigFile(*cfg, customPath)
+		}
+
+		return ToolCallResult{
+			Content: []ToolContent{{
+				Type: "text",
+				Text: fmt.Sprintf("✅ Ticket %s cerrado definitivamente en Odoo.\n🔒 Nota: Un ticket cerrado no se puede volver a abrir ni imputar tiempos.", ticketToClose),
+			}},
 			IsError: false,
 		}
 
@@ -702,7 +953,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
-					Text: "❌ [Fase 0 BLOQUEO MANDATORIO]: No se pueden listar tareas. Este proyecto no está vinculado con PlanesGo (.planesgo.json no encontrado o sin odoo_project_id válido).",
+					Text: "❌ PlanesGo: No vinculado (.planesgo.json requerido)",
 				}},
 				IsError: true,
 			}
@@ -710,27 +961,27 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		tasks, err := client.ListTasks(projID, projName)
 		if err != nil {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al listar tareas: %v", err)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ PlanesGo: %v", err)}},
 				IsError: true,
 			}
 		}
 
 		if len(tasks) == 0 {
 			return ToolCallResult{
-				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No se encontraron tareas asignadas en Odoo para el proyecto %s (ID %d).", projName, projID)}},
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("📋 PlanesGo: Sin tareas en %s (ID %d)", projName, projID)}},
 				IsError: false,
 			}
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("📋 Tareas abiertas en Odoo para '%s' (ID %d):\n", projName, projID))
+		sb.WriteString(fmt.Sprintf("📋 Tareas %s (ID %d):\n", projName, projID))
 		for _, t := range tasks {
 			id, _ := t["id"].(float64)
 			name, _ := t["name"].(string)
 			sb.WriteString(fmt.Sprintf("- [%d] %s\n", int(id), name))
 		}
 		return ToolCallResult{
-			Content: []ToolContent{{Type: "text", Text: sb.String()}},
+			Content: []ToolContent{{Type: "text", Text: strings.TrimRight(sb.String(), "\n")}},
 			IsError: false,
 		}
 
@@ -849,29 +1100,17 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 
-		syncedFiles := []string{mainFilePath}
 		customSubdir := filepath.Join(targetDir, "custom")
 		if info, err := os.Stat(customSubdir); err == nil && info.IsDir() {
 			customPath := filepath.Join(customSubdir, ".planesgo.json")
-			if err := os.WriteFile(customPath, data, 0644); err == nil {
-				syncedFiles = append(syncedFiles, customPath)
-			}
+			_ = os.WriteFile(customPath, data, 0644)
 		} else if filepath.Base(targetDir) == "custom" {
 			parentPath := filepath.Join(filepath.Dir(targetDir), ".planesgo.json")
-			if err := os.WriteFile(parentPath, data, 0644); err == nil {
-				syncedFiles = append(syncedFiles, parentPath)
-			}
+			_ = os.WriteFile(parentPath, data, 0644)
 		}
 
-		var sb strings.Builder
-		sb.WriteString("✅ [PlanesGo] Configuración de proyecto vinculada con éxito:\n")
-		sb.WriteString(fmt.Sprintf("- Proyecto: %s (ID Odoo: %d)\n", resolvedName, resolvedID))
-		sb.WriteString(fmt.Sprintf("- Servidor: %s\n", apiURL))
-		sb.WriteString(fmt.Sprintf("- Archivos configurados: %s\n", strings.Join(syncedFiles, ", ")))
-		sb.WriteString("- Estado: Vinculación activa y operativa para imputación horaria.")
-
 		return ToolCallResult{
-			Content: []ToolContent{{Type: "text", Text: sb.String()}},
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("✅ PlanesGo: %s (ID: %d) vinculado", resolvedName, resolvedID)}},
 			IsError: false,
 		}
 
@@ -887,7 +1126,7 @@ func getToolsDefinition() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "planesgo_check",
-			"description": "Comprueba el estado de conexión con PlanesGo y Odoo para el proyecto actual (Fase 0 mandatoria de PSF). Valida el token, la vinculación del proyecto y la tarea sobre la que se imputará.",
+			"description": "Comprueba el estado de conexión con PlanesGo y Odoo para el proyecto actual (Fase 0 mandatoria de PSF). Valida el token, la vinculación del proyecto y la tarea sobre la que se imputará. Permite indicar opcionalmente un ticket de soporte para vincular automáticamente su proyecto y tarea.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -899,6 +1138,10 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"enum":        []string{"Análisis y diseño", "Desarrollo", "Pruebas"},
 						"description": "Tipo normalizado de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional, se infiere automáticamente si se omite)",
+					},
+					"ticket_code": map[string]interface{}{
+						"type":        "string",
+						"description": "Código o referencia del ticket de soporte en Odoo (ej. T00042 o ID numérico). Al indicarlo, se obtendrá y vinculará automáticamente el proyecto y la tarea correspondiente al ticket.",
 					},
 					"project_id": map[string]interface{}{
 						"type":        "integer",
@@ -934,6 +1177,10 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "integer",
 						"description": "ID numérico de la tarea en Odoo si ya existe (opcional)",
 					},
+					"ticket_code": map[string]interface{}{
+						"type":        "string",
+						"description": "Código del ticket de soporte al que imputar horas (opcional, se usa el vinculado en .planesgo.json)",
+					},
 					"description": map[string]interface{}{
 						"type":        "string",
 						"description": "Resumen breve del trabajo o progreso actual para el parte de horas en Odoo",
@@ -965,6 +1212,10 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "integer",
 						"description": "ID numérico de la tarea a detener (opcional)",
 					},
+					"ticket_code": map[string]interface{}{
+						"type":        "string",
+						"description": "Código del ticket de soporte al que imputar las horas finales (opcional)",
+					},
 					"description": map[string]interface{}{
 						"type":        "string",
 						"description": "Resumen breve, claro y sustantivo del trabajo realizado para el parte de horas en Odoo",
@@ -974,6 +1225,32 @@ func getToolsDefinition() []map[string]interface{} {
 						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
 					},
 				},
+			},
+		},
+		{
+			"name":        "planesgo_close_ticket",
+			"description": "Cierra definitivamente un ticket de soporte en Odoo (helpdesk.ticket) registrando un mensaje en el chatter. Un ticket cerrado no se puede volver a abrir ni imputar tiempos.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"ticket_code": map[string]interface{}{
+						"type":        "string",
+						"description": "Código de referencia del ticket (ej: T00042) o ID numérico a cerrar definitivamente.",
+					},
+					"subject": map[string]interface{}{
+						"type":        "string",
+						"description": "Asunto o resumen de la resolución del ticket para el chatter de Odoo",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "Descripción detallada del cierre y solución aplicada",
+					},
+					"project_path": map[string]interface{}{
+						"type":        "string",
+						"description": "Ruta al directorio del proyecto (opcional)",
+					},
+				},
+				"required": []string{"ticket_code"},
 			},
 		},
 		{
@@ -1027,8 +1304,6 @@ func runMCPServer() {
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	fmt.Fprintf(os.Stderr, "[planesgo-mcp] Servidor MCP iniciado v%s (stdio)\n", Version)
-
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(bytes.TrimSpace(line)) == 0 {
@@ -1037,7 +1312,6 @@ func runMCPServer() {
 
 		var req JSONRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
-			fmt.Fprintf(os.Stderr, "[planesgo-mcp] Error parseando request JSON-RPC: %v\n", err)
 			continue
 		}
 
@@ -1062,7 +1336,6 @@ func runMCPServer() {
 
 		case "notifications/initialized":
 			// Notificación del cliente: no requiere respuesta
-			fmt.Fprintf(os.Stderr, "[planesgo-mcp] Handshake MCP completado con cliente\n")
 
 		case "ping":
 			sendResponse(JSONRPCResponse{
@@ -1108,7 +1381,7 @@ func runMCPServer() {
 					ID:      req.ID,
 					Error: &RPCError{
 						Code:    -32601,
-						Message: fmt.Sprintf("Método '%s' no implementado", req.Method),
+						Message: fmt.Sprintf("Método no implementado: %s", req.Method),
 					},
 				})
 			}
@@ -1142,6 +1415,9 @@ func main() {
 	typeFlag := flag.String("type", "", "Tipo de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional)")
 	descFlag := flag.String("desc", "", "Descripción del trabajo")
 	pathFlag := flag.String("path", "", "Ruta personalizada al proyecto (opcional)")
+	ticketFlag := flag.String("ticket", "", "Código de ticket de soporte (ej: T00042 o ID numérico)")
+	closeTicketFlag := flag.String("close-ticket", "", "Código de ticket a cerrar definitivamente en Odoo")
+	subjectFlag := flag.String("subject", "", "Asunto o resolución del ticket para el cierre")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
 
@@ -1153,6 +1429,25 @@ func main() {
 	}
 
 	// Modo CLI directo
+	if *closeTicketFlag != "" {
+		args := map[string]interface{}{
+			"ticket_code": *closeTicketFlag,
+			"subject":     *subjectFlag,
+			"description": *descFlag,
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		res := executeToolCall("planesgo_close_ticket", args)
+		if len(res.Content) > 0 {
+			fmt.Println(res.Content[0].Text)
+		}
+		if res.IsError {
+			os.Exit(1)
+		}
+		return
+	}
+
 	if *checkFlag {
 		args := map[string]interface{}{}
 		if *taskFlag != "" {
@@ -1163,6 +1458,9 @@ func main() {
 		}
 		if *descFlag != "" {
 			args["description"] = *descFlag
+		}
+		if *ticketFlag != "" {
+			args["ticket_code"] = *ticketFlag
 		}
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag
@@ -1189,6 +1487,9 @@ func main() {
 		if *typeFlag != "" {
 			args["task_type"] = *typeFlag
 		}
+		if *ticketFlag != "" {
+			args["ticket_code"] = *ticketFlag
+		}
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag
 		}
@@ -1209,6 +1510,9 @@ func main() {
 		}
 		if *typeFlag != "" {
 			args["task_type"] = *typeFlag
+		}
+		if *ticketFlag != "" {
+			args["ticket_code"] = *ticketFlag
 		}
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag

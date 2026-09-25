@@ -68,10 +68,71 @@
         .express-card-running .text-sky-400 {
             color: #a7f3d0 !important;
         }
+        .express-card-running-agy {
+            background: linear-gradient(135deg, #4c1d95 0%, #3b0764 40%, #1e1b4b 100%) !important;
+            border: 2px solid #c084fc !important;
+            animation: expressAgyPulse 3s ease-in-out infinite;
+        }
+        .express-card-running-agy .express-card-title {
+            color: #faf5ff !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .express-card-running-agy .border-t {
+            border-color: rgba(192, 132, 252, 0.35) !important;
+        }
+        .express-card-running-agy .text-sky-400 {
+            color: #d8b4fe !important;
+        }
+        @keyframes expressAgyPulse {
+            0%, 100% {
+                box-shadow: 0 0 20px -2px rgba(168, 85, 247, 0.45), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+                border-color: #c084fc;
+            }
+            50% {
+                box-shadow: 0 0 32px 3px rgba(192, 132, 252, 0.7), 0 10px 24px -4px rgba(0, 0, 0, 0.6);
+                border-color: #d8b4fe;
+            }
+        }
+        @keyframes expressConfirmPulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+            }
+            50% {
+                transform: scale(1.02);
+                box-shadow: 0 0 28px rgba(245, 158, 11, 0.95);
+            }
+        }
+        .express-card-confirming {
+            border: 2px solid #f59e0b !important;
+            animation: expressConfirmPulse 1s ease-in-out infinite !important;
+        }
         .express-card-paused {
             background: linear-gradient(135deg, #78350f 0%, #451a03 50%, #1e293b 100%) !important;
             border: 2px solid #fbbf24 !important;
             box-shadow: 0 0 18px -2px rgba(245, 158, 11, 0.35) !important;
+        }
+        @keyframes ticketActivePulse {
+            0%, 100% {
+                box-shadow: 0 0 20px -2px rgba(245, 158, 11, 0.45), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+                border-color: #fbbf24;
+            }
+            50% {
+                box-shadow: 0 0 32px 3px rgba(251, 191, 36, 0.7), 0 10px 24px -4px rgba(0, 0, 0, 0.6);
+                border-color: #fde68a;
+            }
+        }
+        .ticket-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .ticket-card-running {
+            background: linear-gradient(135deg, #78350f 0%, #451a03 40%, #022c22 100%) !important;
+            border: 2px solid #fbbf24 !important;
+            animation: ticketActivePulse 3s ease-in-out infinite;
+        }
+        .ticket-card-running .ticket-card-title {
+            color: #fef3c7 !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
         }
     </style>
 </head>
@@ -90,6 +151,7 @@
          data-project-name="{{.ActiveTimer.ProjectName}}"
          data-task-id="{{.ActiveTimer.TaskID}}"
          data-task-name="{{.ActiveTimer.TaskName}}"
+         data-ticket-id="{{.ActiveTimer.TicketID}}"
          data-desc="{{.ActiveTimer.Description}}"
          data-accumulated-ms="{{.ActiveTimer.AccumulatedMs}}"
          data-started-at="{{.ActiveTimer.StartedAt}}"
@@ -138,8 +200,33 @@
         </div>
     </header>
 
+    <!-- Selector de Pestañas: [ ⚡ Express ] y [ 🎫 Tickets ] (a su derecha) -->
+    <div class="px-3 pt-2.5 pb-2 shrink-0 bg-slate-900/80 border-b border-slate-800/90 flex items-center justify-between">
+        <div class="inline-flex p-1 bg-slate-950/80 rounded-xl border border-slate-800 space-x-1" role="tablist">
+            <!-- Pestaña Express -->
+            <button type="button" id="tab-btn-express" onclick="switchExpressTab('express')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer bg-sky-600 text-white shadow-sm"
+                    role="tab" aria-selected="true">
+                <span class="text-amber-400">⚡</span>
+                <span>Express</span>
+                <span id="express-tab-count-badge" class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-sky-950/80 text-sky-200 border border-sky-400/30">0</span>
+            </button>
+            <!-- Pestaña Tickets (A la derecha de la pestaña Express) -->
+            <button type="button" id="tab-btn-tickets" onclick="switchExpressTab('tickets')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all flex items-center space-x-1.5 cursor-pointer"
+                    role="tab" aria-selected="false">
+                <span>🎫</span>
+                <span>Tickets</span>
+                <span id="tickets-tab-count-badge" class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-slate-800 text-amber-300 border border-amber-500/30">0</span>
+            </button>
+        </div>
+        <div class="flex items-center space-x-2">
+            <span id="tab-subtitle-indicator" class="text-[11px] font-medium text-slate-400 font-mono hidden sm:inline">Tareas recientes</span>
+        </div>
+    </div>
+
     <!-- Barra de búsqueda minimalista -->
-    <div class="px-3 pt-2.5 pb-2.5 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
+    <div class="px-3 pt-2 pb-2 shrink-0 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex items-center gap-2">
         <div class="relative flex-1">
             <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,18 +245,18 @@
                 </svg>
             </button>
         </div>
-        <button type="button" onclick="loadExpressTimesheets(true)"
+        <button type="button" onclick="reloadCurrentTab(true)"
                 class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 active:scale-95 transition cursor-pointer shrink-0"
-                title="Recargar tareas">
+                title="Recargar">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
         </button>
     </div>
 
-    <!-- Cuerpo principal de la botonera con scroll fluido nativo -->
+    <!-- Cuerpo principal con scroll fluido nativo -->
     <main id="express-main-scroll" class="flex-1 overflow-y-auto p-2.5 sm:p-3 relative">
-        <!-- Estado de carga -->
+        <!-- VISTA EXPRESS: Estado de carga -->
         <div id="express-loading-state" class="flex flex-col items-center justify-center py-16 space-y-3">
             <svg class="animate-spin h-7 w-7 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -178,7 +265,7 @@
             <span class="text-xs text-slate-400 font-medium tracking-wide">Cargando botonera...</span>
         </div>
 
-        <!-- Estado vacío -->
+        <!-- VISTA EXPRESS: Estado vacío -->
         <div id="express-empty-state" class="hidden flex flex-col items-center justify-center py-16 text-center p-4">
             <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-slate-500 flex items-center justify-center mb-3">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -189,9 +276,222 @@
             <p class="text-xs text-slate-500 mt-1">Imputa desde la web o usa el buscador</p>
         </div>
 
-        <!-- Cuadrícula responsive de botones de tarea a 1 columna (igual que móvil) -->
+        <!-- VISTA EXPRESS: Cuadrícula responsive de botones de tarea a 1 columna -->
         <div id="express-grid-container" class="grid grid-cols-1 gap-2 sm:gap-2.5 max-w-xl mx-auto"></div>
+
+        <!-- VISTA TICKETS: Estado de carga -->
+        <div id="tickets-loading-state" class="hidden flex flex-col items-center justify-center py-16 space-y-3">
+            <svg class="animate-spin h-7 w-7 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-xs text-slate-400 font-medium tracking-wide">Cargando tickets pendientes...</span>
+        </div>
+
+        <!-- VISTA TICKETS: Estado vacío -->
+        <div id="tickets-empty-state" class="hidden flex flex-col items-center justify-center py-16 text-center p-4">
+            <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-amber-500/80 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/>
+                </svg>
+            </div>
+            <p class="text-sm font-semibold text-slate-300">Sin tickets pendientes</p>
+            <p class="text-xs text-slate-500 mt-1">No tienes tickets abiertos asignados en Helpdesk</p>
+        </div>
+
+        <!-- VISTA TICKETS: Cuadrícula responsive de tarjetas de tickets a 1 columna -->
+        <div id="tickets-grid-container" class="hidden grid grid-cols-1 gap-2.5 sm:gap-3 max-w-xl mx-auto"></div>
     </main>
+
+    <!-- Botón Flotante FAB (Material Design +) para Nuevo Ticket Rápido -->
+    <button type="button" id="fab-create-ticket" onclick="openCreateTicketModal()"
+            class="hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-2xl flex items-center justify-center cursor-pointer transition transform hover:scale-105 active:scale-95 ring-4 ring-sky-900/40 focus:outline-none"
+            title="Crear Nuevo Ticket Rápido">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+        </svg>
+    </button>
+
+    <!-- Modal Creación Rápida de Ticket (Material Design) -->
+    <div id="modal-create-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <!-- Header -->
+            <div class="px-5 py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+                        🎫
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Nuevo Ticket de Soporte</h3>
+                        <p class="text-[11px] text-slate-400">Creación rápida en Helpdesk de Odoo</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeCreateTicketModal()" class="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <!-- Formulario con scroll -->
+            <form id="form-create-ticket" onsubmit="submitCreateTicket(event)" class="p-5 space-y-3.5 overflow-y-auto">
+                <!-- Usuario asignado = usuario logueado (fijo / readonly) -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1">Usuario Asignado</label>
+                    <div class="flex items-center space-x-2 px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-slate-300 text-xs">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span class="font-semibold">{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Usuario actual{{end}}</span>
+                        <span class="ml-auto text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">Tú (Asignado)</span>
+                    </div>
+                </div>
+
+                <!-- Proyecto -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-project">
+                        Proyecto <span class="text-rose-400">*</span>
+                    </label>
+                    <select id="create-ticket-project" onchange="onTicketModalProjectChange(this.value)" required
+                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                        <option value="">-- Selecciona un proyecto --</option>
+                    </select>
+                </div>
+
+                <!-- Tarea en el proyecto -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-task">
+                        Tarea asociada
+                    </label>
+                    <select id="create-ticket-task"
+                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                        <option value="">-- Sin tarea específica asignada --</option>
+                    </select>
+                </div>
+
+                <!-- Contacto que solicita el ticket -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-partner">
+                        Contacto solicitante
+                    </label>
+                    <select id="create-ticket-partner"
+                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                        <option value="">-- Sin contacto específico / Cliente de proyecto --</option>
+                    </select>
+                </div>
+
+                <!-- Prioridad (Estrellas) -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1">Prioridad del Ticket</label>
+                    <div class="flex items-center space-x-2">
+                        <div id="ticket-priority-stars" class="inline-flex items-center space-x-1.5 bg-slate-850 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer select-none">
+                            <span data-star="1" onclick="setTicketPriorityStar(1)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
+                            <span data-star="2" onclick="setTicketPriorityStar(2)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
+                            <span data-star="3" onclick="setTicketPriorityStar(3)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
+                        </div>
+                        <span id="ticket-priority-label" class="text-xs text-slate-400 font-medium">Baja (0★)</span>
+                        <input type="hidden" id="create-ticket-priority" value="0">
+                    </div>
+                </div>
+
+                <!-- Título / Asunto del Ticket -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-name">
+                        Título / Asunto <span class="text-rose-400">*</span>
+                    </label>
+                    <input type="text" id="create-ticket-name" required placeholder="Ej: Error al emitir factura en cliente"
+                           class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                </div>
+
+                <!-- Descripción detallada -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-desc">
+                        Descripción detallada
+                    </label>
+                    <textarea id="create-ticket-desc" rows="3" placeholder="Detalla el problema, pasos para reproducir o requerimiento..."
+                              class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100 resize-none"></textarea>
+                </div>
+
+                <!-- Botones Acción -->
+                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0">
+                    <button type="button" onclick="closeCreateTicketModal()"
+                            class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition">
+                        Cancelar
+                    </button>
+                    <button type="submit" id="btn-submit-create-ticket"
+                            class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold cursor-pointer transition shadow-md flex items-center space-x-1.5">
+                        <span id="btn-create-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
+                            <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </span>
+                        <span id="btn-create-ticket-label">Crear Ticket</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Cerrar Ticket Definitivamente -->
+    <div id="modal-close-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <!-- Header -->
+            <div class="px-5 py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold">
+                        🔒
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Cerrar Ticket Definitivamente</h3>
+                        <p class="text-[11px] text-slate-400" id="close-ticket-ref-title">Ticket #</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeCloseTicketModal()" class="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <!-- Body -->
+            <form id="form-close-ticket" onsubmit="submitCloseTicket(event)" class="p-5 space-y-3.5">
+                <input type="hidden" id="close-ticket-id" value="">
+                <input type="hidden" id="close-ticket-ref" value="">
+
+                <!-- Alerta de Inmutabilidad Absoluta -->
+                <div class="p-3 bg-amber-950/40 border border-amber-600/50 rounded-xl text-amber-200 text-xs flex items-start space-x-2">
+                    <span class="text-base shrink-0">⚠️</span>
+                    <p class="leading-relaxed">
+                        <strong>Atención:</strong> Un ticket cerrado no se puede volver a abrir ni en PlanesGo ni con el plugin.
+                    </p>
+                </div>
+
+                <!-- Asunto del cierre -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="close-ticket-subject">
+                        Asunto / Motivo de Cierre <span class="text-rose-400">*</span>
+                    </label>
+                    <input type="text" id="close-ticket-subject" required placeholder="Ej: Incidencia resuelta satisfactoriamente"
+                           class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                </div>
+
+                <!-- Descripción del trabajo realizado -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="close-ticket-description">
+                        Descripción de la Solución
+                    </label>
+                    <textarea id="close-ticket-description" rows="3" placeholder="Resume la solución o acciones realizadas para el chatter..."
+                              class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100 resize-none"></textarea>
+                </div>
+
+                <!-- Botones Acción -->
+                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0">
+                    <button type="button" onclick="closeCloseTicketModal()"
+                            class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition">
+                        Cancelar
+                    </button>
+                    <button type="submit" id="btn-submit-close-ticket"
+                            class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer transition shadow-md flex items-center space-x-1.5">
+                        <span id="btn-close-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
+                            <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </span>
+                        <span id="btn-close-ticket-label">Dar por Cerrado</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- Toast de notificaciones flotante -->
     <div id="toast-container" class="fixed bottom-3 right-3 z-50 pointer-events-none space-y-2"></div>
@@ -237,8 +537,17 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Inicializar carga de la botonera Express
-            loadExpressTimesheets();
+            // Inicializar carga de la botonera Express o Tickets según query param ?tab=tickets
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('tab') === 'tickets') {
+                switchExpressTab('tickets');
+            } else {
+                loadExpressTimesheets();
+                // Pre-cargar conteo silencioso de tickets para el badge
+                if (typeof loadTicketsView === 'function') {
+                    loadTicketsView(false);
+                }
+            }
 
             // Sincronización entre pestañas / ventanas mediante storage event
             window.addEventListener('storage', function(e) {

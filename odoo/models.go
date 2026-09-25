@@ -70,6 +70,7 @@ type TimesheetEntry struct {
 	IsTimerRunning     bool        `json:"is_timer_running"`
 	Tags               []Tag       `json:"tags,omitempty"`
 	TagIDs             []int       `json:"tag_ids,omitempty"`
+	HelpdeskTicketID   Many2One    `json:"helpdesk_ticket_id,omitempty"`
 }
 
 // IsInvoiced indica si la imputación de horas ya ha sido facturada en Odoo.
@@ -283,17 +284,20 @@ type Employee struct {
 
 // Ticket representa un ticket de soporte/helpdesk en Odoo (helpdesk.ticket).
 type Ticket struct {
-	ID          int      `json:"id"`
-	Name        string   `json:"name"`
-	TicketRef   string   `json:"ticket_ref,omitempty"`
-	StageID     Many2One `json:"stage_id"`
-	UserID      Many2One `json:"user_id"`
-	PartnerID   Many2One `json:"partner_id"`
-	ProjectID   Many2One `json:"project_id"`
-	Priority    string   `json:"priority,omitempty"`
-	CreateDate  string   `json:"create_date,omitempty"`
-	CloseDate   string   `json:"close_date,omitempty"`
-	KanbanState string   `json:"kanban_state,omitempty"`
+	ID              int      `json:"id"`
+	Name            string   `json:"name"`
+	TicketRef       string   `json:"ticket_ref,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	StageID         Many2One `json:"stage_id"`
+	UserID          Many2One `json:"user_id"`
+	PartnerID       Many2One `json:"partner_id"`
+	ProjectID       Many2One `json:"project_id"`
+	TaskID          Many2One `json:"task_id,omitempty"`
+	Priority        string   `json:"priority,omitempty"`
+	CreateDate      string   `json:"create_date,omitempty"`
+	CloseDate       string   `json:"close_date,omitempty"`
+	KanbanState     string   `json:"kanban_state,omitempty"`
+	TotalHoursSpent float64  `json:"total_hours_spent,omitempty"`
 }
 
 func (t *Ticket) DisplayTitle() string {
@@ -331,6 +335,44 @@ func (t *Ticket) ProjectIDValue() int {
 	return t.ProjectID.ID
 }
 
+func (t *Ticket) TaskName() string {
+	if t.TaskID.Name != "" {
+		return t.TaskID.Name
+	}
+	return ""
+}
+
+func (t *Ticket) TaskIDValue() int {
+	return t.TaskID.ID
+}
+
+func (t *Ticket) PriorityStars() int {
+	switch strings.TrimSpace(t.Priority) {
+	case "3":
+		return 3
+	case "2":
+		return 2
+	case "1":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (t *Ticket) IsClosed() bool {
+	if t.CloseDate != "" && t.CloseDate != "false" {
+		return true
+	}
+	sName := strings.ToLower(t.StageName())
+	closedKeywords := []string{"cerrad", "solucion", "cancel", "done", "closed", "solved", "resuelto"}
+	for _, kw := range closedKeywords {
+		if strings.Contains(sName, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *Ticket) FormattedDate() string {
 	if len(t.CreateDate) >= 10 {
 		return t.CreateDate[:10]
@@ -346,6 +388,9 @@ type ActiveTimer struct {
 	ProjectID     int      `json:"project_id"`
 	ProjectName   string   `json:"project_name"`
 	TaskName      string   `json:"task_name"`
+	TicketID      int      `json:"ticket_id,omitempty"`
+	TicketRef     string   `json:"ticket_ref,omitempty"`
+	TicketName    string   `json:"ticket_name,omitempty"`
 	Description   string   `json:"description"`
 	IsRunning     bool     `json:"is_running"`
 	StartedAt     int64    `json:"started_at"`      // Timestamp unix en milisegundos
@@ -388,3 +433,12 @@ func (t *ActiveTimer) CleanTaskName() string {
 	}
 	return name
 }
+
+// Partner representa un contacto o cliente de Odoo (res.partner)
+type Partner struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+

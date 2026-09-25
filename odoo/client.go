@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"pasigo/config"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1001,7 +1002,9 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 		"user_id",
 		"partner_id",
 		"project_id",
+		"task_id",
 		"priority",
+		"description",
 		"create_date",
 		"close_date",
 		"kanban_state",
@@ -1028,7 +1031,13 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
-		// Fallback 1: Si falla close_date en el dominio, intentar solo con user_id
+		// Fallback 1: Si falla task_id o description, intentar con campos estándar
+		if err != nil {
+			fallbackFields := []string{"id", "name", "ticket_ref", "stage_id", "user_id", "partner_id", "project_id", "priority", "description", "create_date", "close_date"}
+			kwargs["fields"] = fallbackFields
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+		// Fallback 2: Si falla close_date en el dominio, intentar solo con user_id
 		if err != nil {
 			fallbackDomain := []interface{}{
 				[]interface{}{"user_id", "=", targetUID},
@@ -1038,7 +1047,7 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 			args[5] = []interface{}{fallbackDomain}
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
-		// Fallback 2: Si el modelo helpdesk.ticket no existe o no hay permisos, retornar vacío sin error fatal
+		// Fallback 3: Si el modelo helpdesk.ticket no existe o no hay permisos, retornar vacío sin error fatal
 		if err != nil {
 			log.Printf("[ODOO INFO] Modelo helpdesk.ticket no disponible o sin tickets: %v", err)
 			return []Ticket{}, nil
@@ -1072,6 +1081,46 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 		pending = append(pending, t)
 	}
 
+	// Calcular tiempo acumulado (account.analytic.line con helpdesk_ticket_id)
+	if len(pending) > 0 {
+		ticketIDs := make([]int, len(pending))
+		for i, t := range pending {
+			ticketIDs[i] = t.ID
+		}
+		aalDomain := []interface{}{
+			[]interface{}{"helpdesk_ticket_id", "in", ticketIDs},
+		}
+		aalArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"search_read",
+			[]interface{}{aalDomain},
+		}
+		aalKwargs := map[string]interface{}{
+			"fields": []string{"helpdesk_ticket_id", "unit_amount"},
+			"limit":  200,
+		}
+		if aalRaw, aalErr := c.call(ctx, "object", "execute_kw", aalArgs, aalKwargs); aalErr == nil {
+			var aalEntries []struct {
+				Ticket Many2One `json:"helpdesk_ticket_id"`
+				Hours  float64  `json:"unit_amount"`
+			}
+			if json.Unmarshal(aalRaw, &aalEntries) == nil {
+				spentMap := make(map[int]float64)
+				for _, entry := range aalEntries {
+					if entry.Ticket.ID > 0 {
+						spentMap[entry.Ticket.ID] += entry.Hours
+					}
+				}
+				for i := range pending {
+					pending[i].TotalHoursSpent = spentMap[pending[i].ID]
+				}
+			}
+		}
+	}
+
 	c.mu.Lock()
 	c.ticketsCache = make([]Ticket, len(pending))
 	copy(c.ticketsCache, pending)
@@ -1079,6 +1128,249 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	c.mu.Unlock()
 
 	return pending, nil
+}
+
+// GetTicketByRefOrID busca un ticket en Odoo por su ID numérico o su secuencia/referencia ticket_ref o nombre.
+func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticket, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar ticket: %w", err)
+	}
+
+	trimmed := strings.TrimSpace(refOrID)
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	if trimmed == "" {
+		return nil, errors.New("identificador o código de ticket vacío")
+	}
+
+	var domain []interface{}
+	if idNum, err := strconv.Atoi(trimmed); err == nil && idNum > 0 {
+		domain = []interface{}{
+			"|",
+			[]interface{}{"id", "=", idNum},
+			[]interface{}{"ticket_ref", "=", trimmed},
+		}
+	} else {
+		domain = []interface{}{
+			"|",
+			[]interface{}{"ticket_ref", "=", trimmed},
+			[]interface{}{"name", "ilike", trimmed},
+		}
+	}
+
+	fields := []string{
+		"id",
+		"name",
+		"ticket_ref",
+		"description",
+		"stage_id",
+		"user_id",
+		"partner_id",
+		"project_id",
+		"task_id",
+		"priority",
+		"create_date",
+		"close_date",
+		"kanban_state",
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"search_read",
+		[]interface{}{domain},
+	}
+	kwargs := map[string]interface{}{
+		"fields": fields,
+		"limit":  1,
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		fallbackFields := []string{"id", "name", "ticket_ref", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date", "close_date"}
+		kwargs["fields"] = fallbackFields
+		resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		if err != nil {
+			return nil, fmt.Errorf("error al buscar ticket %s: %w", trimmed, err)
+		}
+	}
+
+	var tickets []Ticket
+	if err := json.Unmarshal(resultRaw, &tickets); err != nil || len(tickets) == 0 {
+		return nil, fmt.Errorf("ticket '%s' no encontrado", trimmed)
+	}
+
+	ticket := tickets[0]
+	return &ticket, nil
+}
+
+// CreateTicket crea un nuevo ticket en Helpdesk (helpdesk.ticket).
+func (c *Client) CreateTicket(ctx context.Context, vals map[string]interface{}) (int, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("no se pudo autenticar antes de crear ticket: %w", err)
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"create",
+		[]interface{}{vals},
+	}
+
+	resultRaw, err := c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		return 0, fmt.Errorf("error al crear ticket en Odoo: %w", err)
+	}
+
+	var newID int
+	if err := json.Unmarshal(resultRaw, &newID); err == nil && newID > 0 {
+		return newID, nil
+	}
+	var ids []int
+	if err := json.Unmarshal(resultRaw, &ids); err == nil && len(ids) > 0 {
+		return ids[0], nil
+	}
+
+	return 0, fmt.Errorf("respuesta inválida al crear ticket: %s", string(resultRaw))
+}
+
+// CloseTicket marca un ticket como cerrado en Odoo e impide cualquier reapertura posterior.
+func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, description string) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return fmt.Errorf("no se pudo autenticar antes de cerrar ticket: %w", err)
+	}
+
+	if ticketID <= 0 {
+		return errors.New("ID de ticket inválido")
+	}
+
+	// 1. Verificar estado actual del ticket
+	argsCheck := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"search_read",
+		[]interface{}{[]interface{}{[]interface{}{"id", "=", ticketID}}},
+	}
+	kwargsCheck := map[string]interface{}{
+		"fields": []string{"id", "name", "stage_id", "team_id", "close_date"},
+		"limit":  1,
+	}
+
+	checkRaw, err := c.call(ctx, "object", "execute_kw", argsCheck, kwargsCheck)
+	if err != nil {
+		return fmt.Errorf("error al verificar estado del ticket: %w", err)
+	}
+
+	var tickets []struct {
+		ID        int      `json:"id"`
+		Name      string   `json:"name"`
+		StageID   Many2One `json:"stage_id"`
+		TeamID    Many2One `json:"team_id"`
+		CloseDate string   `json:"close_date"`
+	}
+	if err := json.Unmarshal(checkRaw, &tickets); err != nil || len(tickets) == 0 {
+		return fmt.Errorf("ticket %d no encontrado", ticketID)
+	}
+
+	t := tickets[0]
+	if t.CloseDate != "" && t.CloseDate != "false" {
+		return errors.New("el ticket ya se encuentra cerrado y no se puede volver a abrir")
+	}
+
+	// 2. Buscar etapa de cierre (fold = True)
+	var closedStageID int
+	stageDomain := []interface{}{
+		[]interface{}{"fold", "=", true},
+	}
+	if t.TeamID.ID > 0 {
+		stageDomain = []interface{}{
+			"&",
+			[]interface{}{"team_ids", "in", []int{t.TeamID.ID}},
+			[]interface{}{"fold", "=", true},
+		}
+	}
+	stageArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.stage",
+		"search_read",
+		[]interface{}{stageDomain},
+	}
+	stageKwargs := map[string]interface{}{
+		"fields": []string{"id", "name"},
+		"limit":  1,
+	}
+	if sRaw, sErr := c.call(ctx, "object", "execute_kw", stageArgs, stageKwargs); sErr == nil {
+		var stages []struct {
+			ID int `json:"id"`
+		}
+		if json.Unmarshal(sRaw, &stages) == nil && len(stages) > 0 {
+			closedStageID = stages[0].ID
+		}
+	}
+
+	// 3. Preparar valores de cierre
+	writeVals := map[string]interface{}{
+		"close_date": time.Now().UTC().Format("2006-01-02 15:04:05"),
+	}
+	if closedStageID > 0 {
+		writeVals["stage_id"] = closedStageID
+	}
+
+	writeArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"write",
+		[]interface{}{[]int{ticketID}, writeVals},
+	}
+
+	_, writeErr := c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	if writeErr != nil {
+		return fmt.Errorf("error al actualizar ticket a cerrado: %w", writeErr)
+	}
+
+	// 4. Registrar nota en el chatter con el asunto y descripción del cierre
+	noteText := strings.TrimSpace(description)
+	if subject != "" {
+		if noteText != "" {
+			noteText = fmt.Sprintf("<b>Cierre de Ticket: %s</b><br/>%s", subject, noteText)
+		} else {
+			noteText = fmt.Sprintf("<b>Ticket cerrado: %s</b>", subject)
+		}
+	}
+	if noteText != "" {
+		msgArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"helpdesk.ticket",
+			"message_post",
+			[]interface{}{ticketID},
+		}
+		msgKwargs := map[string]interface{}{
+			"body":         noteText,
+			"message_type": "comment",
+		}
+		_, _ = c.call(ctx, "object", "execute_kw", msgArgs, msgKwargs)
+	}
+
+	// Invalidar caché de tickets para refresco inmediato
+	c.mu.Lock()
+	c.ticketsCache = nil
+	c.mu.Unlock()
+
+	return nil
 }
 
 // CreateTask crea una nueva tarea en un proyecto en Odoo (project.task) asignada al trabajador.
@@ -1370,6 +1662,11 @@ func (c *Client) CreateTimesheet(ctx context.Context, date string, projectID int
 
 // CreateTimesheetExtended crea un nuevo parte de horas en Odoo indicando si proviene de Antigravity (Hora Máquina).
 func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, projectID int, taskID int, unitAmount float64, description string, isAntigravity bool) (int, error) {
+	return c.CreateTimesheetFull(ctx, date, projectID, taskID, 0, unitAmount, description, isAntigravity)
+}
+
+// CreateTimesheetFull crea un nuevo parte de horas en Odoo con soporte explícito para vincular helpdesk_ticket_id y si proviene de Antigravity.
+func (c *Client) CreateTimesheetFull(ctx context.Context, date string, projectID int, taskID int, ticketID int, unitAmount float64, description string, isAntigravity bool) (int, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("no se pudo autenticar antes de crear parte de horas: %w", err)
@@ -1397,6 +1694,9 @@ func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, proje
 	if taskID > 0 {
 		vals["task_id"] = taskID
 	}
+	if ticketID > 0 {
+		vals["helpdesk_ticket_id"] = ticketID
+	}
 	if isAntigravity {
 		vals["is_antigravity"] = true
 	}
@@ -1414,6 +1714,16 @@ func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, proje
 	if err != nil {
 		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
 			args[1] = newUID
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		// Fallback: Si falla por campo helpdesk_ticket_id no existente en el modelo Odoo
+		if err != nil && ticketID > 0 {
+			delete(vals, "helpdesk_ticket_id")
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		// Fallback: Si falla por is_antigravity
+		if err != nil && isAntigravity {
+			delete(vals, "is_antigravity")
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {
@@ -1436,6 +1746,11 @@ func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, proje
 
 // UpdateTimesheet actualiza un registro de horas existente en Odoo (account.analytic.line).
 func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date string, taskID int, unitAmount float64, description string) error {
+	return c.UpdateTimesheetWithTicket(ctx, timesheetID, date, taskID, 0, unitAmount, description)
+}
+
+// UpdateTimesheetWithTicket actualiza un registro de horas incluyendo ticket de soporte.
+func (c *Client) UpdateTimesheetWithTicket(ctx context.Context, timesheetID int, date string, taskID int, ticketID int, unitAmount float64, description string) error {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return fmt.Errorf("no se pudo autenticar antes de actualizar parte de horas: %w", err)
@@ -1460,6 +1775,9 @@ func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date stri
 	} else if taskID == -1 {
 		vals["task_id"] = false
 	}
+	if ticketID > 0 {
+		vals["helpdesk_ticket_id"] = ticketID
+	}
 
 	if len(vals) == 0 {
 		return nil
@@ -1481,6 +1799,10 @@ func (c *Client) UpdateTimesheet(ctx context.Context, timesheetID int, date stri
 	if err != nil {
 		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
 			args[1] = newUID
+			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil && ticketID > 0 {
+			delete(vals, "helpdesk_ticket_id")
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {
@@ -2042,3 +2364,51 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 
 	return nil, nil
 }
+
+// GetPartners busca contactos o clientes en res.partner
+func (c *Client) GetPartners(ctx context.Context, query string) ([]Partner, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	domain := []interface{}{}
+	if strings.TrimSpace(query) != "" {
+		q := strings.TrimSpace(query)
+		domain = append(domain, []interface{}{"name", "ilike", "%" + q + "%"})
+	}
+
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "name", "display_name", "email"},
+		"limit":  60,
+		"order":  "name asc",
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"res.partner",
+		"search_read",
+		[]interface{}{domain},
+	}
+
+	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		if newUID, aErr := c.ForceAuthenticate(ctx); aErr == nil {
+			uid = newUID
+			args[1] = uid
+			raw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var partners []Partner
+	if err := json.Unmarshal(raw, &partners); err != nil {
+		return nil, err
+	}
+	return partners, nil
+}
+

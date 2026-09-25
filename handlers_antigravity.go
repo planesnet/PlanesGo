@@ -20,6 +20,8 @@ type AntigravityTaskPayload struct {
 	TaskID          int     `json:"task_id"`
 	TaskName        string  `json:"task_name"`
 	TaskType        string  `json:"task_type,omitempty"` // "Desarrollo", "Análisis", "Ajustes", "Servidor", "Cliente"
+	TicketCode      string  `json:"ticket_code,omitempty"`
+	TicketID        int     `json:"ticket_id,omitempty"`
 	TimesheetID     int     `json:"timesheet_id"`
 	Description     string  `json:"description"`
 	Action          string  `json:"action"` // "heartbeat" (defecto), "start", "stop", "pause"
@@ -437,6 +439,41 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		userUID = client.UID()
 	}
 
+	// Resolución y validación estricta de ticket de soporte
+	if payload.TicketCode != "" || payload.TicketID > 0 {
+		refOrID := payload.TicketCode
+		if refOrID == "" {
+			refOrID = strconv.Itoa(payload.TicketID)
+		}
+		t, tErr := client.GetTicketByRefOrID(ctx, refOrID)
+		if tErr != nil || t == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("No se encontró el ticket '%s' en Odoo", refOrID),
+			})
+			return
+		}
+		if t.IsClosed() {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("El ticket %s (#%d) está cerrado. Un ticket cerrado no se puede volver a abrir ni imputar tiempos.", t.TicketRef, t.ID),
+			})
+			return
+		}
+		payload.TicketID = t.ID
+		payload.TicketCode = t.TicketRef
+		if payload.ProjectID <= 0 && t.ProjectID.ID > 0 {
+			payload.ProjectID = t.ProjectID.ID
+			payload.ProjectName = t.ProjectID.Name
+		}
+		if payload.TaskID <= 0 && t.TaskID.ID > 0 {
+			payload.TaskID = t.TaskID.ID
+			payload.TaskName = t.TaskID.Name
+		}
+	}
+
 	// Validación estricta y case-insensitive de proyecto
 	if payload.ProjectName != "" || payload.ProjectID > 0 {
 		projects, pErr := client.GetProjects(ctx, nil)
@@ -596,10 +633,17 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			json.NewEncoder(w).Encode(map[string]string{"error": "Error al detener tarea en Odoo: " + err.Error()})
 			return
 		}
+		if payload.TicketID <= 0 && cur != nil && cur.TicketID > 0 {
+			payload.TicketID = cur.TicketID
+		}
+		if payload.TicketID > 0 && payload.TimesheetID > 0 {
+			_ = client.UpdateTimesheetWithTicket(ctx, payload.TimesheetID, "", payload.TaskID, payload.TicketID, 0, "")
+		}
 		state.clearActiveTimerForTask(userUID, payload.TaskID, payload.TimesheetID)
 		state.broadcastUserEvent(userUID, "timer_stop", map[string]interface{}{
 			"timesheet_id": payload.TimesheetID,
 			"task_id":      payload.TaskID,
+			"ticket_id":    payload.TicketID,
 			"timer_key":    timerKey,
 			"unit_amount":  payload.UnitAmount,
 			"task_type":    canonicalType,
@@ -616,6 +660,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"task_id":     payload.TaskID,
 			"task_name":   payload.TaskName,
 			"task_type":   canonicalType,
+			"ticket_id":   payload.TicketID,
 			"description": payload.Description,
 			"message":     fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
 		})
@@ -650,6 +695,13 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			activeTimer.TimerKey = timerKey
 			activeTimer.Source = "antigravity"
 			activeTimer.LastHeartbeat = nowMs
+			if payload.TicketID > 0 {
+				activeTimer.TicketID = payload.TicketID
+				activeTimer.TicketRef = payload.TicketCode
+				if activeTimer.TimesheetID > 0 {
+					_ = client.UpdateTimesheetWithTicket(ctx, activeTimer.TimesheetID, "", payload.TaskID, payload.TicketID, 0, "")
+				}
+			}
 			if activeTimer.EmployeeName == "" && sess.UserName != "" {
 				activeTimer.EmployeeName = sess.UserName
 			}
@@ -660,6 +712,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				"timesheet_id": activeTimer.TimesheetID,
 				"project_id":   activeTimer.ProjectID,
 				"task_id":      activeTimer.TaskID,
+				"ticket_id":    activeTimer.TicketID,
 			})
 			cur = activeTimer
 		} else {

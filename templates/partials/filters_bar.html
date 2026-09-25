@@ -12,6 +12,13 @@
             </svg>
             <span class="text-[11px] font-semibold">Express</span>
         </button>
+        <!-- Botón Vista Tickets (A la derecha de la pestaña Express) -->
+        <button type="button" id="btn-view-tickets" onclick="openTicketsPopout()"
+                class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if eq .CurrentView "tickets"}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"
+                title="Tickets de soporte asignados">
+            <span class="text-xs">🎫</span>
+            <span class="text-[11px] font-semibold">Tickets</span>
+        </button>
         <!-- Botón Vista Lista -->
         <button type="button" id="btn-view-list" onclick="switchView('list')"
                 class="view-toggle-btn px-2.5 py-1.5 rounded-lg text-xs {{if or (eq .CurrentView "list") (not .CurrentView)}}font-semibold text-sky-700 bg-white shadow-2xs border border-slate-200/70{{else}}font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50{{end}} transition-all cursor-pointer flex items-center space-x-1.5"

@@ -166,6 +166,7 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			Date        string  `json:"date"`
 			ProjectID   int     `json:"project_id"`
 			TaskID      int     `json:"task_id"`
+			TicketID    int     `json:"ticket_id"`
 			UnitAmount  float64 `json:"unit_amount"`
 			Description string  `json:"description"`
 		}
@@ -194,7 +195,7 @@ func (state *AppState) handleAPITimesheets(w http.ResponseWriter, r *http.Reques
 			req.Date = time.Now().Format("2006-01-02")
 		}
 
-		newID, err := client.CreateTimesheet(ctx, req.Date, req.ProjectID, req.TaskID, req.UnitAmount, req.Description)
+		newID, err := client.CreateTimesheetFull(ctx, req.Date, req.ProjectID, req.TaskID, req.TicketID, req.UnitAmount, req.Description, false)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Error al registrar en Odoo: " + err.Error()})
@@ -254,6 +255,7 @@ func (state *AppState) handleAPITimesheetsUpdate(w http.ResponseWriter, r *http.
 		ID          int     `json:"id"`
 		Date        string  `json:"date"`
 		TaskID      int     `json:"task_id"`
+		TicketID    int     `json:"ticket_id"`
 		UnitAmount  float64 `json:"unit_amount"`
 		Description string  `json:"description"`
 	}
@@ -283,7 +285,7 @@ func (state *AppState) handleAPITimesheetsUpdate(w http.ResponseWriter, r *http.
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := client.UpdateTimesheet(ctx, req.ID, req.Date, req.TaskID, req.UnitAmount, req.Description); err != nil {
+	if err := client.UpdateTimesheetWithTicket(ctx, req.ID, req.Date, req.TaskID, req.TicketID, req.UnitAmount, req.Description); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error al actualizar parte en Odoo: " + err.Error()})
 		return
@@ -597,8 +599,8 @@ func (state *AppState) handleAPIProjects(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(projects)
 }
 
-// handleAPITickets consulta los tickets de soporte pendientes asignados al usuario en Odoo
-func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) {
+// handleAPIPartners busca contactos/clientes en Odoo (res.partner)
+func (state *AppState) handleAPIPartners(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -606,9 +608,52 @@ func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var session *SessionData
-	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
-		session, _ = decodeSession(cookie.Value)
+	session, _ := state.resolveAntigravitySession(r, "", "")
+	if session == nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión no configurada"})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	query := r.URL.Query().Get("q")
+	partners, err := client.GetPartners(ctx, query)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(partners)
+}
+
+// handleAPITickets consulta los tickets de soporte pendientes asignados al usuario en Odoo
+func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		state.handleAPITicketsCreate(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+
+	session, _ := state.resolveAntigravitySession(r, "", "")
+	if session == nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
 	}
 
 	odooCfg := state.resolveUserOdooConfig(session)
@@ -628,6 +673,22 @@ func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Consulta específica por referencia o ID de ticket
+	ticketRef := strings.TrimSpace(r.URL.Query().Get("ref"))
+	if ticketRef == "" {
+		ticketRef = strings.TrimSpace(r.URL.Query().Get("id"))
+	}
+	if ticketRef != "" {
+		t, tErr := client.GetTicketByRefOrID(ctx, ticketRef)
+		if tErr != nil || t == nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Ticket '%s' no encontrado", ticketRef)})
+			return
+		}
+		json.NewEncoder(w).Encode(t)
+		return
+	}
+
 	targetUID := uid
 	if session != nil && session.UserEmail != "" {
 		if resUID, rErr := client.ResolveUserUIDByEmail(ctx, session.UserEmail); rErr == nil && resUID > 0 {
@@ -642,6 +703,199 @@ func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	json.NewEncoder(w).Encode(tickets)
+}
+
+// handleAPITicketsCreate crea un nuevo ticket en Odoo (helpdesk.ticket) asignado al usuario logueado
+func (state *AppState) handleAPITicketsCreate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+
+	session, _ := state.resolveAntigravitySession(r, "", "")
+	if session == nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión no configurada"})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	uid, err := client.Authenticate(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	targetUID := uid
+	if session != nil && session.UserEmail != "" {
+		if resUID, rErr := client.ResolveUserUIDByEmail(ctx, session.UserEmail); rErr == nil && resUID > 0 {
+			targetUID = resUID
+		}
+	}
+
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		PartnerID   int    `json:"partner_id"`
+		ProjectID   int    `json:"project_id"`
+		TaskID      int    `json:"task_id"`
+		Priority    string `json:"priority"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "El asunto/título del ticket es obligatorio"})
+		return
+	}
+
+	vals := map[string]interface{}{
+		"name":    strings.TrimSpace(req.Name),
+		"user_id": targetUID,
+	}
+	if strings.TrimSpace(req.Description) != "" {
+		vals["description"] = strings.TrimSpace(req.Description)
+	}
+	if req.PartnerID > 0 {
+		vals["partner_id"] = req.PartnerID
+	}
+	if req.ProjectID > 0 {
+		vals["project_id"] = req.ProjectID
+	}
+	if req.TaskID > 0 {
+		vals["task_id"] = req.TaskID
+	}
+	if req.Priority != "" {
+		vals["priority"] = req.Priority
+	}
+
+	ticketID, err := client.CreateTicket(ctx, vals)
+	if err != nil {
+		if req.TaskID > 0 {
+			delete(vals, "task_id")
+			ticketID, err = client.CreateTicket(ctx, vals)
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Error al crear ticket en Odoo: " + err.Error()})
+			return
+		}
+	}
+
+	client.InvalidateTicketsCache()
+	state.broadcastUserEvent(targetUID, "tickets_changed", map[string]interface{}{
+		"action":    "ticket_created",
+		"ticket_id": ticketID,
+	})
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"ticket_id": ticketID,
+		"message":   "Ticket creado correctamente",
+	})
+}
+
+// handleAPITicketsClose da por cerrado definitivamente un ticket en Odoo
+func (state *AppState) handleAPITicketsClose(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+
+	session, _ := state.resolveAntigravitySession(r, "", "")
+	if session == nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			session, _ = decodeSession(cookie.Value)
+		}
+	}
+
+	odooCfg := state.resolveUserOdooConfig(session)
+	if odooCfg.Password == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sesión no configurada"})
+		return
+	}
+
+	client := odoo.NewClient(odooCfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	uid, err := client.Authenticate(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	targetUID := uid
+	if session != nil && session.UserEmail != "" {
+		if resUID, rErr := client.ResolveUserUIDByEmail(ctx, session.UserEmail); rErr == nil && resUID > 0 {
+			targetUID = resUID
+		}
+	}
+
+	var req struct {
+		TicketID    int    `json:"ticket_id"`
+		TicketRef   string `json:"ticket_ref"`
+		Subject     string `json:"subject"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	targetTicketID := req.TicketID
+	if targetTicketID <= 0 && req.TicketRef != "" {
+		if t, tErr := client.GetTicketByRefOrID(ctx, req.TicketRef); tErr == nil && t != nil {
+			targetTicketID = t.ID
+		}
+	}
+
+	if targetTicketID <= 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Debe especificar un ID o código de ticket válido"})
+		return
+	}
+
+	if err := client.CloseTicket(ctx, targetTicketID, req.Subject, req.Description); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	client.InvalidateTicketsCache()
+	state.broadcastUserEvent(targetUID, "tickets_changed", map[string]interface{}{
+		"action":    "ticket_closed",
+		"ticket_id": targetTicketID,
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"ticket_id": targetTicketID,
+		"message":   "Ticket cerrado definitivamente",
+	})
 }
 
 // handleHealth retorna el estado del servidor
@@ -760,6 +1014,9 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 		ProjectName string  `json:"project_name"`
 		TaskID      int     `json:"task_id"`
 		TaskName    string  `json:"task_name"`
+		TicketID    int     `json:"ticket_id"`
+		TicketRef   string  `json:"ticket_ref"`
+		TicketName  string  `json:"ticket_name"`
 		TimesheetID int     `json:"timesheet_id"`
 		Description string  `json:"description"`
 		UnitAmount  float64 `json:"unit_amount"`
@@ -788,6 +1045,39 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	}
 	if userUID == 0 {
 		userUID = client.UID()
+	}
+
+	// Si se especifica ticket, validar y completar automáticamente proyecto, tarea y descripción
+	if req.TicketID > 0 || req.TicketRef != "" {
+		refOrID := req.TicketRef
+		if refOrID == "" {
+			refOrID = strconv.Itoa(req.TicketID)
+		}
+		if t, tErr := client.GetTicketByRefOrID(ctx, refOrID); tErr == nil && t != nil {
+			if t.IsClosed() {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "El ticket está cerrado. Un ticket cerrado no se puede volver a abrir ni imputar tiempos."})
+				return
+			}
+			req.TicketID = t.ID
+			if req.TicketRef == "" {
+				req.TicketRef = t.TicketRef
+			}
+			if req.TicketName == "" {
+				req.TicketName = t.Name
+			}
+			if req.ProjectID <= 0 && t.ProjectID.ID > 0 {
+				req.ProjectID = t.ProjectID.ID
+				req.ProjectName = t.ProjectID.Name
+			}
+			if req.TaskID <= 0 && t.TaskID.ID > 0 {
+				req.TaskID = t.TaskID.ID
+				req.TaskName = t.TaskID.Name
+			}
+			if req.Description == "" {
+				req.Description = fmt.Sprintf("[%s] %s", t.TicketRef, t.Name)
+			}
+		}
 	}
 
 	// Creación o búsqueda dinámica de tarea en Odoo si no se especificó task_id pero sí task_name
@@ -819,6 +1109,14 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 	state.setLastConfirmedAt(userUID, nowMs)
 
 	if activeTimer != nil {
+		if req.TicketID > 0 {
+			activeTimer.TicketID = req.TicketID
+			activeTimer.TicketRef = req.TicketRef
+			activeTimer.TicketName = req.TicketName
+			if activeTimer.TimesheetID > 0 {
+				_ = client.UpdateTimesheetWithTicket(ctx, activeTimer.TimesheetID, "", req.TaskID, req.TicketID, 0, "")
+			}
+		}
 		if activeTimer.EmployeeName == "" {
 			if session != nil && session.UserName != "" {
 				activeTimer.EmployeeName = session.UserName
@@ -833,6 +1131,7 @@ func (state *AppState) handleAPITimerStart(w http.ResponseWriter, r *http.Reques
 			"timesheet_id": activeTimer.TimesheetID,
 			"project_id":   activeTimer.ProjectID,
 			"task_id":      activeTimer.TaskID,
+			"ticket_id":    activeTimer.TicketID,
 		})
 	}
 
@@ -1109,6 +1408,7 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	var req struct {
 		TimesheetID int     `json:"timesheet_id"`
 		TaskID      int     `json:"task_id"`
+		TicketID    int     `json:"ticket_id"`
 		UnitAmount  float64 `json:"unit_amount"`
 		Description string  `json:"description"`
 	}
@@ -1121,12 +1421,6 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	client := odoo.GetClient(odooCfg)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-
-	if err := client.StopTimer(ctx, req.TimesheetID, req.TaskID, req.UnitAmount, req.Description); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
 
 	userEmail := ""
 	if session != nil {
@@ -1141,6 +1435,22 @@ func (state *AppState) handleAPITimerStop(w http.ResponseWriter, r *http.Request
 	}
 	if userUID == 0 {
 		userUID = client.UID()
+	}
+
+	if req.TicketID <= 0 {
+		if curTimer := state.getActiveTimer(userUID); curTimer != nil && curTimer.TicketID > 0 {
+			req.TicketID = curTimer.TicketID
+		}
+	}
+
+	if err := client.StopTimer(ctx, req.TimesheetID, req.TaskID, req.UnitAmount, req.Description); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if req.TicketID > 0 && req.TimesheetID > 0 {
+		_ = client.UpdateTimesheetWithTicket(ctx, req.TimesheetID, "", req.TaskID, req.TicketID, 0, "")
 	}
 	if req.TimesheetID > 0 || req.TaskID > 0 {
 		state.clearActiveTimerForTask(userUID, req.TaskID, req.TimesheetID)
