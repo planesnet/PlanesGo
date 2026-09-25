@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.68"
+	Version       = "1.2.69"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -340,13 +340,15 @@ func findConfig(customDir ...string) (*Config, string, error) {
 			cwd = pwd
 		}
 
-		// Si planesgo-mcp se ejecuta como servidor MCP dentro de los plugins de Antigravity (~/.gemini/...),
-		// consultar el workspace activo registrado por Antigravity
+		// Si planesgo-mcp se ejecuta en segundo plano como servidor MCP o CLI (donde cwd suele ser
+		// el HOME del usuario ~/ o dentro de ~/.gemini/...), consultar prioritariamente el
+		// workspace activo registrado por Antigravity en /tmp/planesgo_active_workspace
 		geminiDir := ""
 		if homeDir != "" {
 			geminiDir = filepath.Join(homeDir, ".gemini")
 		}
-		if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+		isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
+		if isBackgroundMCP {
 			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
 				ws := strings.TrimSpace(string(wsBytes))
 				if ws != "" {
@@ -357,6 +359,17 @@ func findConfig(customDir ...string) (*Config, string, error) {
 
 		if len(startDirs) == 0 && cwd != "" {
 			startDirs = append(startDirs, cwd)
+		}
+
+		// Fallback: si aún no tenemos ningún directorio o solo teníamos cwd y este era homeDir
+		// (que será descartado por la regla de no herencia desde HOME), intentar con /tmp/planesgo_active_workspace
+		if len(startDirs) == 0 || (len(startDirs) == 1 && homeDir != "" && startDirs[0] == homeDir) {
+			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+				ws := strings.TrimSpace(string(wsBytes))
+				if ws != "" && ws != homeDir {
+					startDirs = []string{ws}
+				}
+			}
 		}
 	}
 
@@ -765,7 +778,8 @@ func saveConfigFile(cfg Config, targetDir string) error {
 			geminiDir = filepath.Join(homeDir, ".gemini")
 		}
 		cwd, _ := os.Getwd()
-		if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+		isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
+		if isBackgroundMCP {
 			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
 				ws := strings.TrimSpace(string(wsBytes))
 				if ws != "" {
@@ -775,6 +789,14 @@ func saveConfigFile(cfg Config, targetDir string) error {
 		}
 		if targetDir == "" {
 			targetDir = cwd
+		}
+		if targetDir == "" || (homeDir != "" && targetDir == homeDir) {
+			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+				ws := strings.TrimSpace(string(wsBytes))
+				if ws != "" && ws != homeDir {
+					targetDir = ws
+				}
+			}
 		}
 	}
 	targetDir, _ = filepath.Abs(targetDir)
@@ -1420,7 +1442,8 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				geminiDir = filepath.Join(homeDir, ".gemini")
 			}
 			cwd, _ := os.Getwd()
-			if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+			isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
+			if isBackgroundMCP {
 				if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
 					ws := strings.TrimSpace(string(wsBytes))
 					if ws != "" {
@@ -1430,6 +1453,14 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 			if targetDir == "" {
 				targetDir = cwd
+			}
+			if targetDir == "" || (homeDir != "" && targetDir == homeDir) {
+				if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+					ws := strings.TrimSpace(string(wsBytes))
+					if ws != "" && ws != homeDir {
+						targetDir = ws
+					}
+				}
 			}
 		}
 		targetDir, _ = filepath.Abs(targetDir)

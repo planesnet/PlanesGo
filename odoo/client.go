@@ -64,6 +64,7 @@ type Client struct {
 	ticketsCachedAt     time.Time
 	userUIDCache        map[string]int
 	partnerAvatarFields []string
+	modelFieldsCache    map[string]map[string]bool
 }
 
 func poolKey(cfg config.OdooConfig) string {
@@ -88,9 +89,10 @@ func GetClient(cfg config.OdooConfig) *Client {
 	}
 
 	c = &Client{
-		config:       cfg,
-		httpClient:   sharedHTTPClient,
-		userUIDCache: make(map[string]int),
+		config:           cfg,
+		httpClient:       sharedHTTPClient,
+		userUIDCache:     make(map[string]int),
+		modelFieldsCache: make(map[string]map[string]bool),
 	}
 	clientPool[key] = c
 	return c
@@ -231,6 +233,67 @@ func (c *Client) ExecuteKW(ctx context.Context, model, method string, args []int
 	return res, err
 }
 
+// HasField verifica de manera segura y en caché si un modelo de Odoo contiene un campo específico
+// utilizando fields_get, sin generar errores de ORM ni excepciones en los logs del servidor Odoo.
+func (c *Client) HasField(ctx context.Context, model, field string) bool {
+	c.mu.RLock()
+	if c.modelFieldsCache != nil {
+		if fields, ok := c.modelFieldsCache[model]; ok {
+			has, exists := fields[field]
+			c.mu.RUnlock()
+			if exists {
+				return has
+			}
+		} else {
+			c.mu.RUnlock()
+		}
+	} else {
+		c.mu.RUnlock()
+	}
+
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return false
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		model,
+		"fields_get",
+		[]interface{}{[]string{field}},
+	}
+	raw, err := c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
+			raw, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+	}
+	if err != nil {
+		return false
+	}
+
+	var discovered map[string]interface{}
+	if err := json.Unmarshal(raw, &discovered); err != nil {
+		return false
+	}
+	_, has := discovered[field]
+
+	c.mu.Lock()
+	if c.modelFieldsCache == nil {
+		c.modelFieldsCache = make(map[string]map[string]bool)
+	}
+	if c.modelFieldsCache[model] == nil {
+		c.modelFieldsCache[model] = make(map[string]bool)
+	}
+	c.modelFieldsCache[model][field] = has
+	c.mu.Unlock()
+
+	return has
+}
+
 // Authenticate autentica contra el endpoint común de Odoo y devuelve el UID.
 // Si el cliente ya tiene un UID autenticado previamente, lo devuelve de inmediato sin llamadas de red.
 func (c *Client) Authenticate(ctx context.Context) (int, error) {
@@ -354,9 +417,11 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"partner_id",
 		"timesheet_invoice_id",
 		"billing_ref",
-		"is_timer_running",
 		"create_date",
 		"write_date",
+	}
+	if c.HasField(ctx, "account.analytic.line", "is_timer_running") {
+		fields = append(fields, "is_timer_running")
 	}
 
 	kwargs := map[string]interface{}{
@@ -385,7 +450,7 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
 		if err != nil {
-			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado (manteniendo is_timer_running y partner_id)
+			// Fallback 1: intentar sin billing_ref si el modelo no tiene ese campo personalizado (manteniendo partner_id)
 			fallbackFields := []string{
 				"id",
 				"date",
@@ -397,9 +462,11 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 				"user_id",
 				"partner_id",
 				"timesheet_invoice_id",
-				"is_timer_running",
 				"create_date",
 				"write_date",
+			}
+			if c.HasField(ctx, "account.analytic.line", "is_timer_running") {
+				fallbackFields = append(fallbackFields, "is_timer_running")
 			}
 			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
@@ -2285,11 +2352,14 @@ func (c *Client) StartTimerExtended(ctx context.Context, projectID int, projectN
 		_, _ = c.call(ctx, "object", "execute_kw", startArgs, nil)
 	}
 
-	// 3. Si hay tarea asignada, invocar action_timer_start en project.task de forma asíncrona para máxima rapidez
+	// 3. Si hay tarea asignada, invocar action_timer_start en project.task de forma asíncrona para máxima rapidez (si el modelo lo soporta)
 	if taskID > 0 {
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if !c.HasField(taskCtx, "project.task", "is_timer_running") {
+				return
+			}
 			taskStartArgs := []interface{}{
 				c.config.DB,
 				uID,
@@ -2414,6 +2484,9 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if !c.HasField(taskCtx, "project.task", "is_timer_running") {
+				return
+			}
 			taskPauseArgs := []interface{}{
 				c.config.DB,
 				uID,
@@ -2464,6 +2537,9 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if !c.HasField(taskCtx, "project.task", "is_timer_running") {
+				return
+			}
 			taskStartArgs := []interface{}{
 				c.config.DB,
 				uID,
@@ -2582,6 +2658,9 @@ func (c *Client) StopTimerWithAI(ctx context.Context, timesheetID int, taskID in
 		go func(tID, uID int) {
 			taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if !c.HasField(taskCtx, "project.task", "is_timer_running") {
+				return
+			}
 			taskStopArgs := []interface{}{
 				c.config.DB,
 				uID,
@@ -2609,89 +2688,97 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 		effectiveUID = userUID
 	}
 
-	// 1. Buscar en account.analytic.line
-	domain := []interface{}{
-		[]interface{}{"user_id", "=", effectiveUID},
-		[]interface{}{"is_timer_running", "=", true},
-	}
-	kwargs := map[string]interface{}{
-		"fields": []string{"id", "name", "project_id", "task_id", "unit_amount", "date", "write_date"},
-		"limit":  1,
-		"order":  "write_date desc, id desc",
-	}
-	args := []interface{}{
-		c.config.DB,
-		uid,
-		c.config.Password,
-		"account.analytic.line",
-		"search_read",
-		[]interface{}{domain},
+	// 1. Buscar en account.analytic.line solo si el modelo tiene el campo is_timer_running
+	if c.HasField(ctx, "account.analytic.line", "is_timer_running") {
+		domain := []interface{}{
+			[]interface{}{"user_id", "=", effectiveUID},
+			[]interface{}{"is_timer_running", "=", true},
+		}
+		kwargs := map[string]interface{}{
+			"fields": []string{"id", "name", "project_id", "task_id", "unit_amount", "date", "write_date"},
+			"limit":  1,
+			"order":  "write_date desc, id desc",
+		}
+		args := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"account.analytic.line",
+			"search_read",
+			[]interface{}{domain},
+		}
+
+		resultRaw, searchErr := c.call(ctx, "object", "execute_kw", args, kwargs)
+		if searchErr == nil {
+			var lines []struct {
+				ID         int      `json:"id"`
+				Name       string   `json:"name"`
+				ProjectID  Many2One `json:"project_id"`
+				TaskID     Many2One `json:"task_id"`
+				UnitAmount float64  `json:"unit_amount"`
+				WriteDate  string   `json:"write_date"`
+			}
+			if json.Unmarshal(resultRaw, &lines) == nil && len(lines) > 0 {
+				l := lines[0]
+				accumulatedMs := int64(l.UnitAmount * 3600 * 1000)
+				return &ActiveTimer{
+					TimesheetID:   l.ID,
+					ProjectID:     l.ProjectID.ID,
+					ProjectName:   l.ProjectID.Name,
+					TaskID:        l.TaskID.ID,
+					TaskName:      l.TaskID.Name,
+					Description:   l.Name,
+					IsRunning:     true,
+					StartedAt:     time.Now().UnixMilli(),
+					AccumulatedMs: accumulatedMs,
+					UnitAmount:    l.UnitAmount,
+				}, nil
+			}
+		}
 	}
 
-	resultRaw, searchErr := c.call(ctx, "object", "execute_kw", args, kwargs)
-	if searchErr == nil {
-		var lines []struct {
-			ID         int      `json:"id"`
-			Name       string   `json:"name"`
-			ProjectID  Many2One `json:"project_id"`
-			TaskID     Many2One `json:"task_id"`
-			UnitAmount float64  `json:"unit_amount"`
-			WriteDate  string   `json:"write_date"`
+	// 2. Si no se encontró en account.analytic.line, verificar en project.task solo si el modelo tiene is_timer_running
+	if c.HasField(ctx, "project.task", "is_timer_running") {
+		userField := "user_id"
+		if c.HasField(ctx, "project.task", "user_ids") && !c.HasField(ctx, "project.task", "user_id") {
+			userField = "user_ids"
 		}
-		if json.Unmarshal(resultRaw, &lines) == nil && len(lines) > 0 {
-			l := lines[0]
-			accumulatedMs := int64(l.UnitAmount * 3600 * 1000)
-			return &ActiveTimer{
-				TimesheetID:   l.ID,
-				ProjectID:     l.ProjectID.ID,
-				ProjectName:   l.ProjectID.Name,
-				TaskID:        l.TaskID.ID,
-				TaskName:      l.TaskID.Name,
-				Description:   l.Name,
-				IsRunning:     true,
-				StartedAt:     time.Now().UnixMilli(),
-				AccumulatedMs: accumulatedMs,
-				UnitAmount:    l.UnitAmount,
-			}, nil
+		taskDomain := []interface{}{
+			[]interface{}{userField, "=", effectiveUID},
+			[]interface{}{"is_timer_running", "=", true},
 		}
-	}
-
-	// 2. Si no se encontró en account.analytic.line, verificar en project.task
-	taskDomain := []interface{}{
-		[]interface{}{"user_id", "=", effectiveUID},
-		[]interface{}{"is_timer_running", "=", true},
-	}
-	taskKwargs := map[string]interface{}{
-		"fields": []string{"id", "name", "project_id"},
-		"limit":  1,
-	}
-	taskArgs := []interface{}{
-		c.config.DB,
-		uid,
-		c.config.Password,
-		"project.task",
-		"search_read",
-		[]interface{}{taskDomain},
-	}
-	taskRaw, taskErr := c.call(ctx, "object", "execute_kw", taskArgs, taskKwargs)
-	if taskErr == nil {
-		var tasks []struct {
-			ID        int      `json:"id"`
-			Name      string   `json:"name"`
-			ProjectID Many2One `json:"project_id"`
+		taskKwargs := map[string]interface{}{
+			"fields": []string{"id", "name", "project_id"},
+			"limit":  1,
 		}
-		if json.Unmarshal(taskRaw, &tasks) == nil && len(tasks) > 0 {
-			t := tasks[0]
-			return &ActiveTimer{
-				TimesheetID: 0,
-				TaskID:      t.ID,
-				TaskName:    t.Name,
-				ProjectID:   t.ProjectID.ID,
-				ProjectName: t.ProjectID.Name,
-				Description: "Trabajo en " + t.Name,
-				IsRunning:   true,
-				StartedAt:   time.Now().UnixMilli(),
-			}, nil
+		taskArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"project.task",
+			"search_read",
+			[]interface{}{taskDomain},
+		}
+		taskRaw, taskErr := c.call(ctx, "object", "execute_kw", taskArgs, taskKwargs)
+		if taskErr == nil {
+			var tasks []struct {
+				ID        int      `json:"id"`
+				Name      string   `json:"name"`
+				ProjectID Many2One `json:"project_id"`
+			}
+			if json.Unmarshal(taskRaw, &tasks) == nil && len(tasks) > 0 {
+				t := tasks[0]
+				return &ActiveTimer{
+					TimesheetID: 0,
+					TaskID:      t.ID,
+					TaskName:    t.Name,
+					ProjectID:   t.ProjectID.ID,
+					ProjectName: t.ProjectID.Name,
+					Description: "Trabajo en " + t.Name,
+					IsRunning:   true,
+					StartedAt:   time.Now().UnixMilli(),
+				}, nil
+			}
 		}
 	}
 

@@ -216,6 +216,53 @@ func TestFindConfigStrictLocation(t *testing.T) {
 	}
 }
 
+func TestFindConfigWorkspaceFallback(t *testing.T) {
+	// Crear un workspace temporal con .planesgo.json
+	wsDir := t.TempDir()
+	wsConfig := []byte(`{"odoo_project_id": 777, "odoo_project_name": "WORKSPACE ACTIVO"}`)
+	if err := os.WriteFile(filepath.Join(wsDir, ".planesgo.json"), wsConfig, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Guardar estado previo de /tmp/planesgo_active_workspace si existe
+	tmpPath := "/tmp/planesgo_active_workspace"
+	prevBytes, prevErr := os.ReadFile(tmpPath)
+	defer func() {
+		if prevErr == nil {
+			_ = os.WriteFile(tmpPath, prevBytes, 0644)
+		} else {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := os.WriteFile(tmpPath, []byte(wsDir), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		origWd, _ := os.Getwd()
+		if err := os.Chdir(homeDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			_ = os.Chdir(origWd)
+		}()
+
+		// Con cwd en homeDir, findConfig() debe detectar que cwd == homeDir y consultar /tmp/planesgo_active_workspace
+		cfg, foundPath, err := findConfig()
+		if err != nil {
+			t.Fatalf("findConfig() falló resolviendo active workspace desde HOME: %v", err)
+		}
+		if cfg.OdooProjectID != 777 || cfg.OdooProjectName != "WORKSPACE ACTIVO" {
+			t.Errorf("configuración leída incorrecta desde workspace fallback: %+v", cfg)
+		}
+		if foundPath != filepath.Join(wsDir, ".planesgo.json") {
+			t.Errorf("ruta encontrada inesperada: %s, esperada: %s", foundPath, filepath.Join(wsDir, ".planesgo.json"))
+		}
+	}
+}
+
 func TestFormatTokens(t *testing.T) {
 	cases := []struct {
 		input    int

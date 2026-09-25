@@ -191,3 +191,102 @@ func TestGetProjectsCache(t *testing.T) {
 		t.Fatalf("Esperada segunda llamada tras invalidación, pero hubo %d", calls)
 	}
 }
+
+func TestHasField(t *testing.T) {
+	var fieldsGetCalls int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		params, _ := req.Params.(map[string]interface{})
+		if params["service"] == "common" && params["method"] == "authenticate" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  10,
+			})
+			return
+		}
+
+		if params["service"] == "object" && params["method"] == "execute_kw" {
+			args, _ := params["args"].([]interface{})
+			if len(args) >= 6 && args[4] == "fields_get" {
+				atomic.AddInt32(&fieldsGetCalls, 1)
+				res := map[string]interface{}{}
+				if posArgs, ok := args[5].([]interface{}); ok && len(posArgs) > 0 {
+					if fieldList, ok := posArgs[0].([]interface{}); ok {
+						for _, f := range fieldList {
+							if fStr, ok := f.(string); ok && fStr == "existing_field" {
+								res[fStr] = map[string]interface{}{"type": "char"}
+							}
+						}
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  res,
+				})
+				return
+			}
+		}
+
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	cfg := config.OdooConfig{
+		URL:      server.URL,
+		DB:       "testdb",
+		Username: "user@example.com",
+		Password: "password",
+	}
+
+	client := &Client{
+		config:           cfg,
+		httpClient:       server.Client(),
+		userUIDCache:     make(map[string]int),
+		modelFieldsCache: make(map[string]map[string]bool),
+	}
+
+	ctx := context.Background()
+
+	// 1. Campo existente
+	if !client.HasField(ctx, "project.task", "existing_field") {
+		t.Fatalf("Esperado que HasField devuelva true para 'existing_field'")
+	}
+	if calls := atomic.LoadInt32(&fieldsGetCalls); calls != 1 {
+		t.Fatalf("Esperada 1 llamada a fields_get, obtenidas %d", calls)
+	}
+
+	// 2. Campo existente de nuevo (debe responder desde caché en memoria)
+	if !client.HasField(ctx, "project.task", "existing_field") {
+		t.Fatalf("Esperado que HasField devuelva true desde caché")
+	}
+	if calls := atomic.LoadInt32(&fieldsGetCalls); calls != 1 {
+		t.Fatalf("Esperado que se sirva desde caché (1 llamada), pero hubo %d", calls)
+	}
+
+	// 3. Campo inexistente
+	if client.HasField(ctx, "project.task", "is_timer_running") {
+		t.Fatalf("Esperado que HasField devuelva false para campo inexistente")
+	}
+	if calls := atomic.LoadInt32(&fieldsGetCalls); calls != 2 {
+		t.Fatalf("Esperadas 2 llamadas a fields_get en total, obtenidas %d", calls)
+	}
+
+	// 4. Campo inexistente de nuevo (debe responder false desde caché sin llamar a la red)
+	if client.HasField(ctx, "project.task", "is_timer_running") {
+		t.Fatalf("Esperado que HasField devuelva false desde caché")
+	}
+	if calls := atomic.LoadInt32(&fieldsGetCalls); calls != 2 {
+		t.Fatalf("Esperado que se sirva desde caché (2 llamadas), pero hubo %d", calls)
+	}
+}
+
