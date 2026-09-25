@@ -3,6 +3,7 @@ package odoo
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -106,6 +107,17 @@ func (t *TimesheetEntry) DisplayEmployee() string {
 		return t.UserID.Name
 	}
 	return "Sin asignar"
+}
+
+// HoursHHMM devuelve las horas formateadas en Horas:Minutos (ej. 2.62 -> "2:37", 3.00 -> "3:00").
+func (t *TimesheetEntry) HoursHHMM() string {
+	if t.UnitAmount <= 0 {
+		return "0:00"
+	}
+	totalMinutes := int(math.Round(t.UnitAmount * 60))
+	hours := totalMinutes / 60
+	mins := totalMinutes % 60
+	return fmt.Sprintf("%d:%02d", hours, mins)
 }
 
 // IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.

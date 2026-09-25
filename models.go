@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -277,9 +278,9 @@ func (state *AppState) pauseActiveTimerForTask(userUID int, taskID int, timeshee
 			continue
 		}
 		if (taskID > 0 && t.TaskID == taskID) || (timesheetID > 0 && t.TimesheetID == timesheetID) {
-			if t.IsRunning && t.StartedAt > 0 {
+			if t.IsRunning && t.Source != "antigravity" && t.StartedAt > 0 {
 				elapsed := nowMs - t.StartedAt
-				if elapsed > 0 {
+				if elapsed > 0 && elapsed <= 24*3600*1000 {
 					t.AccumulatedMs += elapsed
 				}
 			}
@@ -289,7 +290,14 @@ func (state *AppState) pauseActiveTimerForTask(userUID int, taskID int, timeshee
 				t.UnitAmount = unitAmount
 				t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
 			} else {
+				if t.AccumulatedMs < 0 {
+					t.AccumulatedMs = 0
+				}
 				t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
+			}
+			if t.UnitAmount > 24.0 {
+				t.UnitAmount = 24.0
+				t.AccumulatedMs = 24 * 3600 * 1000
 			}
 		}
 	}
@@ -314,9 +322,9 @@ func (state *AppState) pauseActiveTimerByKey(userUID int, timerKey string, unitA
 		if timerKey != "" && key != timerKey {
 			continue
 		}
-		if t.IsRunning && t.StartedAt > 0 {
+		if t.IsRunning && t.Source != "antigravity" && t.StartedAt > 0 {
 			elapsed := nowMs - t.StartedAt
-			if elapsed > 0 {
+			if elapsed > 0 && elapsed <= 24*3600*1000 {
 				t.AccumulatedMs += elapsed
 			}
 		}
@@ -326,7 +334,14 @@ func (state *AppState) pauseActiveTimerByKey(userUID int, timerKey string, unitA
 			t.UnitAmount = unitAmount
 			t.AccumulatedMs = int64(unitAmount * 3600 * 1000)
 		} else {
+			if t.AccumulatedMs < 0 {
+				t.AccumulatedMs = 0
+			}
 			t.UnitAmount = float64(t.AccumulatedMs) / (3600 * 1000)
+		}
+		if t.UnitAmount > 24.0 {
+			t.UnitAmount = 24.0
+			t.AccumulatedMs = 24 * 3600 * 1000
 		}
 	}
 }
@@ -423,13 +438,23 @@ func (state *AppState) checkIdleTimers(now time.Time, idleTimeout time.Duration)
 			}
 			if lastBeat > 0 && (nowMs-lastBeat) > timeoutMs {
 				// Pausar temporizador por inactividad
-				elapsed := lastBeat - timer.StartedAt
-				if elapsed > 0 {
-					timer.AccumulatedMs += elapsed
+				if timer.Source != "antigravity" && timer.StartedAt > 0 && lastBeat >= timer.StartedAt {
+					elapsed := lastBeat - timer.StartedAt
+					if elapsed > 0 && elapsed <= 24*3600*1000 {
+						timer.AccumulatedMs += elapsed
+					}
 				}
 				timer.IsRunning = false
 				timer.StartedAt = 0
+				if timer.AccumulatedMs < 0 {
+					timer.AccumulatedMs = 0
+				}
 				timer.UnitAmount = float64(timer.AccumulatedMs) / (3600 * 1000)
+				if timer.UnitAmount > 24.0 {
+					log.Printf("[PlanesGo Watchdog] ADVERTENCIA: UnitAmount anómalo detectado (%f h) en temporizador '%s', ajustando a 24h", timer.UnitAmount, key)
+					timer.UnitAmount = 24.0
+					timer.AccumulatedMs = 24 * 3600 * 1000
+				}
 				log.Printf("[PlanesGo Watchdog] Temporizador '%s' (usuario %d, tarea %d) pausado automáticamente por inactividad (%v sin latidos)", key, userUID, timer.TaskID, idleTimeout)
 
 				// Notificar al usuario mediante evento SSE
@@ -505,6 +530,29 @@ type PageData struct {
 	ActiveTimer           *odoo.ActiveTimer
 	ProjectPartnerMapJSON template.JS
 	Error                 string
+}
+
+// FormatHoursToHHMM convierte un valor decimal de horas a formato Horas:Minutos (ej. 2.62 -> "2:37", 3.00 -> "3:00").
+func FormatHoursToHHMM(h float64) string {
+	if h <= 0 {
+		return "0:00"
+	}
+	totalMinutes := int(math.Round(h * 60))
+	hours := totalMinutes / 60
+	mins := totalMinutes % 60
+	return fmt.Sprintf("%d:%02d", hours, mins)
+}
+
+func (p PageData) TotalHoursHHMM() string {
+	return FormatHoursToHHMM(p.TotalHours)
+}
+
+func (p PageData) TotalHorasHombreHHMM() string {
+	return FormatHoursToHHMM(p.TotalHorasHombre)
+}
+
+func (p PageData) TotalHorasMaquinaHHMM() string {
+	return FormatHoursToHHMM(p.TotalHorasMaquina)
 }
 
 type SettingsPageData struct {

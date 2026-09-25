@@ -1,7 +1,11 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCleanURL(t *testing.T) {
@@ -113,6 +117,44 @@ func TestNormalizeTaskType(t *testing.T) {
 		if gotClean != tc.wantClean {
 			t.Errorf("NormalizeTaskType(%q, %q) cleanName = %q; want %q", tc.rawTitle, tc.realWork, gotClean, tc.wantClean)
 		}
+	}
+}
+
+func TestDoWithRetry(t *testing.T) {
+	var attempts int32
+
+	// Servidor que falla con 502 en los 2 primeros intentos y responde 200 en el tercero
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		att := atomic.AddInt32(&attempts, 1)
+		if att < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			w.Write([]byte(`{"error":"bad gateway temporario"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer ts.Close()
+
+	client := &PlanesGoClient{
+		BaseURL:    ts.URL,
+		Token:      "test-token",
+		HTTPClient: ts.Client(),
+		RetryDelay: 10 * time.Millisecond, // Delay mínimo para el test unitario
+	}
+
+	body, status, err := client.doWithRetry(http.MethodGet, ts.URL+"/test", nil, nil)
+	if err != nil {
+		t.Fatalf("doWithRetry falló inesperadamente: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status esperado 200, obtenido %d", status)
+	}
+	if string(body) != `{"status":"ok"}` {
+		t.Fatalf("cuerpo inesperado: %s", string(body))
+	}
+	if atomic.LoadInt32(&attempts) != 3 {
+		t.Fatalf("se esperaban 3 intentos, pero hubo %d", attempts)
 	}
 }
 

@@ -731,6 +731,11 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			cur.LastHeartbeat = nowMs
 			cur.IsRunning = true
 			cur.UnitAmount = float64(cur.AccumulatedMs) / (3600 * 1000)
+			if cur.UnitAmount > 24.0 {
+				log.Printf("[Antigravity Beat] ADVERTENCIA: UnitAmount excesivo (%f h), limitando a 24h", cur.UnitAmount)
+				cur.UnitAmount = 24.0
+				cur.AccumulatedMs = 24 * 3600 * 1000
+			}
 			if payload.Description != "" && payload.Description != "Trabajo en curso" {
 				cur.Description = payload.Description
 			}

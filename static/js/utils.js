@@ -96,6 +96,14 @@ function formatDecimalToTime(decimalVal) {
     return `${hours}:${String(mins).padStart(2, '0')}`;
 }
 
+function formatHoursToHHMM(decimalVal, fallback = '-') {
+    if (decimalVal === null || decimalVal === undefined || isNaN(decimalVal) || decimalVal <= 0) return fallback;
+    const totalMinutes = Math.round(decimalVal * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return `${hours}:${String(mins).padStart(2, '0')}`;
+}
+
 function updateModalTimeBadge() {
     const input = document.getElementById('modal-hours-input');
     const badge = document.getElementById('modal-time-badge') || document.getElementById('modal-hours-preview');
@@ -421,4 +429,6 @@ window.isAntigravityTask = isAntigravityTask;
 window.cleanAntigravityTaskName = cleanAntigravityTaskName;
 window.renderTaskBadgeHTML = renderTaskBadgeHTML;
 window.renderTagsHTML = renderTagsHTML;
+window.formatDecimalToTime = formatDecimalToTime;
+window.formatHoursToHHMM = formatHoursToHHMM;
 

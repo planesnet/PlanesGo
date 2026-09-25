@@ -593,11 +593,11 @@ function applyTimesheetFilters() {
     }
 
     // Actualizar KPIs superiores
-    if (kpiHours) kpiHours.textContent = visibleHours.toFixed(2);
+    if (kpiHours) kpiHours.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(visibleHours, '0:00') : visibleHours.toFixed(2);
     const kpiHoursHombre = document.getElementById('kpi-hours-hombre');
     const kpiHoursMaquina = document.getElementById('kpi-hours-maquina');
-    if (kpiHoursHombre) kpiHoursHombre.textContent = visibleHoursHombre.toFixed(2);
-    if (kpiHoursMaquina) kpiHoursMaquina.textContent = visibleHoursMaquina.toFixed(2);
+    if (kpiHoursHombre) kpiHoursHombre.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(visibleHoursHombre, '0:00') : visibleHoursHombre.toFixed(2);
+    if (kpiHoursMaquina) kpiHoursMaquina.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(visibleHoursMaquina, '0:00') : visibleHoursMaquina.toFixed(2);
     if (kpiEntries) kpiEntries.textContent = visibleCount;
     if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
     if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
@@ -691,7 +691,7 @@ function renderCalendarView(matchingRows) {
         grandTotal += dailyTotals[i];
     }
 
-    if (totalEl) totalEl.textContent = grandTotal.toFixed(2);
+    if (totalEl) totalEl.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandTotal, '0:00') : grandTotal.toFixed(2);
 
     // 4. Si no hay proyectos con imputaciones para esta semana
     if (projectsMap.size === 0) {
@@ -772,15 +772,17 @@ function renderCalendarView(matchingRows) {
                 const tooltipLines = entries.map(e => {
                     const taskStr = e.task ? ` [${e.task}]` : '';
                     const descStr = e.desc ? ` - ${e.desc}` : '';
-                    return `• ${e.employee}: ${e.hours.toFixed(2)}h${taskStr}${descStr}`;
+                    const fHours = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(e.hours, '0:00') : e.hours.toFixed(2);
+                    return `• ${e.employee}: ${fHours} (${e.hours.toFixed(2)}h)${taskStr}${descStr}`;
                 }).join('\n');
 
+                const fDayHours = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(dayHours, '-') : dayHours.toFixed(2);
                 html += `
                     <button type="button" 
                             onclick="openCreateTimesheetModal('${proj.projectId}', '', '${wd.iso}')"
                             title="${escapeAttr(tooltipLines)}"
                             class="inline-flex items-center justify-center font-mono font-bold text-xs sm:text-sm px-2.5 py-1 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 hover:text-sky-900 border border-sky-200/80 shadow-2xs transition-all cursor-pointer">
-                        ${dayHours.toFixed(2)}
+                        ${fDayHours}
                     </button>
                 `;
             } else {
@@ -798,9 +800,10 @@ function renderCalendarView(matchingRows) {
         });
 
         // Columna Total por Proyecto
+        const fProjTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(proj.totalHours, '0:00') : proj.totalHours.toFixed(2);
         html += `
                 <td class="py-3 px-4 text-right font-mono font-bold border-l border-slate-200/70 ${proj.totalHours > 0 ? 'text-slate-900' : 'text-slate-400'}">
-                    ${proj.totalHours > 0 ? proj.totalHours.toFixed(2) + ' h' : '-'}
+                    ${proj.totalHours > 0 ? fProjTotal + ' h' : '-'}
                 </td>
             </tr>
         `;
@@ -819,19 +822,21 @@ function renderCalendarView(matchingRows) {
     for (let i = 0; i < 7; i++) {
         const isToday = weekDays[i].isToday;
         const dayTotal = dailyTotals[i];
+        const fDayTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(dayTotal, '-') : dayTotal.toFixed(2);
 
         html += `
             <td class="py-3 px-2 text-center font-mono border-l border-slate-200 ${isToday ? 'bg-sky-100/60 text-sky-900' : ''}">
                 <span class="text-xs sm:text-sm font-extrabold ${dayTotal > 0 ? 'text-slate-900' : 'text-slate-400'}">
-                    ${dayTotal > 0 ? dayTotal.toFixed(2) : '-'}
+                    ${dayTotal > 0 ? fDayTotal : '-'}
                 </span>
             </td>
         `;
     }
 
+    const fGrandTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandTotal, '0:00') : grandTotal.toFixed(2);
     html += `
                     <td class="py-3 px-4 text-right font-mono font-black text-sky-800 text-xs sm:text-sm border-l border-slate-300 bg-slate-200/50">
-                        ${grandTotal.toFixed(2)} h
+                        ${fGrandTotal} h
                     </td>
                 </tr>
             </tfoot>
@@ -899,7 +904,7 @@ function renderGanttView(matchingRows) {
         t.days[r.date].entries.push(r);
     });
 
-    if (totalEl) totalEl.textContent = totalHours.toFixed(2);
+    if (totalEl) totalEl.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(totalHours, '0:00') : totalHours.toFixed(2);
 
     if (projectsMap.size === 0) {
         tableContainer.innerHTML = `
@@ -953,16 +958,18 @@ function renderGanttView(matchingRows) {
                 if (t.days[wd.iso]) projDayHours += t.days[wd.iso].hours;
             });
 
+            const fProjDay = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(projDayHours, '0:00') : projDayHours.toFixed(1) + 'h';
             html += `
                 <td class="py-2 px-2 text-center font-mono text-[11px] ${wd.isToday ? 'bg-sky-50/40' : ''}">
-                    ${projDayHours > 0 ? `<span class="font-extrabold text-sky-700">${projDayHours.toFixed(1)}h</span>` : `<span class="text-slate-300">-</span>`}
+                    ${projDayHours > 0 ? `<span class="font-extrabold text-sky-700">${fProjDay}</span>` : `<span class="text-slate-300">-</span>`}
                 </td>
             `;
         });
 
+        const fProjTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(proj.totalHours, '0:00') : proj.totalHours.toFixed(2);
         html += `
                 <td class="py-2 px-3 text-right font-mono font-extrabold text-indigo-700">
-                    ${proj.totalHours.toFixed(2)}h
+                    ${fProjTotal} h
                 </td>
             </tr>
         `;
@@ -984,10 +991,11 @@ function renderGanttView(matchingRows) {
 
                 if (dayData && dayData.hours > 0) {
                     const entriesDesc = dayData.entries.map(e => `${e.employee}: ${e.hoursFormatted} - ${escapeAttr(e.desc || 'Sin desc.')}`).join('\n');
+                    const fTaskDay = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(dayData.hours, '0:00') : dayData.hours.toFixed(1) + 'h';
                     html += `
                         <div class="bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-mono text-[10px] font-bold py-1 px-1.5 rounded-lg shadow-2xs hover:opacity-90 transition cursor-help truncate"
                              title="${entriesDesc}">
-                            ${dayData.hours.toFixed(1)}h
+                            ${fTaskDay}
                         </div>
                     `;
                 } else {
@@ -997,9 +1005,10 @@ function renderGanttView(matchingRows) {
                 html += `</td>`;
             });
 
+            const fTaskTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(task.totalHours, '0:00') : task.totalHours.toFixed(2);
             html += `
                     <td class="py-2 px-3 text-right font-mono font-semibold text-slate-700">
-                        ${task.totalHours.toFixed(2)}h
+                        ${fTaskTotal} h
                     </td>
                 </tr>
             `;
@@ -1912,16 +1921,17 @@ function renderExpressView(isSilent = false) {
     }
 
     function getItemHoursSummaryHtml(item) {
+        const fmt = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM : (h => h.toFixed(2));
         if (item.hasTodayEntry && item.todayHours > 0) {
-            let txt = `<span class="text-emerald-400 font-bold">${item.todayHours.toFixed(2)}h hoy</span>`;
+            let txt = `<span class="text-emerald-400 font-bold">${fmt(item.todayHours, '0:00')}h hoy</span>`;
             if (item.yesterdayHours > 0) {
-                txt += ` <span class="text-slate-400 text-xs">(${item.yesterdayHours.toFixed(1)}h ayer)</span>`;
+                txt += ` <span class="text-slate-400 text-xs">(${fmt(item.yesterdayHours, '0:00')}h ayer)</span>`;
             }
             return txt;
         } else if (item.hasYesterdayEntry && item.yesterdayHours > 0) {
-            return `<span class="text-amber-300 font-bold">${item.yesterdayHours.toFixed(2)}h ayer</span>`;
+            return `<span class="text-amber-300 font-bold">${fmt(item.yesterdayHours, '0:00')}h ayer</span>`;
         } else if (item.totalHours > 0) {
-            return `<span class="text-slate-400">${item.totalHours.toFixed(1)}h</span>`;
+            return `<span class="text-slate-400">${fmt(item.totalHours, '0:00')}h</span>`;
         }
         return '';
     }

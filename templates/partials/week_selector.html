@@ -54,12 +54,12 @@
             <div class="min-w-0 flex flex-wrap items-baseline gap-x-2 text-xs">
                 <div class="flex items-baseline space-x-1">
                     <span class="text-slate-500 font-medium">Horas:</span>
-                    <span class="font-bold text-slate-900 tabular-nums text-sm" id="kpi-total-hours">{{printf "%.2f" .TotalHours}}</span>
+                    <span class="font-bold text-slate-900 tabular-nums text-sm" id="kpi-total-hours">{{.TotalHoursHHMM}}</span>
                     <span class="font-semibold text-sky-600 text-[11px]">h</span>
                 </div>
                 <div class="inline-flex items-center gap-1 text-[10px]">
-                    <span class="text-emerald-700 font-medium bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200/60" title="Horas Hombre">H: <b id="kpi-hours-hombre">{{printf "%.2f" .TotalHorasHombre}}</b>h</span>
-                    <span class="text-sky-700 font-medium bg-sky-50 px-1 py-0.5 rounded border border-sky-200/60" title="Horas Máquina">M: <b id="kpi-hours-maquina">{{printf "%.2f" .TotalHorasMaquina}}</b>h</span>
+                    <span class="text-emerald-700 font-medium bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200/60" title="Horas Hombre">H: <b id="kpi-hours-hombre">{{.TotalHorasHombreHHMM}}</b>h</span>
+                    <span class="text-sky-700 font-medium bg-sky-50 px-1 py-0.5 rounded border border-sky-200/60" title="Horas Máquina">M: <b id="kpi-hours-maquina">{{.TotalHorasMaquinaHHMM}}</b>h</span>
                 </div>
             </div>
         </div>

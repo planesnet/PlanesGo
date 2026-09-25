@@ -3,8 +3,10 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"pasigo/config"
+	"pasigo/odoo"
 	"pasigo/store"
 )
 
@@ -136,3 +138,63 @@ func TestResolveUserOdooConfigAutoRestoresEmptyStore(t *testing.T) {
 		t.Errorf("OdooDB guardada en store incorrecta: '%s'", saved.OdooDB)
 	}
 }
+
+func TestFormatHoursToHHMM(t *testing.T) {
+	tests := []struct {
+		input    float64
+		expected string
+	}{
+		{0.0, "0:00"},
+		{-1.5, "0:00"},
+		{0.5, "0:30"},
+		{1.0, "1:00"},
+		{2.62, "2:37"},
+		{3.00, "3:00"},
+		{4.32, "4:19"},
+		{11.50, "11:30"},
+		{0.13, "0:08"},
+	}
+
+	for _, tc := range tests {
+		actual := FormatHoursToHHMM(tc.input)
+		if actual != tc.expected {
+			t.Errorf("FormatHoursToHHMM(%f) = '%s', esperado '%s'", tc.input, actual, tc.expected)
+		}
+	}
+}
+
+func TestCheckIdleTimersAntigravityNotAccumulatingEpoch(t *testing.T) {
+	state := &AppState{
+		activeTimers: make(map[int]map[string]*odoo.ActiveTimer),
+	}
+
+	// Temporizador Antigravity con StartedAt en 0 (típico de latidos externos)
+	userUID := 1
+	timerKey := "dev:123"
+	curTimer := &odoo.ActiveTimer{
+		Source:        "antigravity",
+		StartedAt:     0,
+		LastHeartbeat: 1000,
+		AccumulatedMs: 18 * 60 * 1000, // 18 minutos ya acumulados
+		IsRunning:     true,
+		UnitAmount:    0.3,
+	}
+	state.activeTimers[userUID] = map[string]*odoo.ActiveTimer{
+		timerKey: curTimer,
+	}
+
+	// Ejecutar checkIdleTimers con timeout de 5 minutos
+	state.checkIdleTimers(time.UnixMilli(2000000), 5*time.Minute)
+
+	// Verificar que no se sumó epoch Unix y que UnitAmount no se disparó
+	if curTimer.UnitAmount > 24.0 {
+		t.Fatalf("UnitAmount superó las 24 horas: %f", curTimer.UnitAmount)
+	}
+	if curTimer.AccumulatedMs > 24*3600*1000 {
+		t.Fatalf("AccumulatedMs superó las 24 horas: %d", curTimer.AccumulatedMs)
+	}
+	if curTimer.IsRunning {
+		t.Errorf("El temporizador debería estar pausado")
+	}
+}
+

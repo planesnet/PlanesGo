@@ -2321,6 +2321,10 @@ func (c *Client) UpdateTimerUnits(ctx context.Context, timesheetID int, unitAmou
 	if timesheetID <= 0 || unitAmount <= 0 {
 		return nil
 	}
+	if unitAmount > 24.0 {
+		log.Printf("[Odoo Client] RECHAZADO: UpdateTimerUnits intentó guardar unitAmount anómalo (%f h) en timesheet %d", unitAmount, timesheetID)
+		return fmt.Errorf("unit_amount anómalo rechazado: %f h > 24h", unitAmount)
+	}
 	writeArgs := []interface{}{
 		c.config.DB,
 		uid,

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.64"
+	Version       = "1.2.65"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -298,6 +298,7 @@ type PlanesGoClient struct {
 	BaseURL    string
 	Token      string
 	HTTPClient *http.Client
+	RetryDelay time.Duration
 }
 
 func newClient(customDir ...string) (*PlanesGoClient, *Config, error) {
@@ -312,7 +313,76 @@ func newClient(customDir ...string) (*PlanesGoClient, *Config, error) {
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		RetryDelay: 2 * time.Second,
 	}, cfg, findErr
+}
+
+// doWithRetry ejecuta una petición HTTP con reintentos automáticos para tolerar micro-cortes de red o caídas temporales del servidor
+func (c *PlanesGoClient) doWithRetry(method, targetURL string, bodyBytes []byte, headers map[string]string) ([]byte, int, error) {
+	const maxRetries = 3
+	retryDelay := c.RetryDelay
+	if retryDelay <= 0 {
+		retryDelay = 2 * time.Second
+	}
+
+	var lastErr error
+	var lastStatusCode int
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
+		req, err := http.NewRequestWithContext(context.Background(), method, targetURL, bodyReader)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("error de conexión con PlanesGo (%s): %w", c.BaseURL, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return nil, 0, lastErr
+		}
+
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("error leyendo respuesta de PlanesGo: %w", readErr)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return nil, resp.StatusCode, lastErr
+		}
+
+		lastStatusCode = resp.StatusCode
+
+		// Códigos temporales recuperables: 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout, 429 Too Many Requests
+		if resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout ||
+			resp.StatusCode == http.StatusTooManyRequests {
+			lastErr = fmt.Errorf("PlanesGo HTTP %d: temporalmente no disponible", resp.StatusCode)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return respBody, resp.StatusCode, lastErr
+		}
+
+		return respBody, resp.StatusCode, nil
+	}
+
+	return nil, lastStatusCode, lastErr
 }
 
 // CheckStatus ejecuta la verificación de Fase 0
@@ -332,31 +402,27 @@ func (c *PlanesGoClient) CheckStatus(projectID int, projectName string) (map[str
 	}
 	reqURL.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL.String(), nil)
+	headers := map[string]string{
+		"X-Antigravity-Token": c.Token,
+		"Accept":              "application/json",
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodGet, reqURL.String(), nil, headers)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Antigravity-Token", c.Token)
-	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error de conexión con PlanesGo (%s): %w", c.BaseURL, err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 	var res map[string]interface{}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		errMsg := "error desconocido"
 		if msg, ok := res["error"].(string); ok {
 			errMsg = msg
 		}
-		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
 	}
 
 	return res, nil
@@ -383,31 +449,27 @@ func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, project
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(jsonBytes))
+	headers := map[string]string{
+		"Content-Type":        "application/json",
+		"X-Antigravity-Token": c.Token,
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodPost, endpoint, jsonBytes, headers)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Antigravity-Token", c.Token)
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error de conexión con PlanesGo: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 	var res map[string]interface{}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		errMsg := "error desconocido"
 		if msg, ok := res["error"].(string); ok {
 			errMsg = msg
 		}
-		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
 	}
 
 	return res, nil
@@ -416,31 +478,27 @@ func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, project
 // GetTicket consulta los datos de un ticket por referencia o ID
 func (c *PlanesGoClient) GetTicket(ticketRef string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/api/tickets?ref=%s", c.BaseURL, url.QueryEscape(ticketRef))
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	headers := map[string]string{
+		"X-Antigravity-Token": c.Token,
+		"Accept":              "application/json",
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodGet, endpoint, nil, headers)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Antigravity-Token", c.Token)
-	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error de conexión con PlanesGo: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 	var res map[string]interface{}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		errMsg := "error desconocido"
 		if msg, ok := res["error"].(string); ok {
 			errMsg = msg
 		}
-		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
 	}
 
 	return res, nil
@@ -464,31 +522,27 @@ func (c *PlanesGoClient) CloseTicket(ticketRef, subject, description string, sen
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(jsonBytes))
+	headers := map[string]string{
+		"Content-Type":        "application/json",
+		"X-Antigravity-Token": c.Token,
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodPost, endpoint, jsonBytes, headers)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Antigravity-Token", c.Token)
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error de conexión con PlanesGo: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 	var res map[string]interface{}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		errMsg := "error desconocido"
 		if msg, ok := res["error"].(string); ok {
 			errMsg = msg
 		}
-		return res, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, errMsg)
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
 	}
 
 	return res, nil
@@ -511,22 +565,18 @@ func (c *PlanesGoClient) ListTasks(projectID int, projectName string) ([]map[str
 	}
 	reqURL.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL.String(), nil)
+	headers := map[string]string{
+		"X-Antigravity-Token": c.Token,
+		"Accept":              "application/json",
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodGet, reqURL.String(), nil, headers)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Antigravity-Token", c.Token)
-	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error al conectar con PlanesGo: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("PlanesGo HTTP %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, string(body))
 	}
 
 	var tasks []map[string]interface{}
