@@ -701,6 +701,10 @@ func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("refresh") == "1" {
+		client.InvalidateTicketsCache()
+	}
+
 	tickets, err := client.GetPendingTickets(ctx, targetUID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

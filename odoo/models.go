@@ -3,6 +3,7 @@ package odoo
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -309,6 +310,74 @@ type Ticket struct {
 	CloseDate       string   `json:"close_date,omitempty"`
 	KanbanState     string   `json:"kanban_state,omitempty"`
 	TotalHoursSpent float64  `json:"total_hours_spent,omitempty"`
+}
+
+func (t *Ticket) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID              int         `json:"id"`
+		Name            interface{} `json:"name"`
+		Number          interface{} `json:"number"`
+		TicketRef       interface{} `json:"ticket_ref"`
+		Description     interface{} `json:"description"`
+		StageID         Many2One    `json:"stage_id"`
+		UserID          Many2One    `json:"user_id"`
+		PartnerID       Many2One    `json:"partner_id"`
+		ProjectID       Many2One    `json:"project_id"`
+		TaskID          Many2One    `json:"task_id"`
+		Priority        interface{} `json:"priority"`
+		CreateDate      interface{} `json:"create_date"`
+		Closed          interface{} `json:"closed"`
+		ClosedDate      interface{} `json:"closed_date"`
+		CloseDate       interface{} `json:"close_date"`
+		KanbanState     interface{} `json:"kanban_state"`
+		TotalHoursSpent float64     `json:"total_hours_spent"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	t.ID = raw.ID
+	if s, ok := raw.Name.(string); ok {
+		t.Name = s
+	}
+	if s, ok := raw.Number.(string); ok {
+		t.Number = s
+	}
+	if s, ok := raw.TicketRef.(string); ok {
+		t.TicketRef = s
+	}
+	if s, ok := raw.Description.(string); ok {
+		t.Description = s
+	}
+	t.StageID = raw.StageID
+	t.UserID = raw.UserID
+	t.PartnerID = raw.PartnerID
+	t.ProjectID = raw.ProjectID
+	t.TaskID = raw.TaskID
+	switch v := raw.Priority.(type) {
+	case string:
+		t.Priority = v
+	case float64:
+		t.Priority = strconv.Itoa(int(v))
+	case int:
+		t.Priority = strconv.Itoa(v)
+	}
+	if s, ok := raw.CreateDate.(string); ok {
+		t.CreateDate = s
+	}
+	if b, ok := raw.Closed.(bool); ok {
+		t.Closed = b
+	}
+	if s, ok := raw.ClosedDate.(string); ok {
+		t.ClosedDate = s
+	}
+	if s, ok := raw.CloseDate.(string); ok {
+		t.CloseDate = s
+	}
+	if s, ok := raw.KanbanState.(string); ok {
+		t.KanbanState = s
+	}
+	t.TotalHoursSpent = raw.TotalHoursSpent
+	return nil
 }
 
 func (t *Ticket) DisplayTitle() string {

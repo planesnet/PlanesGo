@@ -60,6 +60,7 @@ type Client struct {
 	employeesCache    []Employee
 	employeesCachedAt   time.Time
 	ticketsCache        []Ticket
+	ticketsCacheUID     int
 	ticketsCachedAt     time.Time
 	userUIDCache        map[string]int
 	partnerAvatarFields []string
@@ -1019,7 +1020,7 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	}
 
 	c.mu.RLock()
-	if len(c.ticketsCache) > 0 && time.Since(c.ticketsCachedAt) < 30*time.Second {
+	if len(c.ticketsCache) > 0 && c.ticketsCacheUID == targetUID && time.Since(c.ticketsCachedAt) < 15*time.Second {
 		cached := make([]Ticket, len(c.ticketsCache))
 		copy(cached, c.ticketsCache)
 		c.mu.RUnlock()
@@ -1123,14 +1124,14 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 		pending = append(pending, t)
 	}
 
-	// Calcular tiempo acumulado (account.analytic.line con helpdesk_ticket_id)
+	// Calcular tiempo acumulado (account.analytic.line con ticket_id)
 	if len(pending) > 0 {
 		ticketIDs := make([]int, len(pending))
 		for i, t := range pending {
 			ticketIDs[i] = t.ID
 		}
 		aalDomain := []interface{}{
-			[]interface{}{"helpdesk_ticket_id", "in", ticketIDs},
+			[]interface{}{"ticket_id", "in", ticketIDs},
 		}
 		aalArgs := []interface{}{
 			c.config.DB,
@@ -1141,12 +1142,12 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 			[]interface{}{aalDomain},
 		}
 		aalKwargs := map[string]interface{}{
-			"fields": []string{"helpdesk_ticket_id", "unit_amount"},
+			"fields": []string{"ticket_id", "unit_amount"},
 			"limit":  200,
 		}
 		if aalRaw, aalErr := c.call(ctx, "object", "execute_kw", aalArgs, aalKwargs); aalErr == nil {
 			var aalEntries []struct {
-				Ticket Many2One `json:"helpdesk_ticket_id"`
+				Ticket Many2One `json:"ticket_id"`
 				Hours  float64  `json:"unit_amount"`
 			}
 			if json.Unmarshal(aalRaw, &aalEntries) == nil {
@@ -1166,6 +1167,7 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	c.mu.Lock()
 	c.ticketsCache = make([]Ticket, len(pending))
 	copy(c.ticketsCache, pending)
+	c.ticketsCacheUID = targetUID
 	c.ticketsCachedAt = time.Now()
 	c.mu.Unlock()
 

@@ -1,8 +1,8 @@
 # Binaries
-pasigo
-planesgo
-planesgo-mcp
-Migrar1
+/pasigo
+/planesgo
+/planesgo-mcp
+/Migrar1
 bin/
 *.exe
 *.exe~
