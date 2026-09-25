@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Inicializar controles de semana y filtros iniciales
-    updateWeekControls();
+    if (typeof updateWeekControls === 'function') updateWeekControls();
     if (typeof updateStartWorkTimerButton === 'function') updateStartWorkTimerButton();
     if (typeof switchView === 'function') {
         switchView(currentView);

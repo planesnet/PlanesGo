@@ -89,6 +89,16 @@ func (rw *statusResponseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+func (rw *statusResponseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (rw *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 func loggingAndRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

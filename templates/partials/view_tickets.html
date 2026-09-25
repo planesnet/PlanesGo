@@ -155,7 +155,7 @@
                                 <div class="inline-flex items-center justify-end space-x-1">
                                     <!-- Botón Play / Pause Temporizador -->
                                     <button type="button"
-                                            onclick="toggleTicketTimerRow({{.ID}}, '{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}', {{.ProjectID.ID}}, '{{.ProjectID.Name}}', {{.TaskID.ID}}, '{{.TaskID.Name}}', '{{.Name}}')"
+                                            onclick="toggleTicketTimerRow({{.ID}})"
                                             id="btn-ticket-timer-{{.ID}}"
                                             class="btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
                                             title="Iniciar o pausar cronómetro en este ticket">
@@ -180,7 +180,7 @@
 
                                     <!-- Botón Cerrar Ticket -->
                                     <button type="button"
-                                            onclick="openCloseTicketModal({{.ID}}, '{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}', '{{.Name}}')"
+                                            onclick="openCloseTicketModal({{.ID}})"
                                             class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer"
                                             title="Dar por cerrado este ticket en Odoo">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

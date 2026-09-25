@@ -2983,7 +2983,7 @@ function renderTicketsView() {
                     </button>
 
                     <!-- Botón Dar por Cerrado -->
-                    <button type="button" onclick="openCloseTicketModal(${ticketId}, '${ticketRef}', '${title.replace(/'/g, "\\'")}')"
+                    <button type="button" onclick="openCloseTicketModal(${ticketId})"
                             class="px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700"
                             title="Cerrar ticket definitivamente en Helpdesk">
                         <span>🔒</span>
@@ -3173,7 +3173,7 @@ function renderTicketsTable() {
             <td class="py-2.5 px-3 text-right whitespace-nowrap">
                 <div class="inline-flex items-center justify-end space-x-1">
                     <button type="button"
-                            onclick="toggleTicketTimerRow(${ticketId}, '${ticketRef}', ${projId}, '${projName.replace(/'/g, "\\'")}', ${taskId}, '${taskName.replace(/'/g, "\\'")}', '${title.replace(/'/g, "\\"')}')"
+                            onclick="toggleTicketTimerRow(${ticketId})"
                             id="btn-ticket-timer-${ticketId}"
                             class="btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
                             title="Iniciar o pausar cronómetro en este ticket">
@@ -3194,7 +3194,7 @@ function renderTicketsTable() {
                         </svg>
                     </button>
                     <button type="button"
-                            onclick="openCloseTicketModal(${ticketId}, '${ticketRef}', '${title.replace(/'/g, "\\'")}')"
+                            onclick="openCloseTicketModal(${ticketId})"
                             class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer"
                             title="Dar por cerrado este ticket en Odoo">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3212,7 +3212,7 @@ function filterMainTicketsTable(val) {
     renderTicketsTable();
 }
 
-function toggleTicketTimerRow(ticketId, ticketRef, projId, projName, taskId, taskName, title) {
+function toggleTicketTimerRow(ticketId) {
     const currentTimer = (typeof getTimerState === 'function') ? getTimerState() : null;
     const isRunning = currentTimer && currentTimer.status === 'running' && parseInt(currentTimer.ticketId, 10) === ticketId;
     if (isRunning) {
@@ -3220,15 +3220,18 @@ function toggleTicketTimerRow(ticketId, ticketRef, projId, projName, taskId, tas
     } else {
         let ticket = (window.pendingTickets || []).find(t => t.id === ticketId);
         if (!ticket) {
-            ticket = {
-                id: ticketId,
-                ticket_ref: ticketRef,
-                name: title,
-                project_id: { id: projId, name: projName },
-                task_id: { id: taskId, name: taskName }
-            };
-            if (!window.pendingTickets) window.pendingTickets = [];
-            window.pendingTickets.push(ticket);
+            const row = document.querySelector(`.ticket-table-row[data-ticket-id="${ticketId}"]`);
+            if (row) {
+                ticket = {
+                    id: ticketId,
+                    ticket_ref: row.dataset.ticketRef || String(ticketId),
+                    name: row.dataset.title || 'Sin título',
+                    project_id: { id: parseInt(row.dataset.projectId, 10) || 0, name: row.dataset.projectName || '' },
+                    task_id: { id: parseInt(row.dataset.taskId, 10) || 0, name: row.dataset.taskName || '' }
+                };
+                if (!window.pendingTickets) window.pendingTickets = [];
+                window.pendingTickets.push(ticket);
+            }
         }
         startTimerOnTicket(ticketId);
     }
@@ -3425,6 +3428,23 @@ async function submitCreateTicket(event) {
 function openCloseTicketModal(ticketId, ticketRef, ticketTitle) {
     const modal = document.getElementById('modal-close-ticket');
     if (!modal) return;
+
+    if (!ticketRef || !ticketTitle) {
+        const ticket = (window.pendingTickets || []).find(t => t.id === ticketId);
+        if (ticket) {
+            ticketRef = ticketRef || ticket.ticket_ref || String(ticket.id);
+            ticketTitle = ticketTitle || ticket.name || 'Sin título';
+        } else {
+            const row = document.querySelector(`.ticket-table-row[data-ticket-id="${ticketId}"]`);
+            if (row) {
+                ticketRef = ticketRef || row.dataset.ticketRef || String(ticketId);
+                ticketTitle = ticketTitle || row.dataset.title || 'Sin título';
+            } else {
+                ticketRef = ticketRef || String(ticketId);
+                ticketTitle = ticketTitle || 'Ticket #' + ticketId;
+            }
+        }
+    }
 
     document.getElementById('close-ticket-id').value = ticketId;
     document.getElementById('close-ticket-ref').value = ticketRef;
