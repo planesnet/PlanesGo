@@ -62,7 +62,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch activeView {
-	case "calendar", "gantt", "express":
+	case "calendar", "gantt", "express", "tickets":
 		// válido
 	default:
 		activeView = "list"

@@ -10,15 +10,15 @@ function getSavedView() {
     try {
         const urlParams = new URLSearchParams(window.location.search);
         const urlView = urlParams.get('view');
-        if (urlView && ['list', 'calendar', 'gantt', 'express'].includes(urlView)) {
+        if (urlView && ['list', 'calendar', 'gantt', 'express', 'tickets'].includes(urlView)) {
             return urlView;
         }
         const saved = localStorage.getItem('planesgo_active_view');
-        if (saved && ['list', 'calendar', 'gantt', 'express'].includes(saved)) {
+        if (saved && ['list', 'calendar', 'gantt', 'express', 'tickets'].includes(saved)) {
             return saved;
         }
         const match = document.cookie.match(/(?:^|;\s*)planesgo_view=([^;]+)/);
-        if (match && ['list', 'calendar', 'gantt', 'express'].includes(match[1])) {
+        if (match && ['list', 'calendar', 'gantt', 'express', 'tickets'].includes(match[1])) {
             return match[1];
         }
     } catch (e) {
@@ -365,7 +365,7 @@ let isExpressLoading = false;
 let isExpressSilentLoading = false;
 
 function switchView(viewName) {
-    if (!['list', 'calendar', 'gantt', 'express'].includes(viewName)) {
+    if (!['list', 'calendar', 'gantt', 'express', 'tickets'].includes(viewName)) {
         viewName = 'list';
     }
     currentView = viewName;
@@ -385,14 +385,17 @@ function switchView(viewName) {
     }
 
     const btnExpress = document.getElementById('btn-view-express');
+    const btnTickets = document.getElementById('btn-view-tickets');
     const btnList = document.getElementById('btn-view-list');
     const btnCal = document.getElementById('btn-view-calendar');
     const btnGantt = document.getElementById('btn-view-gantt');
 
     const containerExpress = document.getElementById('view-container-express');
+    const containerTickets = document.getElementById('view-container-tickets');
     const containerList = document.getElementById('view-container-list');
     const containerCal = document.getElementById('view-container-calendar');
     const containerGantt = document.getElementById('view-container-gantt');
+    const fabTickets = document.getElementById('fab-create-ticket-view');
 
     const activeClasses = ['bg-white', 'text-sky-700', 'shadow-2xs', 'border-slate-200/80', 'font-bold'];
     const inactiveClasses = ['text-slate-600', 'hover:text-slate-900', 'hover:bg-slate-200/50', 'border-transparent', 'font-medium'];
@@ -412,14 +415,17 @@ function switchView(viewName) {
     }
 
     applyBtnStyle(btnExpress, viewName === 'express');
+    applyBtnStyle(btnTickets, viewName === 'tickets');
     applyBtnStyle(btnList, viewName === 'list');
     applyBtnStyle(btnCal, viewName === 'calendar');
     applyBtnStyle(btnGantt, viewName === 'gantt');
 
     if (containerExpress) containerExpress.classList.toggle('hidden', viewName !== 'express');
+    if (containerTickets) containerTickets.classList.toggle('hidden', viewName !== 'tickets');
     if (containerList) containerList.classList.toggle('hidden', viewName !== 'list');
     if (containerCal) containerCal.classList.toggle('hidden', viewName !== 'calendar');
     if (containerGantt) containerGantt.classList.toggle('hidden', viewName !== 'gantt');
+    if (fabTickets) fabTickets.classList.toggle('hidden', viewName !== 'tickets');
 
     if (viewName === 'express') {
         if (!expressTimesheets && !isExpressLoading) {
@@ -428,6 +434,8 @@ function switchView(viewName) {
             renderExpressView();
             loadExpressTimesheets(true, true);
         }
+    } else if (viewName === 'tickets') {
+        loadTicketsView();
     }
 
     applyTimesheetFilters();
@@ -2551,6 +2559,61 @@ function updateTicketsTimerState(activeMap, current, formattedClock) {
             if (stopBtn) stopBtn.classList.add('hidden');
         }
     });
+
+    // Actualizar también filas de la tabla de la vista nativa de tickets
+    document.querySelectorAll('.ticket-table-row').forEach(row => {
+        const ticketId = parseInt(row.dataset.ticketId, 10) || 0;
+        let matchedTimer = null;
+        if (ticketId && activeMap) {
+            for (const act of activeMap.values()) {
+                if (act.ticketId && parseInt(act.ticketId, 10) === ticketId) {
+                    matchedTimer = act;
+                    break;
+                }
+            }
+        }
+        if (!matchedTimer && current && current.ticketId && parseInt(current.ticketId, 10) === ticketId) {
+            matchedTimer = current;
+        }
+
+        const isRunning = matchedTimer && matchedTimer.status === 'running';
+        const isPaused = matchedTimer && matchedTimer.status === 'paused';
+
+        const playBtn = row.querySelector('.btn-ticket-play');
+        const stopBtn = row.querySelector('.btn-ticket-stop');
+        const iconPlay = row.querySelector('.icon-play');
+        const iconPause = row.querySelector('.icon-pause');
+
+        if (isRunning) {
+            row.classList.add('bg-amber-50/70', 'ring-1', 'ring-amber-300');
+            if (playBtn) {
+                playBtn.className = 'btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 animate-pulse rounded-lg transition cursor-pointer';
+                playBtn.title = 'Pausar cronómetro de este ticket';
+            }
+            if (iconPlay) iconPlay.classList.add('hidden');
+            if (iconPause) iconPause.classList.remove('hidden');
+            if (stopBtn) stopBtn.classList.remove('hidden');
+        } else if (isPaused) {
+            row.classList.add('bg-amber-50/40');
+            row.classList.remove('bg-amber-50/70', 'ring-1', 'ring-amber-300');
+            if (playBtn) {
+                playBtn.className = 'btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition cursor-pointer';
+                playBtn.title = 'Reanudar cronómetro de este ticket';
+            }
+            if (iconPlay) iconPlay.classList.remove('hidden');
+            if (iconPause) iconPause.classList.add('hidden');
+            if (stopBtn) stopBtn.classList.remove('hidden');
+        } else {
+            row.classList.remove('bg-amber-50/70', 'bg-amber-50/40', 'ring-1', 'ring-amber-300');
+            if (playBtn) {
+                playBtn.className = 'btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer';
+                playBtn.title = 'Iniciar cronómetro en este ticket';
+            }
+            if (iconPlay) iconPlay.classList.remove('hidden');
+            if (iconPause) iconPause.classList.add('hidden');
+            if (stopBtn) stopBtn.classList.add('hidden');
+        }
+    });
 }
 
 // ============================================================================
@@ -2741,6 +2804,8 @@ async function loadTicketsView(forceReload = false) {
         const count = window.pendingTickets.length;
         const badge = document.getElementById('tickets-tab-count-badge');
         if (badge) badge.textContent = count;
+        const mainBadge = document.getElementById('tickets-main-count-badge');
+        if (mainBadge) mainBadge.textContent = count;
         const floatBadge = document.getElementById('float-tickets-count-badge');
         if (floatBadge) floatBadge.textContent = count;
 
@@ -2753,16 +2818,23 @@ async function loadTicketsView(forceReload = false) {
     } finally {
         __isTicketsLoading = false;
         if (loadingEl) loadingEl.classList.add('hidden');
+        const tableLoading = document.getElementById('tickets-table-loading');
+        if (tableLoading) tableLoading.classList.add('hidden');
     }
 }
 
 /**
- * Renderiza las tarjetas de tickets con todos los datos y controles
+ * Renderiza los tickets tanto en la tabla principal como en la vista de tarjetas/express
  */
 function renderTicketsView() {
+    renderTicketsTable();
+
     const gridEl = document.getElementById('tickets-grid-container');
     const emptyEl = document.getElementById('tickets-empty-state');
-    if (!gridEl) return;
+    if (!gridEl) {
+        updateExpressTimerState();
+        return;
+    }
 
     const tickets = window.pendingTickets || [];
     const searchInput = document.getElementById('filter-search');
@@ -2990,6 +3062,176 @@ function stopTimerOnTicket(ticketId) {
     setTimeout(() => {
         updateExpressTimerState();
     }, 80);
+}
+
+/**
+ * Renderiza la tabla de tickets para la vista nativa 'tickets'
+ */
+function renderTicketsTable() {
+    const tbody = document.getElementById('tickets-table-body');
+    if (!tbody) return;
+
+    const tickets = window.pendingTickets || [];
+    const searchInput = document.getElementById('tickets-table-search');
+    const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+    const filtered = tickets.filter(t => {
+        if (!q) return true;
+        const ref = (t.ticket_ref || String(t.id) || '').toLowerCase();
+        const name = (t.name || '').toLowerCase();
+        const desc = (t.description || '').toLowerCase();
+        const proj = (t.project_id && t.project_id.name ? t.project_id.name : '').toLowerCase();
+        const task = (t.task_id && t.task_id.name ? t.task_id.name : '').toLowerCase();
+        const partner = (t.partner_id && t.partner_id.name ? t.partner_id.name : '').toLowerCase();
+        return ref.includes(q) || name.includes(q) || desc.includes(q) || proj.includes(q) || task.includes(q) || partner.includes(q);
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `
+            <tr id="tickets-table-empty">
+                <td colspan="8" class="py-12 text-center text-slate-400">
+                    <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2 text-xl">
+                        🎉
+                    </div>
+                    <p class="text-sm font-semibold text-slate-700">No hay tickets pendientes asignados</p>
+                    <p class="text-xs text-slate-500 mt-0.5">${q ? 'No se encontraron tickets con ese criterio de búsqueda' : 'Todos los tickets están resueltos o cerrados.'}</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(t => {
+        const ticketId = t.id;
+        const ticketRef = t.ticket_ref || String(t.id);
+        const title = t.name || 'Sin título';
+        const desc = t.description ? t.description.replace(/<[^>]*>?/gm, '').trim() : '';
+        const projId = (t.project_id && t.project_id.id) ? t.project_id.id : 0;
+        const projName = (t.project_id && t.project_id.name) ? t.project_id.name : '';
+        const taskId = (t.task_id && t.task_id.id) ? t.task_id.id : 0;
+        const taskName = (t.task_id && t.task_id.name) ? t.task_id.name : '';
+        const partnerName = (t.partner_id && t.partner_id.name) ? t.partner_id.name : '';
+        const createDate = t.create_date ? t.create_date.split(' ')[0] : '';
+        const hoursSpent = typeof t.total_hours_spent === 'number' ? t.total_hours_spent.toFixed(2) : '0.00';
+
+        const priorityVal = parseInt(t.priority, 10) || 0;
+        let starsHtml = '';
+        if (priorityVal >= 3) {
+            starsHtml = '<span class="text-amber-400 text-sm">★★★</span>';
+        } else if (priorityVal === 2) {
+            starsHtml = '<span class="text-amber-400 text-sm">★★</span><span class="text-slate-200 text-sm">★</span>';
+        } else if (priorityVal === 1) {
+            starsHtml = '<span class="text-amber-400 text-sm">★</span><span class="text-slate-200 text-sm">★★</span>';
+        } else {
+            starsHtml = '<span class="text-slate-200 text-sm">★★★</span>';
+        }
+
+        return `
+        <tr class="ticket-table-row hover:bg-slate-50/80 transition-colors"
+            data-ticket-id="${ticketId}"
+            data-ticket-ref="${ticketRef}"
+            data-project-id="${projId}"
+            data-project-name="${projName.replace(/"/g, '&quot;')}"
+            data-task-id="${taskId}"
+            data-task-name="${taskName.replace(/"/g, '&quot;')}"
+            data-partner-name="${partnerName.replace(/"/g, '&quot;')}"
+            data-title="${title.replace(/"/g, '&quot;')}"
+            data-desc="${desc.replace(/"/g, '&quot;')}">
+            <td class="py-2.5 px-3 text-center whitespace-nowrap">
+                <div class="inline-flex items-center space-x-0.5" title="Prioridad: ${priorityVal} de 3">
+                    ${starsHtml}
+                </div>
+            </td>
+            <td class="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
+                <span class="px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs">
+                    #${ticketRef}
+                </span>
+            </td>
+            <td class="py-2.5 px-3 whitespace-nowrap text-slate-500 font-mono text-xs">
+                ${createDate}
+            </td>
+            <td class="py-2.5 px-4">
+                <div class="font-semibold text-slate-900">
+                    ${title}
+                </div>
+                ${desc ? `<div class="text-[11px] text-slate-500 line-clamp-1 italic mt-0.5">${desc}</div>` : ''}
+            </td>
+            <td class="py-2.5 px-3 whitespace-nowrap text-xs text-slate-600 font-medium">
+                ${partnerName ? `<span class="inline-flex items-center space-x-1" title="${partnerName}"><span class="text-slate-400">🏢</span><span class="truncate max-w-[140px]">${partnerName}</span></span>` : '<span class="text-slate-400 italic text-xs">-</span>'}
+            </td>
+            <td class="py-2.5 px-3 text-xs">
+                <div class="font-medium text-slate-800 truncate max-w-[160px]" title="${projName}">
+                    📁 ${projName || '<span class="text-slate-400">Sin proyecto</span>'}
+                </div>
+                ${taskName ? `<div class="text-[11px] text-slate-500 truncate max-w-[160px]" title="${taskName}">📋 ${taskName}</div>` : ''}
+            </td>
+            <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-slate-800 text-xs">
+                <span class="ticket-hours-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                    ${hoursSpent} h
+                </span>
+            </td>
+            <td class="py-2.5 px-3 text-right whitespace-nowrap">
+                <div class="inline-flex items-center justify-end space-x-1">
+                    <button type="button"
+                            onclick="toggleTicketTimerRow(${ticketId}, '${ticketRef}', ${projId}, '${projName.replace(/'/g, "\\'")}', ${taskId}, '${taskName.replace(/'/g, "\\'")}', '${title.replace(/'/g, "\\"')}')"
+                            id="btn-ticket-timer-${ticketId}"
+                            class="btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
+                            title="Iniciar o pausar cronómetro en este ticket">
+                        <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                        </svg>
+                        <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button type="button"
+                            onclick="stopTimerOnTicket(${ticketId})"
+                            id="btn-ticket-stop-${ticketId}"
+                            class="btn-ticket-stop hidden inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
+                            title="Detener cronómetro y consolidar tiempo">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button type="button"
+                            onclick="openCloseTicketModal(${ticketId}, '${ticketRef}', '${title.replace(/'/g, "\\'")}')"
+                            class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer"
+                            title="Dar por cerrado este ticket en Odoo">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </button>
+                </div>
+            </td>
+        </tr>
+        `;
+    }).join('');
+}
+
+function filterMainTicketsTable(val) {
+    renderTicketsTable();
+}
+
+function toggleTicketTimerRow(ticketId, ticketRef, projId, projName, taskId, taskName, title) {
+    const currentTimer = (typeof getTimerState === 'function') ? getTimerState() : null;
+    const isRunning = currentTimer && currentTimer.status === 'running' && parseInt(currentTimer.ticketId, 10) === ticketId;
+    if (isRunning) {
+        pauseTimerOnTicket(ticketId);
+    } else {
+        let ticket = (window.pendingTickets || []).find(t => t.id === ticketId);
+        if (!ticket) {
+            ticket = {
+                id: ticketId,
+                ticket_ref: ticketRef,
+                name: title,
+                project_id: { id: projId, name: projName },
+                task_id: { id: taskId, name: taskName }
+            };
+            if (!window.pendingTickets) window.pendingTickets = [];
+            window.pendingTickets.push(ticket);
+        }
+        startTimerOnTicket(ticketId);
+    }
 }
 
 // ============================================================================
@@ -3302,6 +3544,9 @@ window.submitCreateTicket = submitCreateTicket;
 window.openCloseTicketModal = openCloseTicketModal;
 window.closeCloseTicketModal = closeCloseTicketModal;
 window.submitCloseTicket = submitCloseTicket;
+window.toggleTicketTimerRow = toggleTicketTimerRow;
+window.filterMainTicketsTable = filterMainTicketsTable;
+window.renderTicketsTable = renderTicketsTable;
 
 // Sincronización periódica y silenciosa en segundo plano (cada 20 segundos)
 if (!window.__expressSilentSyncInterval) {

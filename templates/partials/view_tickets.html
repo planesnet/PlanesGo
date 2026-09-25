@@ -1,0 +1,219 @@
+{{ define "view_tickets" }}
+<!-- VISTA: Tickets de Soporte Asignados (Pestaña Completa) -->
+<div id="view-container-tickets" class="{{if ne .CurrentView "tickets"}}hidden {{end}}space-y-4 relative">
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <!-- Barra Superior de la Pestaña de Tickets -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:px-6 sm:py-4 border-b border-slate-100 bg-slate-50/50">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20 flex items-center justify-center text-sm font-bold shrink-0">
+                    🎫
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h3 class="font-bold text-slate-800 text-sm sm:text-base">Tickets de Soporte Asignados</h3>
+                        <span id="tickets-main-count-badge" class="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            {{if .PendingTicketsCount}}{{.PendingTicketsCount}}{{else}}0{{end}}
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-500">Tickets pendientes con imputación de horas por proyecto/tarea y cierre directo</p>
+                </div>
+            </div>
+
+            <!-- Controles de búsqueda rápida y recarga -->
+            <div class="flex items-center space-x-2 self-stretch sm:self-auto">
+                <div class="relative flex-1 sm:w-64">
+                    <span class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </span>
+                    <input type="text" id="tickets-table-search" oninput="filterMainTicketsTable(this.value)"
+                           placeholder="Filtrar por nº, título, cliente..."
+                           class="w-full pl-8 pr-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500 transition shadow-2xs">
+                </div>
+                <button type="button" onclick="loadTicketsView(true)"
+                        class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-medium transition cursor-pointer flex items-center space-x-1 shrink-0 shadow-2xs"
+                        title="Recargar tickets desde Odoo">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span class="hidden sm:inline">Actualizar</span>
+                </button>
+                <button type="button" onclick="openCreateTicketModal()"
+                        class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs hover:shadow-sm transition cursor-pointer flex items-center space-x-1.5 shrink-0"
+                        title="Crear un nuevo ticket rápido">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>Nuevo Ticket</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Estado de carga -->
+        <div id="tickets-table-loading" class="hidden py-12 flex flex-col items-center justify-center space-y-3 text-slate-400">
+            <svg class="w-8 h-8 animate-spin text-sky-600" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-xs font-medium text-slate-500">Consultando tickets pendientes en Odoo...</span>
+        </div>
+
+        <!-- Tabla Estilo Lista de Odoo -->
+        <div class="overflow-x-auto" id="tickets-table-container">
+            <table class="w-full text-left border-collapse text-xs sm:text-sm" id="tickets-table">
+                <thead>
+                    <tr class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        <th class="py-2.5 px-3 text-center w-20">Prioridad</th>
+                        <th class="py-2.5 px-3 w-28">Nº Ticket</th>
+                        <th class="py-2.5 px-3 w-28">Fecha</th>
+                        <th class="py-2.5 px-4 min-w-[220px]">Título y Asunto</th>
+                        <th class="py-2.5 px-3 min-w-[150px]">Cliente</th>
+                        <th class="py-2.5 px-3 min-w-[170px]">Proyecto / Tarea</th>
+                        <th class="py-2.5 px-3 text-right w-24">Acumulado</th>
+                        <th class="py-2.5 px-3 text-right w-36">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="tickets-table-body" class="divide-y divide-slate-100 font-normal text-slate-700">
+                    {{if .PendingTickets}}
+                        {{range .PendingTickets}}
+                        <tr class="ticket-table-row hover:bg-slate-50/80 transition-colors"
+                            data-ticket-id="{{.ID}}"
+                            data-ticket-ref="{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}"
+                            data-project-id="{{.ProjectID.ID}}"
+                            data-project-name="{{.ProjectID.Name}}"
+                            data-task-id="{{.TaskID.ID}}"
+                            data-task-name="{{.TaskID.Name}}"
+                            data-partner-name="{{.PartnerID.Name}}"
+                            data-title="{{.Name}}"
+                            data-desc="{{.Description}}">
+                            <!-- Prioridad con estrellas -->
+                            <td class="py-2.5 px-3 text-center whitespace-nowrap">
+                                <div class="inline-flex items-center space-x-0.5" title="Prioridad: {{.Priority}} de 3">
+                                    {{if eq .Priority "3"}}
+                                        <span class="text-amber-400 text-sm">★★★</span>
+                                    {{else if eq .Priority "2"}}
+                                        <span class="text-amber-400 text-sm">★★</span><span class="text-slate-200 text-sm">★</span>
+                                    {{else if eq .Priority "1"}}
+                                        <span class="text-amber-400 text-sm">★</span><span class="text-slate-200 text-sm">★★</span>
+                                    {{else}}
+                                        <span class="text-slate-200 text-sm">★★★</span>
+                                    {{end}}
+                                </div>
+                            </td>
+                            <!-- Nº Ticket -->
+                            <td class="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
+                                <span class="px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs">
+                                    #{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}
+                                </span>
+                            </td>
+                            <!-- Fecha -->
+                            <td class="py-2.5 px-3 whitespace-nowrap text-slate-500 font-mono text-xs">
+                                {{.CreateDate}}
+                            </td>
+                            <!-- Título y Asunto -->
+                            <td class="py-2.5 px-4">
+                                <div class="font-semibold text-slate-900 group-hover:text-amber-700 transition">
+                                    {{.Name}}
+                                </div>
+                                {{if .Description}}
+                                <div class="text-[11px] text-slate-500 line-clamp-1 italic mt-0.5">
+                                    {{.Description}}
+                                </div>
+                                {{end}}
+                            </td>
+                            <!-- Cliente -->
+                            <td class="py-2.5 px-3 whitespace-nowrap text-xs text-slate-600 font-medium">
+                                {{if .PartnerID.Name}}
+                                <span class="inline-flex items-center space-x-1" title="{{.PartnerID.Name}}">
+                                    <span class="text-slate-400">🏢</span>
+                                    <span class="truncate max-w-[140px]">{{.PartnerID.Name}}</span>
+                                </span>
+                                {{else}}
+                                <span class="text-slate-400 italic text-xs">-</span>
+                                {{end}}
+                            </td>
+                            <!-- Proyecto y Tarea -->
+                            <td class="py-2.5 px-3 text-xs">
+                                <div class="font-medium text-slate-800 truncate max-w-[160px]" title="{{.ProjectID.Name}}">
+                                    📁 {{if .ProjectID.Name}}{{.ProjectID.Name}}{{else}}<span class="text-slate-400">Sin proyecto</span>{{end}}
+                                </div>
+                                {{if .TaskID.Name}}
+                                <div class="text-[11px] text-slate-500 truncate max-w-[160px]" title="{{.TaskID.Name}}">
+                                    📋 {{.TaskID.Name}}
+                                </div>
+                                {{end}}
+                            </td>
+                            <!-- Tiempo Acumulado -->
+                            <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-slate-800 text-xs">
+                                <span class="ticket-hours-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                                    {{printf "%.2f" .TotalHoursSpent}} h
+                                </span>
+                            </td>
+                            <!-- Acciones: Play, Pause, Stop, Cerrar -->
+                            <td class="py-2.5 px-3 text-right whitespace-nowrap">
+                                <div class="inline-flex items-center justify-end space-x-1">
+                                    <!-- Botón Play / Pause Temporizador -->
+                                    <button type="button"
+                                            onclick="toggleTicketTimerRow({{.ID}}, '{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}', {{.ProjectID.ID}}, '{{.ProjectID.Name}}', {{.TaskID.ID}}, '{{.TaskID.Name}}', '{{.Name}}')"
+                                            id="btn-ticket-timer-{{.ID}}"
+                                            class="btn-ticket-play inline-flex items-center justify-center w-7 h-7 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg transition cursor-pointer"
+                                            title="Iniciar o pausar cronómetro en este ticket">
+                                        <svg class="w-3.5 h-3.5 icon-play" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                                        </svg>
+                                        <svg class="w-3.5 h-3.5 icon-pause hidden" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+
+                                    <!-- Botón Stop Temporizador -->
+                                    <button type="button"
+                                            onclick="stopTimerOnTicket({{.ID}})"
+                                            id="btn-ticket-stop-{{.ID}}"
+                                            class="btn-ticket-stop hidden inline-flex items-center justify-center w-7 h-7 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
+                                            title="Detener cronómetro y consolidar tiempo">
+                                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+
+                                    <!-- Botón Cerrar Ticket -->
+                                    <button type="button"
+                                            onclick="openCloseTicketModal({{.ID}}, '{{if .TicketRef}}{{.TicketRef}}{{else}}{{.ID}}{{end}}', '{{.Name}}')"
+                                            class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer"
+                                            title="Dar por cerrado este ticket en Odoo">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {{end}}
+                    {{else}}
+                        <tr id="tickets-table-empty">
+                            <td colspan="8" class="py-12 text-center text-slate-400">
+                                <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2 text-xl">
+                                    🎉
+                                </div>
+                                <p class="text-sm font-semibold text-slate-700">No hay tickets pendientes asignados</p>
+                                <p class="text-xs text-slate-500 mt-0.5">Todos los tickets están resueltos o cerrados.</p>
+                            </td>
+                        </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Botón Flotante Material Design FAB (+) abajo a la derecha -->
+    <button type="button" onclick="openCreateTicketModal()" id="fab-create-ticket-view"
+            class="fixed bottom-8 right-8 z-40 w-14 h-14 rounded-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 shadow-xl hover:shadow-2xl flex items-center justify-center transition-all cursor-pointer ring-4 ring-amber-500/20"
+            title="Crear nuevo ticket rápido (+)">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+        </svg>
+    </button>
+</div>
+{{ end }}
