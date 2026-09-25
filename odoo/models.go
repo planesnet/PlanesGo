@@ -282,10 +282,19 @@ type Employee struct {
 	Active    bool     `json:"active"`
 }
 
+// ResUser representa un usuario del sistema Odoo (res.users) para asignaciones de tickets y tareas.
+type ResUser struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Login string `json:"login"`
+	Email string `json:"email"`
+}
+
 // Ticket representa un ticket de soporte/helpdesk en Odoo (helpdesk.ticket).
 type Ticket struct {
 	ID              int      `json:"id"`
 	Name            string   `json:"name"`
+	Number          string   `json:"number,omitempty"`
 	TicketRef       string   `json:"ticket_ref,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	StageID         Many2One `json:"stage_id"`
@@ -295,14 +304,20 @@ type Ticket struct {
 	TaskID          Many2One `json:"task_id,omitempty"`
 	Priority        string   `json:"priority,omitempty"`
 	CreateDate      string   `json:"create_date,omitempty"`
+	Closed          bool     `json:"closed,omitempty"`
+	ClosedDate      string   `json:"closed_date,omitempty"`
 	CloseDate       string   `json:"close_date,omitempty"`
 	KanbanState     string   `json:"kanban_state,omitempty"`
 	TotalHoursSpent float64  `json:"total_hours_spent,omitempty"`
 }
 
 func (t *Ticket) DisplayTitle() string {
-	if t.TicketRef != "" && !strings.Contains(t.Name, t.TicketRef) {
-		return fmt.Sprintf("[%s] %s", t.TicketRef, t.Name)
+	ref := t.Number
+	if ref == "" {
+		ref = t.TicketRef
+	}
+	if ref != "" && !strings.Contains(t.Name, ref) {
+		return fmt.Sprintf("[%s] %s", ref, t.Name)
 	}
 	if t.Name != "" {
 		return t.Name
@@ -440,5 +455,30 @@ type Partner struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
+}
+
+func (p *Partner) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID          int         `json:"id"`
+		Name        interface{} `json:"name"`
+		DisplayName interface{} `json:"display_name"`
+		Email       interface{} `json:"email"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = raw.ID
+	if s, ok := raw.Name.(string); ok {
+		p.Name = s
+	}
+	if s, ok := raw.DisplayName.(string); ok {
+		p.DisplayName = s
+	} else if p.Name != "" {
+		p.DisplayName = p.Name
+	}
+	if s, ok := raw.Email.(string); ok {
+		p.Email = s
+	}
+	return nil
 }
 

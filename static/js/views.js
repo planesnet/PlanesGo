@@ -2624,6 +2624,7 @@ window.__activeExpressTab = 'express';
 window.pendingTickets = [];
 let __cachedProjectsForTickets = null;
 let __cachedPartnersForTickets = null;
+let __cachedUsersForTickets = null;
 
 /**
  * Alterna entre la pestaña Express y la pestaña Tickets
@@ -3089,7 +3090,7 @@ function renderTicketsTable() {
     if (filtered.length === 0) {
         tbody.innerHTML = `
             <tr id="tickets-table-empty">
-                <td colspan="8" class="py-12 text-center text-slate-400">
+                <td colspan="9" class="py-12 text-center text-slate-400">
                     <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2 text-xl">
                         🎉
                     </div>
@@ -3103,14 +3104,17 @@ function renderTicketsTable() {
 
     tbody.innerHTML = filtered.map(t => {
         const ticketId = t.id;
-        const ticketRef = t.ticket_ref || String(t.id);
+        const ticketRef = t.number || t.ticket_ref || String(t.id);
         const title = t.name || 'Sin título';
         const desc = t.description ? t.description.replace(/<[^>]*>?/gm, '').trim() : '';
         const projId = (t.project_id && t.project_id.id) ? t.project_id.id : 0;
         const projName = (t.project_id && t.project_id.name) ? t.project_id.name : '';
         const taskId = (t.task_id && t.task_id.id) ? t.task_id.id : 0;
         const taskName = (t.task_id && t.task_id.name) ? t.task_id.name : '';
+        const partnerId = (t.partner_id && t.partner_id.id) ? t.partner_id.id : 0;
         const partnerName = (t.partner_id && t.partner_id.name) ? t.partner_id.name : '';
+        const userId = (t.user_id && t.user_id.id) ? t.user_id.id : 0;
+        const userName = (t.user_id && t.user_id.name) ? t.user_id.name : '';
         const createDate = t.create_date ? t.create_date.split(' ')[0] : '';
         const hoursSpent = typeof t.total_hours_spent === 'number' ? t.total_hours_spent.toFixed(2) : '0.00';
 
@@ -3134,7 +3138,11 @@ function renderTicketsTable() {
             data-project-name="${projName.replace(/"/g, '&quot;')}"
             data-task-id="${taskId}"
             data-task-name="${taskName.replace(/"/g, '&quot;')}"
+            data-partner-id="${partnerId}"
             data-partner-name="${partnerName.replace(/"/g, '&quot;')}"
+            data-user-id="${userId}"
+            data-user-name="${userName.replace(/"/g, '&quot;')}"
+            data-priority="${priorityVal}"
             data-title="${title.replace(/"/g, '&quot;')}"
             data-desc="${desc.replace(/"/g, '&quot;')}">
             <td class="py-2.5 px-3 text-center whitespace-nowrap">
@@ -3165,6 +3173,9 @@ function renderTicketsTable() {
                 </div>
                 ${taskName ? `<div class="text-[11px] text-slate-500 truncate max-w-[160px]" title="${taskName}">📋 ${taskName}</div>` : ''}
             </td>
+            <td class="py-2.5 px-3 whitespace-nowrap text-xs text-slate-600 font-medium">
+                ${userName ? `<span class="inline-flex items-center space-x-1" title="Asignado a: ${userName}"><span class="text-slate-400">👤</span><span class="truncate max-w-[120px]">${userName}</span></span>` : '<span class="text-slate-400 italic text-xs">Sin asignar</span>'}
+            </td>
             <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-slate-800 text-xs">
                 <span class="ticket-hours-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
                     ${hoursSpent} h
@@ -3191,6 +3202,14 @@ function renderTicketsTable() {
                             title="Detener cronómetro y consolidar tiempo">
                         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button type="button"
+                            onclick="openEditTicketModal(${ticketId})"
+                            class="inline-flex items-center justify-center w-7 h-7 text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-lg transition cursor-pointer"
+                            title="Modificar este ticket">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                     </button>
                     <button type="button"
@@ -3238,8 +3257,28 @@ function toggleTicketTimerRow(ticketId) {
 }
 
 // ============================================================================
+// ============================================================================
 // MODAL DE CREACIÓN RÁPIDA DE TICKET (FAB +)
 // ============================================================================
+
+/**
+ * Carga usuarios asignables desde la API de Odoo
+ */
+async function loadAssignableUsers() {
+    if (__cachedUsersForTickets && __cachedUsersForTickets.length > 0) {
+        return __cachedUsersForTickets;
+    }
+    try {
+        const res = await fetch('/api/users');
+        if (res.ok) {
+            __cachedUsersForTickets = await res.json();
+            return __cachedUsersForTickets;
+        }
+    } catch (e) {
+        console.warn('[PlanesGo] Error cargando usuarios:', e);
+    }
+    return [];
+}
 
 /**
  * Abre el modal para crear un nuevo ticket rápido
@@ -3277,6 +3316,28 @@ async function openCreateTicketModal() {
             }
         } catch (e) {
             console.warn('[PlanesGo] Error cargando partners:', e);
+        }
+    }
+
+    // Cargar usuarios asignables y preseleccionar usuario actual
+    const userSelect = document.getElementById('create-ticket-user');
+    if (userSelect) {
+        const users = await loadAssignableUsers();
+        if (users && users.length > 0) {
+            userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+            // Intentar preseleccionar usuario actual
+            const currentWorkerName = (document.querySelector('[data-current-worker]')?.dataset?.currentWorker || '').trim().toLowerCase();
+            const sessionUserName = (window.__userLoginName || '').trim().toLowerCase();
+            const matched = users.find(u => {
+                const uName = (u.name || '').toLowerCase();
+                const uLogin = (u.login || '').toLowerCase();
+                if (sessionUserName && (uLogin === sessionUserName || uName === sessionUserName)) return true;
+                if (currentWorkerName && (uName.includes(currentWorkerName) || currentWorkerName.includes(uName))) return true;
+                return false;
+            });
+            if (matched) {
+                userSelect.value = String(matched.id);
+            }
         }
     }
 
@@ -3365,6 +3426,7 @@ async function submitCreateTicket(event) {
     const projId = parseInt(document.getElementById('create-ticket-project')?.value, 10) || 0;
     const taskId = parseInt(document.getElementById('create-ticket-task')?.value, 10) || 0;
     const partnerId = parseInt(document.getElementById('create-ticket-partner')?.value, 10) || 0;
+    const userId = parseInt(document.getElementById('create-ticket-user')?.value, 10) || 0;
     const priority = document.getElementById('create-ticket-priority')?.value || '0';
     const desc = document.getElementById('create-ticket-desc')?.value?.trim() || '';
 
@@ -3391,6 +3453,7 @@ async function submitCreateTicket(event) {
                 project_id: projId,
                 task_id: taskId,
                 partner_id: partnerId,
+                user_id: userId,
                 priority: priority
             })
         });
@@ -3417,6 +3480,222 @@ async function submitCreateTicket(event) {
     } finally {
         if (btnSpinner) btnSpinner.classList.add('hidden');
         if (btnLabel) btnLabel.textContent = 'Crear Ticket';
+        if (btnSubmit) btnSubmit.disabled = false;
+    }
+}
+
+// ============================================================================
+// MODAL DE MODIFICACIÓN / EDICIÓN DE TICKET DETERMINADO
+// ============================================================================
+
+/**
+ * Abre el modal para modificar cualquier ticket existente
+ */
+async function openEditTicketModal(ticketId) {
+    const modal = document.getElementById('modal-edit-ticket');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+
+    const ticket = (window.pendingTickets || []).find(t => t.id === ticketId);
+    const row = document.querySelector(`.ticket-table-row[data-ticket-id="${ticketId}"]`);
+
+    const title = ticket ? ticket.name : (row?.dataset?.title || '');
+    const desc = ticket ? (ticket.description || '') : (row?.dataset?.desc || '');
+    const number = ticket ? (ticket.number || ticket.ticket_ref || `#${ticket.id}`) : (row?.dataset?.ticketRef || `#${ticketId}`);
+    const priority = ticket ? (ticket.priority || '0') : (row?.dataset?.priority || '0');
+    const projId = ticket?.project_id?.id || parseInt(row?.dataset?.projectId, 10) || 0;
+    const taskId = ticket?.task_id?.id || parseInt(row?.dataset?.taskId, 10) || 0;
+    const partnerId = ticket?.partner_id?.id || parseInt(row?.dataset?.partnerId, 10) || 0;
+    const userId = ticket?.user_id?.id || parseInt(row?.dataset?.userId, 10) || 0;
+
+    const idInput = document.getElementById('edit-ticket-id');
+    if (idInput) idInput.value = ticketId;
+
+    const modalTitle = document.getElementById('edit-ticket-modal-title');
+    if (modalTitle) modalTitle.textContent = `Modificar Ticket ${number}`;
+
+    const nameInput = document.getElementById('edit-ticket-name');
+    if (nameInput) nameInput.value = title;
+
+    const descInput = document.getElementById('edit-ticket-desc');
+    if (descInput) descInput.value = desc.replace(/<[^>]*>?/gm, '').trim();
+
+    setEditTicketPriorityStar(parseInt(priority, 10) || 0);
+
+    // Cargar proyectos
+    const projSelect = document.getElementById('edit-ticket-project');
+    if (projSelect) {
+        if (!__cachedProjectsForTickets || projSelect.options.length <= 1) {
+            try {
+                const res = await fetch('/api/projects');
+                if (res.ok) {
+                    __cachedProjectsForTickets = await res.json();
+                }
+            } catch (e) {
+                console.warn('[PlanesGo] Error cargando proyectos:', e);
+            }
+        }
+        if (__cachedProjectsForTickets) {
+            projSelect.innerHTML = '<option value="">-- Sin proyecto asignado --</option>' +
+                __cachedProjectsForTickets.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+            projSelect.value = projId ? String(projId) : '';
+        }
+    }
+
+    // Cargar partners
+    const partnerSelect = document.getElementById('edit-ticket-partner');
+    if (partnerSelect) {
+        if (!__cachedPartnersForTickets || partnerSelect.options.length <= 1) {
+            try {
+                const res = await fetch('/api/partners');
+                if (res.ok) {
+                    __cachedPartnersForTickets = await res.json();
+                }
+            } catch (e) {
+                console.warn('[PlanesGo] Error cargando partners:', e);
+            }
+        }
+        if (__cachedPartnersForTickets) {
+            partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>' +
+                __cachedPartnersForTickets.map(pt => `<option value="${pt.id}">${pt.name}${pt.email ? ' (' + pt.email + ')' : ''}</option>`).join('');
+            partnerSelect.value = partnerId ? String(partnerId) : '';
+        }
+    }
+
+    // Cargar usuarios asignables
+    const userSelect = document.getElementById('edit-ticket-user');
+    if (userSelect) {
+        const users = await loadAssignableUsers();
+        if (users && users.length > 0) {
+            userSelect.innerHTML = '<option value="">-- Sin asignar --</option>' +
+                users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+            userSelect.value = userId ? String(userId) : '';
+        }
+    }
+
+    // Cargar tareas del proyecto seleccionado
+    await onEditTicketModalProjectChange(projId, taskId);
+}
+
+function closeEditTicketModal() {
+    const modal = document.getElementById('modal-edit-ticket');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function onEditTicketModalProjectChange(projectId, selectedTaskId = null) {
+    const taskSelect = document.getElementById('edit-ticket-task');
+    if (!taskSelect) return;
+
+    taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
+    if (!projectId) {
+        taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/tasks?project_id=${projectId}`);
+        if (res.ok) {
+            const tasks = await res.json();
+            taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>' +
+                tasks.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+            if (selectedTaskId) {
+                taskSelect.value = String(selectedTaskId);
+            }
+        }
+    } catch (e) {
+        taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
+    }
+}
+
+function setEditTicketPriorityStar(rating) {
+    const input = document.getElementById('edit-ticket-priority');
+    if (input) input.value = rating;
+
+    const starsContainer = document.getElementById('edit-ticket-priority-stars');
+    if (starsContainer) {
+        starsContainer.querySelectorAll('[data-star]').forEach(starEl => {
+            const starVal = parseInt(starEl.dataset.star, 10);
+            if (starVal <= rating) {
+                starEl.className = 'text-xl text-amber-400 hover:text-amber-300 transition cursor-pointer';
+            } else {
+                starEl.className = 'text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer';
+            }
+        });
+    }
+
+    const label = document.getElementById('edit-ticket-priority-label');
+    if (label) {
+        const labels = ['Baja (0★)', 'Media (1★)', 'Alta (2★)', 'Urgente (3★)'];
+        label.textContent = labels[rating] || 'Baja (0★)';
+    }
+}
+
+async function submitEditTicket(event) {
+    if (event) event.preventDefault();
+
+    const ticketId = parseInt(document.getElementById('edit-ticket-id')?.value, 10);
+    const name = document.getElementById('edit-ticket-name')?.value?.trim();
+    const projId = parseInt(document.getElementById('edit-ticket-project')?.value, 10) || 0;
+    const taskId = parseInt(document.getElementById('edit-ticket-task')?.value, 10) || 0;
+    const partnerId = parseInt(document.getElementById('edit-ticket-partner')?.value, 10) || 0;
+    const userId = parseInt(document.getElementById('edit-ticket-user')?.value, 10) || 0;
+    const priority = document.getElementById('edit-ticket-priority')?.value || '0';
+    const desc = document.getElementById('edit-ticket-desc')?.value?.trim() || '';
+
+    if (!ticketId || !name) {
+        alert('Por favor indica un título para el ticket.');
+        return;
+    }
+
+    const btnSpinner = document.getElementById('btn-edit-ticket-spinner');
+    const btnLabel = document.getElementById('btn-edit-ticket-label');
+    const btnSubmit = document.getElementById('btn-submit-edit-ticket');
+
+    if (btnSpinner) btnSpinner.classList.remove('hidden');
+    if (btnLabel) btnLabel.textContent = 'Guardando en Odoo...';
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    try {
+        const payload = {
+            id: ticketId,
+            name: name,
+            description: desc,
+            priority: priority,
+            user_id: userId ? userId : false,
+            project_id: projId ? projId : false,
+            task_id: taskId ? taskId : false,
+            partner_id: partnerId ? partnerId : false
+        };
+
+        const res = await fetch('/api/tickets/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Error del servidor');
+        }
+
+        closeEditTicketModal();
+        if (typeof showToast === 'function') {
+            showToast('✅ Ticket actualizado con éxito', 'success');
+        }
+
+        // Recargar vista de tickets
+        await loadTicketsView(true);
+    } catch (err) {
+        console.error('[PlanesGo Tickets] Error actualizando ticket:', err);
+        if (typeof showToast === 'function') {
+            showToast(`⚠️ No se pudo actualizar el ticket: ${err.message}`, 'error');
+        } else {
+            alert(`Error actualizando ticket: ${err.message}`);
+        }
+    } finally {
+        if (btnSpinner) btnSpinner.classList.add('hidden');
+        if (btnLabel) btnLabel.textContent = 'Guardar Cambios';
         if (btnSubmit) btnSubmit.disabled = false;
     }
 }

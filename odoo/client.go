@@ -139,8 +139,17 @@ func (c *Client) call(ctx context.Context, service, method string, args []interf
 		"method":  method,
 		"args":    args,
 	}
-	if kwargs != nil {
+	if kwargs != nil && len(kwargs) > 0 {
 		params["kwargs"] = kwargs
+		// En Odoo JSON-RPC, execute_kw recibe `*params[3:]` donde params es el array "args".
+		// El elemento 7 (índice 6) de "args" es el diccionario de kwargs (kw=None).
+		// Si args tiene 6 elementos, agregamos kwargs al array "args" para que Odoo lo reciba.
+		if method == "execute_kw" && len(args) == 6 {
+			extendedArgs := make([]interface{}, len(args), len(args)+1)
+			copy(extendedArgs, args)
+			extendedArgs = append(extendedArgs, kwargs)
+			params["args"] = extendedArgs
+		}
 	}
 
 	reqBody, err := json.Marshal(jsonRPCRequest{
@@ -811,12 +820,42 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 		return 0, err
 	}
 
-	domain := []interface{}{
-		"|",
+	// 1. Priorizar coincidencia EXACTA por login (ej. "luis@planesnet.com" -> UID 12)
+	loginDomain := []interface{}{
 		[]interface{}{"login", "=", email},
-		[]interface{}{"email", "=", email},
+	}
+	loginArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"res.users",
+		"search_read",
+		[]interface{}{loginDomain},
+	}
+	loginKwargs := map[string]interface{}{
+		"fields": []string{"id", "login", "name"},
+		"limit":  1,
+	}
+	resultRaw, err := c.call(ctx, "object", "execute_kw", loginArgs, loginKwargs)
+	if err == nil {
+		var users []struct {
+			ID int `json:"id"`
+		}
+		if json.Unmarshal(resultRaw, &users) == nil && len(users) > 0 && users[0].ID > 0 {
+			c.mu.Lock()
+			if c.userUIDCache == nil {
+				c.userUIDCache = make(map[string]int)
+			}
+			c.userUIDCache[email] = users[0].ID
+			c.mu.Unlock()
+			return users[0].ID, nil
+		}
 	}
 
+	// 2. Si no coincide el login, buscar por email en res.users (orden descendente para preferir usuarios reales sobre admin)
+	domain := []interface{}{
+		[]interface{}{"email", "=", email},
+	}
 	args := []interface{}{
 		c.config.DB,
 		uid,
@@ -827,10 +866,10 @@ func (c *Client) ResolveUserUIDByEmail(ctx context.Context, email string) (int, 
 	}
 	kwargs := map[string]interface{}{
 		"fields": []string{"id", "login", "name"},
+		"order":  "id desc",
 		"limit":  1,
 	}
-
-	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err == nil {
 		var users []struct {
 			ID int `json:"id"`
@@ -988,16 +1027,18 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	}
 	c.mu.RUnlock()
 
-	// 1. Dominio principal: tickets asignados al usuario y no cerrados
+	// 1. Dominio principal: tickets no cerrados y asignados (si targetUID > 0)
 	domain := []interface{}{
-		[]interface{}{"user_id", "=", targetUID},
-		[]interface{}{"close_date", "=", false},
+		[]interface{}{"closed", "=", false},
+	}
+	if targetUID > 0 {
+		domain = append(domain, []interface{}{"user_id", "=", targetUID})
 	}
 
 	fields := []string{
 		"id",
+		"number",
 		"name",
-		"ticket_ref",
 		"stage_id",
 		"user_id",
 		"partner_id",
@@ -1006,7 +1047,8 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 		"priority",
 		"description",
 		"create_date",
-		"close_date",
+		"closed",
+		"closed_date",
 		"kanban_state",
 	}
 
@@ -1033,16 +1075,16 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 		}
 		// Fallback 1: Si falla task_id o description, intentar con campos estándar
 		if err != nil {
-			fallbackFields := []string{"id", "name", "ticket_ref", "stage_id", "user_id", "partner_id", "project_id", "priority", "description", "create_date", "close_date"}
+			fallbackFields := []string{"id", "number", "name", "stage_id", "user_id", "partner_id", "project_id", "priority", "description", "create_date", "closed"}
 			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		}
-		// Fallback 2: Si falla close_date en el dominio, intentar solo con user_id
-		if err != nil {
+		// Fallback 2: Si falla closed en el dominio, intentar solo con user_id
+		if err != nil && targetUID > 0 {
 			fallbackDomain := []interface{}{
 				[]interface{}{"user_id", "=", targetUID},
 			}
-			fallbackFields := []string{"id", "name", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date"}
+			fallbackFields := []string{"id", "number", "name", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date"}
 			kwargs["fields"] = fallbackFields
 			args[5] = []interface{}{fallbackDomain}
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
@@ -1064,7 +1106,7 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	pending := make([]Ticket, 0, len(tickets))
 	closedKeywords := []string{"cerrad", "solucion", "cancel", "done", "closed", "solved", "resuelto"}
 	for _, t := range tickets {
-		if t.CloseDate != "" && t.CloseDate != "false" {
+		if t.Closed || (t.ClosedDate != "" && t.ClosedDate != "false") || (t.CloseDate != "" && t.CloseDate != "false") {
 			continue
 		}
 		sName := strings.ToLower(t.StageName())
@@ -1130,7 +1172,7 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 	return pending, nil
 }
 
-// GetTicketByRefOrID busca un ticket en Odoo por su ID numérico o su secuencia/referencia ticket_ref o nombre.
+// GetTicketByRefOrID busca un ticket en Odoo por su ID numérico o su secuencia/referencia number o nombre.
 func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticket, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
@@ -1148,12 +1190,12 @@ func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticke
 		domain = []interface{}{
 			"|",
 			[]interface{}{"id", "=", idNum},
-			[]interface{}{"ticket_ref", "=", trimmed},
+			[]interface{}{"number", "=", trimmed},
 		}
 	} else {
 		domain = []interface{}{
 			"|",
-			[]interface{}{"ticket_ref", "=", trimmed},
+			[]interface{}{"number", "=", trimmed},
 			[]interface{}{"name", "ilike", trimmed},
 		}
 	}
@@ -1161,7 +1203,7 @@ func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticke
 	fields := []string{
 		"id",
 		"name",
-		"ticket_ref",
+		"number",
 		"description",
 		"stage_id",
 		"user_id",
@@ -1170,7 +1212,8 @@ func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticke
 		"task_id",
 		"priority",
 		"create_date",
-		"close_date",
+		"closed",
+		"closed_date",
 		"kanban_state",
 	}
 
@@ -1189,7 +1232,7 @@ func (c *Client) GetTicketByRefOrID(ctx context.Context, refOrID string) (*Ticke
 
 	resultRaw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if err != nil {
-		fallbackFields := []string{"id", "name", "ticket_ref", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date", "close_date"}
+		fallbackFields := []string{"id", "name", "number", "stage_id", "user_id", "partner_id", "project_id", "priority", "create_date"}
 		kwargs["fields"] = fallbackFields
 		resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
 		if err != nil {
@@ -1237,6 +1280,79 @@ func (c *Client) CreateTicket(ctx context.Context, vals map[string]interface{}) 
 	}
 
 	return 0, fmt.Errorf("respuesta inválida al crear ticket: %s", string(resultRaw))
+}
+
+// UpdateTicket actualiza campos de un ticket existente en Odoo (helpdesk.ticket).
+func (c *Client) UpdateTicket(ctx context.Context, ticketID int, vals map[string]interface{}) error {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return fmt.Errorf("no se pudo autenticar antes de actualizar ticket: %w", err)
+	}
+
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"helpdesk.ticket",
+		"write",
+		[]interface{}{[]int{ticketID}, vals},
+	}
+
+	_, err = c.call(ctx, "object", "execute_kw", args, nil)
+	if err != nil {
+		if newUID, authErr := c.ForceAuthenticate(ctx); authErr == nil {
+			args[1] = newUID
+			_, err = c.call(ctx, "object", "execute_kw", args, nil)
+		}
+		if err != nil {
+			return fmt.Errorf("error al actualizar ticket #%d: %w", ticketID, err)
+		}
+	}
+
+	c.InvalidateTicketsCache()
+	return nil
+}
+
+// GetAssignableUsers obtiene la lista de usuarios activos de Odoo (res.users) para asignar tickets y tareas.
+func (c *Client) GetAssignableUsers(ctx context.Context) ([]ResUser, error) {
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo autenticar antes de consultar usuarios: %w", err)
+	}
+
+	domain := []interface{}{
+		[]interface{}{"active", "=", true},
+		[]interface{}{"share", "=", false},
+	}
+	args := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"res.users",
+		"search_read",
+		[]interface{}{domain},
+	}
+	kwargs := map[string]interface{}{
+		"fields": []string{"id", "name", "login", "email"},
+		"order":  "name asc",
+		"limit":  100,
+	}
+
+	raw, err := c.call(ctx, "object", "execute_kw", args, kwargs)
+	if err != nil {
+		fallbackDomain := []interface{}{[]interface{}{"active", "=", true}}
+		args[5] = []interface{}{fallbackDomain}
+		raw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
+		if err != nil {
+			return nil, fmt.Errorf("error al consultar usuarios asignables: %w", err)
+		}
+	}
+
+	var users []ResUser
+	if err := json.Unmarshal(raw, &users); err != nil {
+		return nil, fmt.Errorf("error al deserializar usuarios: %w", err)
+	}
+	return users, nil
 }
 
 // CloseTicket marca un ticket como cerrado en Odoo e impide cualquier reapertura posterior.

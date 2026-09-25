@@ -21,14 +21,15 @@
         <!-- Formulario con scroll fluido y disposición adaptativa (1 col en móvil, 2 cols en horizontal) -->
         <form id="form-create-ticket" onsubmit="submitCreateTicket(event)" class="p-4 sm:p-6 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
-                <!-- Usuario asignado = usuario logueado (fijo / readonly) -->
+                <!-- Usuario asignado (seleccionable) -->
                 <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1">Usuario Asignado</label>
-                    <div class="flex items-center space-x-2 px-3 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-slate-300 text-xs sm:text-sm">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                        <span class="font-semibold truncate">{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Usuario actual{{end}}</span>
-                        <span class="ml-auto text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded shrink-0">Tú</span>
-                    </div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-user">
+                        Usuario Asignado <span class="text-rose-400">*</span>
+                    </label>
+                    <select id="create-ticket-user"
+                            class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                        <option value="">-- Cargando usuarios... --</option>
+                    </select>
                 </div>
 
                 <!-- Prioridad (Estrellas) -->
@@ -179,6 +180,125 @@
                         <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     </span>
                     <span id="btn-close-ticket-label">Dar por Cerrado</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Modificar / Editar Ticket Determinado -->
+<div id="modal-edit-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-lg md:max-w-2xl lg:max-w-3xl overflow-hidden flex flex-col max-h-[92vh] max-h-[92dvh] transition-all">
+        <!-- Header -->
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-base">
+                    ✏️
+                </div>
+                <div>
+                    <h3 class="text-sm sm:text-base font-bold text-slate-100" id="edit-ticket-modal-title">Modificar Ticket</h3>
+                    <p class="text-[11px] text-slate-400" id="edit-ticket-modal-subtitle">Edición en Helpdesk de Odoo</p>
+                </div>
+            </div>
+            <button type="button" onclick="closeEditTicketModal()" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl hover:bg-slate-800 transition cursor-pointer" title="Cerrar">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Formulario con scroll fluido y disposición adaptativa -->
+        <form id="form-edit-ticket" onsubmit="submitEditTicket(event)" class="p-4 sm:p-6 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1">
+            <input type="hidden" id="edit-ticket-id" value="">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+                <!-- Usuario asignado (seleccionable entre todos los usuarios activos) -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-user">
+                        Usuario Asignado <span class="text-rose-400">*</span>
+                    </label>
+                    <select id="edit-ticket-user"
+                            class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                        <option value="">-- Sin asignar --</option>
+                    </select>
+                </div>
+
+                <!-- Prioridad (Estrellas) -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1">Prioridad del Ticket</label>
+                    <div class="flex items-center space-x-2.5">
+                        <div id="edit-ticket-priority-stars" class="inline-flex items-center space-x-1.5 bg-slate-850 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer select-none">
+                            <span data-star="1" onclick="setEditTicketPriorityStar(1)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                            <span data-star="2" onclick="setEditTicketPriorityStar(2)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                            <span data-star="3" onclick="setEditTicketPriorityStar(3)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                        </div>
+                        <span id="edit-ticket-priority-label" class="text-xs sm:text-sm text-slate-400 font-medium">Baja (0★)</span>
+                        <input type="hidden" id="edit-ticket-priority" value="0">
+                    </div>
+                </div>
+
+                <!-- Proyecto -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-project">
+                        Proyecto
+                    </label>
+                    <select id="edit-ticket-project" onchange="onEditTicketModalProjectChange(this.value)"
+                            class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                        <option value="">-- Sin proyecto asignado --</option>
+                    </select>
+                </div>
+
+                <!-- Tarea en el proyecto -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-task">
+                        Tarea asociada
+                    </label>
+                    <select id="edit-ticket-task"
+                            class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                        <option value="">-- Sin tarea específica asignada --</option>
+                    </select>
+                </div>
+
+                <!-- Contacto que solicita el ticket -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-partner">
+                        Contacto solicitante
+                    </label>
+                    <select id="edit-ticket-partner"
+                            class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                        <option value="">-- Sin contacto específico / Cliente de proyecto --</option>
+                    </select>
+                </div>
+
+                <!-- Título / Asunto del Ticket -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-name">
+                        Título / Asunto <span class="text-rose-400">*</span>
+                    </label>
+                    <input type="text" id="edit-ticket-name" required placeholder="Título del ticket"
+                           class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                </div>
+
+                <!-- Descripción detallada (Ancho completo en desktop) -->
+                <div class="md:col-span-2">
+                    <label class="block text-xs font-bold text-slate-300 mb-1" for="edit-ticket-desc">
+                        Descripción detallada
+                    </label>
+                    <textarea id="edit-ticket-desc" rows="3" placeholder="Detalla el problema o requerimiento..."
+                              class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100 resize-none"></textarea>
+                </div>
+            </div>
+
+            <!-- Botones Acción Sticky en la parte inferior -->
+            <div class="pt-3 sm:pt-4 border-t border-slate-800 flex items-center justify-end space-x-2.5 shrink-0"
+                 style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
+                <button type="button" onclick="closeEditTicketModal()"
+                        class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold cursor-pointer transition">
+                    Cancelar
+                </button>
+                <button type="submit" id="btn-submit-edit-ticket"
+                        class="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition shadow-md flex items-center space-x-2">
+                    <span id="btn-edit-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
+                        <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </span>
+                    <span id="btn-edit-ticket-label">Guardar Cambios</span>
                 </button>
             </div>
         </form>

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.59"
+	Version       = "1.2.60"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
