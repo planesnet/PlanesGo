@@ -276,8 +276,8 @@
             <p class="text-xs text-slate-500 mt-1">Imputa desde la web o usa el buscador</p>
         </div>
 
-        <!-- VISTA EXPRESS: Cuadrícula responsive de botones de tarea a 1 columna -->
-        <div id="express-grid-container" class="grid grid-cols-1 gap-2 sm:gap-2.5 max-w-xl mx-auto"></div>
+        <!-- VISTA EXPRESS: Cuadrícula responsive adaptativa (1 col en móvil, 2 cols en tablet/laptop, 3 cols en monitor horizontal) -->
+        <div id="express-grid-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3.5 max-w-7xl mx-auto"></div>
 
         <!-- VISTA TICKETS: Estado de carga -->
         <div id="tickets-loading-state" class="hidden flex flex-col items-center justify-center py-16 space-y-3">
@@ -299,122 +299,127 @@
             <p class="text-xs text-slate-500 mt-1">No tienes tickets abiertos asignados en Helpdesk</p>
         </div>
 
-        <!-- VISTA TICKETS: Cuadrícula responsive de tarjetas de tickets a 1 columna -->
-        <div id="tickets-grid-container" class="hidden grid grid-cols-1 gap-2.5 sm:gap-3 max-w-xl mx-auto"></div>
+        <!-- VISTA TICKETS: Cuadrícula responsive adaptativa (1 col en móvil, 2 cols en tablet/laptop, 3 cols en monitor horizontal) -->
+        <div id="tickets-grid-container" class="hidden grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 max-w-7xl mx-auto"></div>
     </main>
 
     <!-- Botón Flotante FAB (Material Design +) para Nuevo Ticket Rápido -->
     <button type="button" id="fab-create-ticket" onclick="openCreateTicketModal()"
-            class="hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-2xl flex items-center justify-center cursor-pointer transition transform hover:scale-105 active:scale-95 ring-4 ring-sky-900/40 focus:outline-none"
+            class="hidden fixed bottom-6 sm:bottom-8 right-4 sm:right-8 z-40 w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-2xl flex items-center justify-center cursor-pointer transition transform hover:scale-105 active:scale-95 ring-4 ring-sky-900/40 focus:outline-none"
+            style="bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px));"
             title="Crear Nuevo Ticket Rápido">
-        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-6 h-6 sm:w-7 sm:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
         </svg>
     </button>
 
-    <!-- Modal Creación Rápida de Ticket (Material Design) -->
-    <div id="modal-create-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 hidden">
-        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+    <!-- Modal Creación Rápida de Ticket (Material Design Adaptativo Móvil & Escritorio) -->
+    <div id="modal-create-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-lg md:max-w-2xl lg:max-w-3xl overflow-hidden flex flex-col max-h-[92vh] max-h-[92dvh] transition-all">
             <!-- Header -->
-            <div class="px-5 py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div class="px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <div class="flex items-center space-x-2.5">
-                    <div class="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+                    <div class="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-base">
                         🎫
                     </div>
                     <div>
-                        <h3 class="text-sm font-bold text-slate-100">Nuevo Ticket de Soporte</h3>
+                        <h3 class="text-sm sm:text-base font-bold text-slate-100">Nuevo Ticket de Soporte</h3>
                         <p class="text-[11px] text-slate-400">Creación rápida en Helpdesk de Odoo</p>
                     </div>
                 </div>
-                <button type="button" onclick="closeCreateTicketModal()" class="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">
+                <button type="button" onclick="closeCreateTicketModal()" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl hover:bg-slate-800 transition cursor-pointer" title="Cerrar">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
-            <!-- Formulario con scroll -->
-            <form id="form-create-ticket" onsubmit="submitCreateTicket(event)" class="p-5 space-y-3.5 overflow-y-auto">
-                <!-- Usuario asignado = usuario logueado (fijo / readonly) -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1">Usuario Asignado</label>
-                    <div class="flex items-center space-x-2 px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-slate-300 text-xs">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                        <span class="font-semibold">{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Usuario actual{{end}}</span>
-                        <span class="ml-auto text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">Tú (Asignado)</span>
-                    </div>
-                </div>
 
-                <!-- Proyecto -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-project">
-                        Proyecto <span class="text-rose-400">*</span>
-                    </label>
-                    <select id="create-ticket-project" onchange="onTicketModalProjectChange(this.value)" required
-                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
-                        <option value="">-- Selecciona un proyecto --</option>
-                    </select>
-                </div>
-
-                <!-- Tarea en el proyecto -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-task">
-                        Tarea asociada
-                    </label>
-                    <select id="create-ticket-task"
-                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
-                        <option value="">-- Sin tarea específica asignada --</option>
-                    </select>
-                </div>
-
-                <!-- Contacto que solicita el ticket -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-partner">
-                        Contacto solicitante
-                    </label>
-                    <select id="create-ticket-partner"
-                            class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
-                        <option value="">-- Sin contacto específico / Cliente de proyecto --</option>
-                    </select>
-                </div>
-
-                <!-- Prioridad (Estrellas) -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1">Prioridad del Ticket</label>
-                    <div class="flex items-center space-x-2">
-                        <div id="ticket-priority-stars" class="inline-flex items-center space-x-1.5 bg-slate-850 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer select-none">
-                            <span data-star="1" onclick="setTicketPriorityStar(1)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
-                            <span data-star="2" onclick="setTicketPriorityStar(2)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
-                            <span data-star="3" onclick="setTicketPriorityStar(3)" class="text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer">★</span>
+            <!-- Formulario con scroll fluido y disposición adaptativa (1 col en móvil, 2 cols en horizontal) -->
+            <form id="form-create-ticket" onsubmit="submitCreateTicket(event)" class="p-4 sm:p-6 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+                    <!-- Usuario asignado = usuario logueado (fijo / readonly) -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1">Usuario Asignado</label>
+                        <div class="flex items-center space-x-2 px-3 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-slate-300 text-xs sm:text-sm">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                            <span class="font-semibold truncate">{{if .CurrentWorker}}{{.CurrentWorker}}{{else if and .Session .Session.UserName}}{{.Session.UserName}}{{else}}Usuario actual{{end}}</span>
+                            <span class="ml-auto text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded shrink-0">Tú</span>
                         </div>
-                        <span id="ticket-priority-label" class="text-xs text-slate-400 font-medium">Baja (0★)</span>
-                        <input type="hidden" id="create-ticket-priority" value="0">
+                    </div>
+
+                    <!-- Prioridad (Estrellas) -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1">Prioridad del Ticket</label>
+                        <div class="flex items-center space-x-2.5">
+                            <div id="ticket-priority-stars" class="inline-flex items-center space-x-1.5 bg-slate-850 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer select-none">
+                                <span data-star="1" onclick="setTicketPriorityStar(1)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                                <span data-star="2" onclick="setTicketPriorityStar(2)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                                <span data-star="3" onclick="setTicketPriorityStar(3)" class="text-2xl sm:text-xl text-slate-600 hover:text-amber-400 transition cursor-pointer p-0.5">★</span>
+                            </div>
+                            <span id="ticket-priority-label" class="text-xs sm:text-sm text-slate-400 font-medium">Baja (0★)</span>
+                            <input type="hidden" id="create-ticket-priority" value="0">
+                        </div>
+                    </div>
+
+                    <!-- Proyecto -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-project">
+                            Proyecto <span class="text-rose-400">*</span>
+                        </label>
+                        <select id="create-ticket-project" onchange="onTicketModalProjectChange(this.value)" required
+                                class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                            <option value="">-- Selecciona un proyecto --</option>
+                        </select>
+                    </div>
+
+                    <!-- Tarea en el proyecto -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-task">
+                            Tarea asociada
+                        </label>
+                        <select id="create-ticket-task"
+                                class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                            <option value="">-- Sin tarea específica asignada --</option>
+                        </select>
+                    </div>
+
+                    <!-- Contacto que solicita el ticket -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-partner">
+                            Contacto solicitante
+                        </label>
+                        <select id="create-ticket-partner"
+                                class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                            <option value="">-- Sin contacto específico / Cliente de proyecto --</option>
+                        </select>
+                    </div>
+
+                    <!-- Título / Asunto del Ticket -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-name">
+                            Título / Asunto <span class="text-rose-400">*</span>
+                        </label>
+                        <input type="text" id="create-ticket-name" required placeholder="Ej: Error al emitir factura en cliente"
+                               class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
+                    </div>
+
+                    <!-- Descripción detallada (Ancho completo en desktop) -->
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-desc">
+                            Descripción detallada
+                        </label>
+                        <textarea id="create-ticket-desc" rows="3" placeholder="Detalla el problema, pasos para reproducir o requerimiento..."
+                                  class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100 resize-none"></textarea>
                     </div>
                 </div>
 
-                <!-- Título / Asunto del Ticket -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-name">
-                        Título / Asunto <span class="text-rose-400">*</span>
-                    </label>
-                    <input type="text" id="create-ticket-name" required placeholder="Ej: Error al emitir factura en cliente"
-                           class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100">
-                </div>
-
-                <!-- Descripción detallada -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-300 mb-1" for="create-ticket-desc">
-                        Descripción detallada
-                    </label>
-                    <textarea id="create-ticket-desc" rows="3" placeholder="Detalla el problema, pasos para reproducir o requerimiento..."
-                              class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 text-slate-100 resize-none"></textarea>
-                </div>
-
-                <!-- Botones Acción -->
-                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0">
+                <!-- Botones Acción Sticky en la parte inferior -->
+                <div class="pt-3 sm:pt-4 border-t border-slate-800 flex items-center justify-end space-x-2.5 shrink-0"
+                     style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
                     <button type="button" onclick="closeCreateTicketModal()"
-                            class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition">
+                            class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold cursor-pointer transition">
                         Cancelar
                     </button>
                     <button type="submit" id="btn-submit-create-ticket"
-                            class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold cursor-pointer transition shadow-md flex items-center space-x-1.5">
+                            class="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition shadow-md flex items-center space-x-2">
                         <span id="btn-create-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
                             <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                         </span>
@@ -425,9 +430,9 @@
         </div>
     </div>
 
-    <!-- Modal Cerrar Ticket Definitivamente -->
-    <div id="modal-close-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 hidden">
-        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+    <!-- Modal Cerrar Ticket Definitivamente (Material Design Adaptativo) -->
+    <div id="modal-close-ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh] max-h-[92dvh]">
             <!-- Header -->
             <div class="px-5 py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <div class="flex items-center space-x-2.5">
@@ -439,13 +444,13 @@
                         <p class="text-[11px] text-slate-400" id="close-ticket-ref-title">Ticket #</p>
                     </div>
                 </div>
-                <button type="button" onclick="closeCloseTicketModal()" class="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">
+                <button type="button" onclick="closeCloseTicketModal()" class="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Cerrar">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
 
-            <!-- Body -->
-            <form id="form-close-ticket" onsubmit="submitCloseTicket(event)" class="p-5 space-y-3.5">
+            <!-- Body con scroll fluido -->
+            <form id="form-close-ticket" onsubmit="submitCloseTicket(event)" class="p-5 space-y-3.5 overflow-y-auto flex-1">
                 <input type="hidden" id="close-ticket-id" value="">
                 <input type="hidden" id="close-ticket-ref" value="">
 
@@ -463,7 +468,7 @@
                         Asunto / Motivo de Cierre <span class="text-rose-400">*</span>
                     </label>
                     <input type="text" id="close-ticket-subject" required placeholder="Ej: Incidencia resuelta satisfactoriamente"
-                           class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
+                           class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100">
                 </div>
 
                 <!-- Descripción del trabajo realizado -->
@@ -472,17 +477,18 @@
                         Descripción de la Solución
                     </label>
                     <textarea id="close-ticket-description" rows="3" placeholder="Resume la solución o acciones realizadas para el chatter..."
-                              class="w-full px-3 py-2 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100 resize-none"></textarea>
+                              class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100 resize-none"></textarea>
                 </div>
 
                 <!-- Botones Acción -->
-                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0">
+                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0"
+                     style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
                     <button type="button" onclick="closeCloseTicketModal()"
-                            class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition">
+                            class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold cursor-pointer transition">
                         Cancelar
                     </button>
                     <button type="submit" id="btn-submit-close-ticket"
-                            class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer transition shadow-md flex items-center space-x-1.5">
+                            class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition shadow-md flex items-center space-x-2">
                         <span id="btn-close-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
                             <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                         </span>
