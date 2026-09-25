@@ -355,6 +355,8 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 		"timesheet_invoice_id",
 		"billing_ref",
 		"is_timer_running",
+		"create_date",
+		"write_date",
 	}
 
 	kwargs := map[string]interface{}{
@@ -396,6 +398,8 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 				"partner_id",
 				"timesheet_invoice_id",
 				"is_timer_running",
+				"create_date",
+				"write_date",
 			}
 			kwargs["fields"] = fallbackFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)
@@ -411,6 +415,8 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 				"task_id",
 				"employee_id",
 				"user_id",
+				"create_date",
+				"write_date",
 			}
 			kwargs["fields"] = minimalFields
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, kwargs)

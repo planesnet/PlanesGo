@@ -548,7 +548,12 @@ function applyTimesheetFilters() {
                 employee: row.dataset.employee || '',
                 invoiced: row.dataset.invoiced === 'true',
                 invoiceId: row.dataset.invoiceId || '',
-                invoiceName: row.dataset.invoiceName || ''
+                invoiceName: row.dataset.invoiceName || '',
+                createDate: row.dataset.createDate || '',
+                writeDate: row.dataset.writeDate || '',
+                timerRunning: row.dataset.timerRunning === 'true',
+                isMaquina: isMaquina,
+                isAntigravity: row.dataset.isAntigravity === 'true'
             });
         } else {
             row.style.display = 'none';
@@ -598,6 +603,11 @@ function applyTimesheetFilters() {
     const kpiHoursMaquina = document.getElementById('kpi-hours-maquina');
     if (kpiHoursHombre) kpiHoursHombre.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(visibleHoursHombre, '0:00') : visibleHoursHombre.toFixed(2);
     if (kpiHoursMaquina) kpiHoursMaquina.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(visibleHoursMaquina, '0:00') : visibleHoursMaquina.toFixed(2);
+    const kpiHoursReloj = document.getElementById('kpi-hours-reloj');
+    if (kpiHoursReloj) {
+        const wallClock = (typeof calculateWallClockHours === 'function') ? calculateWallClockHours(matchingRows) : 0;
+        kpiHoursReloj.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(wallClock, '0:00') : wallClock.toFixed(2);
+    }
     if (kpiEntries) kpiEntries.textContent = visibleCount;
     if (kpiProjects) kpiProjects.textContent = visibleProjects.size;
     if (kpiEmployees) kpiEmployees.textContent = visibleEmployees.size;
@@ -614,6 +624,120 @@ function applyTimesheetFilters() {
     } else if (currentView === 'gantt') {
         renderGanttView(matchingRows);
     }
+}
+
+/**
+ * Parsea un timestamp de Odoo en formato "YYYY-MM-DD HH:MM:SS" (UTC) a epoch ms.
+ */
+function parseOdooUtcTimestamp(str) {
+    if (!str || typeof str !== 'string') return 0;
+    const trimmed = str.trim();
+    if (!trimmed) return 0;
+    // Odoo guarda siempre en UTC: "2026-09-25 09:15:30" -> "2026-09-25T09:15:30Z"
+    const isoStr = trimmed.includes('T') ? (trimmed.endsWith('Z') ? trimmed : trimmed + 'Z') : trimmed.replace(' ', 'T') + 'Z';
+    const d = new Date(isoStr);
+    const ms = d.getTime();
+    return isNaN(ms) ? 0 : ms;
+}
+
+/**
+ * Calcula el tiempo humano real (wall-clock) a partir de una lista de imputaciones
+ * mediante el algoritmo de fusión de intervalos (Merge Intervals).
+ * Para tareas concurrentes (subagentes en paralelo), fusiona solapamientos evitando duplicar horas.
+ */
+function calculateWallClockHours(entries) {
+    if (!entries || entries.length === 0) return 0;
+
+    // Agrupar por día para que los intervalos solo se fusionen dentro de su propia jornada
+    const dayMap = new Map();
+    entries.forEach(e => {
+        const h = parseFloat(e.hours) || 0;
+        if (h <= 0) return;
+        const dKey = e.date || 'default';
+        if (!dayMap.has(dKey)) dayMap.set(dKey, []);
+        dayMap.get(dKey).push(e);
+    });
+
+    let totalMergedMs = 0;
+
+    dayMap.forEach((dayEntries, dateKey) => {
+        const intervals = [];
+
+        dayEntries.forEach(e => {
+            const hours = parseFloat(e.hours) || 0;
+            if (hours <= 0) return;
+
+            const expectedDurationMs = Math.round(hours * 3600 * 1000);
+            let startMs = 0;
+            let endMs = 0;
+
+            if (e.createDate) {
+                startMs = parseOdooUtcTimestamp(e.createDate);
+            }
+            if (e.writeDate) {
+                endMs = parseOdooUtcTimestamp(e.writeDate);
+            }
+
+            if (e.timerRunning) {
+                endMs = Date.now();
+                if (!startMs || startMs >= endMs) {
+                    startMs = endMs - expectedDurationMs;
+                }
+            }
+
+            // Consistencia de marcas de tiempo vs duración real
+            if (startMs > 0 && endMs > startMs) {
+                const diff = endMs - startMs;
+                if (diff < expectedDurationMs * 0.5) {
+                    startMs = endMs - expectedDurationMs;
+                }
+            } else if (endMs > 0) {
+                startMs = endMs - expectedDurationMs;
+            } else if (startMs > 0) {
+                endMs = startMs + expectedDurationMs;
+            } else {
+                // Fallback sintético: anclar a las 09:00 UTC de esa fecha
+                const baseDate = new Date(dateKey + 'T09:00:00Z');
+                startMs = !isNaN(baseDate.getTime()) ? baseDate.getTime() : 0;
+                endMs = startMs + expectedDurationMs;
+            }
+
+            if (startMs < endMs) {
+                intervals.push({ start: startMs, end: endMs });
+            }
+        });
+
+        if (intervals.length === 0) {
+            dayEntries.forEach(e => {
+                totalMergedMs += Math.round((parseFloat(e.hours) || 0) * 3600 * 1000);
+            });
+            return;
+        }
+
+        // Ordenar intervalos por tiempo de inicio ascendente
+        intervals.sort((a, b) => a.start - b.start);
+
+        // Fusión de intervalos solapados
+        const merged = [{ start: intervals[0].start, end: intervals[0].end }];
+        for (let i = 1; i < intervals.length; i++) {
+            const curr = intervals[i];
+            const last = merged[merged.length - 1];
+
+            if (curr.start <= last.end) {
+                last.end = Math.max(last.end, curr.end);
+            } else {
+                merged.push({ start: curr.start, end: curr.end });
+            }
+        }
+
+        // Sumar duraciones fusionadas de esta jornada
+        merged.forEach(m => {
+            totalMergedMs += (m.end - m.start);
+        });
+    });
+
+    const humanHours = totalMergedMs / (3600 * 1000);
+    return Math.round(humanHours * 100) / 100;
 }
 
 function renderCalendarView(matchingRows) {
@@ -681,17 +805,38 @@ function renderCalendarView(matchingRows) {
 
     // 3. Totales por cada día y total general de la semana
     const dailyTotals = [0, 0, 0, 0, 0, 0, 0];
+    const dailyHumanTotals = [0, 0, 0, 0, 0, 0, 0];
     let grandTotal = 0;
+    let grandHumanTotal = 0;
 
     for (let i = 0; i < 7; i++) {
         const iso = weekDays[i].iso;
+        const dayAllEntries = [];
         projectsMap.forEach(proj => {
             dailyTotals[i] += (proj.days[iso] || 0);
+            if (proj.dayEntries[iso]) {
+                dayAllEntries.push(...proj.dayEntries[iso]);
+            }
         });
         grandTotal += dailyTotals[i];
+
+        if (dayAllEntries.length > 0) {
+            dailyHumanTotals[i] = calculateWallClockHours(dayAllEntries);
+        } else {
+            dailyHumanTotals[i] = 0;
+        }
+        grandHumanTotal += dailyHumanTotals[i];
     }
 
-    if (totalEl) totalEl.textContent = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandTotal, '0:00') : grandTotal.toFixed(2);
+    if (totalEl) {
+        const fGrandTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandTotal, '0:00') : grandTotal.toFixed(2);
+        const fGrandHuman = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandHumanTotal, '0:00') : grandHumanTotal.toFixed(2);
+        if (grandTotal > grandHumanTotal + 0.05 && grandHumanTotal > 0) {
+            totalEl.innerHTML = `<span>${fGrandTotal}</span> <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 ml-1" title="Tiempo Humano Real de Reloj (Wall-Clock sin solapamientos)">Reloj: ${fGrandHuman}h</span>`;
+        } else {
+            totalEl.textContent = fGrandTotal;
+        }
+    }
 
     // 4. Si no hay proyectos con imputaciones para esta semana
     if (projectsMap.size === 0) {
@@ -815,28 +960,61 @@ function renderCalendarView(matchingRows) {
             <tfoot>
                 <tr class="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-slate-800">
                     <td class="py-3 px-4 font-black uppercase text-[11px] tracking-wider text-slate-700">
-                        Total Diario
+                        <div>Total Diario</div>
+                        <div class="text-[10px] text-slate-400 font-normal normal-case">Agente / Reloj</div>
                     </td>
     `;
 
     for (let i = 0; i < 7; i++) {
         const isToday = weekDays[i].isToday;
         const dayTotal = dailyTotals[i];
+        const dayHuman = dailyHumanTotals[i];
         const fDayTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(dayTotal, '-') : dayTotal.toFixed(2);
+        const fDayHuman = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(dayHuman, '-') : dayHuman.toFixed(2);
+        const hasConcurrency = (dayHuman > 0 && dayTotal > dayHuman + 0.05);
+        const multiplier = hasConcurrency ? (dayTotal / dayHuman).toFixed(1) : null;
 
         html += `
-            <td class="py-3 px-2 text-center font-mono border-l border-slate-200 ${isToday ? 'bg-sky-100/60 text-sky-900' : ''}">
-                <span class="text-xs sm:text-sm font-extrabold ${dayTotal > 0 ? 'text-slate-900' : 'text-slate-400'}">
+            <td class="py-2.5 px-2 text-center font-mono border-l border-slate-200 ${isToday ? 'bg-sky-100/60 text-sky-900' : ''}">
+                <div class="text-xs sm:text-sm font-extrabold ${dayTotal > 0 ? 'text-slate-900' : 'text-slate-400'}" title="Total acumulado entregado por tareas/agentes">
                     ${dayTotal > 0 ? fDayTotal : '-'}
-                </span>
+                </div>
+                ${dayTotal > 0 ? `
+                    <div class="mt-1 flex flex-col items-center gap-0.5">
+                        <span class="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80" 
+                              title="Tiempo humano real de reloj (Wall-Clock sin duplicar solapamientos de tareas concurrentes)">
+                            <svg class="w-2.5 h-2.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            ${fDayHuman}h
+                        </span>
+                        ${multiplier ? `
+                            <span class="text-[9px] font-bold text-sky-700 bg-sky-50 px-1 py-0.2 rounded border border-sky-200/60"
+                                  title="Factor de aceleración por concurrencia: los agentes realizaron ${multiplier}x horas en el mismo tiempo">
+                                x${multiplier}
+                            </span>
+                        ` : ''}
+                    </div>
+                ` : ''}
             </td>
         `;
     }
 
     const fGrandTotal = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandTotal, '0:00') : grandTotal.toFixed(2);
+    const fGrandHuman = (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(grandHumanTotal, '0:00') : grandHumanTotal.toFixed(2);
+    const grandMultiplier = (grandHumanTotal > 0 && grandTotal > grandHumanTotal + 0.05) ? (grandTotal / grandHumanTotal).toFixed(1) : null;
+
     html += `
                     <td class="py-3 px-4 text-right font-mono font-black text-sky-800 text-xs sm:text-sm border-l border-slate-300 bg-slate-200/50">
-                        ${fGrandTotal} h
+                        <div title="Total Tareas / Agentes">${fGrandTotal} h</div>
+                        ${grandTotal > 0 ? `
+                            <div class="text-[10px] font-semibold text-emerald-800 mt-0.5" title="Total Humano Real de Reloj">
+                                Reloj: ${fGrandHuman} h
+                            </div>
+                            ${grandMultiplier ? `
+                                <div class="text-[9px] font-bold text-sky-700 mt-0.5">
+                                    Factor: x${grandMultiplier}
+                                </div>
+                            ` : ''}
+                        ` : ''}
                     </td>
                 </tr>
             </tfoot>

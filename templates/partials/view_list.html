@@ -36,7 +36,9 @@
                             data-invoiced="{{if .IsInvoiced}}true{{else}}false{{end}}"
                             data-hora-maquina="{{if .IsHoraMaquina}}true{{else}}false{{end}}"
                             data-hora-hombre="{{if .IsHoraHombre}}true{{else}}false{{end}}"
-                            data-is-antigravity="{{if .IsAntigravity}}true{{else}}false{{end}}">
+                            data-is-antigravity="{{if .IsAntigravity}}true{{else}}false{{end}}"
+                            data-create-date="{{.CreateDate}}"
+                            data-write-date="{{.WriteDate}}">
                             <td class="py-2.5 px-3 whitespace-nowrap">
                                 <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
                             </td>

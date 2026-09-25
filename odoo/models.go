@@ -70,9 +70,33 @@ type TimesheetEntry struct {
 	TimesheetInvoiceID Many2One    `json:"timesheet_invoice_id"`
 	BillingRef         interface{} `json:"billing_ref"` // Indica si está facturado en Odoo 14
 	IsTimerRunning     bool        `json:"is_timer_running"`
+	CreateDate         string      `json:"create_date,omitempty"`
+	WriteDate          string      `json:"write_date,omitempty"`
 	Tags               []Tag       `json:"tags,omitempty"`
 	TagIDs             []int       `json:"tag_ids,omitempty"`
 	HelpdeskTicketID   Many2One    `json:"helpdesk_ticket_id,omitempty"`
+}
+
+// UnmarshalJSON desempaqueta TimesheetEntry gestionando campos que Odoo puede devolver como false si están vacíos.
+func (t *TimesheetEntry) UnmarshalJSON(data []byte) error {
+	type Alias TimesheetEntry
+	aux := &struct {
+		CreateDateRaw interface{} `json:"create_date"`
+		WriteDateRaw  interface{} `json:"write_date"`
+		*Alias
+	}{
+		Alias: (*Alias)(t),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if str, ok := aux.CreateDateRaw.(string); ok {
+		t.CreateDate = str
+	}
+	if str, ok := aux.WriteDateRaw.(string); ok {
+		t.WriteDate = str
+	}
+	return nil
 }
 
 // IsInvoiced indica si la imputación de horas ya ha sido facturada en Odoo.

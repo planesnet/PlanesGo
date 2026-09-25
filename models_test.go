@@ -198,3 +198,93 @@ func TestCheckIdleTimersAntigravityNotAccumulatingEpoch(t *testing.T) {
 	}
 }
 
+func TestCalculateWallClockHours(t *testing.T) {
+	// Caso 1: Concurrencia exacta - dos tareas de 2h que corren en el mismo intervalo [10:00, 12:00]
+	entriesExactConcurrency := []odoo.TimesheetEntry{
+		{
+			ID:         1,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 10:00:00",
+			WriteDate:  "2026-09-25 12:00:00",
+		},
+		{
+			ID:         2,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 10:00:00",
+			WriteDate:  "2026-09-25 12:00:00",
+		},
+	}
+	wc1 := CalculateWallClockHours(entriesExactConcurrency)
+	if wc1 != 2.0 {
+		t.Errorf("Esperado 2.0h para concurrencia exacta, obtenido: %f", wc1)
+	}
+
+	// Caso 2: Tareas secuenciales sin solapamiento - [09:00, 11:00] (2h) y [14:00, 16:00] (2h)
+	entriesDisjoint := []odoo.TimesheetEntry{
+		{
+			ID:         3,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 09:00:00",
+			WriteDate:  "2026-09-25 11:00:00",
+		},
+		{
+			ID:         4,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 14:00:00",
+			WriteDate:  "2026-09-25 16:00:00",
+		},
+	}
+	wc2 := CalculateWallClockHours(entriesDisjoint)
+	if wc2 != 4.0 {
+		t.Errorf("Esperado 4.0h para tareas disjuntas, obtenido: %f", wc2)
+	}
+
+	// Caso 3: Solapamiento parcial - [09:00, 11:00] (2h) y [10:00, 12:00] (2h) -> [09:00, 12:00] = 3h
+	entriesPartial := []odoo.TimesheetEntry{
+		{
+			ID:         5,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 09:00:00",
+			WriteDate:  "2026-09-25 11:00:00",
+		},
+		{
+			ID:         6,
+			Date:       "2026-09-25",
+			UnitAmount: 2.0,
+			CreateDate: "2026-09-25 10:00:00",
+			WriteDate:  "2026-09-25 12:00:00",
+		},
+	}
+	wc3 := CalculateWallClockHours(entriesPartial)
+	if wc3 != 3.0 {
+		t.Errorf("Esperado 3.0h para solapamiento parcial, obtenido: %f", wc3)
+	}
+
+	// Caso 4: Tareas en días distintos - no deben fusionarse entre sí
+	entriesMultiDay := []odoo.TimesheetEntry{
+		{
+			ID:         7,
+			Date:       "2026-09-24",
+			UnitAmount: 3.0,
+			CreateDate: "2026-09-24 10:00:00",
+			WriteDate:  "2026-09-24 13:00:00",
+		},
+		{
+			ID:         8,
+			Date:       "2026-09-25",
+			UnitAmount: 3.0,
+			CreateDate: "2026-09-25 10:00:00",
+			WriteDate:  "2026-09-25 13:00:00",
+		},
+	}
+	wc4 := CalculateWallClockHours(entriesMultiDay)
+	if wc4 != 6.0 {
+		t.Errorf("Esperado 6.0h para dos días distintos, obtenido: %f", wc4)
+	}
+}
+

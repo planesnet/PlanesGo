@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -516,6 +517,7 @@ type PageData struct {
 	TotalHours           float64
 	TotalHorasHombre     float64
 	TotalHorasMaquina    float64
+	TotalHorasReloj      float64 // Tiempo humano real acumulado mediante unión de intervalos (wall-clock)
 	TotalProjectsCount   int
 	UniqueProjectsCount  int
 	UniqueEmployeesCount int
@@ -526,10 +528,10 @@ type PageData struct {
 	PendingTickets       []odoo.Ticket
 	PendingTicketsCount  int
 	OdooURL              string
-	Today                 string
-	ActiveTimer           *odoo.ActiveTimer
+	Today                string
+	ActiveTimer          *odoo.ActiveTimer
 	ProjectPartnerMapJSON template.JS
-	Error                 string
+	Error                string
 }
 
 // FormatHoursToHHMM convierte un valor decimal de horas a formato Horas:Minutos (ej. 2.62 -> "2:37", 3.00 -> "3:00").
@@ -553,6 +555,122 @@ func (p PageData) TotalHorasHombreHHMM() string {
 
 func (p PageData) TotalHorasMaquinaHHMM() string {
 	return FormatHoursToHHMM(p.TotalHorasMaquina)
+}
+
+func (p PageData) TotalHorasRelojHHMM() string {
+	return FormatHoursToHHMM(p.TotalHorasReloj)
+}
+
+// TimeInterval representa un segmento temporal [Start, End] en segundos unix.
+type TimeInterval struct {
+	Start int64
+	End   int64
+}
+
+// CalculateWallClockHours calcula el tiempo humano real (wall-clock) en horas
+// mediante la unión y fusión de intervalos temporales (Merge Intervals), agrupando día por día.
+func CalculateWallClockHours(entries []odoo.TimesheetEntry) float64 {
+	if len(entries) == 0 {
+		return 0
+	}
+
+	// Agrupar por día (date)
+	dayEntries := make(map[string][]odoo.TimesheetEntry)
+	for _, e := range entries {
+		if e.UnitAmount <= 0 {
+			continue
+		}
+		dayEntries[e.Date] = append(dayEntries[e.Date], e)
+	}
+
+	totalWallClockSeconds := int64(0)
+
+	for dateStr, list := range dayEntries {
+		var intervals []TimeInterval
+
+		for _, e := range list {
+			expectedDurationSec := int64(math.Round(e.UnitAmount * 3600))
+			if expectedDurationSec <= 0 {
+				continue
+			}
+
+			var startSec, endSec int64
+
+			// 1. Parsear create_date y write_date si existen (formato Odoo: "2006-01-02 15:04:05" UTC)
+			if e.CreateDate != "" {
+				if t, err := time.Parse("2006-01-02 15:04:05", e.CreateDate); err == nil {
+					startSec = t.Unix()
+				}
+			}
+			if e.WriteDate != "" {
+				if t, err := time.Parse("2006-01-02 15:04:05", e.WriteDate); err == nil {
+					endSec = t.Unix()
+				}
+			}
+
+			if e.IsTimerRunning {
+				endSec = time.Now().Unix()
+				if startSec <= 0 || startSec >= endSec {
+					startSec = endSec - expectedDurationSec
+				}
+			}
+
+			if startSec > 0 && endSec > startSec {
+				recordedDiff := endSec - startSec
+				if recordedDiff < expectedDurationSec/2 {
+					startSec = endSec - expectedDurationSec
+				}
+			} else if endSec > 0 {
+				startSec = endSec - expectedDurationSec
+			} else if startSec > 0 {
+				endSec = startSec + expectedDurationSec
+			} else {
+				// Fallback si no hay marcas horarias: base 09:00 UTC en esa fecha
+				if baseT, err := time.Parse("2006-01-02", dateStr); err == nil {
+					startSec = baseT.Add(9 * time.Hour).Unix()
+					endSec = startSec + expectedDurationSec
+				} else {
+					startSec = 0
+					endSec = expectedDurationSec
+				}
+			}
+
+			if startSec < endSec {
+				intervals = append(intervals, TimeInterval{Start: startSec, End: endSec})
+			}
+		}
+
+		if len(intervals) == 0 {
+			continue
+		}
+
+		// Ordenar intervalos por tiempo de inicio ascendente
+		sort.Slice(intervals, func(i, j int) bool {
+			return intervals[i].Start < intervals[j].Start
+		})
+
+		// Fusión de intervalos solapados
+		merged := []TimeInterval{intervals[0]}
+		for i := 1; i < len(intervals); i++ {
+			curr := intervals[i]
+			lastIdx := len(merged) - 1
+			if curr.Start <= merged[lastIdx].End {
+				if curr.End > merged[lastIdx].End {
+					merged[lastIdx].End = curr.End
+				}
+			} else {
+				merged = append(merged, curr)
+			}
+		}
+
+		// Sumar duraciones netas del día
+		for _, m := range merged {
+			totalWallClockSeconds += (m.End - m.Start)
+		}
+	}
+
+	hours := float64(totalWallClockSeconds) / 3600.0
+	return math.Round(hours*100) / 100
 }
 
 type SettingsPageData struct {

@@ -266,6 +266,8 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	totalHorasReloj := CalculateWallClockHours(entries)
+
 	type projectTicketInfo struct {
 		count       int
 		latestTitle string
@@ -751,6 +753,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		TotalHours:            totalHours,
 		TotalHorasHombre:      totalHorasHombre,
 		TotalHorasMaquina:     totalHorasMaquina,
+		TotalHorasReloj:       totalHorasReloj,
 		TotalProjectsCount:    len(projects),
 		UniqueProjectsCount:   len(projectMap),
 		UniqueEmployeesCount:  uniqueEmployeesCount,
