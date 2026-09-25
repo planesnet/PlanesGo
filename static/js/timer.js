@@ -1607,6 +1607,10 @@ async function syncActiveTimerFromOdoo() {
         const resp = await fetch('/api/timer/active', { cache: 'no-store' });
         if (resp.ok) {
             const data = await resp.json();
+            const now = Date.now();
+            const serverTime = (data && data.server_time) ? data.server_time : now;
+            const clockOffset = serverTime - now;
+
             if (data && data.active_list) {
                 window.__activeTimersList = data.active_list;
                 if (!window.__activeTimersMap) {
@@ -1670,9 +1674,6 @@ async function syncActiveTimerFromOdoo() {
             const act = data ? data.active : null;
             const lastConfirmedAt = data ? data.last_confirmed_at : 0;
             const current = getTimerState();
-            const now = Date.now();
-            const serverTime = (data && data.server_time) ? data.server_time : now;
-            const clockOffset = serverTime - now;
 
             // Comprobar si el temporizador principal local actual existe en la lista activa del servidor
             const currentItemInList = (data && data.active_list && current && current.timesheetId)

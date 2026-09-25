@@ -26,7 +26,18 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// La aplicación en móvil tiene que ir siempre a la url /m
+	// Si el usuario solicita explícitamente modo escritorio, guardar preferencia en cookie
+	if r.URL.Query().Get("desktop") == "1" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "planesgo_prefer_desktop",
+			Value:    "1",
+			Path:     "/",
+			MaxAge:   31536000,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+
+	// La aplicación en móvil tiene que ir a la url /m a menos que se haya forzado modo escritorio
 	if isMobileRequest(r) {
 		http.Redirect(w, r, "/m", http.StatusSeeOther)
 		return
@@ -902,6 +913,15 @@ func isMobileRequest(r *http.Request) bool {
 	if r == nil {
 		return false
 	}
+
+	// Comprobar si el usuario solicitó explícitamente modo escritorio (query param o cookie persistente)
+	if r.URL.Query().Get("desktop") == "1" || r.URL.Query().Get("nomobile") == "1" {
+		return false
+	}
+	if cookie, err := r.Cookie("planesgo_prefer_desktop"); err == nil && cookie.Value == "1" {
+		return false
+	}
+
 	// 1. Client Hints moderno estándar (Sec-CH-UA-Mobile)
 	if r.Header.Get("Sec-CH-UA-Mobile") == "?1" {
 		return true

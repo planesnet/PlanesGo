@@ -8,17 +8,26 @@
     <link rel="apple-touch-icon" href="/static/img/icon-192.png">
     <script>
         (function() {
-            // La aplicación en móvil tiene que ir siempre a la url /m
-            if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) || (window.innerWidth && window.innerWidth < 768)) {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('desktop') === '1') {
+                document.cookie = "planesgo_prefer_desktop=1; path=/; max-age=31536000; SameSite=Lax";
+                return;
+            }
+            if (document.cookie.includes('planesgo_prefer_desktop=1')) {
+                return;
+            }
+            // En dispositivos móviles reales (no en PC por redimensionar la ventana), redirigir a /m
+            if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
                 window.location.replace('/m');
                 return;
             }
-            var noop = function() {};
-            window.console.log = noop;
-            window.console.info = noop;
-            window.console.debug = noop;
-            window.console.warn = noop;
-            window.console.error = noop;
+
+            // Filtrar únicamente la advertencia de Tailwind Play CDN en desarrollo local
+            const _origWarn = console.warn;
+            console.warn = function(...args) {
+                if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+                _origWarn.apply(console, args);
+            };
         })();
     </script>
     <script src="https://cdn.tailwindcss.com"></script>

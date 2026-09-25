@@ -8,12 +8,22 @@
     <!-- Metadatos y Manifiesto PWA -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#020617">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Express">
     <link rel="apple-touch-icon" href="/static/img/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/img/icon-192.png">
 
+    <script>
+        (function() {
+            const _origWarn = console.warn;
+            console.warn = function(...args) {
+                if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+                _origWarn.apply(console, args);
+            };
+        })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -187,8 +197,16 @@
             </div>
         </div>
 
-        <!-- Botón Salir / Logout -->
-        <div class="flex items-center shrink-0">
+        <!-- Acciones: Escritorio y Salir -->
+        <div class="flex items-center space-x-2 shrink-0">
+            <a href="/?desktop=1"
+               class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-sky-950/60 text-slate-200 hover:text-sky-300 border border-slate-700/80 hover:border-sky-700/60 transition active:scale-95 text-xs font-semibold cursor-pointer"
+               title="Ir al panel completo de escritorio">
+                <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+                <span class="hidden sm:inline">Escritorio</span>
+            </a>
             <a href="/logout?next=/m"
                class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-950/60 text-slate-200 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 transition active:scale-95 text-xs font-semibold cursor-pointer"
                title="Cerrar sesión">
@@ -637,7 +655,6 @@
                     }
                 }
             });
-        });
     </script>
 </body>
 </html>
