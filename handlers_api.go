@@ -1011,6 +1011,7 @@ func (state *AppState) handleAPITicketsClose(w http.ResponseWriter, r *http.Requ
 		TicketRef   string `json:"ticket_ref"`
 		Subject     string `json:"subject"`
 		Description string `json:"description"`
+		SendReport  bool   `json:"send_report"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1031,7 +1032,13 @@ func (state *AppState) handleAPITicketsClose(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := client.CloseTicket(ctx, targetTicketID, req.Subject, req.Description); err != nil {
+	sessionUserEmail := ""
+	if session != nil && session.UserEmail != "" {
+		sessionUserEmail = session.UserEmail
+	}
+
+	resultMsg, err := client.CloseTicket(ctx, targetTicketID, req.Subject, req.Description, req.SendReport, sessionUserEmail)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -1039,14 +1046,15 @@ func (state *AppState) handleAPITicketsClose(w http.ResponseWriter, r *http.Requ
 
 	client.InvalidateTicketsCache()
 	state.broadcastUserEvent(targetUID, "tickets_changed", map[string]interface{}{
-		"action":    "ticket_closed",
-		"ticket_id": targetTicketID,
+		"action":      "ticket_closed",
+		"ticket_id":   targetTicketID,
+		"send_report": req.SendReport,
 	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":   true,
 		"ticket_id": targetTicketID,
-		"message":   "Ticket cerrado definitivamente",
+		"message":   resultMsg,
 	})
 }
 

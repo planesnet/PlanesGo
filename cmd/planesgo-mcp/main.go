@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.63"
+	Version       = "1.2.64"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -447,12 +447,17 @@ func (c *PlanesGoClient) GetTicket(ticketRef string) (map[string]interface{}, er
 }
 
 // CloseTicket cierra definitivamente un ticket en Odoo a través de PlanesGo
-func (c *PlanesGoClient) CloseTicket(ticketRef, subject, description string) (map[string]interface{}, error) {
+func (c *PlanesGoClient) CloseTicket(ticketRef, subject, description string, sendReport ...bool) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/api/tickets/close", c.BaseURL)
+	shouldSend := false
+	if len(sendReport) > 0 {
+		shouldSend = sendReport[0]
+	}
 	payload := map[string]interface{}{
 		"ticket_ref":  ticketRef,
 		"subject":     subject,
 		"description": description,
+		"send_report": shouldSend,
 	}
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -918,11 +923,12 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 		subject, _ := args["subject"].(string)
 		desc, _ := args["description"].(string)
+		sendReport, _ := args["send_report"].(bool)
 		if strings.TrimSpace(subject) == "" {
 			subject = "Resolución de ticket"
 		}
 
-		_, err := client.CloseTicket(ticketToClose, subject, desc)
+		_, err := client.CloseTicket(ticketToClose, subject, desc, sendReport)
 		if err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{

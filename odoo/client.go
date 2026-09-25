@@ -1358,17 +1358,18 @@ func (c *Client) GetAssignableUsers(ctx context.Context) ([]ResUser, error) {
 }
 
 // CloseTicket marca un ticket como cerrado en Odoo e impide cualquier reapertura posterior.
-func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, description string) error {
+// Si sendReport es true, envía el informe de partes de trabajo por correo al contacto del ticket, tal como hace Odoo.
+func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, description string, sendReport bool, userEmail string) (string, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
-		return fmt.Errorf("no se pudo autenticar antes de cerrar ticket: %w", err)
+		return "", fmt.Errorf("no se pudo autenticar antes de cerrar ticket: %w", err)
 	}
 
 	if ticketID <= 0 {
-		return errors.New("ID de ticket inválido")
+		return "", errors.New("ID de ticket inválido")
 	}
 
-	// 1. Verificar estado actual del ticket
+	// 1. Verificar estado actual del ticket y datos del cliente
 	argsCheck := []interface{}{
 		c.config.DB,
 		uid,
@@ -1378,48 +1379,55 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		[]interface{}{[]interface{}{[]interface{}{"id", "=", ticketID}}},
 	}
 	kwargsCheck := map[string]interface{}{
-		"fields": []string{"id", "name", "stage_id", "team_id", "close_date"},
+		"fields": []string{"id", "name", "number", "stage_id", "team_id", "close_date", "partner_id", "partner_email"},
 		"limit":  1,
 	}
 
 	checkRaw, err := c.call(ctx, "object", "execute_kw", argsCheck, kwargsCheck)
 	if err != nil {
-		return fmt.Errorf("error al verificar estado del ticket: %w", err)
+		return "", fmt.Errorf("error al verificar estado del ticket: %w", err)
 	}
 
 	var tickets []struct {
-		ID        int      `json:"id"`
-		Name      string   `json:"name"`
-		StageID   Many2One `json:"stage_id"`
-		TeamID    Many2One `json:"team_id"`
-		CloseDate string   `json:"close_date"`
+		ID           int      `json:"id"`
+		Name         string   `json:"name"`
+		Number       string   `json:"number"`
+		StageID      Many2One `json:"stage_id"`
+		TeamID       Many2One `json:"team_id"`
+		CloseDate    string   `json:"close_date"`
+		PartnerID    Many2One `json:"partner_id"`
+		PartnerEmail string   `json:"partner_email"`
 	}
 	if err := json.Unmarshal(checkRaw, &tickets); err != nil || len(tickets) == 0 {
-		return fmt.Errorf("ticket %d no encontrado", ticketID)
+		return "", fmt.Errorf("ticket %d no encontrado", ticketID)
 	}
 
 	t := tickets[0]
 	if t.CloseDate != "" && t.CloseDate != "false" {
-		return errors.New("el ticket ya se encuentra cerrado y no se puede volver a abrir")
+		return "", errors.New("el ticket ya se encuentra cerrado y no se puede volver a abrir")
 	}
 
-	// 2. Buscar etapa de cierre (fold = True)
+	// 2. Buscar etapa de cierre en helpdesk.ticket.stage (name in ['Done', 'Hecho'] o fold/closed = True)
 	var closedStageID int
 	stageDomain := []interface{}{
+		"|",
+		[]interface{}{"name", "in", []string{"Done", "Hecho"}},
+		"&",
+		[]interface{}{"closed", "=", true},
 		[]interface{}{"fold", "=", true},
 	}
 	if t.TeamID.ID > 0 {
 		stageDomain = []interface{}{
 			"&",
 			[]interface{}{"team_ids", "in", []int{t.TeamID.ID}},
-			[]interface{}{"fold", "=", true},
+			stageDomain,
 		}
 	}
 	stageArgs := []interface{}{
 		c.config.DB,
 		uid,
 		c.config.Password,
-		"helpdesk.stage",
+		"helpdesk.ticket.stage",
 		"search_read",
 		[]interface{}{stageDomain},
 	}
@@ -1436,12 +1444,37 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		}
 	}
 
+	// Fallback si no encontró etapa con el dominio específico: buscar cualquier etapa con closed = true
+	if closedStageID <= 0 {
+		fallbackArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"helpdesk.ticket.stage",
+			"search_read",
+			[]interface{}{[]interface{}{[]interface{}{"closed", "=", true}}},
+		}
+		fallbackKwargs := map[string]interface{}{
+			"fields": []string{"id", "name"},
+			"limit":  1,
+		}
+		if fbRaw, fbErr := c.call(ctx, "object", "execute_kw", fallbackArgs, fallbackKwargs); fbErr == nil {
+			var fbStages []struct {
+				ID int `json:"id"`
+			}
+			if json.Unmarshal(fbRaw, &fbStages) == nil && len(fbStages) > 0 {
+				closedStageID = fbStages[0].ID
+			}
+		}
+	}
+	if closedStageID <= 0 {
+		closedStageID = 4 // ID habitual de etapa "Done"
+	}
+
 	// 3. Preparar valores de cierre
 	writeVals := map[string]interface{}{
 		"close_date": time.Now().UTC().Format("2006-01-02 15:04:05"),
-	}
-	if closedStageID > 0 {
-		writeVals["stage_id"] = closedStageID
+		"stage_id":   closedStageID,
 	}
 
 	writeArgs := []interface{}{
@@ -1455,7 +1488,7 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 
 	_, writeErr := c.call(ctx, "object", "execute_kw", writeArgs, nil)
 	if writeErr != nil {
-		return fmt.Errorf("error al actualizar ticket a cerrado: %w", writeErr)
+		return "", fmt.Errorf("error al actualizar ticket a cerrado: %w", writeErr)
 	}
 
 	// 4. Registrar nota en el chatter con el asunto y descripción del cierre
@@ -1483,12 +1516,136 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		_, _ = c.call(ctx, "object", "execute_kw", msgArgs, msgKwargs)
 	}
 
+	resultMsg := "Ticket cerrado definitivamente"
+
+	// 5. Si sendReport es true, enviar el informe de partes de trabajo por correo al contacto
+	if sendReport {
+		targetEmail := strings.TrimSpace(t.PartnerEmail)
+		if targetEmail == "" && t.PartnerID.ID > 0 {
+			partArgs := []interface{}{
+				c.config.DB,
+				uid,
+				c.config.Password,
+				"res.partner",
+				"read",
+				[]interface{}{[]int{t.PartnerID.ID}},
+			}
+			partKwargs := map[string]interface{}{
+				"fields": []string{"email"},
+			}
+			if pRaw, pErr := c.call(ctx, "object", "execute_kw", partArgs, partKwargs); pErr == nil {
+				var partners []struct {
+					Email string `json:"email"`
+				}
+				if json.Unmarshal(pRaw, &partners) == nil && len(partners) > 0 {
+					targetEmail = strings.TrimSpace(partners[0].Email)
+				}
+			}
+		}
+
+		// Buscar la plantilla de correo de cierre de helpdesk
+		templateID := 17 // Template "Helpdesk Closed Ticket Notification Email"
+		tmplArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"mail.template",
+			"search_read",
+			[]interface{}{
+				[]interface{}{
+					"|",
+					[]interface{}{"name", "=", "Helpdesk Closed Ticket Notification Email"},
+					"&",
+					[]interface{}{"model", "=", "helpdesk.ticket"},
+					[]interface{}{"report_template", "!=", false},
+				},
+			},
+		}
+		tmplKwargs := map[string]interface{}{
+			"fields": []string{"id", "name"},
+			"limit":  1,
+		}
+		if tmplRaw, tmplErr := c.call(ctx, "object", "execute_kw", tmplArgs, tmplKwargs); tmplErr == nil {
+			var templates []struct {
+				ID int `json:"id"`
+			}
+			if json.Unmarshal(tmplRaw, &templates) == nil && len(templates) > 0 && templates[0].ID > 0 {
+				templateID = templates[0].ID
+			}
+		}
+
+		// Adjuntar adjuntos existentes del ticket si los hay
+		attArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"ir.attachment",
+			"search",
+			[]interface{}{
+				[]interface{}{
+					[]interface{}{"res_model", "=", "helpdesk.ticket"},
+					[]interface{}{"res_id", "=", ticketID},
+				},
+			},
+		}
+		if attRaw, attErr := c.call(ctx, "object", "execute_kw", attArgs, nil); attErr == nil {
+			var attIDs []int
+			if json.Unmarshal(attRaw, &attIDs) == nil && len(attIDs) > 0 {
+				_, _ = c.call(ctx, "object", "execute_kw", []interface{}{
+					c.config.DB,
+					uid,
+					c.config.Password,
+					"mail.template",
+					"write",
+					[]interface{}{[]int{templateID}, map[string]interface{}{
+						"attachment_ids": []interface{}{[]interface{}{6, 0, attIDs}},
+					}},
+				}, nil)
+			}
+		}
+
+		emailValues := map[string]interface{}{}
+		if targetEmail != "" {
+			emailValues["email_to"] = targetEmail
+		}
+		if userEmail != "" {
+			emailValues["email_from"] = userEmail
+		}
+
+		sendArgs := []interface{}{
+			c.config.DB,
+			uid,
+			c.config.Password,
+			"mail.template",
+			"send_mail",
+			[]interface{}{templateID, ticketID},
+		}
+		sendKwargs := map[string]interface{}{
+			"force_send": true,
+		}
+		if len(emailValues) > 0 {
+			sendKwargs["email_values"] = emailValues
+		}
+
+		_, sendErr := c.call(ctx, "object", "execute_kw", sendArgs, sendKwargs)
+		if sendErr != nil {
+			log.Printf("[CloseTicket] Advertencia enviando correo del ticket %d: %v", ticketID, sendErr)
+			resultMsg = fmt.Sprintf("Ticket cerrado. Nota: no se pudo enviar el email al contacto (%v)", sendErr)
+		} else {
+			if targetEmail != "" {
+				resultMsg = fmt.Sprintf("Ticket cerrado e informe enviado a %s", targetEmail)
+			} else {
+				resultMsg = "Ticket cerrado e informe generado y enviado"
+			}
+		}
+	}
+
 	// Invalidar caché de tickets para refresco inmediato
 	c.mu.Lock()
 	c.ticketsCache = nil
 	c.mu.Unlock()
 
-	return nil
+	return resultMsg, nil
 }
 
 // CreateTask crea una nueva tarea en un proyecto en Odoo (project.task) asignada al trabajador.

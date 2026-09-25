@@ -468,7 +468,7 @@
             </div>
 
             <!-- Body con scroll fluido -->
-            <form id="form-close-ticket" onsubmit="submitCloseTicket(event)" class="p-5 space-y-3.5 overflow-y-auto flex-1">
+            <form id="form-close-ticket" onsubmit="event.preventDefault(); submitCloseTicket(event, false);" class="p-5 space-y-3.5 overflow-y-auto flex-1">
                 <input type="hidden" id="close-ticket-id" value="">
                 <input type="hidden" id="close-ticket-ref" value="">
 
@@ -498,19 +498,34 @@
                               class="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100 resize-none"></textarea>
                 </div>
 
-                <!-- Botones Acción -->
-                <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2 shrink-0"
+                <!-- Botones Acción: Cancelar | Cerrar | Cerrar y enviar -->
+                <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2 flex-wrap shrink-0"
                      style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
                     <button type="button" onclick="closeCloseTicketModal()"
-                            class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold cursor-pointer transition">
+                            class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold cursor-pointer transition">
                         Cancelar
                     </button>
-                    <button type="submit" id="btn-submit-close-ticket"
-                            class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition shadow-md flex items-center space-x-2">
+                    <button type="button" onclick="submitCloseTicket(event, false)" id="btn-submit-close-ticket"
+                            class="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs sm:text-sm font-bold cursor-pointer transition shadow-sm flex items-center space-x-1.5"
+                            title="Cierra el ticket e imputa las horas acumuladas">
                         <span id="btn-close-ticket-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
                             <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                         </span>
-                        <span id="btn-close-ticket-label">Dar por Cerrado</span>
+                        <svg class="w-4 h-4 text-emerald-400" id="btn-close-ticket-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span id="btn-close-ticket-label">Cerrar</span>
+                    </button>
+                    <button type="button" onclick="submitCloseTicket(event, true)" id="btn-submit-close-send-ticket"
+                            class="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition shadow-md flex items-center space-x-1.5"
+                            title="Cierra el ticket, imputa horas y envía el informe de horas al contacto">
+                        <span id="btn-close-send-spinner" class="hidden animate-spin h-3.5 w-3.5 text-white">
+                            <svg class="w-full h-full" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </span>
+                        <svg class="w-4 h-4 text-white" id="btn-close-send-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        <span id="btn-close-send-label">Cerrar y enviar</span>
                     </button>
                 </div>
             </form>

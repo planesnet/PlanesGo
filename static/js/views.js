@@ -3739,6 +3739,24 @@ function openCloseTicketModal(ticketId, ticketRef, ticketTitle) {
     const descInput = document.getElementById('close-ticket-description');
     if (descInput) descInput.value = '';
 
+    // Restablecer estados de botones
+    const btnClose = document.getElementById('btn-submit-close-ticket');
+    const btnSend = document.getElementById('btn-submit-close-send-ticket');
+    if (btnClose) btnClose.disabled = false;
+    if (btnSend) btnSend.disabled = false;
+    const spinnerClose = document.getElementById('btn-close-ticket-spinner');
+    const iconClose = document.getElementById('btn-close-ticket-icon');
+    const labelClose = document.getElementById('btn-close-ticket-label');
+    const spinnerSend = document.getElementById('btn-close-send-spinner');
+    const iconSend = document.getElementById('btn-close-send-icon');
+    const labelSend = document.getElementById('btn-close-send-label');
+    if (spinnerClose) spinnerClose.classList.add('hidden');
+    if (iconClose) iconClose.classList.remove('hidden');
+    if (labelClose) labelClose.textContent = 'Cerrar';
+    if (spinnerSend) spinnerSend.classList.add('hidden');
+    if (iconSend) iconSend.classList.remove('hidden');
+    if (labelSend) labelSend.textContent = 'Cerrar y enviar';
+
     modal.classList.remove('hidden');
 }
 
@@ -3747,8 +3765,9 @@ function closeCloseTicketModal() {
     if (modal) modal.classList.add('hidden');
 }
 
-async function submitCloseTicket(event) {
+async function submitCloseTicket(event, sendReport) {
     if (event) event.preventDefault();
+    sendReport = !!sendReport;
 
     const ticketId = parseInt(document.getElementById('close-ticket-id')?.value, 10) || 0;
     const ticketRef = document.getElementById('close-ticket-ref')?.value || '';
@@ -3760,13 +3779,39 @@ async function submitCloseTicket(event) {
         return;
     }
 
-    const btnSpinner = document.getElementById('btn-close-ticket-spinner');
-    const btnLabel = document.getElementById('btn-close-ticket-label');
-    const btnSubmit = document.getElementById('btn-submit-close-ticket');
+    // Si hay un cronómetro activo corriendo en este ticket, detenerlo para imputar sus horas en Odoo
+    if (typeof getTimerState === 'function' && typeof pauseWorkTimer === 'function') {
+        const curTimer = getTimerState();
+        if (curTimer && curTimer.running && (curTimer.ticketId === ticketId || (curTimer.description && curTimer.description.includes(ticketRef)))) {
+            try {
+                pauseWorkTimer();
+            } catch (timerErr) {
+                console.warn('[PlanesGo Tickets] Error guardando timer activo antes de cerrar:', timerErr);
+            }
+        }
+    }
 
-    if (btnSpinner) btnSpinner.classList.remove('hidden');
-    if (btnLabel) btnLabel.textContent = 'Cerrando en Odoo...';
-    if (btnSubmit) btnSubmit.disabled = true;
+    const btnClose = document.getElementById('btn-submit-close-ticket');
+    const btnSend = document.getElementById('btn-submit-close-send-ticket');
+    const spinnerClose = document.getElementById('btn-close-ticket-spinner');
+    const iconClose = document.getElementById('btn-close-ticket-icon');
+    const labelClose = document.getElementById('btn-close-ticket-label');
+    const spinnerSend = document.getElementById('btn-close-send-spinner');
+    const iconSend = document.getElementById('btn-close-send-icon');
+    const labelSend = document.getElementById('btn-close-send-label');
+
+    if (btnClose) btnClose.disabled = true;
+    if (btnSend) btnSend.disabled = true;
+
+    if (sendReport) {
+        if (spinnerSend) spinnerSend.classList.remove('hidden');
+        if (iconSend) iconSend.classList.add('hidden');
+        if (labelSend) labelSend.textContent = 'Enviando...';
+    } else {
+        if (spinnerClose) spinnerClose.classList.remove('hidden');
+        if (iconClose) iconClose.classList.add('hidden');
+        if (labelClose) labelClose.textContent = 'Cerrando...';
+    }
 
     try {
         const res = await fetch('/api/tickets/close', {
@@ -3776,7 +3821,8 @@ async function submitCloseTicket(event) {
                 ticket_id: ticketId,
                 ticket_ref: ticketRef,
                 subject: subject,
-                description: description
+                description: description,
+                send_report: sendReport
             })
         });
 
@@ -3786,12 +3832,17 @@ async function submitCloseTicket(event) {
         }
 
         closeCloseTicketModal();
+        const successMsg = data.message || (sendReport 
+            ? `🔒 Ticket ${ticketRef || ticketId} cerrado e informe enviado al contacto`
+            : `🔒 Ticket ${ticketRef || ticketId} cerrado definitivamente`);
         if (typeof showToast === 'function') {
-            showToast(`🔒 Ticket ${ticketRef || ticketId} cerrado definitivamente`, 'success');
+            showToast(successMsg, 'success');
         }
 
         // Recargar tickets para quitarlo de pendientes
-        await loadTicketsView(true);
+        if (typeof loadTicketsView === 'function') {
+            await loadTicketsView(true);
+        }
     } catch (err) {
         console.error('[PlanesGo Tickets] Error cerrando ticket:', err);
         if (typeof showToast === 'function') {
@@ -3800,9 +3851,14 @@ async function submitCloseTicket(event) {
             alert(`Error: ${err.message}`);
         }
     } finally {
-        if (btnSpinner) btnSpinner.classList.add('hidden');
-        if (btnLabel) btnLabel.textContent = 'Dar por Cerrado';
-        if (btnSubmit) btnSubmit.disabled = false;
+        if (btnClose) btnClose.disabled = false;
+        if (btnSend) btnSend.disabled = false;
+        if (spinnerClose) spinnerClose.classList.add('hidden');
+        if (iconClose) iconClose.classList.remove('hidden');
+        if (labelClose) labelClose.textContent = 'Cerrar';
+        if (spinnerSend) spinnerSend.classList.add('hidden');
+        if (iconSend) iconSend.classList.remove('hidden');
+        if (labelSend) labelSend.textContent = 'Cerrar y enviar';
     }
 }
 
