@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.66"
+	Version       = "1.2.68"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -76,6 +76,119 @@ func cleanAntigravityTaskName(taskName string) string {
 		break
 	}
 	return name
+}
+
+// formatTokens formatea un número entero con separador de miles (ej: 15420 -> "15.420")
+func formatTokens(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	in := strconv.Itoa(n)
+	var out []byte
+	l := len(in)
+	for i, c := range in {
+		if i > 0 && (l-i)%3 == 0 {
+			out = append(out, '.')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+// ActiveSessionMetadata contiene la información de la sesión activa de Antigravity registrada por los hooks
+type ActiveSessionMetadata struct {
+	TranscriptPath string  `json:"transcriptPath"`
+	ConversationID string  `json:"conversationId"`
+	ModelName      string  `json:"modelName"`
+	UpdatedAt      float64 `json:"updatedAt"`
+}
+
+// estimateTokensFromActiveSession intenta estimar los tokens consumidos analizando el archivo de transcript de la sesión
+func estimateTokensFromActiveSession() (int, int, int, string) {
+	sessionFile := "/tmp/planesgo_active_session.json"
+	var transcriptPath string
+	var modelName string
+
+	if data, err := os.ReadFile(sessionFile); err == nil {
+		var meta ActiveSessionMetadata
+		if err := json.Unmarshal(data, &meta); err == nil {
+			transcriptPath = meta.TranscriptPath
+			modelName = meta.ModelName
+		}
+	}
+
+	if transcriptPath == "" || !fileExists(transcriptPath) {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			brainDir := filepath.Join(homeDir, ".gemini", "antigravity", "brain")
+			var newestFile string
+			var newestMod time.Time
+			_ = filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+				if !info.IsDir() && (info.Name() == "transcript.jsonl" || info.Name() == "transcript_full.jsonl") {
+					if info.ModTime().After(newestMod) {
+						newestMod = info.ModTime()
+						newestFile = path
+					}
+				}
+				return nil
+			})
+			if newestFile != "" && time.Since(newestMod) < 2*time.Hour {
+				transcriptPath = newestFile
+			}
+		}
+	}
+
+	if transcriptPath == "" || !fileExists(transcriptPath) {
+		return 0, 0, 0, modelName
+	}
+
+	file, err := os.Open(transcriptPath)
+	if err != nil {
+		return 0, 0, 0, modelName
+	}
+	defer file.Close()
+
+	var inputChars, outputChars int
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 5*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var step struct {
+			Source    string          `json:"source"`
+			Type      string          `json:"type"`
+			Content   string          `json:"content"`
+			Thinking  string          `json:"thinking"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
+		}
+		if err := json.Unmarshal(line, &step); err != nil {
+			continue
+		}
+
+		if step.Source == "MODEL" {
+			outputChars += len(step.Content) + len(step.Thinking) + len(step.ToolCalls)
+		} else {
+			inputChars += len(step.Content) + len(step.ToolCalls)
+		}
+	}
+
+	tokensIn := int(float64(inputChars) / 3.8)
+	tokensOut := int(float64(outputChars) / 3.8)
+	tokensTotal := tokensIn + tokensOut
+
+	return tokensTotal, tokensIn, tokensOut, modelName
 }
 
 func NormalizeTaskType(taskName, description, explicitType string) (string, string) {
@@ -204,19 +317,13 @@ type ToolCallResult struct {
 	IsError bool          `json:"isError"`
 }
 
-// findConfig busca .planesgo.json hacia arriba desde el directorio especificado o de trabajo
+// findConfig busca .planesgo.json estrictamente en el directorio principal del proyecto
+// (prohibido buscar en directorios padres o hijos).
 func findConfig(customDir ...string) (*Config, string, error) {
 	var startDirs []string
 	for _, d := range customDir {
 		if strings.TrimSpace(d) != "" {
 			startDirs = append(startDirs, strings.TrimSpace(d))
-		}
-	}
-	if len(startDirs) == 0 {
-		if wd, err := os.Getwd(); err == nil && wd != "" {
-			startDirs = append(startDirs, wd)
-		} else if pwd := os.Getenv("PWD"); pwd != "" {
-			startDirs = append(startDirs, pwd)
 		}
 	}
 
@@ -225,38 +332,67 @@ func findConfig(customDir ...string) (*Config, string, error) {
 		homeDir, _ = filepath.Abs(homeDir)
 	}
 
+	if len(startDirs) == 0 {
+		cwd := ""
+		if wd, err := os.Getwd(); err == nil && wd != "" {
+			cwd = wd
+		} else if pwd := os.Getenv("PWD"); pwd != "" {
+			cwd = pwd
+		}
+
+		// Si planesgo-mcp se ejecuta como servidor MCP dentro de los plugins de Antigravity (~/.gemini/...),
+		// consultar el workspace activo registrado por Antigravity
+		geminiDir := ""
+		if homeDir != "" {
+			geminiDir = filepath.Join(homeDir, ".gemini")
+		}
+		if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+				ws := strings.TrimSpace(string(wsBytes))
+				if ws != "" {
+					startDirs = append(startDirs, ws)
+				}
+			}
+		}
+
+		if len(startDirs) == 0 && cwd != "" {
+			startDirs = append(startDirs, cwd)
+		}
+	}
+
 	for _, dir := range startDirs {
 		curr, err := filepath.Abs(dir)
 		if err != nil {
 			curr = dir
 		}
-		for {
-			if curr == "/" || (homeDir != "" && curr == homeDir) {
-				break
-			}
 
-			candidate := filepath.Join(curr, ".planesgo.json")
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				data, err := os.ReadFile(candidate)
-				if err != nil {
-					return nil, candidate, err
-				}
-				var cfg Config
-				if err := json.Unmarshal(data, &cfg); err != nil {
-					return nil, candidate, fmt.Errorf("error al parsear .planesgo.json: %w", err)
-				}
-				return &cfg, candidate, nil
-			}
+		// Si curr apunta a un archivo, obtener su directorio contenedor
+		if info, err := os.Stat(curr); err == nil && !info.IsDir() {
+			curr = filepath.Dir(curr)
+		}
 
-			parent := filepath.Dir(curr)
-			if parent == curr {
-				break
+		// La ubicación debe ser estrictamente la del directorio principal del proyecto.
+		// En el home (~/) existe un .planesgo.json personal para antigravity cli;
+		// ignorarlo si no fue solicitado explícitamente como proyecto único.
+		if homeDir != "" && curr == homeDir && len(customDir) == 0 {
+			continue
+		}
+
+		candidate := filepath.Join(curr, ".planesgo.json")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			data, err := os.ReadFile(candidate)
+			if err != nil {
+				return nil, candidate, err
 			}
-			curr = parent
+			var cfg Config
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				return nil, candidate, fmt.Errorf("error al parsear .planesgo.json: %w", err)
+			}
+			return &cfg, candidate, nil
 		}
 	}
 
-	return nil, "", fmt.Errorf("no se encontró .planesgo.json en el directorio actual ni en sus padres")
+	return nil, "", fmt.Errorf("no se encontró .planesgo.json estrictamente en el directorio principal del proyecto")
 }
 
 // getAuth obtiene el token y la URL de PlanesGo
@@ -439,6 +575,11 @@ func (c *PlanesGoClient) CheckStatus(projectID int, projectName string) (map[str
 
 // SendTaskAction envía latido o stop a PlanesGo
 func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, projectID int, projectName, description, taskType, ticketCode string) (map[string]interface{}, error) {
+	return c.SendTaskActionWithTokens(action, taskName, taskID, projectID, projectName, description, taskType, ticketCode, 0, 0, 0, "", 0, "")
+}
+
+// SendTaskActionWithTokens envía latido o stop a PlanesGo incluyendo telemetría de tokens de IA
+func (c *PlanesGoClient) SendTaskActionWithTokens(action, taskName string, taskID, projectID int, projectName, description, taskType, ticketCode string, tokensTotal, tokensInput, tokensOutput int, aiModel string, aiCost float64, aiSessionID string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/antigravity/update_tasks", c.BaseURL)
 
 	payload := map[string]interface{}{
@@ -451,6 +592,25 @@ func (c *PlanesGoClient) SendTaskAction(action, taskName string, taskID, project
 		"task_type":    taskType,
 		"ticket_code":  ticketCode,
 		"token":        c.Token,
+	}
+
+	if tokensTotal > 0 {
+		payload["tokens_total"] = tokensTotal
+	}
+	if tokensInput > 0 {
+		payload["tokens_input"] = tokensInput
+	}
+	if tokensOutput > 0 {
+		payload["tokens_output"] = tokensOutput
+	}
+	if aiModel != "" {
+		payload["ai_model"] = aiModel
+	}
+	if aiCost > 0 {
+		payload["ai_cost"] = aiCost
+	}
+	if aiSessionID != "" {
+		payload["ai_session_id"] = aiSessionID
 	}
 
 	jsonBytes, err := json.Marshal(payload)
@@ -596,13 +756,25 @@ func (c *PlanesGoClient) ListTasks(projectID int, projectName string) ([]map[str
 	return tasks, nil
 }
 
-// saveConfigFile guarda la configuración en .planesgo.json (y custom/.planesgo.json si existe)
+// saveConfigFile guarda la configuración estrictamente en .planesgo.json en la raíz del proyecto
 func saveConfigFile(cfg Config, targetDir string) error {
 	if targetDir == "" {
-		if wd, err := os.Getwd(); err == nil && wd != "" {
-			targetDir = wd
-		} else if pwd := os.Getenv("PWD"); pwd != "" {
-			targetDir = pwd
+		homeDir, _ := os.UserHomeDir()
+		geminiDir := ""
+		if homeDir != "" {
+			geminiDir = filepath.Join(homeDir, ".gemini")
+		}
+		cwd, _ := os.Getwd()
+		if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+				ws := strings.TrimSpace(string(wsBytes))
+				if ws != "" {
+					targetDir = ws
+				}
+			}
+		}
+		if targetDir == "" {
+			targetDir = cwd
 		}
 	}
 	targetDir, _ = filepath.Abs(targetDir)
@@ -613,18 +785,11 @@ func saveConfigFile(cfg Config, targetDir string) error {
 	}
 	data = append(data, '\n')
 
+	// La ubicación de .planesgo.json debe ser estrictamente la del directorio principal
+	// asociada al proyecto. Prohibido escribir en directorios padres o hijos (custom, etc.).
 	mainFilePath := filepath.Join(targetDir, ".planesgo.json")
 	if err := os.WriteFile(mainFilePath, data, 0644); err != nil {
 		return err
-	}
-
-	customSubdir := filepath.Join(targetDir, "custom")
-	if info, err := os.Stat(customSubdir); err == nil && info.IsDir() {
-		customPath := filepath.Join(customSubdir, ".planesgo.json")
-		_ = os.WriteFile(customPath, data, 0644)
-	} else if filepath.Base(targetDir) == "custom" {
-		parentPath := filepath.Join(filepath.Dir(targetDir), ".planesgo.json")
-		_ = os.WriteFile(parentPath, data, 0644)
 	}
 	return nil
 }
@@ -866,9 +1031,52 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			taskID = cfg.OdooTaskID
 		}
 
+		tokensTotal := 0
+		if val, ok := args["tokens_total"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensTotal = int(f)
+			}
+		} else if val, ok := args["tokens"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensTotal = int(f)
+			}
+		}
+		tokensInput := 0
+		if val, ok := args["tokens_input"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensInput = int(f)
+			}
+		}
+		tokensOutput := 0
+		if val, ok := args["tokens_output"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensOutput = int(f)
+			}
+		}
+		aiModel := ""
+		if val, ok := args["ai_model"].(string); ok {
+			aiModel = strings.TrimSpace(val)
+		} else if val, ok := args["model"].(string); ok {
+			aiModel = strings.TrimSpace(val)
+		}
+		aiCost := 0.0
+		if val, ok := args["ai_cost"]; ok {
+			if f, ok := val.(float64); ok {
+				aiCost = f
+			}
+		}
+		aiSessionID := ""
+		if val, ok := args["ai_session_id"].(string); ok {
+			aiSessionID = strings.TrimSpace(val)
+		}
+
+		if tokensTotal == 0 && (tokensInput > 0 || tokensOutput > 0) {
+			tokensTotal = tokensInput + tokensOutput
+		}
+
 		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
 
-		_, err := client.SendTaskAction("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType, ticketCode)
+		_, err := client.SendTaskActionWithTokens("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType, ticketCode, tokensTotal, tokensInput, tokensOutput, aiModel, aiCost, aiSessionID)
 		if err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al registrar latido: %v", err)}},
@@ -890,7 +1098,16 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
 
-		output := fmt.Sprintf("⏱️ %s%s | %s", projStr, ticketPart, normalizedTaskName)
+		tokensPart := ""
+		if tokensTotal > 0 {
+			if aiModel != "" {
+				tokensPart = fmt.Sprintf(" | 🪙 %s tok (%s)", formatTokens(tokensTotal), aiModel)
+			} else {
+				tokensPart = fmt.Sprintf(" | 🪙 %s tok", formatTokens(tokensTotal))
+			}
+		}
+
+		output := fmt.Sprintf("⏱️ %s%s | %s%s", projStr, ticketPart, normalizedTaskName, tokensPart)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
@@ -928,13 +1145,69 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			ticketCode = cfg.OdooTicketRef
 		}
 
+		tokensTotal := 0
+		if val, ok := args["tokens_total"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensTotal = int(f)
+			}
+		} else if val, ok := args["tokens"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensTotal = int(f)
+			}
+		}
+		tokensInput := 0
+		if val, ok := args["tokens_input"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensInput = int(f)
+			}
+		}
+		tokensOutput := 0
+		if val, ok := args["tokens_output"]; ok {
+			if f, ok := val.(float64); ok {
+				tokensOutput = int(f)
+			}
+		}
+		aiModel := ""
+		if val, ok := args["ai_model"].(string); ok {
+			aiModel = strings.TrimSpace(val)
+		} else if val, ok := args["model"].(string); ok {
+			aiModel = strings.TrimSpace(val)
+		}
+		aiCost := 0.0
+		if val, ok := args["ai_cost"]; ok {
+			if f, ok := val.(float64); ok {
+				aiCost = f
+			}
+		}
+		aiSessionID := ""
+		if val, ok := args["ai_session_id"].(string); ok {
+			aiSessionID = strings.TrimSpace(val)
+		}
+
+		if tokensTotal == 0 && (tokensInput > 0 || tokensOutput > 0) {
+			tokensTotal = tokensInput + tokensOutput
+		}
+
+		// Si no se proporcionaron tokens explícitamente, intentar estimarlos de la sesión activa
+		if tokensTotal <= 0 {
+			estTotal, estIn, estOut, estModel := estimateTokensFromActiveSession()
+			if estTotal > 0 {
+				tokensTotal = estTotal
+				tokensInput = estIn
+				tokensOutput = estOut
+				if aiModel == "" {
+					aiModel = estModel
+				}
+			}
+		}
+
 		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
 		finalDesc := strings.TrimSpace(desc)
 		if finalDesc == "" || finalDesc == "Trabajo en curso" {
 			finalDesc = cleanAntigravityTaskName(taskName)
 		}
 
-		_, err := client.SendTaskAction("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType, ticketCode)
+		_, err := client.SendTaskActionWithTokens("stop", normalizedTaskName, taskID, projID, projName, finalDesc, canonicalType, ticketCode, tokensTotal, tokensInput, tokensOutput, aiModel, aiCost, aiSessionID)
 		if err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al consolidar imputación: %v", err)}},
@@ -956,7 +1229,16 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			ticketPart = fmt.Sprintf(" | Ticket: %s", ticketCode)
 		}
 
-		output := fmt.Sprintf("⏹️ Imputado | %s%s | %s: %s", projStr, ticketPart, normalizedTaskName, finalDesc)
+		tokensPart := ""
+		if tokensTotal > 0 {
+			if aiModel != "" {
+				tokensPart = fmt.Sprintf(" | 🪙 %s tokens (%s)", formatTokens(tokensTotal), aiModel)
+			} else {
+				tokensPart = fmt.Sprintf(" | 🪙 %s tokens", formatTokens(tokensTotal))
+			}
+		}
+
+		output := fmt.Sprintf("⏹️ Imputado | %s%s | %s: %s%s", projStr, ticketPart, normalizedTaskName, finalDesc, tokensPart)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
@@ -1132,10 +1414,22 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 		targetDir := customPath
 		if targetDir == "" {
-			if wd, err := os.Getwd(); err == nil && wd != "" {
-				targetDir = wd
-			} else if pwd := os.Getenv("PWD"); pwd != "" {
-				targetDir = pwd
+			homeDir, _ := os.UserHomeDir()
+			geminiDir := ""
+			if homeDir != "" {
+				geminiDir = filepath.Join(homeDir, ".gemini")
+			}
+			cwd, _ := os.Getwd()
+			if geminiDir != "" && cwd != "" && strings.HasPrefix(cwd, geminiDir) {
+				if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
+					ws := strings.TrimSpace(string(wsBytes))
+					if ws != "" {
+						targetDir = ws
+					}
+				}
+			}
+			if targetDir == "" {
+				targetDir = cwd
 			}
 		}
 		targetDir, _ = filepath.Abs(targetDir)
@@ -1168,6 +1462,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 		data = append(data, '\n')
 
+		// Escribir estrictamente en la raíz del proyecto principal (sin escribir en padres ni hijos)
 		mainFilePath := filepath.Join(targetDir, ".planesgo.json")
 		if err := os.WriteFile(mainFilePath, data, 0644); err != nil {
 			return ToolCallResult{
@@ -1177,15 +1472,6 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				}},
 				IsError: true,
 			}
-		}
-
-		customSubdir := filepath.Join(targetDir, "custom")
-		if info, err := os.Stat(customSubdir); err == nil && info.IsDir() {
-			customPath := filepath.Join(customSubdir, ".planesgo.json")
-			_ = os.WriteFile(customPath, data, 0644)
-		} else if filepath.Base(targetDir) == "custom" {
-			parentPath := filepath.Join(filepath.Dir(targetDir), ".planesgo.json")
-			_ = os.WriteFile(parentPath, data, 0644)
 		}
 
 		return ToolCallResult{
@@ -1264,6 +1550,22 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Resumen breve del trabajo o progreso actual para el parte de horas en Odoo",
 					},
+					"tokens_total": map[string]interface{}{
+						"type":        "integer",
+						"description": "Total de tokens consumidos por el modelo de IA en esta tarea (opcional)",
+					},
+					"tokens_input": map[string]interface{}{
+						"type":        "integer",
+						"description": "Tokens de entrada / prompt consumidos (opcional)",
+					},
+					"tokens_output": map[string]interface{}{
+						"type":        "integer",
+						"description": "Tokens de salida / respuesta consumidos (opcional)",
+					},
+					"ai_model": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del modelo de IA utilizado (opcional, ej: Gemini 3.8 Flash)",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
@@ -1298,6 +1600,22 @@ func getToolsDefinition() []map[string]interface{} {
 					"description": map[string]interface{}{
 						"type":        "string",
 						"description": "Resumen breve, claro y sustantivo del trabajo realizado para el parte de horas en Odoo",
+					},
+					"tokens_total": map[string]interface{}{
+						"type":        "integer",
+						"description": "Total de tokens consumidos por el modelo de IA en esta tarea (opcional)",
+					},
+					"tokens_input": map[string]interface{}{
+						"type":        "integer",
+						"description": "Tokens de entrada / prompt consumidos (opcional)",
+					},
+					"tokens_output": map[string]interface{}{
+						"type":        "integer",
+						"description": "Tokens de salida / respuesta consumidos (opcional)",
+					},
+					"ai_model": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del modelo de IA utilizado (opcional, ej: Gemini 3.8 Flash)",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -1497,6 +1815,10 @@ func main() {
 	ticketFlag := flag.String("ticket", "", "Código de ticket de soporte (ej: T00042 o ID numérico)")
 	closeTicketFlag := flag.String("close-ticket", "", "Código de ticket a cerrar definitivamente en Odoo")
 	subjectFlag := flag.String("subject", "", "Asunto o resolución del ticket para el cierre")
+	tokensFlag := flag.Int("tokens", 0, "Tokens totales consumidos por IA en la tarea")
+	tokensInFlag := flag.Int("tokens-in", 0, "Tokens de entrada / prompt")
+	tokensOutFlag := flag.Int("tokens-out", 0, "Tokens de salida / respuesta")
+	modelFlag := flag.String("model", "", "Modelo de IA utilizado (ej. Gemini 3.8 Flash)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
 
@@ -1572,6 +1894,18 @@ func main() {
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag
 		}
+		if *tokensFlag > 0 {
+			args["tokens_total"] = float64(*tokensFlag)
+		}
+		if *tokensInFlag > 0 {
+			args["tokens_input"] = float64(*tokensInFlag)
+		}
+		if *tokensOutFlag > 0 {
+			args["tokens_output"] = float64(*tokensOutFlag)
+		}
+		if *modelFlag != "" {
+			args["ai_model"] = *modelFlag
+		}
 		res := executeToolCall("planesgo_beat", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -1595,6 +1929,18 @@ func main() {
 		}
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag
+		}
+		if *tokensFlag > 0 {
+			args["tokens_total"] = float64(*tokensFlag)
+		}
+		if *tokensInFlag > 0 {
+			args["tokens_input"] = float64(*tokensInFlag)
+		}
+		if *tokensOutFlag > 0 {
+			args["tokens_output"] = float64(*tokensOutFlag)
+		}
+		if *modelFlag != "" {
+			args["ai_model"] = *modelFlag
 		}
 		res := executeToolCall("planesgo_stop", args)
 		if len(res.Content) > 0 {

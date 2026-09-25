@@ -30,6 +30,12 @@ type AntigravityTaskPayload struct {
 	ClientTimestamp int64   `json:"client_timestamp"`
 	Token           string  `json:"token,omitempty"`
 	UserEmail       string  `json:"user_email,omitempty"`
+	TokensInput     int     `json:"tokens_input,omitempty"`
+	TokensOutput    int     `json:"tokens_output,omitempty"`
+	TokensTotal     int     `json:"tokens_total,omitempty"`
+	AIModel         string  `json:"ai_model,omitempty"`
+	AICost          float64 `json:"ai_cost,omitempty"`
+	AISessionID     string  `json:"ai_session_id,omitempty"`
 }
 
 // resolveAntigravitySession autentica la petición de Antigravity utilizando el token de seguridad
@@ -619,6 +625,29 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			if payload.Description == "" {
 				payload.Description = cur.Description
 			}
+			if payload.TokensTotal <= 0 && cur.TokensTotal > 0 {
+				payload.TokensTotal = cur.TokensTotal
+			}
+			if payload.TokensInput <= 0 && cur.TokensInput > 0 {
+				payload.TokensInput = cur.TokensInput
+			}
+			if payload.TokensOutput <= 0 && cur.TokensOutput > 0 {
+				payload.TokensOutput = cur.TokensOutput
+			}
+			if payload.AIModel == "" && cur.AIModel != "" {
+				payload.AIModel = cur.AIModel
+			}
+			if payload.AICost <= 0 && cur.AICost > 0 {
+				payload.AICost = cur.AICost
+			}
+			if payload.AISessionID == "" && cur.AISessionID != "" {
+				payload.AISessionID = cur.AISessionID
+			}
+		}
+
+		// Si no viene tokens_total pero sí input y output
+		if payload.TokensTotal <= 0 && (payload.TokensInput > 0 || payload.TokensOutput > 0) {
+			payload.TokensTotal = payload.TokensInput + payload.TokensOutput
 		}
 
 		// Resumen breve y sustantivo para el parte de horas en Odoo
@@ -628,7 +657,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		}
 		payload.Description = desc
 
-		if err := client.StopTimer(ctx, payload.TimesheetID, payload.TaskID, payload.UnitAmount, payload.Description); err != nil {
+		if err := client.StopTimerWithAI(ctx, payload.TimesheetID, payload.TaskID, payload.UnitAmount, payload.Description, payload.TokensInput, payload.TokensOutput, payload.TokensTotal, payload.AIModel, payload.AICost, payload.AISessionID); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Error al detener tarea en Odoo: " + err.Error()})
 			return
@@ -648,21 +677,28 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"unit_amount":  payload.UnitAmount,
 			"task_type":    canonicalType,
 			"source":       "antigravity",
+			"tokens_total": payload.TokensTotal,
+			"ai_model":     payload.AIModel,
 		})
 		state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
 			"action":       "timer_stop",
 			"timesheet_id": payload.TimesheetID,
 			"unit_amount":  payload.UnitAmount,
+			"tokens_total": payload.TokensTotal,
 		})
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":     true,
-			"action":      "stopped",
-			"task_id":     payload.TaskID,
-			"task_name":   payload.TaskName,
-			"task_type":   canonicalType,
-			"ticket_id":   payload.TicketID,
-			"description": payload.Description,
-			"message":     fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
+			"success":      true,
+			"action":       "stopped",
+			"task_id":      payload.TaskID,
+			"task_name":    payload.TaskName,
+			"task_type":    canonicalType,
+			"ticket_id":    payload.TicketID,
+			"description":  payload.Description,
+			"tokens_total": payload.TokensTotal,
+			"tokens_input": payload.TokensInput,
+			"tokens_output": payload.TokensOutput,
+			"ai_model":     payload.AIModel,
+			"message":      fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
 		})
 		return
 
@@ -705,6 +741,24 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			if activeTimer.EmployeeName == "" && sess.UserName != "" {
 				activeTimer.EmployeeName = sess.UserName
 			}
+			if payload.TokensTotal > 0 {
+				activeTimer.TokensTotal = payload.TokensTotal
+			}
+			if payload.TokensInput > 0 {
+				activeTimer.TokensInput = payload.TokensInput
+			}
+			if payload.TokensOutput > 0 {
+				activeTimer.TokensOutput = payload.TokensOutput
+			}
+			if payload.AIModel != "" {
+				activeTimer.AIModel = payload.AIModel
+			}
+			if payload.AICost > 0 {
+				activeTimer.AICost = payload.AICost
+			}
+			if payload.AISessionID != "" {
+				activeTimer.AISessionID = payload.AISessionID
+			}
 			state.setActiveTimer(userUID, activeTimer)
 			state.broadcastUserEvent(userUID, "timer_start", activeTimer)
 			state.broadcastUserEvent(userUID, "timesheets_changed", map[string]interface{}{
@@ -713,6 +767,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				"project_id":   activeTimer.ProjectID,
 				"task_id":      activeTimer.TaskID,
 				"ticket_id":    activeTimer.TicketID,
+				"tokens_total": activeTimer.TokensTotal,
 			})
 			cur = activeTimer
 		} else {
@@ -738,6 +793,24 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			}
 			if payload.Description != "" && payload.Description != "Trabajo en curso" {
 				cur.Description = payload.Description
+			}
+			if payload.TokensTotal > 0 {
+				cur.TokensTotal = payload.TokensTotal
+			}
+			if payload.TokensInput > 0 {
+				cur.TokensInput = payload.TokensInput
+			}
+			if payload.TokensOutput > 0 {
+				cur.TokensOutput = payload.TokensOutput
+			}
+			if payload.AIModel != "" {
+				cur.AIModel = payload.AIModel
+			}
+			if payload.AICost > 0 {
+				cur.AICost = payload.AICost
+			}
+			if payload.AISessionID != "" {
+				cur.AISessionID = payload.AISessionID
 			}
 			state.setActiveTimer(userUID, cur)
 

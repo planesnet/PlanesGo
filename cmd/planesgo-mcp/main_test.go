@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,6 +158,133 @@ func TestDoWithRetry(t *testing.T) {
 	}
 	if atomic.LoadInt32(&attempts) != 3 {
 		t.Fatalf("se esperaban 3 intentos, pero hubo %d", attempts)
+	}
+}
+
+func TestFindConfigStrictLocation(t *testing.T) {
+	// 1. Probar que no busca en directorios padres
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "subproject")
+	if err := os.MkdirAll(childDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Poner .planesgo.json en el padre
+	parentConfig := []byte(`{"odoo_project_id": 999, "odoo_project_name": "PROYECTO PADRE"}`)
+	if err := os.WriteFile(filepath.Join(parentDir, ".planesgo.json"), parentConfig, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Buscar desde el subdirectorio NO debe encontrar el del padre
+	_, _, err := findConfig(childDir)
+	if err == nil {
+		t.Errorf("findConfig(childDir) debería fallar y no heredar el .planesgo.json del padre")
+	}
+
+	// 2. Probar que busca estrictamente en el directorio raíz del proyecto
+	projectDir := t.TempDir()
+	projConfig := []byte(`{"odoo_project_id": 123, "odoo_project_name": "MI PROYECTO"}`)
+	if err := os.WriteFile(filepath.Join(projectDir, ".planesgo.json"), projConfig, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, foundPath, err := findConfig(projectDir)
+	if err != nil {
+		t.Fatalf("findConfig(projectDir) falló: %v", err)
+	}
+	if cfg.OdooProjectID != 123 || cfg.OdooProjectName != "MI PROYECTO" {
+		t.Errorf("configuración leída incorrecta: %+v", cfg)
+	}
+	if foundPath != filepath.Join(projectDir, ".planesgo.json") {
+		t.Errorf("ruta encontrada inesperada: %s", foundPath)
+	}
+
+	// 3. Probar que no busca en directorios hijos (ej. custom/)
+	noRootProj := t.TempDir()
+	customSubdir := filepath.Join(noRootProj, "custom")
+	if err := os.MkdirAll(customSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(customSubdir, ".planesgo.json"), projConfig, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Si no está en la raíz, debe fallar
+	_, _, err = findConfig(noRootProj)
+	if err == nil {
+		t.Errorf("findConfig(noRootProj) debería fallar cuando solo existe en el subdirectorio hijo 'custom'")
+	}
+}
+
+func TestFormatTokens(t *testing.T) {
+	cases := []struct {
+		input    int
+		expected string
+	}{
+		{0, "0"},
+		{50, "50"},
+		{999, "999"},
+		{1000, "1.000"},
+		{15420, "15.420"},
+		{1234567, "1.234.567"},
+	}
+
+	for _, c := range cases {
+		result := formatTokens(c.input)
+		if result != c.expected {
+			t.Errorf("formatTokens(%d) = %s, esperado %s", c.input, result, c.expected)
+		}
+	}
+}
+
+func TestSendTaskActionWithTokens(t *testing.T) {
+	var receivedPayload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/antigravity/update_tasks" {
+			_ = json.NewDecoder(r.Body).Decode(&receivedPayload)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status": "ok"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := &PlanesGoClient{
+		BaseURL:    server.URL,
+		Token:      "test-token",
+		HTTPClient: server.Client(),
+	}
+
+	_, err := client.SendTaskActionWithTokens(
+		"stop",
+		"Desarrollo de feature",
+		10,
+		567,
+		"PLANESGO",
+		"Completado con éxito",
+		"Desarrollo",
+		"T123",
+		15420,
+		10000,
+		5420,
+		"Gemini 3.8 Flash",
+		0.05,
+		"session-abc",
+	)
+	if err != nil {
+		t.Fatalf("SendTaskActionWithTokens falló: %v", err)
+	}
+
+	if receivedPayload["tokens_total"] != float64(15420) {
+		t.Errorf("tokens_total esperado 15420, obtenido %v", receivedPayload["tokens_total"])
+	}
+	if receivedPayload["ai_model"] != "Gemini 3.8 Flash" {
+		t.Errorf("ai_model esperado 'Gemini 3.8 Flash', obtenido %v", receivedPayload["ai_model"])
+	}
+	if receivedPayload["ai_session_id"] != "session-abc" {
+		t.Errorf("ai_session_id esperado 'session-abc', obtenido %v", receivedPayload["ai_session_id"])
 	}
 }
 

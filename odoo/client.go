@@ -2491,6 +2491,11 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 
 // StopTimer detiene y finaliza el cronómetro en Odoo actualizando la imputación con la duración total y descripción
 func (c *Client) StopTimer(ctx context.Context, timesheetID int, taskID int, unitAmount float64, description string) error {
+	return c.StopTimerWithAI(ctx, timesheetID, taskID, unitAmount, description, 0, 0, 0, "", 0, "")
+}
+
+// StopTimerWithAI detiene el cronómetro y guarda tanto el tiempo/descripción como los campos de telemetría de IA de forma segura.
+func (c *Client) StopTimerWithAI(ctx context.Context, timesheetID int, taskID int, unitAmount float64, description string, tokensInput, tokensOutput, tokensTotal int, aiModel string, aiCost float64, aiSessionID string) error {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return err
@@ -2527,6 +2532,49 @@ func (c *Client) StopTimer(ctx context.Context, timesheetID int, taskID int, uni
 				},
 			}
 			_, _ = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+		}
+
+		// Guardar telemetría de IA en account.analytic.line si viene informada
+		if tokensTotal > 0 || tokensInput > 0 || tokensOutput > 0 || aiModel != "" || aiCost > 0 || aiSessionID != "" {
+			aiVals := map[string]interface{}{}
+			if tokensTotal > 0 {
+				aiVals["ai_tokens_total"] = tokensTotal
+			}
+			if tokensInput > 0 {
+				aiVals["ai_tokens_input"] = tokensInput
+			}
+			if tokensOutput > 0 {
+				aiVals["ai_tokens_output"] = tokensOutput
+			}
+			if aiModel != "" {
+				aiVals["ai_model"] = aiModel
+			}
+			if aiCost > 0 {
+				aiVals["ai_cost"] = aiCost
+			}
+			if aiSessionID != "" {
+				aiVals["ai_session_id"] = aiSessionID
+			}
+
+			if len(aiVals) > 0 {
+				aiWriteArgs := []interface{}{
+					c.config.DB,
+					uid,
+					c.config.Password,
+					"account.analytic.line",
+					"write",
+					[]interface{}{
+						[]int{timesheetID},
+						aiVals,
+					},
+				}
+				// Se ejecuta de forma segura: si Odoo no tiene los campos de IA instalados,
+				// no aborta ni corrompe el registro del parte de horas ya consolidado.
+				_, aiErr := c.call(ctx, "object", "execute_kw", aiWriteArgs, nil)
+				if aiErr != nil {
+					log.Printf("[Odoo Client] Nota: campos de IA no persistidos en account.analytic.line (posiblemente módulo Odoo pendiente de actualizar): %v", aiErr)
+				}
+			}
 		}
 	}
 

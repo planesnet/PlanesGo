@@ -75,6 +75,12 @@ type TimesheetEntry struct {
 	Tags               []Tag       `json:"tags,omitempty"`
 	TagIDs             []int       `json:"tag_ids,omitempty"`
 	HelpdeskTicketID   Many2One    `json:"helpdesk_ticket_id,omitempty"`
+	AITokensInput      int         `json:"ai_tokens_input,omitempty"`
+	AITokensOutput     int         `json:"ai_tokens_output,omitempty"`
+	AITokensTotal      int         `json:"ai_tokens_total,omitempty"`
+	AIModel            string      `json:"ai_model,omitempty"`
+	AICost             float64     `json:"ai_cost,omitempty"`
+	AISessionID        string      `json:"ai_session_id,omitempty"`
 }
 
 // UnmarshalJSON desempaqueta TimesheetEntry gestionando campos que Odoo puede devolver como false si están vacíos.
@@ -521,6 +527,12 @@ type ActiveTimer struct {
 	Source        string   `json:"source,omitempty"`        // Origen del temporizador: "antigravity", "web", "extension"
 	EmployeeName  string   `json:"employee_name,omitempty"`
 	Tags          []Tag    `json:"tags,omitempty"`
+	TokensInput   int      `json:"tokens_input,omitempty"`
+	TokensOutput  int      `json:"tokens_output,omitempty"`
+	TokensTotal   int      `json:"tokens_total,omitempty"`
+	AIModel       string   `json:"ai_model,omitempty"`
+	AICost        float64  `json:"ai_cost,omitempty"`
+	AISessionID   string   `json:"ai_session_id,omitempty"`
 }
 
 // IsAntigravity indica si el temporizador activo proviene de Antigravity.
