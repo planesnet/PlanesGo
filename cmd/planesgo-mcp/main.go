@@ -1897,6 +1897,9 @@ func main() {
 		if *pathFlag != "" {
 			args["project_path"] = *pathFlag
 		}
+		if *modelFlag != "" {
+			args["ai_model"] = *modelFlag
+		}
 		res := executeToolCall("planesgo_check", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)

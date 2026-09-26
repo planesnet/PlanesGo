@@ -2165,15 +2165,18 @@ function ensureTimesheetRowExists(serverData, timerState) {
     tr.dataset.projectName = projectName;
     tr.dataset.projectId = projectId;
     tr.dataset.task = taskName;
-    const isAgy = Boolean(typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc));
+    const isAgy = Boolean((serverData && (serverData.source === 'antigravity' || serverData.is_antigravity)) || (typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc)));
+    const isClaude = Boolean((serverData && (serverData.source === 'claude' || serverData.is_claude)) || (typeof isClaudeTask === 'function' && isClaudeTask(taskName, desc)));
+    const isMaquina = isAgy || isClaude;
     tr.dataset.taskId = taskId;
     tr.dataset.taskName = taskName;
     tr.dataset.desc = desc;
     tr.dataset.hours = hours;
     tr.dataset.invoiced = 'false';
-    tr.dataset.horaMaquina = isAgy ? 'true' : 'false';
-    tr.dataset.horaHombre = isAgy ? 'false' : 'true';
+    tr.dataset.horaMaquina = isMaquina ? 'true' : 'false';
+    tr.dataset.horaHombre = isMaquina ? 'false' : 'true';
     tr.dataset.isAntigravity = isAgy ? 'true' : 'false';
+    tr.dataset.isClaude = isClaude ? 'true' : 'false';
 
     tr.innerHTML = `
         <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
@@ -2201,7 +2204,7 @@ function ensureTimesheetRowExists(serverData, timerState) {
             ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${taskName}</span>` : '<span class="text-slate-400 text-xs">-</span>')}
         </td>
         <td class="py-3 px-4 whitespace-nowrap">
-            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(null, isAgy, isAgy, !isAgy) : `<span class="text-slate-300 text-xs">-</span>`}
+            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(serverData ? serverData.tags : null, isAgy, isMaquina, !isMaquina, isClaude) : `<span class="text-slate-300 text-xs">-</span>`}
         </td>
         <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${desc || 'Sin descripción'}">
             ${desc || '<span class="italic text-slate-400">Sin descripción</span>'}

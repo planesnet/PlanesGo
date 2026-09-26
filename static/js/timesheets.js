@@ -666,7 +666,8 @@ function insertOptimisticTimesheetRow(data) {
     const isRunning = Boolean(data.timerRunning || data.isRunning);
 
     const isAgy = Boolean(data.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(data.taskName, data.desc)));
-    const isMaquina = Boolean(data.is_hora_maquina || isAgy);
+    const isClaude = Boolean(data.is_claude || (typeof isClaudeTask === 'function' && isClaudeTask(data.taskName, data.desc)));
+    const isMaquina = Boolean(data.is_hora_maquina || isAgy || isClaude);
     const isHombre = data.is_hora_hombre !== undefined ? data.is_hora_hombre : !isMaquina;
 
     const tr = document.createElement('tr');
@@ -687,6 +688,7 @@ function insertOptimisticTimesheetRow(data) {
     tr.dataset.horaMaquina = isMaquina ? 'true' : 'false';
     tr.dataset.horaHombre = isHombre ? 'true' : 'false';
     tr.dataset.isAntigravity = isAgy ? 'true' : 'false';
+    tr.dataset.isClaude = isClaude ? 'true' : 'false';
 
     tr.innerHTML = `
         <td class="py-3 px-4 sm:px-6 whitespace-nowrap">
@@ -715,7 +717,7 @@ function insertOptimisticTimesheetRow(data) {
             ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(data.taskName) : (data.taskName ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">${data.taskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
         </td>
         <td class="py-3 px-4 whitespace-nowrap">
-            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(data.tags, isAgy, isMaquina, isHombre) : `<span class="text-slate-300 text-xs">-</span>`}
+            ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(data.tags, isAgy, isMaquina, isHombre, isClaude) : `<span class="text-slate-300 text-xs">-</span>`}
         </td>
         <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${data.desc || ''}">
             ${data.desc ? data.desc : `<span class="italic text-slate-400">Sin descripción</span>`}

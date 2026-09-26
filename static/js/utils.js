@@ -333,7 +333,14 @@ function isAntigravityTask(taskName, description) {
 
 function cleanAntigravityTaskName(taskName) {
     if (!taskName) return '';
-    return String(taskName).replace(/^\[(?:AGY|ANTIGRAVITY)\]\s*/i, '').trim();
+    return String(taskName).replace(/^\[(?:AGY|ANTIGRAVITY|CLAUDE)\]\s*/i, '').trim();
+}
+
+function isClaudeTask(taskName, description) {
+    if (!taskName && !description) return false;
+    const tn = String(taskName || '').toUpperCase();
+    const ds = String(description || '').toUpperCase();
+    return tn.startsWith('[CLAUDE]') || ds.startsWith('[CLAUDE]') || tn.includes('CLAUDE') || ds.includes('CLAUDE');
 }
 
 function renderTaskBadgeHTML(taskName) {
@@ -343,7 +350,7 @@ function renderTaskBadgeHTML(taskName) {
     return `<span class="text-slate-600 font-medium text-xs sm:text-sm truncate block max-w-[150px] xl:max-w-[190px]" title="${safeClean}">${safeClean}</span>`;
 }
 
-function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
+function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre, isClaude) {
     let isMachine = false;
     let isHuman = false;
 
@@ -356,11 +363,13 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
                 isMachine = true;
             } else if (lower === 'hora hombre') {
                 isHuman = true;
+            } else if (lower === 'claude' || lower === 'cl') {
+                isClaude = true;
             }
         });
     }
 
-    if (isAgy || isHoraMaquina) {
+    if (isAgy || isHoraMaquina || isClaude) {
         isMachine = true;
     }
 
@@ -396,14 +405,22 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
         </span>`;
     }
 
-    // 2. Si proviene de Antigravity, mostrar insignia Antigravity
+    // 2. Si proviene de Antigravity, mostrar insignia Antigravity (solo icono)
     if (isAgy) {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs shrink-0" title="Antigravity (Imputación automática por IA)">
+        html += `<span class="inline-flex items-center justify-center w-5 h-5 rounded bg-purple-50 border border-purple-200/90 shadow-2xs shrink-0" title="Antigravity (Imputación automática por IA)">
             <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
                 <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
             </svg>
-            <span>AG</span>
+        </span>`;
+    }
+
+    // 2b. Si proviene de Claude Code, mostrar insignia Claude (solo icono)
+    if (isClaude) {
+        html += `<span class="inline-flex items-center justify-center w-5 h-5 rounded bg-orange-50 border border-orange-200/90 shadow-2xs shrink-0" title="Claude Code (Imputación automática por IA)">
+            <svg class="w-3 h-3 text-orange-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/>
+            </svg>
         </span>`;
     }
 
@@ -413,7 +430,7 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
             const name = (typeof t === 'string') ? t : (t.Name || t.name || '');
             if (!name) return;
             const lower = name.toLowerCase().trim();
-            if (lower === 'antigravity' || lower === 'agy' || lower === 'hora máquina' || lower === 'hora maquina' || lower === 'hora hombre') {
+            if (lower === 'antigravity' || lower === 'agy' || lower === 'claude' || lower === 'cl' || lower === 'hora máquina' || lower === 'hora maquina' || lower === 'hora hombre') {
                 return;
             }
             const safeName = (typeof escapeHtml === 'function') ? escapeHtml(name) : name;
@@ -426,6 +443,7 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre) {
 }
 
 window.isAntigravityTask = isAntigravityTask;
+window.isClaudeTask = isClaudeTask;
 window.cleanAntigravityTaskName = cleanAntigravityTaskName;
 window.renderTaskBadgeHTML = renderTaskBadgeHTML;
 window.renderTagsHTML = renderTagsHTML;

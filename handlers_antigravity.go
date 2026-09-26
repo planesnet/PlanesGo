@@ -187,7 +187,21 @@ func containsAny(text string, keywords ...string) bool {
 	return false
 }
 
-// cleanAntigravityTaskName extrae el nombre legible de una tarea sin los prefijos técnicos [AGY] o [ANTIGRAVITY]
+// isClaudeOrigin indica si la imputación proviene del hook de Claude Code (en lugar de Antigravity),
+// a partir del modelo de IA reportado por el cliente (planesgo-mcp --model "Claude Code").
+func isClaudeOrigin(aiModel string) bool {
+	return strings.Contains(strings.ToLower(aiModel), "claude")
+}
+
+// originTagName devuelve el nombre del tag de Odoo ("Claude" o "Antigravity") según el origen de la imputación.
+func originTagName(aiModel string) string {
+	if isClaudeOrigin(aiModel) {
+		return "Claude"
+	}
+	return "Antigravity"
+}
+
+// cleanAntigravityTaskName extrae el nombre legible de una tarea sin los prefijos técnicos [AGY], [ANTIGRAVITY] o [CLAUDE]
 func cleanAntigravityTaskName(taskName string) string {
 	name := strings.TrimSpace(taskName)
 	for {
@@ -198,6 +212,10 @@ func cleanAntigravityTaskName(taskName string) string {
 		}
 		if strings.HasPrefix(upper, "[ANTIGRAVITY]") {
 			name = strings.TrimSpace(name[14:])
+			continue
+		}
+		if strings.HasPrefix(upper, "[CLAUDE]") {
+			name = strings.TrimSpace(name[8:])
 			continue
 		}
 		break
@@ -573,19 +591,20 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				}
 			}
 		}
+		originTag := originTagName(payload.AIModel)
 		if payload.TaskID <= 0 {
-			newID, createErr := client.CreateTaskWithTag(ctx, payload.ProjectID, payload.TaskName, userUID, "Antigravity")
+			newID, createErr := client.CreateTaskWithTag(ctx, payload.ProjectID, payload.TaskName, userUID, originTag)
 			if createErr == nil && newID > 0 {
 				payload.TaskID = newID
-				log.Printf("[Antigravity Gateway] Tarea canónica creada en Odoo: ID %d ('%s') con tag 'Antigravity' en proyecto %d", newID, payload.TaskName, payload.ProjectID)
+				log.Printf("[Antigravity Gateway] Tarea canónica creada en Odoo: ID %d ('%s') con tag '%s' en proyecto %d", newID, payload.TaskName, originTag, payload.ProjectID)
 			} else {
 				log.Printf("[Antigravity Gateway] Advertencia al crear tarea canónica en Odoo: %v", createErr)
 			}
 		} else {
-			// Asegurar que la tarea asignada tenga el tag Antigravity
-			go func(tID int) {
-				_ = client.EnsureTaskTag(context.Background(), tID, "Antigravity")
-			}(payload.TaskID)
+			// Asegurar que la tarea asignada tenga el tag de origen correspondiente (Claude o Antigravity)
+			go func(tID int, tag string) {
+				_ = client.EnsureTaskTag(context.Background(), tID, tag)
+			}(payload.TaskID, originTag)
 		}
 	}
 
@@ -676,7 +695,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"timer_key":    timerKey,
 			"unit_amount":  payload.UnitAmount,
 			"task_type":    canonicalType,
-			"source":       "antigravity",
+			"source":       strings.ToLower(originTagName(payload.AIModel)),
 			"tokens_total": payload.TokensTotal,
 			"ai_model":     payload.AIModel,
 		})
@@ -729,7 +748,11 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				return
 			}
 			activeTimer.TimerKey = timerKey
-			activeTimer.Source = "antigravity"
+			if isClaudeOrigin(payload.AIModel) {
+				activeTimer.Source = "claude"
+			} else {
+				activeTimer.Source = "antigravity"
+			}
 			activeTimer.LastHeartbeat = nowMs
 			if payload.TicketID > 0 {
 				activeTimer.TicketID = payload.TicketID
