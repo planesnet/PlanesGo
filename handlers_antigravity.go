@@ -607,16 +607,19 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 	nowMs := time.Now().UnixMilli()
 	state.setLastConfirmedAt(userUID, nowMs)
 
-	// Clave identificadora del cronómetro
+	// Clave identificadora del cronómetro. Incluye el origen (Claude/Antigravity) para que dos
+	// arneses trabajando a la vez en la misma tarea/tipo nunca compartan ni se fusionen en el
+	// mismo cronómetro/imputación: cada uno abre y acumula su propia entrada de forma independiente.
+	originKeyPart := strings.ToLower(originTagName(payload.AIModel))
 	timerKey := ""
 	if payload.TaskID > 0 {
-		timerKey = fmt.Sprintf("task_%d", payload.TaskID)
+		timerKey = fmt.Sprintf("task_%d_%s", payload.TaskID, originKeyPart)
 	} else if payload.TimesheetID > 0 {
-		timerKey = fmt.Sprintf("ts_%d", payload.TimesheetID)
+		timerKey = fmt.Sprintf("ts_%d_%s", payload.TimesheetID, originKeyPart)
 	} else if payload.ProjectID > 0 {
-		timerKey = fmt.Sprintf("proj_%d", payload.ProjectID)
+		timerKey = fmt.Sprintf("proj_%d_%s", payload.ProjectID, originKeyPart)
 	} else {
-		timerKey = "default"
+		timerKey = "default_" + originKeyPart
 	}
 
 	action := strings.ToLower(strings.TrimSpace(payload.Action))
