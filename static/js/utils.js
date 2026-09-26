@@ -405,24 +405,22 @@ function renderTagsHTML(tags, isAgy, isHoraMaquina, isHoraHombre, isClaude) {
         </span>`;
     }
 
-    // 2. Si proviene de Antigravity, mostrar insignia Antigravity
+    // 2. Si proviene de Antigravity, mostrar insignia Antigravity (solo icono)
     if (isAgy) {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/90 shadow-2xs shrink-0" title="Antigravity (Imputación automática por IA)">
+        html += `<span class="inline-flex items-center justify-center w-5 h-5 rounded bg-purple-50 border border-purple-200/90 shadow-2xs shrink-0" title="Antigravity (Imputación automática por IA)">
             <svg class="w-3 h-3 text-purple-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3.5" fill="currentColor"/>
                 <ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="currentColor" stroke-width="1.6" transform="rotate(-30 12 12)"/>
             </svg>
-            <span>AG</span>
         </span>`;
     }
 
-    // 2b. Si proviene de Claude Code, mostrar insignia Claude
+    // 2b. Si proviene de Claude Code, mostrar insignia Claude (solo icono)
     if (isClaude) {
-        html += `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200/90 shadow-2xs shrink-0" title="Claude Code (Imputación automática por IA)">
+        html += `<span class="inline-flex items-center justify-center w-5 h-5 rounded bg-orange-50 border border-orange-200/90 shadow-2xs shrink-0" title="Claude Code (Imputación automática por IA)">
             <svg class="w-3 h-3 text-orange-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/>
             </svg>
-            <span>CL</span>
         </span>`;
     }
 
