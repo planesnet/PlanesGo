@@ -2621,14 +2621,17 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 		effectiveUID = userUID
 	}
 
-	// 1. Buscar en account.analytic.line
+	// 1. Buscar en account.analytic.line.
+	// is_timer_running es un campo computado no-store en este Odoo: Odoo lo permite
+	// leer en "fields" pero rechaza usarlo como leaf de dominio ("Invalid field").
+	// Por eso filtramos por usuario+recientes en el dominio y comprobamos el campo
+	// en Go sobre el resultado, en vez de delegar el filtro en Odoo.
 	domain := []interface{}{
 		[]interface{}{"user_id", "=", effectiveUID},
-		[]interface{}{"is_timer_running", "=", true},
 	}
 	kwargs := map[string]interface{}{
-		"fields": []string{"id", "name", "project_id", "task_id", "unit_amount", "date", "write_date"},
-		"limit":  1,
+		"fields": []string{"id", "name", "project_id", "task_id", "unit_amount", "date", "write_date", "is_timer_running"},
+		"limit":  20,
 		"order":  "write_date desc, id desc",
 	}
 	args := []interface{}{
@@ -2643,39 +2646,44 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 	resultRaw, searchErr := c.call(ctx, "object", "execute_kw", args, kwargs)
 	if searchErr == nil {
 		var lines []struct {
-			ID         int      `json:"id"`
-			Name       string   `json:"name"`
-			ProjectID  Many2One `json:"project_id"`
-			TaskID     Many2One `json:"task_id"`
-			UnitAmount float64  `json:"unit_amount"`
-			WriteDate  string   `json:"write_date"`
+			ID             int      `json:"id"`
+			Name           string   `json:"name"`
+			ProjectID      Many2One `json:"project_id"`
+			TaskID         Many2One `json:"task_id"`
+			UnitAmount     float64  `json:"unit_amount"`
+			WriteDate      string   `json:"write_date"`
+			IsTimerRunning bool     `json:"is_timer_running"`
 		}
-		if json.Unmarshal(resultRaw, &lines) == nil && len(lines) > 0 {
-			l := lines[0]
-			accumulatedMs := int64(l.UnitAmount * 3600 * 1000)
-			return &ActiveTimer{
-				TimesheetID:   l.ID,
-				ProjectID:     l.ProjectID.ID,
-				ProjectName:   l.ProjectID.Name,
-				TaskID:        l.TaskID.ID,
-				TaskName:      l.TaskID.Name,
-				Description:   l.Name,
-				IsRunning:     true,
-				StartedAt:     time.Now().UnixMilli(),
-				AccumulatedMs: accumulatedMs,
-				UnitAmount:    l.UnitAmount,
-			}, nil
+		if json.Unmarshal(resultRaw, &lines) == nil {
+			for _, l := range lines {
+				if !l.IsTimerRunning {
+					continue
+				}
+				accumulatedMs := int64(l.UnitAmount * 3600 * 1000)
+				return &ActiveTimer{
+					TimesheetID:   l.ID,
+					ProjectID:     l.ProjectID.ID,
+					ProjectName:   l.ProjectID.Name,
+					TaskID:        l.TaskID.ID,
+					TaskName:      l.TaskID.Name,
+					Description:   l.Name,
+					IsRunning:     true,
+					StartedAt:     time.Now().UnixMilli(),
+					AccumulatedMs: accumulatedMs,
+					UnitAmount:    l.UnitAmount,
+				}, nil
+			}
 		}
 	}
 
-	// 2. Si no se encontró en account.analytic.line, verificar en project.task
+	// 2. Si no se encontró en account.analytic.line, verificar en project.task (mismo motivo: filtrado en Go).
 	taskDomain := []interface{}{
 		[]interface{}{"user_id", "=", effectiveUID},
-		[]interface{}{"is_timer_running", "=", true},
 	}
 	taskKwargs := map[string]interface{}{
-		"fields": []string{"id", "name", "project_id"},
-		"limit":  1,
+		"fields": []string{"id", "name", "project_id", "is_timer_running"},
+		"limit":  20,
+		"order":  "write_date desc, id desc",
 	}
 	taskArgs := []interface{}{
 		c.config.DB,
@@ -2688,22 +2696,27 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 	taskRaw, taskErr := c.call(ctx, "object", "execute_kw", taskArgs, taskKwargs)
 	if taskErr == nil {
 		var tasks []struct {
-			ID        int      `json:"id"`
-			Name      string   `json:"name"`
-			ProjectID Many2One `json:"project_id"`
+			ID             int      `json:"id"`
+			Name           string   `json:"name"`
+			ProjectID      Many2One `json:"project_id"`
+			IsTimerRunning bool     `json:"is_timer_running"`
 		}
-		if json.Unmarshal(taskRaw, &tasks) == nil && len(tasks) > 0 {
-			t := tasks[0]
-			return &ActiveTimer{
-				TimesheetID: 0,
-				TaskID:      t.ID,
-				TaskName:    t.Name,
-				ProjectID:   t.ProjectID.ID,
-				ProjectName: t.ProjectID.Name,
-				Description: "Trabajo en " + t.Name,
-				IsRunning:   true,
-				StartedAt:   time.Now().UnixMilli(),
-			}, nil
+		if json.Unmarshal(taskRaw, &tasks) == nil {
+			for _, t := range tasks {
+				if !t.IsTimerRunning {
+					continue
+				}
+				return &ActiveTimer{
+					TimesheetID: 0,
+					TaskID:      t.ID,
+					TaskName:    t.Name,
+					ProjectID:   t.ProjectID.ID,
+					ProjectName: t.ProjectID.Name,
+					Description: "Trabajo en " + t.Name,
+					IsRunning:   true,
+					StartedAt:   time.Now().UnixMilli(),
+				}, nil
+			}
 		}
 	}
 
