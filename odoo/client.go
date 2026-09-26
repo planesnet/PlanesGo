@@ -1933,6 +1933,18 @@ func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []T
 				entries[i].Tags = append(entries[i].Tags, Tag{Name: "Antigravity"})
 			}
 		}
+		if entries[i].IsClaude() {
+			hasClaudeTag := false
+			for _, tg := range entries[i].Tags {
+				if strings.EqualFold(tg.Name, "Claude") || strings.EqualFold(tg.Name, "CL") {
+					hasClaudeTag = true
+					break
+				}
+			}
+			if !hasClaudeTag {
+				entries[i].Tags = append(entries[i].Tags, Tag{Name: "Claude"})
+			}
+		}
 	}
 }
 

@@ -60,6 +60,9 @@ ACTIVE_FILE="$STATE_DIR/active"
 TASK_NAME="Claude Code - Sesión IA"
 TASK_TYPE="Desarrollo"
 DESC="Trabajo de codificación asistido con Claude Code"
+# Identifica el origen ante el backend de PlanesGo (que distingue Claude de
+# Antigravity por este valor) sin tocar el hook ni el binario que usa Antigravity.
+AI_MODEL_LABEL="Claude Code"
 
 heartbeat_interval() {
   local interval=30
@@ -81,7 +84,7 @@ case "$ACTION" in
 check)
   # Verificación best-effort de conexión/proyecto (Fase 0). Nunca bloquea
   # el arranque de la sesión: se lanza en segundo plano y se descarta.
-  nohup "$BIN" --check --task "$TASK_NAME" --type "$TASK_TYPE" >/dev/null 2>&1 &
+  nohup "$BIN" --check --task "$TASK_NAME" --type "$TASK_TYPE" --model "$AI_MODEL_LABEL" >/dev/null 2>&1 &
   disown 2>/dev/null || true
   ;;
 
@@ -92,7 +95,7 @@ beat)
     # tiene su propio timeout de red de 15s) para confirmar que el
     # temporizador ha quedado realmente iniciado en Odoo antes de marcar
     # la sesión como activa. Así evitamos un "stop" huérfano al final.
-    if "$BIN" --beat --task "$TASK_NAME" --type "$TASK_TYPE" --desc "$DESC" >/dev/null 2>&1; then
+    if "$BIN" --beat --task "$TASK_NAME" --type "$TASK_TYPE" --desc "$DESC" --model "$AI_MODEL_LABEL" >/dev/null 2>&1; then
       echo "$NOW" >"$ACTIVE_FILE"
       echo "$NOW" >"$LAST_BEAT_FILE"
     fi
@@ -102,7 +105,7 @@ beat)
     [ -f "$LAST_BEAT_FILE" ] && LAST=$(cat "$LAST_BEAT_FILE" 2>/dev/null || echo 0)
     if [ $((NOW - LAST)) -ge "$INTERVAL" ]; then
       echo "$NOW" >"$LAST_BEAT_FILE"
-      nohup "$BIN" --beat --task "$TASK_NAME" --type "$TASK_TYPE" --desc "$DESC" >/dev/null 2>&1 &
+      nohup "$BIN" --beat --task "$TASK_NAME" --type "$TASK_TYPE" --desc "$DESC" --model "$AI_MODEL_LABEL" >/dev/null 2>&1 &
       disown 2>/dev/null || true
     fi
   fi
@@ -112,7 +115,7 @@ stop)
   # Solo cerramos el parte si realmente llegamos a abrir uno (evita
   # generar imputaciones a 0h cuando la sesión no tocó código).
   if [ -f "$ACTIVE_FILE" ]; then
-    "$BIN" --stop --task "$TASK_NAME" --type "$TASK_TYPE" --desc "Sesión Claude Code finalizada" >/dev/null 2>&1 || true
+    "$BIN" --stop --task "$TASK_NAME" --type "$TASK_TYPE" --desc "Sesión Claude Code finalizada" --model "$AI_MODEL_LABEL" >/dev/null 2>&1 || true
     rm -f "$ACTIVE_FILE" "$LAST_BEAT_FILE" 2>/dev/null || true
   fi
   ;;

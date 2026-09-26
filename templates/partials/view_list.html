@@ -37,6 +37,7 @@
                             data-hora-maquina="{{if .IsHoraMaquina}}true{{else}}false{{end}}"
                             data-hora-hombre="{{if .IsHoraHombre}}true{{else}}false{{end}}"
                             data-is-antigravity="{{if .IsAntigravity}}true{{else}}false{{end}}"
+                            data-is-claude="{{if .IsClaude}}true{{else}}false{{end}}"
                             data-create-date="{{.CreateDate}}"
                             data-write-date="{{.WriteDate}}">
                             <td class="py-2.5 px-3 whitespace-nowrap">
@@ -111,8 +112,17 @@
                                     </span>
                                     {{end}}
 
+                                    {{if .IsClaude}}
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200/90 shadow-2xs shrink-0" title="Claude Code (Imputación automática por IA)">
+                                        <svg class="w-3 h-3 text-orange-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/>
+                                        </svg>
+                                        <span>CL</span>
+                                    </span>
+                                    {{end}}
+
                                     {{range .Tags}}
-                                        {{if or (eq .Name "Hora Máquina") (eq .Name "Hora Maquina") (eq .Name "Hora Hombre") (eq .Name "Antigravity") (eq .Name "AGY")}}
+                                        {{if or (eq .Name "Hora Máquina") (eq .Name "Hora Maquina") (eq .Name "Hora Hombre") (eq .Name "Antigravity") (eq .Name "AGY") (eq .Name "Claude") (eq .Name "CL")}}
                                             {{/* Ya representadas */}}
                                         {{else}}
                                         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60 whitespace-nowrap shrink-0">
