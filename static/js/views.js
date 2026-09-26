@@ -94,7 +94,8 @@ function insertWeekEntriesIntoTable(entries) {
         const invoiceName = entry.timesheet_invoice_id ? (entry.timesheet_invoice_id.name || `#${entry.timesheet_invoice_id.id}`) : '';
 
         const isAgy = Boolean(entry.is_antigravity || (typeof isAntigravityTask === 'function' && isAntigravityTask(taskName, desc)));
-        const isMaquina = Boolean(entry.is_hora_maquina || isAgy);
+        const isClaude = Boolean(entry.is_claude || (typeof isClaudeTask === 'function' && isClaudeTask(taskName, desc)));
+        const isMaquina = Boolean(entry.is_hora_maquina || isAgy || isClaude);
         const isHombre = entry.is_hora_hombre !== undefined ? entry.is_hora_hombre : !isMaquina;
 
         const tr = document.createElement('tr');
@@ -115,6 +116,7 @@ function insertWeekEntriesIntoTable(entries) {
         tr.dataset.horaMaquina = isMaquina ? 'true' : 'false';
         tr.dataset.horaHombre = isHombre ? 'true' : 'false';
         tr.dataset.isAntigravity = isAgy ? 'true' : 'false';
+        tr.dataset.isClaude = isClaude ? 'true' : 'false';
 
         const safeEmpName = (typeof escapeHtml === 'function') ? escapeHtml(empName) : empName;
         const safeProjName = (typeof escapeHtml === 'function') ? escapeHtml(projName) : projName;
@@ -149,7 +151,7 @@ function insertWeekEntriesIntoTable(entries) {
                 ${(typeof renderTaskBadgeHTML === 'function') ? renderTaskBadgeHTML(taskName) : (taskName ? `<span class="text-slate-600 font-medium text-xs sm:text-sm truncate block max-w-[150px] xl:max-w-[190px]" title="${safeTaskName}">${safeTaskName}</span>` : `<span class="text-slate-400 text-xs">-</span>`)}
             </td>
             <td class="py-2.5 px-2 whitespace-nowrap">
-                ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(entry.tags, isAgy, isMaquina, isHombre) : `<span class="text-slate-300 text-xs">-</span>`}
+                ${(typeof renderTagsHTML === 'function') ? renderTagsHTML(entry.tags, isAgy, isMaquina, isHombre, isClaude) : `<span class="text-slate-300 text-xs">-</span>`}
             </td>
             <td class="py-2.5 px-3 text-slate-600 max-w-xs xl:max-w-md truncate" title="${safeDesc}">
                 ${desc ? safeDesc : `<span class="italic text-slate-400">Sin descripción</span>`}

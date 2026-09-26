@@ -166,14 +166,27 @@ func (t *TimesheetEntry) IsAntigravity() bool {
 		strings.HasPrefix(desc, "[AGY]")
 }
 
-// IsHoraMaquina indica si la imputación tiene la etiqueta Hora Máquina o proviene de Antigravity.
+// IsClaude indica si la imputación o su tarea proviene del hook de Claude Code.
+func (t *TimesheetEntry) IsClaude() bool {
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Claude") || strings.EqualFold(tag.Name, "CL") {
+			return true
+		}
+	}
+	taskName := strings.ToUpper(t.TaskID.Name)
+	desc := strings.ToUpper(t.Name)
+	return strings.HasPrefix(taskName, "[CLAUDE]") ||
+		strings.HasPrefix(desc, "[CLAUDE]")
+}
+
+// IsHoraMaquina indica si la imputación tiene la etiqueta Hora Máquina o proviene de Antigravity/Claude.
 func (t *TimesheetEntry) IsHoraMaquina() bool {
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Hora Máquina") || strings.EqualFold(tag.Name, "Hora Maquina") {
 			return true
 		}
 	}
-	return t.IsAntigravity()
+	return t.IsAntigravity() || t.IsClaude()
 }
 
 // IsHoraHombre indica si la imputación es de trabajo humano (no es de máquina/IA).
@@ -192,19 +205,21 @@ func (t TimesheetEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		Alias
 		IsAntigravity bool   `json:"is_antigravity"`
+		IsClaude      bool   `json:"is_claude"`
 		IsHoraMaquina bool   `json:"is_hora_maquina"`
 		IsHoraHombre  bool   `json:"is_hora_hombre"`
 		CleanTaskName string `json:"clean_task_name"`
 	}{
 		Alias:         Alias(t),
 		IsAntigravity: t.IsAntigravity(),
+		IsClaude:      t.IsClaude(),
 		IsHoraMaquina: t.IsHoraMaquina(),
 		IsHoraHombre:  t.IsHoraHombre(),
 		CleanTaskName: t.CleanTaskName(),
 	})
 }
 
-// CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].
+// CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY], [ANTIGRAVITY] o [CLAUDE].
 func (t *TimesheetEntry) CleanTaskName() string {
 	name := strings.TrimSpace(t.TaskID.Name)
 	if strings.HasPrefix(strings.ToUpper(name), "[AGY]") {
@@ -212,6 +227,9 @@ func (t *TimesheetEntry) CleanTaskName() string {
 	}
 	if strings.HasPrefix(strings.ToUpper(name), "[ANTIGRAVITY]") {
 		return strings.TrimSpace(name[14:])
+	}
+	if strings.HasPrefix(strings.ToUpper(name), "[CLAUDE]") {
+		return strings.TrimSpace(name[8:])
 	}
 	return name
 }
@@ -552,6 +570,21 @@ func (t *ActiveTimer) IsAntigravity() bool {
 		strings.Contains(taskName, "ANTIGRAVITY") ||
 		strings.HasPrefix(desc, "[ANTIGRAVITY]") ||
 		strings.HasPrefix(desc, "[AGY]")
+}
+
+// IsClaude indica si el temporizador activo proviene del hook de Claude Code.
+func (t *ActiveTimer) IsClaude() bool {
+	if strings.EqualFold(t.Source, "claude") {
+		return true
+	}
+	for _, tag := range t.Tags {
+		if strings.EqualFold(tag.Name, "Claude") || strings.EqualFold(tag.Name, "CL") {
+			return true
+		}
+	}
+	taskName := strings.ToUpper(t.TaskName)
+	desc := strings.ToUpper(t.Description)
+	return strings.HasPrefix(taskName, "[CLAUDE]") || strings.HasPrefix(desc, "[CLAUDE]")
 }
 
 // CleanTaskName devuelve el nombre de la tarea sin el prefijo técnico [AGY] o [ANTIGRAVITY].
