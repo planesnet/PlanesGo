@@ -1822,6 +1822,7 @@ func (state *AppState) handleAPIVersion(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	json.NewEncoder(w).Encode(map[string]string{
 		"version": Version,
+		"build":   BuildStamp,
 	})
 }
 

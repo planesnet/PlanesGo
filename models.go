@@ -508,6 +508,7 @@ func (r WorkerRecentProject) FormattedDate() string {
 
 type PageData struct {
 	Version              string
+	Build                string
 	CurrentView          string
 	Config               *config.Config
 	Session              *SessionData

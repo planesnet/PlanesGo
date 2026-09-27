@@ -22,6 +22,11 @@ var embeddedVersion string
 
 var Version = "1.2.69"
 
+// BuildStamp identifica de forma única cada arranque del proceso (cada despliegue reinicia
+// el binario). Se usa como cache-buster de los estáticos de /m y para la auto-actualización
+// de la PWA, así el navegador siempre detecta el código nuevo aunque nadie suba VERSION a mano.
+var BuildStamp = fmt.Sprintf("%d", time.Now().Unix())
+
 func init() {
 	if v := strings.TrimSpace(embeddedVersion); v != "" {
 		Version = v

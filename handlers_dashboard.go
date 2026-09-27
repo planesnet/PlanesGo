@@ -741,6 +741,7 @@ func (state *AppState) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	data := PageData{
 		Version:               Version,
+		Build:                 BuildStamp,
 		CurrentView:           activeView,
 		Config:                activeCfg,
 		Session:               session,
@@ -881,6 +882,7 @@ func (state *AppState) handleExpressStandalone(w http.ResponseWriter, r *http.Re
 
 	data := PageData{
 		Version:               Version,
+		Build:                 BuildStamp,
 		CurrentView:           "express",
 		Config:                activeCfg,
 		Session:               session,
