@@ -84,6 +84,8 @@ case "$ACTION" in
 check)
   # Verificación best-effort de conexión/proyecto (Fase 0). Nunca bloquea
   # el arranque de la sesión: se lanza en segundo plano y se descarta.
+  # (Este repo ya trae su .planesgo.json, así que este caso es solo por
+  # coherencia con el hook global; en PlanesGo el check siempre tendría éxito.)
   nohup "$BIN" --check --task "$TASK_NAME" --type "$TASK_TYPE" --model "$AI_MODEL_LABEL" >/dev/null 2>&1 &
   disown 2>/dev/null || true
   ;;
