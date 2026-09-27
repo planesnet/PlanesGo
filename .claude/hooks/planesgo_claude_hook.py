@@ -37,7 +37,7 @@ EXEMPT_PREFIXES = (
 )
 
 SAFE_BINS = {
-    "planesgo-mcp", "planesgo-track", "ls", "pwd", "grep", "find",
+    "planesgo-mcp", "planesgo-track", "cd", "ls", "pwd", "grep", "find",
     "cat", "head", "tail", "echo", "which", "test", "true", "false",
     "uname", "id", "whoami", "ps", "env", "printenv",
 }
