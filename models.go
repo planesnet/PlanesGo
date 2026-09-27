@@ -697,11 +697,21 @@ type LoginPageData struct {
 
 func encodeSession(data SessionData) string {
 	b, _ := json.Marshal(data)
-	return base64.StdEncoding.EncodeToString(b)
+	sealed, err := sealSession(b)
+	if err != nil {
+		log.Printf("[SEGURIDAD] No se pudo cifrar la sesión: %v", err)
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed)
 }
 
 func decodeSession(cookieVal string) (*SessionData, error) {
-	b, err := base64.StdEncoding.DecodeString(cookieVal)
+	sealed, err := base64.RawURLEncoding.DecodeString(cookieVal)
+	if err != nil {
+		return nil, err
+	}
+	// Las cookies antiguas sin cifrar se rechazan: el usuario vuelve a iniciar sesión una vez
+	b, err := openSession(sealed)
 	if err != nil {
 		return nil, err
 	}
@@ -824,8 +834,8 @@ func (state *AppState) resolveUserOdooConfig(sess *SessionData) config.OdooConfi
 		odooCfg.DB = ""
 	}
 
-	// 5. Fallback: Variables del sistema si aún estuvieran vacías
-	if odooCfg.Password == "" && defaultCfg.Password != "" {
+	// 5. Fallback: Variables del sistema si aún estuvieran vacías (nunca para peticiones anónimas)
+	if sess != nil && odooCfg.Password == "" && defaultCfg.Password != "" {
 		odooCfg.Password = defaultCfg.Password
 		if odooCfg.Username == "" {
 			odooCfg.Username = defaultCfg.Username

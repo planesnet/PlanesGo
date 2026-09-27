@@ -108,6 +108,11 @@ func main() {
 		cfg.Server.Port = *portFlag
 	}
 
+	// Clave de cifrado de la cookie de sesión (SESSION_SECRET o data/session_secret autogenerado)
+	if err := initSessionCipher(os.Getenv("SESSION_SECRET"), sessionSecretFile); err != nil {
+		log.Fatalf("[FATAL] No se pudo inicializar el cifrado de sesiones: %v", err)
+	}
+
 	// Inicializar almacén persistente de ajustes de usuario en data/user_settings.json
 	userStore, err := store.NewUserSettingsStore("data/user_settings.json")
 	if err != nil {

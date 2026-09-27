@@ -39,8 +39,9 @@ type AntigravityTaskPayload struct {
 }
 
 // resolveAntigravitySession autentica la petición de Antigravity utilizando el token de seguridad
-// por empleado (cabecera X-Antigravity-Token, Authorization: Bearer, o token en JSON/query).
-func (state *AppState) resolveAntigravitySession(r *http.Request, explicitToken string, explicitEmail string) (*SessionData, error) {
+// por empleado (cabecera X-Antigravity-Token, Authorization: Bearer, o token en JSON/query) o la cookie
+// de sesión web cifrada. Sin credenciales verificables no hay sesión: nunca se suplanta a otro usuario.
+func (state *AppState) resolveAntigravitySession(r *http.Request, explicitToken string) (*SessionData, error) {
 	token := strings.TrimSpace(explicitToken)
 	if token == "" {
 		token = strings.TrimSpace(r.Header.Get("X-Antigravity-Token"))
@@ -74,32 +75,6 @@ func (state *AppState) resolveAntigravitySession(r *http.Request, explicitToken 
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 		if sess, err := decodeSession(cookie.Value); err == nil && sess != nil {
 			return sess, nil
-		}
-	}
-
-	// 3. Fallback con email explícito si el store tiene usuario configurado
-	email := strings.TrimSpace(explicitEmail)
-	if email == "" {
-		email = strings.TrimSpace(r.Header.Get("X-User-Email"))
-	}
-	if email == "" && state.userStore != nil {
-		for _, u := range state.userStore.GetAllSettings() {
-			if u.Email != "" && u.OdooToken != "" {
-				email = u.Email
-				break
-			}
-		}
-	}
-	if email != "" && state.userStore != nil {
-		if uSetting, ok := state.userStore.GetSettings(email); ok {
-			return &SessionData{
-				URL:        uSetting.OdooURL,
-				DB:         uSetting.OdooDB,
-				Username:   uSetting.OdooUser,
-				Password:   uSetting.OdooToken,
-				UserEmail:  uSetting.Email,
-				AuthMethod: "cli_email_fallback",
-			}, nil
 		}
 	}
 
@@ -303,7 +278,7 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 func (state *AppState) handleAntigravityStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	sess, err := state.resolveAntigravitySession(r, "", "")
+	sess, err := state.resolveAntigravitySession(r, "")
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -433,7 +408,7 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 		return
 	}
 
-	sess, err := state.resolveAntigravitySession(r, payload.Token, payload.UserEmail)
+	sess, err := state.resolveAntigravitySession(r, payload.Token)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -877,7 +852,7 @@ func (state *AppState) handleAntigravityTasks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	sess, err := state.resolveAntigravitySession(r, "", "")
+	sess, err := state.resolveAntigravitySession(r, "")
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{

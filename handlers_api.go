@@ -608,7 +608,7 @@ func (state *AppState) handleAPIPartners(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -649,7 +649,7 @@ func (state *AppState) handleAPITickets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -723,7 +723,7 @@ func (state *AppState) handleAPITicketsCreate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -837,7 +837,7 @@ func (state *AppState) handleAPITicketsUpdate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -938,7 +938,7 @@ func (state *AppState) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -974,7 +974,7 @@ func (state *AppState) handleAPITicketsClose(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	session, _ := state.resolveAntigravitySession(r, "", "")
+	session, _ := state.resolveAntigravitySession(r, "")
 	if session == nil {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 			session, _ = decodeSession(cookie.Value)
@@ -1666,32 +1666,9 @@ func (state *AppState) handleAPITimerHeartbeat(w http.ResponseWriter, r *http.Re
 		session, _ = decodeSession(cookie.Value)
 	}
 
-	// Permitir llamadas sin cookie (p.ej. scripts CLI o Antigravity local) usando req.UserEmail o cabecera
+	// Llamadas sin cookie (CLI o agentes) deben autenticarse con su token de Antigravity
 	if session == nil {
-		email := strings.TrimSpace(req.UserEmail)
-		if email == "" {
-			email = strings.TrimSpace(r.Header.Get("X-User-Email"))
-		}
-		if email == "" && state.userStore != nil {
-			for _, u := range state.userStore.GetAllSettings() {
-				if u.Email != "" && u.OdooToken != "" {
-					email = u.Email
-					break
-				}
-			}
-		}
-		if email != "" && state.userStore != nil {
-			if uSettings, ok := state.userStore.GetSettings(email); ok {
-				session = &SessionData{
-					URL:        uSettings.OdooURL,
-					DB:         uSettings.OdooDB,
-					Username:   uSettings.OdooUser,
-					Password:   uSettings.OdooToken,
-					UserEmail:  uSettings.Email,
-					AuthMethod: "cli",
-				}
-			}
-		}
+		session, _ = state.resolveAntigravitySession(r, "")
 	}
 
 	odooCfg := state.resolveUserOdooConfig(session)
