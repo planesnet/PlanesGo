@@ -610,9 +610,9 @@
             }
         }
     </script>
-    <script src="/static/js/utils.js?v={{.Version}}"></script>
-    <script src="/static/js/timer.js?v={{.Version}}"></script>
-    <script src="/static/js/views.js?v={{.Version}}"></script>
+    <script src="/static/js/utils.js?v={{.Build}}"></script>
+    <script src="/static/js/timer.js?v={{.Build}}"></script>
+    <script src="/static/js/views.js?v={{.Build}}"></script>
 
     <script>
         function initExpressStandaloneView() {
@@ -675,14 +675,16 @@
                 });
             }
 
-            // Auto-actualización ante nueva versión desplegada
-            const currentAppVersion = "{{.Version}}";
+            // Auto-actualización ante nueva versión desplegada. Se compara el "build" (identifica
+            // cada arranque del proceso) en vez de solo la versión semántica, para detectar
+            // SIEMPRE un despliegue nuevo aunque nadie haya subido el número de VERSION a mano.
+            const currentBuild = "{{.Build}}";
             function checkForUpdates() {
                 fetch('/api/version', { cache: 'no-store' })
                     .then(res => res.json())
                     .then(data => {
-                        if (data && data.version && data.version !== currentAppVersion) {
-                            console.log('[PlanesGo PWA] Nueva versión detectada (' + data.version + ' vs ' + currentAppVersion + '). Actualizando...');
+                        if (data && data.build && data.build !== currentBuild) {
+                            console.log('[PlanesGo PWA] Nuevo despliegue detectado (build ' + data.build + ' vs ' + currentBuild + '). Actualizando...');
                             if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
                                 navigator.serviceWorker.controller.postMessage({ action: 'skipWaiting' });
                             }
