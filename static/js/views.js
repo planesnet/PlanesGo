@@ -2826,6 +2826,7 @@ function switchExpressTab(tabName) {
 
     const btnExpress = document.getElementById('tab-btn-express');
     const btnTickets = document.getElementById('tab-btn-tickets');
+    const btnHoy = document.getElementById('tab-btn-hoy');
     const floatBtnExpress = document.getElementById('float-tab-btn-express');
     const floatBtnTickets = document.getElementById('float-tab-btn-tickets');
 
@@ -2837,9 +2838,57 @@ function switchExpressTab(tabName) {
     const ticketsLoading = document.getElementById('tickets-loading-state');
     const ticketsEmpty = document.getElementById('tickets-empty-state');
 
+    const hoyContainer = document.getElementById('hoy-view-container');
+
     const fabBtn = document.getElementById('fab-create-ticket');
     const subtitleInd = document.getElementById('tab-subtitle-indicator');
     const searchInput = document.getElementById('filter-search');
+
+    const inactiveTabClass = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all flex items-center space-x-1.5 cursor-pointer';
+
+    if (tabName === 'hoy') {
+        // Estilos pestaña activa: Hoy
+        if (btnHoy) {
+            btnHoy.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer bg-emerald-600 text-white shadow-sm';
+            btnHoy.setAttribute('aria-selected', 'true');
+        }
+        if (btnExpress) {
+            btnExpress.className = inactiveTabClass;
+            btnExpress.setAttribute('aria-selected', 'false');
+        }
+        if (btnTickets) {
+            btnTickets.className = inactiveTabClass;
+            btnTickets.setAttribute('aria-selected', 'false');
+        }
+
+        // Mostrar Hoy, ocultar Express y Tickets
+        if (expressGrid) expressGrid.classList.add('hidden');
+        if (expressLoading) expressLoading.classList.add('hidden');
+        if (expressEmpty) expressEmpty.classList.add('hidden');
+        if (ticketsGrid) ticketsGrid.classList.add('hidden');
+        if (ticketsLoading) ticketsLoading.classList.add('hidden');
+        if (ticketsEmpty) ticketsEmpty.classList.add('hidden');
+        if (fabBtn) fabBtn.classList.add('hidden');
+        if (searchInput) searchInput.closest('.flex')?.classList.add('hidden');
+        if (hoyContainer) hoyContainer.classList.remove('hidden');
+
+        if (subtitleInd) subtitleInd.textContent = 'Resumen de hoy';
+
+        try {
+            document.title = 'Hoy - PlanesGo';
+            if (window.location.pathname.startsWith('/express') || window.location.pathname.startsWith('/m')) {
+                const url = new URL(window.location);
+                url.searchParams.set('tab', 'hoy');
+                window.history.replaceState({ tab: 'hoy' }, '', url.toString());
+            }
+        } catch (e) {}
+
+        loadTodaySummary();
+        return;
+    }
+
+    if (searchInput) searchInput.closest('.flex')?.classList.remove('hidden');
+    if (hoyContainer) hoyContainer.classList.add('hidden');
 
     if (tabName === 'tickets') {
         // Estilos pestaña activa: Tickets
@@ -2850,6 +2899,10 @@ function switchExpressTab(tabName) {
         if (btnExpress) {
             btnExpress.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all flex items-center space-x-1.5 cursor-pointer';
             btnExpress.setAttribute('aria-selected', 'false');
+        }
+        if (btnHoy) {
+            btnHoy.className = inactiveTabClass;
+            btnHoy.setAttribute('aria-selected', 'false');
         }
 
         if (floatBtnTickets) {
@@ -2889,6 +2942,10 @@ function switchExpressTab(tabName) {
         if (btnTickets) {
             btnTickets.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all flex items-center space-x-1.5 cursor-pointer';
             btnTickets.setAttribute('aria-selected', 'false');
+        }
+        if (btnHoy) {
+            btnHoy.className = inactiveTabClass;
+            btnHoy.setAttribute('aria-selected', 'false');
         }
 
         if (floatBtnExpress) {
@@ -2930,9 +2987,142 @@ function switchExpressTab(tabName) {
 function reloadCurrentTab(force = true) {
     if (window.__activeExpressTab === 'tickets') {
         loadTicketsView(force);
+    } else if (window.__activeExpressTab === 'hoy') {
+        loadTodaySummary();
     } else {
         loadExpressTimesheets(force);
     }
+}
+
+/**
+ * Carga y renderiza el resumen de tiempo de HOY (pestaña "Hoy" de /m):
+ * total real de reloj, desglose Hombre/Máquina/Antigravity/Claude y por proyecto.
+ */
+async function loadTodaySummary() {
+    const loadingEl = document.getElementById('hoy-loading-state');
+    const emptyEl = document.getElementById('hoy-empty-state');
+    const contentEl = document.getElementById('hoy-content');
+    if (!loadingEl || !emptyEl || !contentEl) return;
+
+    loadingEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+    contentEl.classList.add('hidden');
+
+    const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
+    const currentWorker = (document.body && document.body.dataset.currentWorker) || '';
+
+    try {
+        const res = await fetch(`/api/timesheets?date_from=${todayStr}&date_to=${todayStr}&_t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        let entries = await res.json();
+        if (!Array.isArray(entries)) entries = [];
+
+        // Restringir al trabajador actual (PlanesGo puede tener varios miembros)
+        if (currentWorker) {
+            entries = entries.filter(e => {
+                const empName = (e.employee_id && e.employee_id.name) || (e.user_id && e.user_id.name) || '';
+                return !empName || empName === currentWorker;
+            });
+        }
+
+        loadingEl.classList.add('hidden');
+
+        if (!entries.length) {
+            emptyEl.classList.remove('hidden');
+            return;
+        }
+        contentEl.classList.remove('hidden');
+
+        const mappedForWallClock = entries.map(e => ({
+            hours: e.unit_amount || 0,
+            date: e.date,
+            createDate: e.create_date,
+            writeDate: e.write_date,
+            timerRunning: Boolean(e.is_timer_running)
+        }));
+
+        const declaredTotal = entries.reduce((sum, e) => sum + (e.unit_amount || 0), 0);
+        const wallClockTotal = (typeof calculateWallClockHours === 'function')
+            ? calculateWallClockHours(mappedForWallClock)
+            : declaredTotal;
+
+        let hHours = 0, mHours = 0, agHours = 0, clHours = 0;
+        const projectMap = new Map();
+        entries.forEach(e => {
+            const hours = e.unit_amount || 0;
+            const isAgy = Boolean(e.is_antigravity);
+            const isClaude = Boolean(e.is_claude);
+            const isMachine = Boolean(e.is_hora_maquina) || isAgy || isClaude;
+            if (isMachine) { mHours += hours; } else { hHours += hours; }
+            if (isAgy) agHours += hours;
+            if (isClaude) clHours += hours;
+
+            const pName = (e.project_id && e.project_id.name) || 'Sin proyecto';
+            if (!projectMap.has(pName)) {
+                projectMap.set(pName, { name: pName, hours: 0, running: false });
+            }
+            const p = projectMap.get(pName);
+            p.hours += hours;
+            if (e.is_timer_running) p.running = true;
+        });
+
+        const projects = Array.from(projectMap.values()).sort((a, b) => b.hours - a.hours);
+
+        renderTodaySummary({ declaredTotal, wallClockTotal, hHours, mHours, agHours, clHours, projects });
+    } catch (err) {
+        console.error('[PlanesGo] Error cargando el resumen de hoy:', err);
+        loadingEl.classList.add('hidden');
+        emptyEl.classList.remove('hidden');
+        const emptyText = emptyEl.querySelector('p');
+        if (emptyText) emptyText.textContent = 'No se pudo cargar el resumen de hoy';
+    }
+}
+
+/**
+ * Pinta el contenido de la pestaña "Hoy" a partir de los totales ya calculados.
+ */
+function renderTodaySummary(summary) {
+    const contentEl = document.getElementById('hoy-content');
+    if (!contentEl) return;
+
+    const fmt = (h) => (typeof formatHoursToHHMM === 'function') ? formatHoursToHHMM(h, '0:00') : (h || 0).toFixed(2);
+
+    const chip = (label, hours, colorClasses) => hours > 0.001 ? `
+        <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800">
+            <span class="text-xs font-semibold ${colorClasses}">${label}</span>
+            <span class="text-xs font-mono font-bold text-slate-200">${fmt(hours)} h</span>
+        </div>` : '';
+
+    const projectRows = summary.projects.map(p => `
+        <div class="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-900/60 border border-slate-800 ${p.running ? 'ring-1 ring-emerald-500/60' : ''}">
+            <div class="flex items-center gap-2 min-w-0">
+                ${p.running ? '<span class="relative flex h-2 w-2 shrink-0"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>' : ''}
+                <span class="text-sm font-semibold text-slate-200 truncate">${(typeof escapeHtml === 'function') ? escapeHtml(p.name) : p.name}</span>
+            </div>
+            <span class="text-sm font-mono font-bold text-sky-300 shrink-0">${fmt(p.hours)} h</span>
+        </div>`).join('');
+
+    const showReloj = summary.declaredTotal > summary.wallClockTotal + 0.02;
+
+    contentEl.innerHTML = `
+        <div class="rounded-2xl bg-gradient-to-br from-sky-600 to-indigo-700 p-5 text-center shadow-lg mb-3">
+            <p class="text-xs font-semibold text-sky-100/90 uppercase tracking-wide">Llevas hoy</p>
+            <p class="text-4xl font-mono font-black text-white mt-1">${fmt(summary.wallClockTotal)}<span class="text-lg font-bold ml-1">h</span></p>
+            ${showReloj ? `<p class="text-[11px] text-sky-100/80 mt-1">Tiempo real de reloj (sin solapes) · imputado: ${fmt(summary.declaredTotal)} h</p>` : ''}
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 mb-3">
+            ${chip('Hora Hombre', summary.hHours, 'text-emerald-400')}
+            ${chip('Hora Máquina', summary.mHours, 'text-sky-400')}
+            ${chip('Antigravity', summary.agHours, 'text-purple-400')}
+            ${chip('Claude Code', summary.clHours, 'text-orange-400')}
+        </div>
+
+        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-1.5 mt-4">Por proyecto</p>
+        <div class="space-y-2">
+            ${projectRows}
+        </div>
+    `;
 }
 
 /**
@@ -4105,6 +4295,8 @@ if (!window.__expressSilentSyncInterval) {
             if (isExpressVisible) {
                 if (window.__activeExpressTab === 'tickets') {
                     loadTicketsView(false);
+                } else if (window.__activeExpressTab === 'hoy') {
+                    if (typeof loadTodaySummary === 'function') loadTodaySummary();
                 } else if (typeof loadExpressTimesheets === 'function') {
                     loadExpressTimesheets(true, true);
                 }
@@ -4123,6 +4315,8 @@ if (!window.__expressVisibilityListenerAdded) {
             if (isExpressVisible) {
                 if (window.__activeExpressTab === 'tickets') {
                     loadTicketsView(false);
+                } else if (window.__activeExpressTab === 'hoy') {
+                    if (typeof loadTodaySummary === 'function') loadTodaySummary();
                 } else if (typeof loadExpressTimesheets === 'function') {
                     loadExpressTimesheets(true, true);
                 }
