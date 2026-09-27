@@ -3009,21 +3009,12 @@ async function loadTodaySummary() {
     contentEl.classList.add('hidden');
 
     const todayStr = (typeof formatISODate === 'function') ? formatISODate(new Date()) : new Date().toISOString().split('T')[0];
-    const currentWorker = (document.body && document.body.dataset.currentWorker) || '';
 
     try {
         const res = await fetch(`/api/timesheets?date_from=${todayStr}&date_to=${todayStr}&_t=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         let entries = await res.json();
         if (!Array.isArray(entries)) entries = [];
-
-        // Restringir al trabajador actual (PlanesGo puede tener varios miembros)
-        if (currentWorker) {
-            entries = entries.filter(e => {
-                const empName = (e.employee_id && e.employee_id.name) || (e.user_id && e.user_id.name) || '';
-                return !empName || empName === currentWorker;
-            });
-        }
 
         loadingEl.classList.add('hidden');
 
