@@ -100,7 +100,8 @@ def project_root_for_file(path, session_dir):
 
 
 def has_token():
-    if os.environ.get("ANTIGRAVITY_TOKEN"):
+    # PLANESGO_TOKEN es el nombre vigente; ANTIGRAVITY_TOKEN se mantiene por compatibilidad
+    if os.environ.get("PLANESGO_TOKEN") or os.environ.get("ANTIGRAVITY_TOKEN"):
         return True
     try:
         with open(os.path.join(HOME, ".planesgo_auth.json"), "r", encoding="utf-8") as f:
@@ -177,7 +178,7 @@ def on_context(payload, event):
         return
     if not has_token():
         emit_context(event, (
-            "No hay token de empleado para la imputación horaria (~/.planesgo_auth.json o $ANTIGRAVITY_TOKEN). "
+            "No hay token de empleado para la imputación horaria (~/.planesgo_auth.json o $PLANESGO_TOKEN). "
             "Avisa al usuario de que debe generarlo en https://planesgo.autopyme.com/settings "
             "y guardarlo en ~/.planesgo_auth.json antes de trabajar en este proyecto."
         ))

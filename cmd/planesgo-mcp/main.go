@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.69"
+	Version       = "1.2.71"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -415,7 +415,11 @@ func getAuth(cfg *Config) (token string, apiURL string, err error) {
 		apiURL = cfg.PlanesGoURL
 	}
 
-	token = strings.TrimSpace(os.Getenv("ANTIGRAVITY_TOKEN"))
+	// PLANESGO_TOKEN es el nombre vigente; ANTIGRAVITY_TOKEN se mantiene por compatibilidad
+	token = strings.TrimSpace(os.Getenv("PLANESGO_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("ANTIGRAVITY_TOKEN"))
+	}
 	if token != "" {
 		return token, cleanURL(apiURL), nil
 	}
@@ -437,7 +441,7 @@ func getAuth(cfg *Config) (token string, apiURL string, err error) {
 	}
 
 	if token == "" {
-		return "", cleanURL(apiURL), fmt.Errorf("token de autenticación no encontrado en $ANTIGRAVITY_TOKEN ni en ~/.planesgo_auth.json")
+		return "", cleanURL(apiURL), fmt.Errorf("token de autenticación no encontrado en $PLANESGO_TOKEN ni en ~/.planesgo_auth.json")
 	}
 
 	return token, cleanURL(apiURL), nil

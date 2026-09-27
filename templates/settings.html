@@ -423,7 +423,7 @@
                                     <span>Copiar Comando</span>
                                 </button>
                             </div>
-                            <pre id="snippet-env" class="p-3 bg-slate-950/70 rounded-xl text-xs font-mono text-sky-300 overflow-x-auto">export ANTIGRAVITY_TOKEN="{{.Settings.AntigravityToken}}"</pre>
+                            <pre id="snippet-env" class="p-3 bg-slate-950/70 rounded-xl text-xs font-mono text-sky-300 overflow-x-auto">export PLANESGO_TOKEN="{{.Settings.AntigravityToken}}"</pre>
                             <p class="text-[11px] text-slate-400 mt-1 font-light">Alternativa para entornos CI/CD o sesiones efímeras donde no se utilice archivo físico.</p>
                         </div>
                     </div>
@@ -563,7 +563,7 @@
                 const originalHtml = btn.innerHTML;
                 btn.className = "px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center space-x-2 flex-shrink-0 cursor-pointer";
                 btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg><span>¡Copiado!</span>`;
-                showAlert('antigravity-alert', 'success', '✓ <strong>¡Token copiado al portapapeles!</strong> Pégalo en tu archivo <code>~/.planesgo_auth.json</code> o en la variable <code>ANTIGRAVITY_TOKEN</code>.');
+                showAlert('antigravity-alert', 'success', '✓ <strong>¡Token copiado al portapapeles!</strong> Pégalo en tu archivo <code>~/.planesgo_auth.json</code> o en la variable <code>PLANESGO_TOKEN</code>.');
                 setTimeout(() => {
                     btn.className = "px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm hover:shadow flex items-center justify-center space-x-2 flex-shrink-0 cursor-pointer";
                     btn.innerHTML = originalHtml;
@@ -624,7 +624,7 @@
                         "planesgo_url": "https://planesgo.autopyme.com"
                     };
                     document.getElementById('snippet-json').innerText = JSON.stringify(jsonSnippet, null, 2);
-                    document.getElementById('snippet-env').innerText = `export ANTIGRAVITY_TOKEN="${data.token}"`;
+                    document.getElementById('snippet-env').innerText = `export PLANESGO_TOKEN="${data.token}"`;
 
                     // Actualizar badge en menú
                     const navBadge = document.getElementById('antigravity-nav-badge');
