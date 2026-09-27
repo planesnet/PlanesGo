@@ -237,6 +237,13 @@
                 <span>Tickets</span>
                 <span id="tickets-tab-count-badge" class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-slate-800 text-amber-300 border border-amber-500/30">0</span>
             </button>
+            <!-- Pestaña Hoy: resumen de tiempo acumulado del día -->
+            <button type="button" id="tab-btn-hoy" onclick="switchExpressTab('hoy')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all flex items-center space-x-1.5 cursor-pointer"
+                    role="tab" aria-selected="false">
+                <span>📊</span>
+                <span>Hoy</span>
+            </button>
         </div>
         <div class="flex items-center space-x-2">
             <span id="tab-subtitle-indicator" class="text-[11px] font-medium text-slate-400 font-mono hidden sm:inline">Tareas recientes</span>
@@ -319,6 +326,27 @@
 
         <!-- VISTA TICKETS: Cuadrícula responsive adaptativa (1 col en móvil, 2 cols en tablet/laptop, 3 cols en monitor horizontal) -->
         <div id="tickets-grid-container" class="hidden grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 max-w-7xl mx-auto"></div>
+
+        <!-- VISTA HOY: Resumen de tiempo acumulado del día actual -->
+        <div id="hoy-view-container" class="hidden max-w-2xl mx-auto">
+            <div id="hoy-loading-state" class="flex flex-col items-center justify-center py-16 space-y-3">
+                <svg class="animate-spin h-7 w-7 text-emerald-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="text-xs text-slate-400 font-medium tracking-wide">Calculando resumen de hoy...</span>
+            </div>
+            <div id="hoy-empty-state" class="hidden flex flex-col items-center justify-center py-16 text-center p-4">
+                <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-slate-500 flex items-center justify-center mb-3">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <p class="text-sm font-semibold text-slate-300">Todavía no hay imputaciones hoy</p>
+                <p class="text-xs text-slate-500 mt-1">En cuanto empieces a trabajar aparecerá aquí el resumen</p>
+            </div>
+            <div id="hoy-content" class="hidden"></div>
+        </div>
     </main>
 
     <!-- Botón Flotante FAB (Material Design +) para Nuevo Ticket Rápido -->
@@ -593,6 +621,10 @@
             if (urlParams.get('tab') === 'tickets') {
                 if (typeof switchExpressTab === 'function') {
                     switchExpressTab('tickets');
+                }
+            } else if (urlParams.get('tab') === 'hoy') {
+                if (typeof switchExpressTab === 'function') {
+                    switchExpressTab('hoy');
                 }
             } else {
                 if (typeof switchExpressTab === 'function') {
