@@ -32,6 +32,16 @@
           }
         ],
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/planesgo_claude_hook.py\" mcp",
+            "timeout": 10
+          }
+        ],
+        "matcher": "mcp__planesgo__.*"
       }
     ],
     "PostToolUse": [

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	Version       = "1.2.71"
+	Version       = "1.2.72"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -317,6 +317,31 @@ type ToolCallResult struct {
 	IsError bool          `json:"isError"`
 }
 
+// errMissingProjectPath indica que el arnés no ha pasado la raíz del proyecto de su sesión.
+var errMissingProjectPath = fmt.Errorf("falta project_path: el MCP se ejecuta fuera de un proyecto; indica la raíz del proyecto de esta sesión en project_path (o --path)")
+
+func sessionCwd() string {
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		return wd
+	}
+	return os.Getenv("PWD")
+}
+
+// isBackgroundDir indica si dir no identifica un proyecto (HOME o ~/.gemini, donde los arneses lanzan el MCP en segundo plano).
+func isBackgroundDir(dir string) bool {
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		return false
+	}
+	homeDir, _ = filepath.Abs(homeDir)
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	geminiDir := filepath.Join(homeDir, ".gemini")
+	return abs == homeDir || abs == geminiDir || strings.HasPrefix(abs, geminiDir+string(filepath.Separator))
+}
+
 // findConfig busca .planesgo.json estrictamente en el directorio principal del proyecto
 // (prohibido buscar en directorios padres o hijos).
 func findConfig(customDir ...string) (*Config, string, error) {
@@ -333,43 +358,10 @@ func findConfig(customDir ...string) (*Config, string, error) {
 	}
 
 	if len(startDirs) == 0 {
-		cwd := ""
-		if wd, err := os.Getwd(); err == nil && wd != "" {
-			cwd = wd
-		} else if pwd := os.Getenv("PWD"); pwd != "" {
-			cwd = pwd
-		}
-
-		// Si planesgo-mcp se ejecuta en segundo plano como servidor MCP o CLI (donde cwd suele ser
-		// el HOME del usuario ~/ o dentro de ~/.gemini/...), consultar prioritariamente el
-		// workspace activo registrado por Antigravity en /tmp/planesgo_active_workspace
-		geminiDir := ""
-		if homeDir != "" {
-			geminiDir = filepath.Join(homeDir, ".gemini")
-		}
-		isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
-		if isBackgroundMCP {
-			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-				ws := strings.TrimSpace(string(wsBytes))
-				if ws != "" {
-					startDirs = append(startDirs, ws)
-				}
-			}
-		}
-
-		if len(startDirs) == 0 && cwd != "" {
+		// Sin project_path explícito solo vale el cwd cuando el MCP se lanzó dentro de un proyecto.
+		// Si corre en segundo plano (HOME o ~/.gemini) el proyecto debe venir de la sesión del arnés.
+		if cwd := sessionCwd(); cwd != "" && !isBackgroundDir(cwd) {
 			startDirs = append(startDirs, cwd)
-		}
-
-		// Fallback: si aún no tenemos ningún directorio o solo teníamos cwd y este era homeDir
-		// (que será descartado por la regla de no herencia desde HOME), intentar con /tmp/planesgo_active_workspace
-		if len(startDirs) == 0 || (len(startDirs) == 1 && homeDir != "" && startDirs[0] == homeDir) {
-			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-				ws := strings.TrimSpace(string(wsBytes))
-				if ws != "" && ws != homeDir {
-					startDirs = []string{ws}
-				}
-			}
 		}
 	}
 
@@ -405,6 +397,9 @@ func findConfig(customDir ...string) (*Config, string, error) {
 		}
 	}
 
+	if len(startDirs) == 0 {
+		return nil, "", errMissingProjectPath
+	}
 	return nil, "", fmt.Errorf("no se encontró .planesgo.json estrictamente en el directorio principal del proyecto")
 }
 
@@ -776,32 +771,11 @@ func (c *PlanesGoClient) ListTasks(projectID int, projectName string) ([]map[str
 // saveConfigFile guarda la configuración estrictamente en .planesgo.json en la raíz del proyecto
 func saveConfigFile(cfg Config, targetDir string) error {
 	if targetDir == "" {
-		homeDir, _ := os.UserHomeDir()
-		geminiDir := ""
-		if homeDir != "" {
-			geminiDir = filepath.Join(homeDir, ".gemini")
+		cwd := sessionCwd()
+		if cwd == "" || isBackgroundDir(cwd) {
+			return errMissingProjectPath
 		}
-		cwd, _ := os.Getwd()
-		isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
-		if isBackgroundMCP {
-			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-				ws := strings.TrimSpace(string(wsBytes))
-				if ws != "" {
-					targetDir = ws
-				}
-			}
-		}
-		if targetDir == "" {
-			targetDir = cwd
-		}
-		if targetDir == "" || (homeDir != "" && targetDir == homeDir) {
-			if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-				ws := strings.TrimSpace(string(wsBytes))
-				if ws != "" && ws != homeDir {
-					targetDir = ws
-				}
-			}
-		}
+		targetDir = cwd
 	}
 	targetDir, _ = filepath.Abs(targetDir)
 
@@ -1440,30 +1414,12 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 		targetDir := customPath
 		if targetDir == "" {
-			homeDir, _ := os.UserHomeDir()
-			geminiDir := ""
-			if homeDir != "" {
-				geminiDir = filepath.Join(homeDir, ".gemini")
-			}
-			cwd, _ := os.Getwd()
-			isBackgroundMCP := (homeDir != "" && cwd == homeDir) || (geminiDir != "" && strings.HasPrefix(cwd, geminiDir))
-			if isBackgroundMCP {
-				if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-					ws := strings.TrimSpace(string(wsBytes))
-					if ws != "" {
-						targetDir = ws
-					}
-				}
-			}
-			if targetDir == "" {
+			if cwd := sessionCwd(); cwd != "" && !isBackgroundDir(cwd) {
 				targetDir = cwd
-			}
-			if targetDir == "" || (homeDir != "" && targetDir == homeDir) {
-				if wsBytes, err := os.ReadFile("/tmp/planesgo_active_workspace"); err == nil {
-					ws := strings.TrimSpace(string(wsBytes))
-					if ws != "" && ws != homeDir {
-						targetDir = ws
-					}
+			} else {
+				return ToolCallResult{
+					Content: []ToolContent{{Type: "text", Text: "❌ " + errMissingProjectPath.Error()}},
+					IsError: true,
 				}
 			}
 		}
@@ -1695,6 +1651,10 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "integer",
 						"description": "ID numérico del proyecto (opcional)",
 					},
+					"project_path": map[string]interface{}{
+						"type":        "string",
+						"description": "Raíz del proyecto de la sesión actual (obligatorio si el MCP no se ejecuta dentro del proyecto)",
+					},
 				},
 			},
 		},
@@ -1702,8 +1662,13 @@ func getToolsDefinition() []map[string]interface{} {
 			"name":        "planesgo_status",
 			"description": "Consulta el temporizador activo actual y los datos de sincronización con PlanesGo.",
 			"inputSchema": map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+				"type": "object",
+				"properties": map[string]interface{}{
+					"project_path": map[string]interface{}{
+						"type":        "string",
+						"description": "Raíz del proyecto de la sesión actual (obligatorio si el MCP no se ejecuta dentro del proyecto)",
+					},
+				},
 			},
 		},
 		{

@@ -7,6 +7,7 @@ Modos (argv[1]):
   session-start  SessionStart      -> check en segundo plano o aviso de proyecto no vinculado
   prompt         UserPromptSubmit  -> recuerda al agente que pregunte y verifique el proyecto mientras no esté vinculado
   guard          PreToolUse        -> bloquea Edit/Write/NotebookEdit/Bash en proyectos sin .planesgo.json válido
+  mcp            PreToolUse        -> añade project_path (proyecto de esta sesión) a las llamadas al MCP planesgo
   track          PostToolUse       -> latidos de imputación (el primero abre el cronómetro)
   session-end    SessionEnd        -> cierra e imputa los cronómetros abiertos en la sesión
 
@@ -225,10 +226,52 @@ def target_root(payload):
     return None
 
 
+def record_session_project(payload, root):
+    """Recuerda el último proyecto tocado en esta sesión (útil cuando la sesión se abrió en el home)."""
+    try:
+        sdir = session_state_dir(payload)
+        os.makedirs(sdir, exist_ok=True)
+        with open(os.path.join(sdir, "current_project"), "w", encoding="utf-8") as f:
+            f.write(root)
+    except Exception:
+        pass
+
+
+def session_project(payload):
+    """Proyecto de esta sesión: el directorio de la sesión o, si es el home, el último proyecto tocado."""
+    root = project_root_for_dir(session_dir(payload))
+    if root:
+        return root
+    try:
+        with open(os.path.join(session_state_dir(payload), "current_project"), "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except Exception:
+        return None
+
+
+def on_mcp(payload):
+    args = dict(payload.get("tool_input") or {})
+    if args.get("project_path"):
+        return
+    root = session_project(payload)
+    if not root:
+        # Sin proyecto en la sesión el MCP responde que falta project_path y el agente pregunta al usuario
+        return
+    args["project_path"] = root
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "permissionDecisionReason": f"Proyecto de la sesión: {root}",
+        "updatedInput": args,
+    }}))
+
+
 def on_guard(payload):
+    root = target_root(payload)
+    if root:
+        record_session_project(payload, root)
     if payload.get("tool_name") == "Bash" and is_safe_command((payload.get("tool_input") or {}).get("command")):
         return
-    root = target_root(payload)
     if not root or load_config(root):
         return
     deny("Bloqueo PSF: proyecto no vinculado a Odoo.\n" + unlinked_instructions(root))
@@ -317,6 +360,8 @@ def main():
             on_context(payload, "UserPromptSubmit")
         elif mode == "guard":
             on_guard(payload)
+        elif mode == "mcp":
+            on_mcp(payload)
         elif mode == "track":
             on_track(payload)
         elif mode == "session-end":
