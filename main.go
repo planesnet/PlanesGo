@@ -81,6 +81,7 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	// Controlador de Integración Antigravity (Latidos continuos, verificación previa y telemetría)
 	mux.HandleFunc("/antigravity", state.handleAntigravity)
 	mux.HandleFunc("/antigravity/status", state.handleAntigravityStatus)
+	mux.HandleFunc("/antigravity/projects/search", state.handleAntigravityProjectSearch)
 	mux.HandleFunc("/antigravity/tasks", state.handleAntigravityTasks)
 	mux.HandleFunc("/antigravity/update_tasks", state.handleAntigravityUpdateTasks)
 	mux.HandleFunc("/antigravity/update_parts", state.handleAntigravityUpdateTasks)

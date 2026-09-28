@@ -128,13 +128,17 @@ def unlinked_instructions(root):
         f"El directorio '{root}' no está vinculado a ningún proyecto de Odoo "
         "(falta .planesgo.json en su raíz o tiene odoo_project_id 0), así que no hay imputación horaria "
         "y las ediciones y comandos de desarrollo están bloqueados. Antes de trabajar:\n"
-        "1. Pregunta al usuario el nombre exacto del proyecto de Odoo. No lo asumas ni lo deduzcas del "
-        "nombre de la carpeta, y nunca uses PLANESGO por defecto.\n"
-        "2. Verifícalo con la herramienta MCP `mcp__planesgo__planesgo_set_project` con "
-        f'{{"project_name": "<nombre>", "project_path": "{root}"}} '
-        f'(alternativa CLI: `planesgo-mcp --set-project "<nombre>" --path "{root}"`).\n'
-        "3. Si responde que el proyecto no existe, díselo al usuario y vuelve a preguntarle. "
-        "Repite hasta que la vinculación se confirme; solo entonces continúa con la tarea."
+        "1. Pregunta al usuario a qué proyecto de Odoo corresponde este repositorio. No lo asumas ni lo "
+        "deduzcas del nombre de la carpeta, y nunca uses PLANESGO por defecto.\n"
+        "2. Si no conoces el nombre exacto (o el usuario tampoco), búscalo primero con la herramienta MCP "
+        '`mcp__planesgo__planesgo_search_projects` con {"query": "<texto parcial>"} '
+        f'(alternativa CLI: `planesgo-mcp --search-project "<texto parcial>"`); no hace falta acento ni '
+        "mayúsculas exactas. Muestra las coincidencias al usuario para que confirme cuál es.\n"
+        "3. Con el nombre confirmado, vincula con `mcp__planesgo__planesgo_set_project` usando "
+        f'{{"project_name": "<nombre exacto>", "project_path": "{root}"}} '
+        f'(alternativa CLI: `planesgo-mcp --set-project "<nombre exacto>" --path "{root}"`).\n'
+        "4. Si aun así responde que el proyecto no existe, díselo al usuario y repite la búsqueda. "
+        "No continúes con la tarea hasta que la vinculación se confirme."
     )
 
 
