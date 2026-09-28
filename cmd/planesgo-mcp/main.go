@@ -542,6 +542,47 @@ func (c *PlanesGoClient) doWithRetry(method, targetURL string, bodyBytes []byte,
 	return nil, lastStatusCode, lastErr
 }
 
+// SearchProjects busca proyectos de Odoo por texto parcial (sin vincular nada), para
+// encontrar el nombre exacto antes de usar --set-project.
+func (c *PlanesGoClient) SearchProjects(query string) ([]map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("%s/antigravity/projects/search", c.BaseURL)
+	reqURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	q := reqURL.Query()
+	if query != "" {
+		q.Set("q", query)
+	}
+	reqURL.RawQuery = q.Encode()
+
+	headers := map[string]string{
+		"X-Antigravity-Token": c.Token,
+		"Accept":              "application/json",
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodGet, reqURL.String(), nil, headers)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		Projects []map[string]interface{} `json:"projects"`
+		Error    string                    `json:"error"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
+	}
+	if statusCode != http.StatusOK {
+		errMsg := res.Error
+		if errMsg == "" {
+			errMsg = "error desconocido"
+		}
+		return nil, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
+	}
+	return res.Projects, nil
+}
+
 // CheckStatus ejecuta la verificación de Fase 0
 func (c *PlanesGoClient) CheckStatus(projectID int, projectName string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/antigravity/status", c.BaseURL)
@@ -1347,6 +1388,50 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			IsError: false,
 		}
 
+	case "planesgo_search_projects":
+		query, _ := args["query"].(string)
+
+		token, apiURL, authErr := getAuth(cfg)
+		if authErr != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error de autenticación: %v", authErr)}},
+				IsError: true,
+			}
+		}
+		if client == nil {
+			client = &PlanesGoClient{
+				BaseURL:    apiURL,
+				Token:      token,
+				HTTPClient: &http.Client{Timeout: 15 * time.Second},
+			}
+		}
+
+		results, err := client.SearchProjects(query)
+		if err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al buscar proyectos: %v", err)}},
+				IsError: true,
+			}
+		}
+		if len(results) == 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("📋 Sin proyectos que coincidan con '%s'", query)}},
+				IsError: false,
+			}
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📋 Proyectos que coinciden con '%s':\n", query))
+		for _, p := range results {
+			id, _ := p["id"].(float64)
+			name, _ := p["name"].(string)
+			sb.WriteString(fmt.Sprintf("- [%d] %s\n", int(id), name))
+		}
+		return ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: strings.TrimRight(sb.String(), "\n")}},
+			IsError: false,
+		}
+
 	case "planesgo_set_project":
 		targetProjName, _ := args["project_name"].(string)
 		targetProjID := 0
@@ -1672,6 +1757,19 @@ func getToolsDefinition() []map[string]interface{} {
 			},
 		},
 		{
+			"name":        "planesgo_search_projects",
+			"description": "Busca proyectos de Odoo/PlanesGo por texto parcial (sin acentos ni mayúsculas exactas), sin vincular nada. Úsalo cuando no sepas el nombre exacto del proyecto antes de llamar a planesgo_set_project.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query": map[string]interface{}{
+						"type":        "string",
+						"description": "Texto parcial a buscar en el nombre del proyecto (ej: 'logistica', 'fly-pyr'). Vacío para listar todos.",
+					},
+				},
+			},
+		},
+		{
 			"name":        "planesgo_set_project",
 			"description": "Vincula o actualiza el proyecto activo de PlanesGo (.planesgo.json) resolviendo automáticamente el ID y nombre oficial desde Odoo en un solo paso rápido.",
 			"inputSchema": map[string]interface{}{
@@ -1806,6 +1904,7 @@ func main() {
 	stopFlag := flag.Bool("stop", false, "Detiene la tarea indicada")
 	listFlag := flag.Bool("list", false, "Lista tareas de Odoo para el proyecto actual")
 	setProjFlag := flag.String("set-project", "", "Vincula y configura el proyecto indicado en .planesgo.json")
+	searchProjFlag := flag.String("search-project", "", "Busca proyectos de Odoo por texto parcial (sin vincular), para encontrar el nombre exacto")
 	initFlag := flag.String("init", "", "Alias de --set-project para inicializar/vincular proyecto")
 	projectFlag := flag.String("project", "", "Alias de --set-project")
 	taskFlag := flag.String("task", "", "Nombre de la tarea")
@@ -1961,6 +2060,17 @@ func main() {
 			args["project_path"] = *pathFlag
 		}
 		res := executeToolCall("planesgo_list_tasks", args)
+		if len(res.Content) > 0 {
+			fmt.Println(res.Content[0].Text)
+		}
+		if res.IsError {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *searchProjFlag != "" {
+		res := executeToolCall("planesgo_search_projects", map[string]interface{}{"query": *searchProjFlag})
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}

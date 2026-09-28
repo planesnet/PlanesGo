@@ -393,6 +393,65 @@ func (state *AppState) handleAntigravityStatus(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(resp)
 }
 
+// normalizeSearchText pasa a mayúsculas y sustituye acentos/eñes comunes, para comparar
+// texto de búsqueda sin depender de tildes ni de mayúsculas/minúsculas exactas.
+func normalizeSearchText(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	replacer := strings.NewReplacer(
+		"Á", "A", "É", "E", "Í", "I", "Ó", "O", "Ú", "U", "Ü", "U", "Ñ", "N",
+	)
+	return replacer.Replace(s)
+}
+
+// handleAntigravityProjectSearch busca proyectos de Odoo por texto parcial (sin vincular
+// nada), para que el usuario/agente encuentre el nombre exacto antes de usar --set-project
+// en vez de tener que adivinarlo o asumir un proyecto por defecto.
+func (state *AppState) handleAntigravityProjectSearch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	sess, err := state.resolveAntigravitySession(r, "")
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+			"hint":  "Configure su X-Antigravity-Token en las cabeceras o en ~/.planesgo_auth.json",
+		})
+		return
+	}
+
+	odooCfg := state.resolveUserOdooConfig(sess)
+	client := odoo.GetClient(odooCfg)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	projects, err := client.GetProjects(ctx, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Error al consultar proyectos en Odoo: " + err.Error(),
+		})
+		return
+	}
+
+	query := normalizeSearchText(r.URL.Query().Get("q"))
+	results := make([]map[string]interface{}, 0, len(projects))
+	for _, p := range projects {
+		if query == "" || strings.Contains(normalizeSearchText(p.Name), query) {
+			results = append(results, map[string]interface{}{"id": p.ID, "name": p.Name})
+		}
+		if len(results) >= 25 {
+			break
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"query":    r.URL.Query().Get("q"),
+		"projects": results,
+		"count":    len(results),
+	})
+}
+
 // handleAntigravityUpdateTasks gestiona el inicio, latidos continuos y cierre de tareas desde Antigravity.
 func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
