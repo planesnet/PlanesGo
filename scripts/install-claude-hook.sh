@@ -4,6 +4,8 @@
 # USUARIO: funciona en CUALQUIER proyecto (no solo PlanesGo), bloquea
 # Edit/Write/Bash hasta que el proyecto esté vinculado a Odoo (nunca asume
 # "PLANESGO" por defecto), y reutiliza el mismo binario/cuenta que Antigravity.
+# También instala el comando /planesgo para revisar el estado del tracking
+# (proyecto vinculado, token, hook, binario) en cualquier sesión, a demanda.
 #
 # Uso genérico en cualquier sesión de Claude Code (nueva o ya abierta), local
 # o en la nube — siempre descarga la versión más reciente del propio repo:
@@ -34,6 +36,15 @@ if ! curl -fsSL "$REPO_RAW/.claude/hooks/planesgo_claude_hook.py" -o "$HOOKS_DIR
 fi
 chmod +x "$HOOKS_DIR/planesgo_claude_hook.py"
 echo "OK: hook instalado en $HOOKS_DIR/planesgo_claude_hook.py"
+
+# 1b. Comando /planesgo (diagnóstico bajo demanda): siempre la versión actual del repo -----
+COMMANDS_DIR="$HOME/.claude/commands"
+mkdir -p "$COMMANDS_DIR"
+if curl -fsSL "$REPO_RAW/.claude/commands/planesgo.md" -o "$COMMANDS_DIR/planesgo.md"; then
+    echo "OK: comando /planesgo instalado en $COMMANDS_DIR/planesgo.md"
+else
+    echo "AVISO: no se pudo descargar el comando /planesgo (no crítico, el tracking funciona igual)."
+fi
 
 # 2. settings.json de usuario: fusiona los hooks sin machacar lo que ya haya -
 SETTINGS_FILE="$HOME/.claude/settings.json"
