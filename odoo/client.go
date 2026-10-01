@@ -1471,17 +1471,18 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		return "", fmt.Errorf("error al verificar estado del ticket: %w", err)
 	}
 
-	var tickets []struct {
-		ID         int      `json:"id"`
-		Name       string   `json:"name"`
-		Number     string   `json:"number"`
-		StageID    Many2One `json:"stage_id"`
-		TeamID     Many2One `json:"team_id"`
-		Closed     bool     `json:"closed"`
-		ClosedDate string   `json:"closed_date"`
-		PartnerID  Many2One `json:"partner_id"`
+	// Se reutiliza el struct Ticket (con su UnmarshalJSON ya probado) en vez de un
+	// struct improvisado: un ticket abierto devuelve closed_date=false (booleano,
+	// no string vacío) y un campo Many2one vacío también es "false" en Odoo. Un
+	// struct con campos string/Many2One sin ese manejo especial fallaba el
+	// Unmarshal en silencio, y ese error se confundía con "0 resultados",
+	// reportando "ticket no encontrado" aunque el ticket sí existía y se había
+	// leído correctamente.
+	var tickets []Ticket
+	if err := json.Unmarshal(checkRaw, &tickets); err != nil {
+		return "", fmt.Errorf("error al interpretar la respuesta de Odoo para el ticket %d: %w", ticketID, err)
 	}
-	if err := json.Unmarshal(checkRaw, &tickets); err != nil || len(tickets) == 0 {
+	if len(tickets) == 0 {
 		return "", fmt.Errorf("ticket %d no encontrado", ticketID)
 	}
 
@@ -1554,10 +1555,11 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		closedStageID = 4 // ID habitual de etapa "Done"
 	}
 
-	// 3. Preparar valores de cierre
+	// 3. Preparar valores de cierre. "closed" no se escribe aquí: en este Odoo es un
+	// campo derivado de la etapa (stage_id.closed), no se asume escribible directamente.
 	writeVals := map[string]interface{}{
-		"close_date": time.Now().UTC().Format("2006-01-02 15:04:05"),
-		"stage_id":   closedStageID,
+		"closed_date": time.Now().UTC().Format("2006-01-02 15:04:05"),
+		"stage_id":    closedStageID,
 	}
 
 	writeArgs := []interface{}{

@@ -382,6 +382,7 @@ type Ticket struct {
 	PartnerID       Many2One `json:"partner_id"`
 	ProjectID       Many2One `json:"project_id"`
 	TaskID          Many2One `json:"task_id,omitempty"`
+	TeamID          Many2One `json:"team_id,omitempty"`
 	Priority        string   `json:"priority,omitempty"`
 	CreateDate      string   `json:"create_date,omitempty"`
 	Closed          bool     `json:"closed,omitempty"`
@@ -403,6 +404,7 @@ func (t *Ticket) UnmarshalJSON(data []byte) error {
 		PartnerID       Many2One    `json:"partner_id"`
 		ProjectID       Many2One    `json:"project_id"`
 		TaskID          Many2One    `json:"task_id"`
+		TeamID          Many2One    `json:"team_id"`
 		Priority        interface{} `json:"priority"`
 		CreateDate      interface{} `json:"create_date"`
 		Closed          interface{} `json:"closed"`
@@ -432,6 +434,7 @@ func (t *Ticket) UnmarshalJSON(data []byte) error {
 	t.PartnerID = raw.PartnerID
 	t.ProjectID = raw.ProjectID
 	t.TaskID = raw.TaskID
+	t.TeamID = raw.TeamID
 	switch v := raw.Priority.(type) {
 	case string:
 		t.Priority = v
