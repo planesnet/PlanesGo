@@ -1,0 +1,12 @@
+/* Paleta del icono de la barra: una fila de botones con icono y etiqueta corta. */
+:root { --bg: #ffffff; --fg: #142030; --hover: #eef2f6; --accent: #0284c7; color-scheme: light; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #152131; --fg: #e7eef6; --hover: #1b2a3d; --accent: #38bdf8; color-scheme: dark; }
+}
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 600 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.palette { display: flex; gap: 4px; padding: 8px; }
+.tool { width: 72px; padding: 8px 4px 6px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-decoration: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.tool:hover { background: var(--hover); }
+.tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tool svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool img { display: block; }
