@@ -16,20 +16,24 @@ imagen (por ejemplo, pegándola en un chat).
   fondo **Captura** (una imagen de esa página) para marcar sobre ella.
 - Fondos (solo icono): móvil en vertical, captura o móvil en horizontal, con rejilla.
 - El lienzo es un tapete con el dispositivo dibujado encima.
-- **Patrones** (desplegable de la barra): layouts de Material Design 3 agrupados por categorías.
-  Se incrustan en el tapete como un **grupo de objetos dibujados a mano** (rectángulos, líneas,
-  círculos y textos) que puedes mover, redimensionar, borrar o editar. Se adaptan a la
-  orientación: en horizontal (expandido) el patrón cabe en el dispositivo; en vertical (compacto)
-  puede descomponerse en varias pantallas en el tapete, enlazadas con flechas. Si no has tocado
-  el grupo, al cambiar de orientación se regenera; si lo has tocado, se queda como está.
-  Están en `patterns.js` (y `sketch.js` los convierte en objetos):
-  - Layouts canónicos: lista + detalle con búsqueda, panel de apoyo, feed.
-  - Navegación: barra de navegación ↔ riel, cajón de navegación, pestañas.
-  - Barras de app: barra superior grande, barra inferior con FAB.
-  - Contenido: cuadrícula de tarjetas, carrusel, detalle con imagen, ajustes, tema (claro, oscuro,
-    automático).
-  - Entrada de datos: búsqueda, formulario, inicio de sesión.
-  - Superposiciones: diálogo, hoja inferior ↔ lateral.
+- **Patrones** (botón de la barra): biblioteca de patrones de Material Design 3 con buscador y
+  tres secciones. Cada patrón tiene su **ficha de uso y comportamiento** (qué es, variantes,
+  cuándo usarlo y cuándo no, comportamiento, cómo se ve en compacto y en expandido, accesibilidad
+  y enlace a su página de m3.material.io), resumida de la web oficial (`guia.js`, 1 oct 2026).
+  - **Pantallas**: patrones completos (los layouts canónicos list-detail, supporting pane y feed,
+    y pantallas de navegación, barras, contenido, entrada de datos y superposiciones). Sustituyen
+    el patrón del dispositivo; incluye la tabla de clases de tamaño de ventana.
+  - **Componentes**: los 36 componentes de Material 3 (acciones, comunicación, contención,
+    navegación, selección y entrada de texto).
+  - **Campos y datos**: campos por tipo de dato (texto, multilínea, entero, decimal, importe,
+    porcentaje, fecha, hora, fecha y hora, rango de fechas, duración, correo, teléfono,
+    contraseña, URL, desplegable, autocompletar, sí/no, deslizador, etiquetas, archivo, error) y
+    visualización de datos (ficha de solo lectura, tabla y cifras destacadas), con formato es-ES y
+    atributos HTML de entrada.
+  Las pantallas y piezas se incrustan como **grupos de objetos dibujados a mano** que puedes mover,
+  redimensionar, borrar o editar; las piezas se colocan en su sitio (barras, rieles, FAB) o en el
+  centro. Si no has tocado el grupo de la pantalla, al cambiar de orientación se regenera. Están en
+  `patterns.js` (pantallas), `pieces.js` (componentes y campos) y `sketch.js` (paso a objetos).
 - Herramientas: seleccionar y mover (V), lápiz (P), rectángulo (R), línea (L), flecha (A),
   texto (T), caja de texto (B) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
 - **Caja de texto**: arrastra para crearla y escribe dentro; el texto se ajusta al ancho de la caja.
@@ -46,7 +50,8 @@ imagen (por ejemplo, pegándola en un chat).
 - **Copiar** (icono) deja el PNG en el portapapeles (con el tapete y el patrón) para pegarlo con Ctrl+V; **Descargar** (icono)
   lo guarda en un fichero.
 - **Copiar para Claude** (icono `{ }`) copia una explicación en Markdown con un bloque JSON
-  (`pizarra-bocetos/v1`): el patrón con su nombre de Material Design 3 y sus componentes, su
+  (`pizarra-bocetos/v1`): el patrón con su nombre de Material Design 3 y sus componentes, los
+  componentes y campos insertados con su guía de uso, comportamiento y formato, su
   comportamiento en **los dos modos** (compacto y expandido) con las pantallas y el flujo entre
   ellas, y tus anotaciones (textos, cajas, flechas, rectángulos y trazos) con color, pantalla,
   zona y posición en dp. El patrón es solo estructura: el estilo (colores, tipografía, formas) se

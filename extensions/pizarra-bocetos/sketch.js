@@ -105,7 +105,9 @@
         if (filled && p.h <= 34 && p.w > 2.2 * p.h) { const t = Math.max(2, Math.min(9, p.h * 0.5)); return this.line(p.x + p.h / 2, p.y + p.h / 2, p.x + p.w - p.h / 2, p.y + p.h / 2, color, Math.round(t)); }
         if (filled && p.w <= 8 && p.h > 3 * p.w) return this.line(p.x + p.w / 2, p.y, p.x + p.w / 2, p.y + p.h, color, Math.max(2, Math.round(p.w)));
         const r = inter(this.clipR, p); if (r.w < 4 || r.h < 4) return;
-        this.push({ type: 'rect', x1: r.x, y1: r.y, x2: r.x + r.w, y2: r.y + r.h, r: Math.min(p.r || 0, r.w / 2, r.h / 2), color, size });
+        const sh = { type: 'rect', x1: r.x, y1: r.y, x2: r.x + r.w, y2: r.y + r.h, r: Math.min(p.r || 0, r.w / 2, r.h / 2), color, size };
+        if (filled && p.w * p.h > 40000 && !white) sh.fill = '#ffffff'; // superficie opaca: tapa lo de debajo
+        this.push(sh);
       } else if (p.k === 'circle') {
         const c = this.clipR; if (p.cx < c.x || p.cx > c.x + c.w || p.cy < c.y || p.cy > c.y + c.h) return;
         if (filled && p.r <= 6) return this.push({ type: 'pen', pts: [[p.cx, p.cy]], color, size: Math.round(p.r * 2) });
@@ -130,7 +132,9 @@
       const seen = new Map();
       for (const s of this.out) {
         const b = (s.type === 'line' ? [s.x1, s.y1, s.x2, s.y2] : boxOf(s)).map(v => Math.round(v / 4));
-        seen.set(s.type === 'text' ? 't' + b.join(',') + s.text : s.type + b.join(','), s);
+        const key = s.type === 'text' ? 't' + b.join(',') + s.text : s.type + b.join(','), prev = seen.get(key);
+        if (prev && prev.fill && !s.fill) s.fill = prev.fill;
+        seen.set(key, s);
       }
       const keep = new Set(seen.values());
       return this.out.filter(s => keep.has(s)).map(s => { if (s.type === 'text') { delete s.w; delete s.h; } return s; });
@@ -159,5 +163,12 @@
     return out.map(sh => Object.assign(sh, { hand: true, seed: Math.floor(rnd() * 1e9) }));
   }
 
-  window.PizarraBoceto = { generate };
+  // Un patrón simple (pieza) dibujado en el rectángulo r, recortado al dispositivo
+  function generatePiece(piece, r, mode, clip) {
+    let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const rec = new Recorder(clip, rnd); piece.draw(rec, r, mode);
+    return rec.done().map(sh => Object.assign(sh, { hand: true, seed: Math.floor(rnd() * 1e9) }));
+  }
+
+  window.PizarraBoceto = { generate, generatePiece };
 })();

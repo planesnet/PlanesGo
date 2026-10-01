@@ -33,6 +33,18 @@
       case 'plus': c.moveTo(x - 12, y); c.lineTo(x + 12, y); c.moveTo(x, y - 12); c.lineTo(x, y + 12); break;
       case 'history': c.arc(x, y, 13, 0, Math.PI * 2); c.moveTo(x, y - 7); c.lineTo(x, y); c.lineTo(x + 6, y + 4); break;
       case 'chevron': c.moveTo(x - 6, y - 12); c.lineTo(x + 6, y); c.lineTo(x - 6, y + 12); break;
+      case 'minus': c.moveTo(x - 12, y); c.lineTo(x + 12, y); break;
+      case 'expand': c.moveTo(x - 10, y - 5); c.lineTo(x, y + 6); c.lineTo(x + 10, y - 5); break;
+      case 'chevronLeft': c.moveTo(x + 6, y - 12); c.lineTo(x - 6, y); c.lineTo(x + 6, y + 12); break;
+      case 'calendar': c.rect(x - 13, y - 11, 26, 24); c.moveTo(x - 13, y - 3); c.lineTo(x + 13, y - 3); c.moveTo(x - 6, y - 15); c.lineTo(x - 6, y - 8); c.moveTo(x + 6, y - 15); c.lineTo(x + 6, y - 8); break;
+      case 'clock': c.arc(x, y, 13, 0, Math.PI * 2); c.moveTo(x, y - 8); c.lineTo(x, y); c.lineTo(x + 6, y + 4); break;
+      case 'edit': c.moveTo(x - 11, y + 11); c.lineTo(x - 9, y + 3); c.lineTo(x + 6, y - 12); c.lineTo(x + 12, y - 6); c.lineTo(x - 3, y + 9); c.lineTo(x - 11, y + 11); break;
+      case 'keyboard': c.rect(x - 16, y - 10, 32, 20); c.moveTo(x - 8, y + 4); c.lineTo(x + 8, y + 4); break;
+      case 'mail': c.rect(x - 14, y - 10, 28, 20); c.moveTo(x - 14, y - 10); c.lineTo(x, y + 2); c.lineTo(x + 14, y - 10); break;
+      case 'phone': c.rect(x - 8, y - 14, 16, 28); c.moveTo(x - 3, y + 9); c.lineTo(x + 3, y + 9); break;
+      case 'eye': c.moveTo(x - 15, y); c.quadraticCurveTo(x, y - 14, x + 15, y); c.quadraticCurveTo(x, y + 14, x - 15, y); c.moveTo(x + 5, y); c.arc(x, y, 5, 0, Math.PI * 2); break;
+      case 'link': c.moveTo(x - 4, y + 4); c.lineTo(x + 4, y - 4); c.moveTo(x - 1, y - 9); c.lineTo(x + 3, y - 13); c.lineTo(x + 13, y - 3); c.lineTo(x + 9, y + 1); c.moveTo(x + 1, y + 9); c.lineTo(x - 3, y + 13); c.lineTo(x - 13, y + 3); c.lineTo(x - 9, y - 1); break;
+      case 'error': c.arc(x, y, 13, 0, Math.PI * 2); c.moveTo(x, y - 7); c.lineTo(x, y + 2); c.moveTo(x, y + 7); c.lineTo(x, y + 8); break;
       case 'more': for (const d of [-10, 0, 10]) { c.moveTo(x + 3, y + d); c.arc(x, y + d, 3, 0, Math.PI * 2); } c.fill(); c.restore(); return;
       default: c.arc(x, y, 13, 0, Math.PI * 2);
     }
@@ -524,5 +536,8 @@
     (pantallas || []).forEach((n, i) => { if (p.compact[i]) p.compact[i].name = n; });
   }
 
-  window.PizarraPatrones = { list: PATRONES, appBar };
+  // Piezas de dibujo, para los patrones simples (pieces.js)
+  const kit = { WF, PAD, rr, bar, disc, txt, icon, ph, textLines, button, fab, toggle, chip, chips, field, searchBar, listRow, rows,
+    card, grid, scrim, sheet, divider, vdivider, split, appBar, navBar, rail, drawer, tabs, bottomAppBar, keyboard, carousel, radio, segmented, wv };
+  window.PizarraPatrones = { list: PATRONES, appBar, kit };
 })();

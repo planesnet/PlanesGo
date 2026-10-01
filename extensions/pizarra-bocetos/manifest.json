@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pizarra de bocetos",
   "short_name": "Pizarra",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Boceta pantallas (móvil vertical u horizontal, con rejilla) o dibuja encima de la página actual, y copia la imagen para compartirla.",
   "action": {
     "default_title": "Herramientas: pizarra de bocetos y PlanesGo",

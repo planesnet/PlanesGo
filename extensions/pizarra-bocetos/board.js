@@ -107,6 +107,7 @@
     const R = rng(s.seed);
     if (s.type === 'rect') {
       const x1 = Math.min(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), x2 = Math.max(s.x1, s.x2), y2 = Math.max(s.y1, s.y2), r = s.r || 0;
+      if (s.fill) { c.save(); c.fillStyle = s.fill; c.beginPath(); c.roundRect(x1, y1, x2 - x1, y2 - y1, Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2)); c.fill(); c.restore(); }
       if (r >= 10) { // redondeado: dos pasadas algo desplazadas
         for (const a of [1, 0.45]) { const j = () => (R() - 0.5) * 3; c.globalAlpha = a; c.beginPath(); c.roundRect(x1 + j(), y1 + j(), x2 - x1 + j(), y2 - y1 + j(), Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2)); c.stroke(); }
         c.globalAlpha = 1; return;
@@ -380,17 +381,12 @@
   document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => { closeText(true); state.tool = b.dataset.tool; press('[data-tool]', b); if (state.tool !== 'select') selected = []; render(); draw.style.cursor = { text: 'text', eraser: 'cell', select: 'default' }[state.tool] || 'crosshair'; }));
   document.querySelectorAll('[data-color]').forEach(b => b.addEventListener('click', () => { state.color = b.dataset.color; press('[data-color]', b); }));
   document.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { state.size = +b.dataset.size; press('[data-size]', b); }));
-  const paperEl = document.getElementById('paper'), patternSel = document.getElementById('pattern');
-  const groups = {};
-  for (const p of Object.values(PATTERNS)) {
-    if (!groups[p.cat]) { groups[p.cat] = document.createElement('optgroup'); groups[p.cat].label = p.cat; patternSel.appendChild(groups[p.cat]); }
-    groups[p.cat].appendChild(new Option(p.name, p.id));
-  }
+  const paperEl = document.getElementById('paper');
   function applyLayout() {
     lay = layout(); W = lay.W; H = lay.H;
     paperEl.style.aspectRatio = W + ' / ' + H;
     paperEl.style.width = `min(100%, calc((100vh - 230px) * ${(W / H).toFixed(4)}))`;
-    patternSel.value = state.pattern; patternSel.disabled = state.orient === 'c';
+    renderLibrary();
     saveDraft(); requestAnimationFrame(resize);
   }
   // Incrusta el patrón como un grupo de objetos dibujados a mano (debajo de lo que ya hay). Sin
@@ -403,11 +399,119 @@
     state.shapes = [...gen, ...keep];
     selected = gen.length && force ? gen : [];
   }
-  patternSel.addEventListener('change', () => {
+  function usePattern(id) {
     closeText(true); selected = [];
-    mutate(() => { state.pattern = patternSel.value; lay = layout(); placePattern(true); });
-    applyLayout();
-  });
+    if (state.orient === 'c' && id) state.orient = 'h';
+    mutate(() => { state.pattern = id; lay = layout(); placePattern(true); });
+    pressOrient(); applyLayout();
+  }
+
+  // ── Biblioteca de patrones ───────────────────────────────────────────────────────────
+  // Pantallas completas (patterns.js), componentes y campos (pieces.js), con su ficha de uso y
+  // comportamiento (guia.js, extraída de m3.material.io). Las pantallas sustituyen el patrón del
+  // dispositivo; los componentes y campos se insertan como un grupo más.
+  const GUIA = window.PizarraGuia || { layout: { patrones: {} }, componentes: {}, campos: {} };
+  const PIEZAS = {}; for (const p of (window.PizarraPiezas && window.PizarraPiezas.list) || []) PIEZAS[p.id] = p;
+  const CANON = { 'lista-detalle': 'list-detail', 'panel-apoyo': 'supporting-pane', 'feed': 'feed' };
+  const lib = document.getElementById('library'), libBtn = document.getElementById('lib-btn');
+  const libList = document.getElementById('lib-list'), libDetail = document.getElementById('lib-detail'), libSearch = document.getElementById('lib-search');
+  let libTab = 'pantalla', libOpen = null;
+  const fold = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Ficha unificada de cualquier patrón
+  function ficha(kind, id) {
+    if (kind === 'pantalla') {
+      const p = PATTERNS[id], g = GUIA.layout.patrones[CANON[id]] || {};
+      return { kind, id, name: p.name, cat: p.cat, m3: g.nombreM3 ? `${g.nombreM3} (layout canónico)` : p.info.m3, url: g.url,
+        que: g.que, cuandoUsar: g.cuandoUsar, cuandoNo: g.cuandoNo, comportamiento: g.comportamiento,
+        compacto: g.compacto || p.info.compacto, medio: g.medio, expandido: g.expandido || p.info.expandido, componentes: p.info.componentes, notas: g.notas };
+    }
+    const pz = PIEZAS[id];
+    if (pz.kind === 'componente') { const g = GUIA.componentes[id] || {}; return { kind: 'componente', id, name: pz.name, cat: pz.cat, m3: g.nombreM3, url: g.url, que: g.que, variantes: g.variantes, cuandoUsar: g.cuandoUsar, cuandoNo: g.cuandoNo, comportamiento: g.comportamiento, compacto: g.compacto, expandido: g.expandido, accesibilidad: g.accesibilidad }; }
+    const f = pz.ficha || {};
+    return { kind: 'campo', id, name: pz.name, cat: pz.cat, m3: 'Text fields, menus, pickers (guía de campos)', url: 'https://m3.material.io/components/text-fields/guidelines',
+      que: f.que, formato: f.formato, comportamiento: f.comportamiento, compacto: f.compacto, expandido: f.expandido, html: f.html };
+  }
+  function entries(kind) {
+    if (kind === 'pantalla') return Object.values(PATTERNS).map(p => ({ kind, id: p.id, name: p.name, cat: p.cat, sub: (GUIA.layout.patrones[CANON[p.id]] || {}).nombreM3 || p.info.m3 }));
+    return Object.values(PIEZAS).filter(p => p.kind === kind).map(p => ({ kind, id: p.id, name: p.name, cat: p.cat, sub: p.kind === 'componente' ? (GUIA.componentes[p.id] || {}).nombreM3 || '' : (p.ficha && p.ficha.html) || '' }));
+  }
+  const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v); } for (const k of kids) if (k != null) e.append(k); return e; };
+  function renderLibrary() {
+    if (lib.hidden) return;
+    document.querySelectorAll('.lib-tabs [data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === libTab)));
+    if (libOpen) { renderDetail(); return; }
+    libDetail.hidden = true; libList.hidden = false; libList.replaceChildren();
+    const q = fold(libSearch.value.trim());
+    const list = q ? ['pantalla', 'componente', 'campo'].flatMap(entries).filter(e => fold([e.name, e.sub, e.cat, e.id].join(' ')).includes(q)) : entries(libTab);
+    if (libTab === 'pantalla' && !q && GUIA.layout.fundamentos) {
+      const f = GUIA.layout.fundamentos, t = el('table', {}, el('tr', {}, el('th', {}, 'Clase'), el('th', {}, 'Ancho'), el('th', {}, 'Paneles'), el('th', {}, 'Navegación')));
+      for (const k of f.clasesTamano || []) t.append(el('tr', {}, el('td', {}, k.nombre), el('td', {}, k.rango), el('td', {}, k.paneles || ''), el('td', {}, k.navegacion || '')));
+      libList.append(el('details', { class: 'lib-info' }, el('summary', {}, 'Diseño adaptable: clases de tamaño de ventana'), t, el('ul', {}, ...(f.reglas || []).map(r => el('li', {}, r)))));
+    }
+    if (!list.length) { libList.append(el('p', { class: 'lib-empty' }, 'No hay patrones con ese nombre. Prueba con otra palabra (p. ej. «fecha», «barra», «menú»).')); return; }
+    let cat = null;
+    const label = { pantalla: 'Pantallas', componente: 'Componentes', campo: 'Campos y datos' };
+    for (const e of list) {
+      const head = q ? label[e.kind] + ' · ' + e.cat : e.cat;
+      if (head !== cat) { cat = head; libList.append(el('h3', {}, head)); }
+      const b = el('button', { type: 'button', class: 'lib-item' + (e.kind === 'pantalla' && state.pattern === e.id ? ' on' : ''), onclick: () => { libOpen = { kind: e.kind, id: e.id }; renderLibrary(); } }, el('b', {}, e.name), e.sub ? el('small', {}, e.sub) : null);
+      libList.append(b);
+    }
+  }
+  function renderDetail() {
+    const f = ficha(libOpen.kind, libOpen.id);
+    libList.hidden = true; libDetail.hidden = false; libDetail.replaceChildren(); libDetail.className = 'lib-body lib-detail';
+    const back = el('button', { type: 'button', class: 'tbtn', 'aria-label': 'Volver a la lista', title: 'Volver', onclick: () => { libOpen = null; renderLibrary(); } });
+    back.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>';
+    libDetail.append(el('div', { class: 'lib-detail-head' }, back, el('h4', {}, f.name)));
+    if (f.m3) libDetail.append(f.url ? el('a', { class: 'm3', href: f.url, target: '_blank', rel: 'noopener' }, 'Material 3: ' + f.m3 + ' ↗') : el('span', { class: 'm3' }, 'Material 3: ' + f.m3));
+    const acts = el('div', { class: 'lib-actions' });
+    if (f.kind === 'pantalla') {
+      if (state.pattern === f.id) acts.append(el('button', { type: 'button', class: 'btn ghost', onclick: () => { usePattern(''); } }, 'Quitar de la pizarra'));
+      else acts.append(el('button', { type: 'button', class: 'btn', onclick: () => { usePattern(f.id); setStatus(`Pantalla «${f.name}» en la pizarra.`, 'ok'); } }, 'Usar esta pantalla'));
+    } else acts.append(el('button', { type: 'button', class: 'btn', onclick: () => insertPiece(f.id) }, 'Insertar en el dispositivo'));
+    libDetail.append(acts);
+    const sec = (title, v) => { if (!v || (Array.isArray(v) && !v.length)) return; libDetail.append(el('section', {}, el('h5', {}, title), Array.isArray(v) ? el('ul', {}, ...v.map(x => el('li', {}, x))) : el('p', {}, v))); };
+    sec('Qué es', f.que); sec('Variantes', f.variantes); sec('Cuándo usarlo', f.cuandoUsar); sec('Cuándo no', f.cuandoNo);
+    sec('Comportamiento', f.comportamiento); sec('Formato', f.formato);
+    sec('Compacto (< 600 dp, móvil en vertical)', f.compacto); sec('Mediano (600–839 dp)', f.medio); sec('Expandido (≥ 840 dp, horizontal, tableta, escritorio)', f.expandido);
+    sec('Componentes', f.componentes); sec('Accesibilidad', f.accesibilidad); sec('Notas', f.notas);
+    if (f.html) libDetail.append(el('section', {}, el('h5', {}, 'En HTML'), el('p', {}, el('code', {}, f.html))));
+    if (f.kind === 'campo' && GUIA.campos) {
+      const g = GUIA.campos, d = el('details', { class: 'lib-info' }, el('summary', {}, 'Reglas comunes de los campos (Material 3)'));
+      for (const [k, t] of [['etiqueta', 'Etiqueta'], ['textoAyuda', 'Texto de ayuda'], ['error', 'Error'], ['prefijoSufijo', 'Prefijo y sufijo'], ['obligatorio', 'Obligatorio'], ['tipoEntrada', 'Tipo de entrada']]) if (g[k]) d.append(el('p', {}, el('b', {}, t + ': '), g[k].join(' ')));
+      libDetail.append(d);
+    }
+    libDetail.scrollTop = 0;
+  }
+  function openLibrary(v) {
+    lib.hidden = !v; libBtn.setAttribute('aria-expanded', String(v));
+    if (v) { renderLibrary(); libSearch.focus(); } else libBtn.focus();
+  }
+  libBtn.addEventListener('click', () => openLibrary(lib.hidden));
+  document.getElementById('lib-close').addEventListener('click', () => openLibrary(false));
+  document.querySelectorAll('.lib-tabs [data-tab]').forEach(b => b.addEventListener('click', () => { libTab = b.dataset.tab; libOpen = null; libSearch.value = ''; renderLibrary(); }));
+  libSearch.addEventListener('input', () => { libOpen = null; renderLibrary(); });
+  lib.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); openLibrary(false); } });
+
+  // Inserta un componente o campo en el dispositivo, en su sitio, como grupo seleccionado
+  function insertPiece(id) {
+    const pz = PIEZAS[id]; if (!pz || !window.PizarraBoceto) return;
+    closeText(true);
+    const s = lay.screens[0] || { x: 0, y: 0, w: W, h: H }, mode = state.orient === 'v' ? 'compacto' : 'expandido';
+    const [w, h] = pz.size({ w: s.w, h: s.h }, mode);
+    const at = {
+      top: [s.x, s.y], bottom: [s.x, s.y + s.h - h], left: [s.x, s.y + s.h - h], right: [s.x + s.w - w, s.y + s.h - h],
+      fab: [s.x + s.w - w - 32, s.y + s.h - h - 32], bottomInset: [s.x + (s.w - w) / 2, s.y + s.h - h - 48],
+      topInset: [s.x + (s.w - w) / 2, s.y + 16], belowBar: [s.x, s.y + HEADER],
+    }[pz.place] || [s.x + (s.w - w) / 2, s.y + Math.max(HEADER, (s.h - h) / 2)];
+    const r = { x: Math.round(at[0]), y: Math.round(at[1]), w, h };
+    const shapes = window.PizarraBoceto.generatePiece(pz, r, mode, { x: s.x, y: s.y, w: s.w, h: s.h });
+    const g = newGroupId(); shapes.forEach(sh => { sh.g = g; sh.pz = id; });
+    mutate(() => { state.shapes.push(...shapes); });
+    document.querySelector('[data-tool="select"]').click(); selected = shapes; render();
+    setStatus(`«${pz.name}» insertado. Arrástralo para colocarlo.`, 'ok');
+  }
   const pressOrient = () => document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === state.orient)));
   function setOrient(o) {
     if (o === 'c' && !capture) o = 'h';
@@ -429,7 +533,7 @@
   document.getElementById('undo').addEventListener('click', undo);
   document.getElementById('redo').addEventListener('click', redo);
   document.addEventListener('keydown', (e) => {
-    if (e.target.closest && e.target.closest('input, textarea, select')) return;
+    if (e.target.closest && e.target.closest('input, textarea, select, #library, #ctx-menu')) return;
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
@@ -570,6 +674,21 @@
         expandido: { cuando: 'ventana mediana o expandida (≥ 600 dp, móvil en horizontal, tableta, escritorio)', comportamiento: p.info.expandido, pantallas: screensOf(p, 'expandido') },
       };
     }
+    // Componentes y campos insertados (un grupo por pieza)
+    const seen = new Set(), pieces = [];
+    for (const sh of state.shapes) {
+      if (!sh.pz || seen.has(sh.g)) continue; seen.add(sh.g);
+      const objs = state.shapes.filter(o => o.g === sh.g), bs = objs.map(bbox);
+      const b = [Math.min(...bs.map(v => v[0])), Math.min(...bs.map(v => v[1])), Math.max(...bs.map(v => v[2])), Math.max(...bs.map(v => v[3]))];
+      const scs = lay.screens.length ? lay.screens : [{ x: 0, y: 0, w: W, h: H }], cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const k = scs.findIndex(sc => cx >= sc.x && cx <= sc.x + sc.w && cy >= sc.y && cy <= sc.y + sc.h), sc = scs[k] || scs[0];
+      const f = ficha(PIEZAS[sh.pz].kind, sh.pz);
+      pieces.push({ id: f.id, nombre: f.name, tipo: f.kind, materialDesign3: f.m3, ...(f.url ? { guia: f.url } : {}), pantalla: k >= 0 ? k + 1 : null, zona: k >= 0 ? zone(cx, cy, sc) : 'fuera de las pantallas',
+        xDp: dp(b[0] - sc.x), yDp: dp(b[1] - sc.y), anchoDp: dp(b[2] - b[0]), altoDp: dp(b[3] - b[1]),
+        uso: f.que, comportamiento: (f.comportamiento || []).slice(0, 4), ...(f.formato ? { formato: f.formato } : {}), ...(f.html ? { html: f.html } : {}),
+        ...(f.compacto ? { compacto: f.compacto } : {}), ...(f.expandido ? { expandido: f.expandido } : {}) });
+    }
+    if (pieces.length) spec.componentes = pieces;
     spec.estilo = 'No incluido: el patrón solo define estructura y comportamiento. Usa el tema y los estilos del proyecto (colores, tipografía, formas); los grises y el trazo a mano son del boceto.';
     spec.anotaciones = notes;
 
@@ -590,12 +709,24 @@
     } else {
       L.push('Boceto libre, sin patrón de base.', '');
     }
+    if (pieces.length) {
+      L.push('**Componentes y campos que he colocado** (sigue su guía de Material 3):', '');
+      pieces.forEach((pc, i) => {
+        L.push(`${i + 1}. **${pc.nombre}** (${pc.materialDesign3 || pc.tipo})${pc.pantalla ? `, pantalla ${pc.pantalla}` : ''}, ${pc.zona}.`);
+        if (pc.uso) L.push(`   - Uso: ${pc.uso}`);
+        for (const c of pc.comportamiento) L.push(`   - ${c}`);
+        for (const c of pc.formato || []) L.push(`   - Formato: ${c}`);
+        if (pc.html) L.push(`   - HTML: \`${pc.html}\``);
+        if (pc.compacto || pc.expandido) L.push(`   - Compacto: ${pc.compacto || 'igual'} · Expandido: ${pc.expandido || 'igual'}`);
+      });
+      L.push('');
+    }
     L.push(`El boceto está dibujado en **${spec.boceto.vista}**${state.orient !== 'c' ? ` (modo ${mode}, ${spec.boceto.dispositivoDp.join(' × ')} dp)` : ''}.`);
     if (notes.length) {
       L.push(p ? `Mis anotaciones se refieren a ese modo; aplica lo que pidan también al otro modo cuando tenga sentido:` : 'Mis anotaciones:', '');
       notes.forEach((a, i) => L.push(`${i + 1}. ${a.tipo[0].toUpperCase() + a.tipo.slice(1)}${a.texto ? ` «${a.texto.replace(/\n/g, ' ')}»` : ''} en ${a.color}, ${a.pantalla ? `pantalla ${a.pantalla}, ` : ''}${a.zona}.`));
       if (notes.some(a => a.color === 'rojo')) L.push('', 'Lo marcado en rojo es lo que hay que cambiar.');
-    } else L.push('No hay anotaciones: implementa el patrón tal cual.');
+    } else L.push(p ? 'No hay anotaciones: implementa el patrón tal cual.' : 'No hay más anotaciones.');
     L.push('', 'Si pego también la imagen del boceto, úsala como referencia visual; la estructura y los modos son los de esta descripción.', '', '```json', JSON.stringify(spec, null, 2), '```');
     return L.join('\n');
   }
