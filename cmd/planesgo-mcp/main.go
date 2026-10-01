@@ -847,7 +847,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 	}
 
 	client, cfg, err := newClient(customPath)
-	if err != nil && name != "planesgo_set_project" {
+	if err != nil && name != "planesgo_set_project" && name != "planesgo_search_projects" {
 		return ToolCallResult{
 			Content: []ToolContent{{
 				Type: "text",
