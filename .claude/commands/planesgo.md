@@ -1,6 +1,6 @@
 ---
-description: Revisa el estado del tracking de PlanesGo en esta sesión, o vincula directamente un proyecto si se pasa un texto de búsqueda como argumento
-argument-hint: [texto de búsqueda del proyecto de Odoo (opcional)]
+description: Revisa el estado del tracking de PlanesGo, vincula un proyecto por búsqueda, imputa horas manuales (+N) o actualiza todo (--update)
+argument-hint: [texto de búsqueda | +N horas | --update]
 ---
 
 Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
@@ -15,9 +15,17 @@ curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/i
 
 Esto reconstruye en un solo paso el hook global, el comando `/planesgo`, el binario `planesgo-mcp` y el servidor MCP, todos con la versión actual de `master`. Muestra la salida real del instalador (no la resumas) y termina con una frase: todo actualizado, o qué paso concreto falló. Si el servidor MCP se acaba de registrar por primera vez, recuerda que no se carga en caliente — hace falta una sesión nueva para que la herramienta `mcp__planesgo__*` aparezca disponible.
 
+## Caso A1: argumento es "+N" → latido manual de N horas hoy
+
+Si "$ARGUMENTS" coincide con el patrón `+<número>` (ej. `+3.5`, `+1`, `+0.5`; con punto decimal, no coma), interpreta el número como horas a imputar HOY en el proyecto que YA esté vinculado en esta sesión. Este caso no busca ni vincula ningún proyecto nuevo, es solo para imputar horas sobre lo que ya hay:
+
+1. Comprueba que el proyecto de esta sesión YA está vinculado (existe `.planesgo.json` con `odoo_project_id > 0` en la raíz del repo git o del directorio de trabajo). Si NO está vinculado, responde solo "❌ Esta sesión no tiene ningún proyecto vinculado todavía. Usa `/planesgo <texto de búsqueda>` primero." y para aquí, sin ejecutar nada más.
+2. Si está vinculado, ejecuta `planesgo-mcp --add-hours <N>` (o la herramienta MCP `planesgo_add_hours` con `{"hours": <N>}`). Esto crea el registro de hoy con esas horas si no existía, o se las añade al que ya hubiera (no lo sobrescribe).
+3. Responde en 1-2 líneas con el resultado tal cual lo devuelva el comando (nombre del proyecto, tarea, horas totales). No narres el proceso ni menciones otros puntos del diagnóstico.
+
 ## Caso A: con argumento → vincular directamente
 
-Si "$ARGUMENTS" NO está vacío (y no es `--update`, ya cubierto arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
+Si "$ARGUMENTS" NO está vacío (y no es `--update` ni `+N`, ya cubiertos arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
 
 1. Determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo), en silencio.
 2. Busca con `planesgo-mcp --search-project "$ARGUMENTS"` (o la herramienta MCP `planesgo_search_projects` con `{"query": "$ARGUMENTS"}`), en silencio.

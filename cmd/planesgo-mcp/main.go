@@ -26,6 +26,11 @@ const (
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
 	TaskTypeDesarrollo     = "Desarrollo"
 	TaskTypePruebas        = "Pruebas"
+
+	// TASK_NAME_DEFAULT es el mismo nombre de tarea que usa el hook de Claude Code
+	// (planesgo_claude_hook.py) para los latidos automáticos, así las horas imputadas
+	// manualmente con --add-hours caen en la misma tarea en vez de crear una aparte.
+	TASK_NAME_DEFAULT = "Claude Code - Sesión IA"
 )
 
 var CanonicalTaskTypes = []string{
@@ -789,6 +794,59 @@ func (c *PlanesGoClient) SendTaskActionWithTokens(action, taskName string, taskI
 	return res, nil
 }
 
+// SendHeartbeatWithElapsed envía una acción con un número explícito de segundos
+// transcurridos, en vez de depender del tiempo real entre latidos. La usa
+// --add-hours para imputar tiempo retroactivo de un solo golpe: crea el
+// registro de hoy si no existía, o añade esas horas al que ya hubiera.
+func (c *PlanesGoClient) SendHeartbeatWithElapsed(action, taskName string, taskID, projectID int, projectName, description, taskType string, elapsedSeconds int, aiModel string) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("%s/antigravity/update_tasks", c.BaseURL)
+
+	payload := map[string]interface{}{
+		"action":       action,
+		"task_name":    taskName,
+		"task_id":      taskID,
+		"project_id":   projectID,
+		"project_name": projectName,
+		"description":  description,
+		"task_type":    taskType,
+		"token":        c.Token,
+	}
+	if elapsedSeconds > 0 {
+		payload["elapsed_seconds"] = elapsedSeconds
+	}
+	if aiModel != "" {
+		payload["ai_model"] = aiModel
+	}
+
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"Content-Type":        "application/json",
+		"X-Antigravity-Token": c.Token,
+	}
+
+	body, statusCode, err := c.doWithRetry(http.MethodPost, endpoint, jsonBytes, headers)
+	if err != nil {
+		return nil, err
+	}
+
+	var res map[string]interface{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
+	}
+	if statusCode != http.StatusOK {
+		errMsg := "error desconocido"
+		if msg, ok := res["error"].(string); ok {
+			errMsg = msg
+		}
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
+	}
+	return res, nil
+}
+
 // GetTicket consulta los datos de un ticket por referencia o ID
 func (c *PlanesGoClient) GetTicket(ticketRef string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/api/tickets?ref=%s", c.BaseURL, url.QueryEscape(ticketRef))
@@ -1122,6 +1180,90 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		msg := fmt.Sprintf("✅ %s%s | Tarea: %s", projStr, ticketInfoStr, taskName)
 		return ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: msg}},
+			IsError: false,
+		}
+
+	case "planesgo_add_hours":
+		if cfg == nil || projID <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: "❌ Proyecto no vinculado (.planesgo.json requerido)",
+				}},
+				IsError: true,
+			}
+		}
+
+		hoursVal := 0.0
+		if val, ok := args["hours"]; ok {
+			if f, ok := val.(float64); ok {
+				hoursVal = f
+			}
+		}
+		if hoursVal <= 0 {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: "❌ Campo 'hours' requerido y debe ser > 0"}},
+				IsError: true,
+			}
+		}
+		if hoursVal > 24 {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: "❌ 'hours' no puede superar 24 en una sola llamada"}},
+				IsError: true,
+			}
+		}
+
+		taskName, _ := args["task_name"].(string)
+		if taskName == "" {
+			taskName = TASK_NAME_DEFAULT
+		}
+		taskType, _ := args["task_type"].(string)
+		if taskType == "" {
+			taskType = TaskTypeDesarrollo
+		}
+		desc, _ := args["description"].(string)
+		if desc == "" {
+			desc = fmt.Sprintf("Horas imputadas manualmente (+%.2fh)", hoursVal)
+		}
+		aiModel, _ := args["ai_model"].(string)
+		if aiModel == "" {
+			aiModel = "Claude Code"
+		}
+		taskID := 0
+		if val, ok := args["task_id"]; ok {
+			if idFloat, ok := val.(float64); ok {
+				taskID = int(idFloat)
+			}
+		}
+		if taskID <= 0 && cfg != nil && cfg.OdooTaskID > 0 {
+			taskID = cfg.OdooTaskID
+		}
+
+		canonicalType, normalizedTaskName := NormalizeTaskType(taskName, desc, taskType)
+		elapsedSecs := int(hoursVal * 3600)
+
+		if _, err := client.SendHeartbeatWithElapsed("heartbeat", normalizedTaskName, taskID, projID, projName, desc, canonicalType, elapsedSecs, aiModel); err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Error al imputar horas: %v", err)}},
+				IsError: true,
+			}
+		}
+
+		// Se detiene inmediatamente para dejar el registro cerrado con exactamente esas horas,
+		// en vez de un cronómetro corriendo que luego siga acumulando tiempo real sin querer.
+		stopWarning := ""
+		if _, err := client.SendHeartbeatWithElapsed("stop", normalizedTaskName, taskID, projID, projName, desc, canonicalType, 0, aiModel); err != nil {
+			stopWarning = fmt.Sprintf(" (aviso: no se pudo cerrar el cronómetro automáticamente: %v)", err)
+		}
+
+		projStr := projName
+		if projID > 0 && projName != "" {
+			projStr = fmt.Sprintf("%s (ID: %d)", projName, projID)
+		}
+
+		output := fmt.Sprintf("✅ +%.2fh imputadas hoy en %s | %s%s", hoursVal, projStr, normalizedTaskName, stopWarning)
+		return ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: output}},
 			IsError: false,
 		}
 
@@ -1692,6 +1834,37 @@ func getToolsDefinition() []map[string]interface{} {
 			},
 		},
 		{
+			"name":        "planesgo_add_hours",
+			"description": "Imputa manualmente N horas de hoy en el proyecto ya vinculado (latido retroactivo de un solo golpe): crea el registro de hoy si no existía, o añade esas horas al que ya hubiera. No busca ni vincula ningún proyecto.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"hours": map[string]interface{}{
+						"type":        "number",
+						"description": "Horas a imputar hoy, en decimal (ej. 3.5). Máximo 24 por llamada.",
+					},
+					"task_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre de la tarea (opcional, por defecto 'Claude Code - Sesión IA', la misma que usan los latidos automáticos)",
+					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"Análisis y diseño", "Desarrollo", "Pruebas"},
+						"description": "Tipo normalizado de tarea (opcional, por defecto Desarrollo)",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "Resumen breve del trabajo para el parte de horas en Odoo (opcional)",
+					},
+					"project_path": map[string]interface{}{
+						"type":        "string",
+						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
+					},
+				},
+				"required": []string{"hours"},
+			},
+		},
+		{
 			"name":        "planesgo_beat",
 			"description": "Envía un latido periódico de telemetría e imputación en tiempo real a PlanesGo y Odoo para la tarea en curso.",
 			"inputSchema": map[string]interface{}{
@@ -1992,6 +2165,7 @@ func sendResponse(resp JSONRPCResponse) {
 
 func main() {
 	checkFlag := flag.Bool("check", false, "Ejecuta verificación de Fase 0 (como planesgo-track check)")
+	addHoursFlag := flag.Float64("add-hours", 0, "Imputa manualmente N horas de hoy en el proyecto ya vinculado (crea el registro si no existe, o lo incrementa)")
 	beatFlag := flag.Bool("beat", false, "Envía un latido para la tarea indicada")
 	stopFlag := flag.Bool("stop", false, "Detiene la tarea indicada")
 	listFlag := flag.Bool("list", false, "Lista tareas de Odoo para el proyecto actual")
@@ -2161,6 +2335,33 @@ func main() {
 			args["project_path"] = *pathFlag
 		}
 		res := executeToolCall("planesgo_list_tasks", args)
+		if len(res.Content) > 0 {
+			fmt.Println(res.Content[0].Text)
+		}
+		if res.IsError {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *addHoursFlag > 0 {
+		args := map[string]interface{}{"hours": *addHoursFlag}
+		if *taskFlag != "" {
+			args["task_name"] = *taskFlag
+		}
+		if *typeFlag != "" {
+			args["task_type"] = *typeFlag
+		}
+		if *descFlag != "" {
+			args["description"] = *descFlag
+		}
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		if *modelFlag != "" {
+			args["ai_model"] = *modelFlag
+		}
+		res := executeToolCall("planesgo_add_hours", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}
