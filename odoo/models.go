@@ -150,6 +150,25 @@ func (t *TimesheetEntry) HoursHHMM() string {
 	return fmt.Sprintf("%d:%02d", hours, mins)
 }
 
+// CreateTimeLocal devuelve la hora (HH:MM) en que se creó la imputación en Odoo,
+// convertida de UTC a hora de Madrid. Vacío si no hay create_date o no se puede
+// interpretar (el campo "date" de Odoo es solo fecha, sin hora, así que esta es
+// la única forma de mostrar a qué hora del día se registró cada entrada).
+func (t *TimesheetEntry) CreateTimeLocal() string {
+	if t.CreateDate == "" {
+		return ""
+	}
+	parsed, err := time.Parse("2006-01-02 15:04:05", t.CreateDate)
+	if err != nil {
+		return ""
+	}
+	loc, err := time.LoadLocation("Europe/Madrid")
+	if err != nil {
+		loc = time.UTC
+	}
+	return parsed.In(loc).Format("15:04")
+}
+
 // IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.
 func (t *TimesheetEntry) IsAntigravity() bool {
 	for _, tag := range t.Tags {

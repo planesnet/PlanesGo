@@ -65,3 +65,22 @@ func TestModelsCleanTaskNameAndOrigin(t *testing.T) {
 		t.Errorf("is_claude esperado true en JSON serializado, obtenido: %v", unmarshaled["is_claude"])
 	}
 }
+
+func TestCreateTimeLocal(t *testing.T) {
+	cases := []struct {
+		name       string
+		createDate string
+		want       string
+	}{
+		{"UTC invierno a Madrid (+1h)", "2026-01-15 10:30:00", "11:30"},
+		{"UTC verano a Madrid (+2h, DST)", "2026-07-15 10:30:00", "12:30"},
+		{"vacío", "", ""},
+		{"formato inválido", "no es una fecha", ""},
+	}
+	for _, c := range cases {
+		ts := TimesheetEntry{CreateDate: c.createDate}
+		if got := ts.CreateTimeLocal(); got != c.want {
+			t.Errorf("%s: CreateTimeLocal() = %q, esperado %q", c.name, got, c.want)
+		}
+	}
+}
