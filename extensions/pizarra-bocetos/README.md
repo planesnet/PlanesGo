@@ -14,7 +14,8 @@ imagen (por ejemplo, pegándola en un chat).
 - Pulsa el icono: se abre una paleta con **Pizarra** y un enlace a **PlanesGo**.
 - **Pizarra** abre la pizarra en una pestaña nueva. Si estabas en una página web, arranca con el
   fondo **Captura** (una imagen de esa página) para marcar sobre ella.
-- Fondos (solo icono): móvil en vertical, captura o móvil en horizontal, con rejilla.
+- **Orientación** (un solo botón, tecla O): muestra la actual y alterna entre móvil en vertical y
+  en horizontal. Si abriste la pizarra desde una página, el botón Captura usa su imagen de fondo.
 - El lienzo es un tapete con el dispositivo dibujado encima.
 - **Patrones** (botón de la barra): biblioteca de patrones de Material Design 3 con buscador y
   tres secciones. Cada patrón tiene su **ficha de uso y comportamiento** (qué es, variantes,
@@ -38,6 +39,9 @@ imagen (por ejemplo, pegándola en un chat).
   texto (T), caja de texto (B) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
 - **Caja de texto**: arrastra para crearla y escribe dentro; el texto se ajusta al ancho de la caja.
   Doble clic sobre una caja o un texto (o clic con la herramienta de texto) para cambiar su texto.
+- **Grupos anidados**: un grupo puede contener otros (pantalla › formulario › campo › icono).
+  Desagrupar quita solo el nivel exterior y deja los de dentro agrupados; repítelo para bajar de
+  nivel. Agrupar envuelve lo seleccionado (grupos incluidos) en un nivel nuevo.
 - **Selección y grupos**: clic sobre un objeto de un grupo selecciona el grupo entero; Mayús+clic
   añade o quita; arrastrar en vacío selecciona por área; Ctrl+A selecciona todo. Clic derecho abre
   el **menú contextual**: Agrupar (Ctrl+G), Desagrupar (Ctrl+Mayús+G), Traer al frente, Enviar al

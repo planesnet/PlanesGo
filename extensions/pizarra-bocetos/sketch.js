@@ -41,10 +41,14 @@
   class Recorder {
     constructor(clip, rnd) {
       this.out = []; this.stack = []; this.path = []; this.cur = null; this.clipR = clip; this.rnd = rnd;
+      this.groups = []; this.gid = 0; this.gbase = 's' + Date.now().toString(36) + Math.floor(rnd() * 1e6).toString(36);
       this.fillStyle = '#000'; this.strokeStyle = '#000'; this.lineWidth = 1; this.font = '10px sans-serif';
       this.textAlign = 'left'; this.textBaseline = 'alphabetic';
       this.m = document.createElement('canvas').getContext('2d');
     }
+    // Subgrupos: las piezas de dibujo (patterns.js, pieces.js) abren y cierran un grupo por pieza
+    beginGroup() { this.groups.push(this.gbase + '-' + (++this.gid)); }
+    endGroup() { this.groups.pop(); }
     save() { this.stack.push({ fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline, clipR: this.clipR }); }
     restore() { const s = this.stack.pop(); if (s) Object.assign(this, s); }
     beginPath() { this.path = []; this.cur = null; }
@@ -126,7 +130,7 @@
       if (Math.hypot(s[2] - s[0], s[3] - s[1]) < 2) return;
       this.push({ type: 'line', x1: s[0], y1: s[1], x2: s[2], y2: s[3], color, size });
     }
-    push(s) { this.out.push(s); }
+    push(s) { if (this.groups.length) s.gs = this.groups.slice(); this.out.push(s); }
     // Quita duplicados (relleno + borde de la misma figura): se queda con el último
     done() {
       const seen = new Map();
@@ -136,8 +140,14 @@
         if (prev && prev.fill && !s.fill) s.fill = prev.fill;
         seen.set(key, s);
       }
-      const keep = new Set(seen.values());
-      return this.out.filter(s => keep.has(s)).map(s => { if (s.type === 'text') { delete s.w; delete s.h; } return s; });
+      const keep = new Set(seen.values()), out = this.out.filter(s => keep.has(s));
+      // Un grupo con un solo objeto no aporta nada: se quita ese nivel
+      const count = {}; for (const s of out) for (const g of s.gs || []) count[g] = (count[g] || 0) + 1;
+      return out.map(s => {
+        if (s.type === 'text') { delete s.w; delete s.h; }
+        if (s.gs) { s.gs = s.gs.filter(g => count[g] > 1); if (!s.gs.length) delete s.gs; }
+        return s;
+      });
     }
   }
 
@@ -149,16 +159,19 @@
     for (const s of screens) {
       const full = { x: s.x, y: s.y, w: s.w, h: s.h }, rec = new Recorder(full, rnd), spec = s.spec;
       let r = full;
+      if (screens.length > 1) rec.beginGroup();
       if (spec.bar !== false) { P.appBar(rec, { x: s.x, y: s.y, w: s.w, h: header }, spec.bar || {}); r = { x: s.x, y: s.y + header, w: s.w, h: s.h - header }; }
       anchors.push((spec.draw && spec.draw(rec, r, full)) || null);
+      if (screens.length > 1) rec.endGroup();
       out.push(...rec.done());
     }
     // Flechas entre pantallas, con su texto
     screens.forEach((s, i) => {
       if (!i) return; const prev = screens[i - 1], a = anchors[i - 1] || [prev.x + prev.w, prev.y + prev.h / 2];
-      out.push({ type: 'arrow', x1: a[0] + 14, y1: a[1], x2: s.x - 10, y2: a[1], color: INK.dark, size: 3 });
+      const lg = ['enlace' + i + '-' + Math.floor(rnd() * 1e9).toString(36)];
+      out.push({ type: 'arrow', x1: a[0] + 14, y1: a[1], x2: s.x - 10, y2: a[1], color: INK.dark, size: 3, gs: lg });
       const label = prev.spec.link || '';
-      if (label) { const px = 22, m = document.createElement('canvas').getContext('2d'); m.font = `${px}px ${HAND}`; const w = m.measureText(label).width; out.push({ type: 'text', text: label, x: (a[0] + s.x) / 2 - w / 2, y: a[1] - 44, color: INK.dark, size: 2, k: 1 }); }
+      if (label) { const px = 22, m = document.createElement('canvas').getContext('2d'); m.font = `${px}px ${HAND}`; const w = m.measureText(label).width; out.push({ type: 'text', text: label, x: (a[0] + s.x) / 2 - w / 2, y: a[1] - 44, color: INK.dark, size: 2, k: 1, gs: lg }); }
     });
     return out.map(sh => Object.assign(sh, { hand: true, seed: Math.floor(rnd() * 1e9) }));
   }

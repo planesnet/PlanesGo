@@ -208,7 +208,7 @@
     const bs = selected.map(bbox);
     return [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])), Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
   }
-  const oneGroup = () => selected.length > 1 && selected[0].g && selected.every(s => s.g === selected[0].g) && state.shapes.filter(s => s.g === selected[0].g).length === selected.length;
+  const oneGroup = () => { const g = top(selected[0] || {}); return selected.length > 1 && !!g && selected.every(s => top(s) === g) && state.shapes.filter(s => top(s) === g).length === selected.length; };
   const handles = () => { const [x1, y1, x2, y2] = selBox(); return [['nw', x1 - PAD, y1 - PAD], ['ne', x2 + PAD, y1 - PAD], ['sw', x1 - PAD, y2 + PAD], ['se', x2 + PAD, y2 + PAD]]; };
   function pickHandle(x, y) {
     if (!(state.tool === 'select' && selected.length)) return null;
@@ -228,9 +228,12 @@
   const handleCursor = (h) => h ? (h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize') : 'default';
 
   function pick(x, y) { for (let i = state.shapes.length - 1; i >= 0; i--) if (hit(state.shapes[i], x, y)) return i; return -1; }
-  // Grupos: los objetos de un grupo comparten g. Los de un patrón llevan además pat mientras no
-  // se toquen: así, al cambiar de orientación, se regeneran para la nueva forma.
-  const members = (s) => s.g ? state.shapes.filter(o => o.g === s.g) : [s];
+  // Grupos anidados: cada objeto lleva gs, la lista de sus grupos de fuera hacia dentro
+  // (p. ej. [formulario, campo de búsqueda, icono]). Se selecciona y se mueve por el grupo
+  // exterior; desagrupar quita solo ese nivel y deja los de dentro. Los objetos de un patrón
+  // llevan además pat mientras no se toquen: así, al cambiar de orientación, se regeneran.
+  const top = (s) => (s.gs && s.gs[0]) || null;
+  const members = (s) => top(s) ? state.shapes.filter(o => top(o) === top(s)) : [s];
   function touch(objs) { for (const o of objs) for (const m of members(o)) delete m.pat; }
   const newGroupId = () => 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   function deleteSelected() {
@@ -238,9 +241,12 @@
     mutate(() => { touch(del); state.shapes = state.shapes.filter(s => !del.includes(s)); });
   }
   const canGroup = () => selected.length > 1 && !oneGroup();
-  const canUngroup = () => selected.some(s => s.g);
-  function groupSelected() { if (!canGroup()) return; const g = newGroupId(), objs = selected; mutate(() => { touch(objs); objs.forEach(s => { s.g = g; }); }); }
-  function ungroupSelected() { if (!canUngroup()) return; const objs = selected; mutate(() => { touch(objs); objs.forEach(s => { delete s.g; }); }); }
+  const canUngroup = () => selected.some(s => top(s));
+  function groupSelected() { if (!canGroup()) return; const g = newGroupId(), objs = selected; mutate(() => { touch(objs); objs.forEach(s => { s.gs = [g, ...(s.gs || [])]; }); }); }
+  function ungroupSelected() {
+    if (!canUngroup()) return; const objs = selected;
+    mutate(() => { touch(objs); objs.forEach(s => { if (s.gs && s.gs.length) { s.gs = s.gs.slice(1); if (!s.gs.length) delete s.gs; } }); });
+  }
   function reorder(front) {
     if (!selected.length) return; const objs = state.shapes.filter(s => selected.includes(s));
     mutate(() => { const rest = state.shapes.filter(s => !objs.includes(s)); state.shapes = front ? [...rest, ...objs] : [...objs, ...rest]; });
@@ -395,7 +401,7 @@
     if (!force && !state.shapes.some(s => s.pat)) return;
     const keep = state.shapes.filter(s => !s.pat);
     const gen = state.pattern && window.PizarraBoceto ? window.PizarraBoceto.generate(lay.screens, HEADER) : [];
-    const g = newGroupId(); gen.forEach(s => { s.g = g; s.pat = true; });
+    const g = newGroupId(); gen.forEach(s => { s.gs = [g, ...(s.gs || [])]; s.pat = true; });
     state.shapes = [...gen, ...keep];
     selected = gen.length && force ? gen : [];
   }
@@ -507,18 +513,29 @@
     }[pz.place] || [s.x + (s.w - w) / 2, s.y + Math.max(HEADER, (s.h - h) / 2)];
     const r = { x: Math.round(at[0]), y: Math.round(at[1]), w, h };
     const shapes = window.PizarraBoceto.generatePiece(pz, r, mode, { x: s.x, y: s.y, w: s.w, h: s.h });
-    const g = newGroupId(); shapes.forEach(sh => { sh.g = g; sh.pz = id; });
+    const g = newGroupId(); shapes.forEach(sh => { sh.gs = [g, ...(sh.gs || [])]; sh.pz = id; sh.pzg = g; });
     mutate(() => { state.shapes.push(...shapes); });
     document.querySelector('[data-tool="select"]').click(); selected = shapes; render();
     setStatus(`«${pz.name}» insertado. Arrástralo para colocarlo.`, 'ok');
   }
-  const pressOrient = () => document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === state.orient)));
+  // Un solo botón de orientación: muestra la actual y alterna vertical ↔ horizontal
+  const ORIENT_ICO = { v: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', h: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M18 11v2"/>' };
+  const orientBtn = document.getElementById('orient-btn');
+  function pressOrient() {
+    const o = state.orient === 'v' ? 'v' : 'h', name = o === 'v' ? 'vertical' : 'horizontal', next = o === 'v' ? 'horizontal' : 'vertical';
+    document.getElementById('orient-ico').innerHTML = ORIENT_ICO[o];
+    orientBtn.setAttribute('aria-pressed', String(state.orient !== 'c'));
+    orientBtn.setAttribute('aria-label', `Orientación: ${name}. Cambiar a ${next}`);
+    orientBtn.title = `Móvil en ${name} · pulsa para pasar a ${next} (O)`;
+    document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === state.orient)));
+  }
   function setOrient(o) {
     if (o === 'c' && !capture) o = 'h';
     closeText(true); selected = [];
     mutate(() => { state.orient = o; lay = layout(); placePattern(false); });
     pressOrient(); applyLayout();
   }
+  orientBtn.addEventListener('click', () => setOrient(state.orient === 'v' ? 'h' : 'v'));
   document.querySelectorAll('[data-orient]').forEach(b => b.addEventListener('click', () => { if (state.orient !== b.dataset.orient) setOrient(b.dataset.orient); }));
   const snapBtn = document.getElementById('snap');
   const setSnap = (v) => { state.snap = v; snapBtn.setAttribute('aria-pressed', String(v)); saveDraft(); };
@@ -540,6 +557,7 @@
     if ((e.ctrlKey || e.metaKey) && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); render(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); document.querySelector('[data-tool="select"]').click(); selected = state.shapes.slice(); render(); return; }
     if (!e.ctrlKey && !e.metaKey && k === 'g') { setSnap(!state.snap); return; }
+    if (!e.ctrlKey && !e.metaKey && k === 'o') { orientBtn.click(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (selected.length) { e.preventDefault(); deleteSelected(); } return; }
     if (e.key === 'Escape') { hideMenu(); selected = []; render(); return; }
     const map = { v: 'select', p: 'pen', r: 'rect', l: 'line', a: 'arrow', t: 'text', b: 'box', e: 'eraser' };
@@ -648,7 +666,7 @@
       a.pantalla = k >= 0 ? k + 1 : null; a.zona = k >= 0 ? zone(cx, cy, sc) : 'fuera de las pantallas';
       if (s.type === 'arrow' || s.type === 'line') { a.desdeDp = [dp(s.x1 - sc.x), dp(s.y1 - sc.y)]; a.hastaDp = [dp(s.x2 - sc.x), dp(s.y2 - sc.y)]; }
       else { a.xDp = dp(b[0] - sc.x); a.yDp = dp(b[1] - sc.y); a.anchoDp = dp(b[2] - b[0]); a.altoDp = dp(b[3] - b[1]); }
-      if (s.g) a.grupo = s.g;
+      if (top(s)) a.grupo = top(s);
       return a;
     });
   }
@@ -677,8 +695,8 @@
     // Componentes y campos insertados (un grupo por pieza)
     const seen = new Set(), pieces = [];
     for (const sh of state.shapes) {
-      if (!sh.pz || seen.has(sh.g)) continue; seen.add(sh.g);
-      const objs = state.shapes.filter(o => o.g === sh.g), bs = objs.map(bbox);
+      if (!sh.pz || seen.has(sh.pzg)) continue; seen.add(sh.pzg);
+      const objs = state.shapes.filter(o => o.pzg === sh.pzg), bs = objs.map(bbox);
       const b = [Math.min(...bs.map(v => v[0])), Math.min(...bs.map(v => v[1])), Math.max(...bs.map(v => v[2])), Math.max(...bs.map(v => v[3]))];
       const scs = lay.screens.length ? lay.screens : [{ x: 0, y: 0, w: W, h: H }], cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
       const k = scs.findIndex(sc => cx >= sc.x && cx <= sc.x + sc.w && cy >= sc.y && cy <= sc.y + sc.h), sc = scs[k] || scs[0];
@@ -762,6 +780,7 @@
       state.shapes = d.shapes; state.orient = d.orient === 'v' ? 'v' : 'h'; if (d.snap === false) state.snap = false;
       if (PATTERNS[d.pattern]) state.pattern = d.pattern;
       if (!d.v) state.shapes.forEach(sh => moveShape(sh, M, M)); // borradores anteriores al tapete
+      state.shapes.forEach(sh => { if (sh.g && !sh.gs) { sh.gs = [sh.g]; if (sh.pz) sh.pzg = sh.g; } delete sh.g; }); // grupos de un nivel → anidados
     }
   } catch (e) {}
   if (state.orient === 'c') state.orient = 'h';

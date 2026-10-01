@@ -368,6 +368,18 @@
     }
   }
 
+  // ── Subgrupos ──────────────────────────────────────────────────────────────────────────
+  // Al convertir el patrón en objetos (sketch.js), cada pieza queda en su propio grupo, anidado
+  // dentro del que la contiene: formulario > campo > icono. En un lienzo normal no hace nada.
+  const grouped = (fn) => function (c, ...args) { if (c.beginGroup) c.beginGroup(); try { return fn(c, ...args); } finally { if (c.endGroup) c.endGroup(); } };
+  icon = grouped(icon); ph = grouped(ph); textLines = grouped(textLines); button = grouped(button); fab = grouped(fab); toggle = grouped(toggle);
+  chip = grouped(chip); chips = grouped(chips); field = grouped(field); searchBar = grouped(searchBar); listRow = grouped(listRow); rows = grouped(rows);
+  card = grouped(card); grid = grouped(grid); appBar = grouped(appBar); navBar = grouped(navBar); rail = grouped(rail); drawer = grouped(drawer);
+  tabs = grouped(tabs); bottomAppBar = grouped(bottomAppBar); keyboard = grouped(keyboard); carousel = grouped(carousel); radio = grouped(radio);
+  segmented = grouped(segmented); settingRow = grouped(settingRow); themeThumb = grouped(themeThumb); listPane = grouped(listPane);
+  detailPane = grouped(detailPane); articlePane = grouped(articlePane); relatedPane = grouped(relatedPane); heroContent = grouped(heroContent);
+  loginForm = grouped(loginForm); formFields = grouped(formFields); settingsList = grouped(settingsList); appearancePane = grouped(appearancePane);
+
   // ── Catálogo ───────────────────────────────────────────────────────────────────────────
   // Cada pantalla: { bar: opciones de la barra superior | false (sin barra), draw(c, contenido,
   // pantalla) → punto de salida para la flecha o null, link: texto de la flecha a la siguiente }

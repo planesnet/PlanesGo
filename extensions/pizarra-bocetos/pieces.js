@@ -62,8 +62,13 @@
     c.strokeStyle = WF.dark; c.lineWidth = 3; c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8); c.stroke();
     disc(c, cx, cy, 6, WF.dark); c.strokeStyle = WF.dark; c.beginPath(); c.arc(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8, 24, 0, Math.PI * 2); c.stroke();
   }
-  const dialogBox = (c, r, title) => { surface(c, r.x, r.y, r.w, r.h, 56); if (title) txt(c, title, r.x + 48, r.y + 64, { size: 30, weight: 700 }); };
-  const actions = (c, r, labels) => { let x = r.x + r.w - 40; for (const l of labels.slice().reverse()) { const w = l.length * 14 + 48; button(c, x - w, r.y + r.h - 40 - 80, w, 80, l, 'text'); x -= w + 8; } };
+  const dialogBox0 = (c, r, title) => { surface(c, r.x, r.y, r.w, r.h, 56); if (title) txt(c, title, r.x + 48, r.y + 64, { size: 30, weight: 700 }); };
+  const actions0 = (c, r, labels) => { let x = r.x + r.w - 40; for (const l of labels.slice().reverse()) { const w = l.length * 14 + 48; button(c, x - w, r.y + r.h - 40 - 80, w, 80, l, 'text'); x -= w + 8; } };
+
+  // Cada pieza auxiliar, en su propio subgrupo al pasar a objetos (ver patterns.js)
+  const grouped = (fn) => function (c, ...args) { if (c.beginGroup) c.beginGroup(); try { return fn(c, ...args); } finally { if (c.endGroup) c.endGroup(); } };
+  check = grouped(check); iconBtn = grouped(iconBtn); tf = grouped(tf); kv = grouped(kv); calendarGrid = grouped(calendarGrid); clockFace = grouped(clockFace);
+  const actions = grouped(actions0), dialogBox = grouped(dialogBox0);
 
   // ── Catálogo de componentes (Material Design 3) ────────────────────────────────────────
   const A = 'Acciones', CO = 'Comunicación', CT = 'Contención', NV = 'Navegación', SE = 'Selección', TI = 'Entrada de texto';
