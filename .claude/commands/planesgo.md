@@ -1,8 +1,24 @@
 ---
-description: Revisa el estado del tracking de tiempo de PlanesGo (proyecto vinculado, token, hook) en esta sesión
+description: Revisa el estado del tracking de PlanesGo en esta sesión, o vincula directamente un proyecto si se pasa un texto de búsqueda como argumento
+argument-hint: [texto de búsqueda del proyecto de Odoo (opcional)]
 ---
 
-Haz un diagnóstico completo del sistema de tracking de tiempo de PlanesGo (Claude Code → Odoo) para el proyecto de esta sesión, y repórtalo al usuario con un ✅/❌ claro por cada punto:
+Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
+
+## Caso A: con argumento → vincular directamente
+
+Si "$ARGUMENTS" NO está vacío, trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
+
+1. Determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo), en silencio.
+2. Busca con `planesgo-mcp --search-project "$ARGUMENTS"` (o la herramienta MCP `planesgo_search_projects` con `{"query": "$ARGUMENTS"}`), en silencio.
+3. Según el resultado, responde ÚNICAMENTE con una de estas tres salidas (nada más):
+   - **Una sola coincidencia**: vincúlala directamente sin pedir confirmación adicional, con `planesgo-mcp --set-project "<nombre exacto>" --path "<raíz>"` (o la herramienta MCP `planesgo_set_project` con `{"project_name": "<nombre exacto>", "project_path": "<raíz>"}`), y responde solo: "✅ Vinculado a **\<nombre\>** (ID \<id\>)."
+   - **Varias coincidencias**: no vincules nada, responde solo con la lista numerada (nombre e ID) y "¿cuál de estos es?".
+   - **Ninguna coincidencia**: responde solo "❌ Ningún proyecto de Odoo contiene '$ARGUMENTS'. Prueba con otro texto."
+
+## Caso B: sin argumento → diagnóstico completo
+
+Si "$ARGUMENTS" está vacío, haz un diagnóstico completo del sistema de tracking de tiempo de PlanesGo (Claude Code → Odoo) para el proyecto de esta sesión, y repórtalo al usuario con un ✅/❌ claro por cada punto:
 
 1. **Proyecto vinculado**: determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo). Comprueba si existe `.planesgo.json` en esa raíz con `odoo_project_id > 0`. Si existe, muestra el nombre y el ID del proyecto de Odoo al que está vinculado. Si no, dilo claramente.
 
@@ -16,7 +32,7 @@ Haz un diagnóstico completo del sistema de tracking de tiempo de PlanesGo (Clau
 5. **Conexión real**: si hay binario y el proyecto está vinculado, ejecuta `planesgo-mcp --check` y muestra el resultado tal cual.
 
 Según lo que encuentres:
-- Si el proyecto **no está vinculado**: pregunta al usuario a qué proyecto de Odoo corresponde (nunca lo asumas ni uses PLANESGO por defecto). Si no conoce el nombre exacto, búscalo con `planesgo-mcp --search-project "<texto parcial>"` (o la herramienta MCP `planesgo_search_projects`), muéstrale las coincidencias, y una vez confirmado vincula con `planesgo-mcp --set-project "<nombre exacto>"`.
+- Si el proyecto **no está vinculado**: pregunta al usuario a qué proyecto de Odoo corresponde (nunca lo asumas ni uses PLANESGO por defecto), o sugiérele usar directamente `/planesgo <texto de búsqueda>` para vincularlo sin más preguntas. Si no conoce el nombre exacto, búscalo con `planesgo-mcp --search-project "<texto parcial>"` (o la herramienta MCP `planesgo_search_projects`), muéstrale las coincidencias, y una vez confirmado vincula con `planesgo-mcp --set-project "<nombre exacto>"`.
 - Si **falta el token**: indica al usuario que lo genere en https://planesgo.autopyme.com/settings y lo guarde en `~/.planesgo_auth.json`, o lo exporte como `$PLANESGO_TOKEN`.
 - Si **falta el hook global o el binario**: sugiere ejecutar
   `curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash`

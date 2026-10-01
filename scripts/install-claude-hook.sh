@@ -96,10 +96,8 @@ with open(path, "w") as f:
 print(f"OK: hooks globales (PSF unificado) fusionados en {path}")
 PY_EOF
 
-# 3. Binario planesgo-mcp: usar el ya compilado si existe, o compilarlo -----
-if [ -x "$BIN_DIR/planesgo-mcp" ]; then
-    echo "OK: planesgo-mcp ya está instalado en $BIN_DIR/planesgo-mcp"
-elif command -v go >/dev/null 2>&1; then
+# 3. Binario planesgo-mcp: siempre se reconstruye con la versión actual del repo ---
+if command -v go >/dev/null 2>&1; then
     SRC_DIR=""
     if [ -f "./cmd/planesgo-mcp/main.go" ]; then
         SRC_DIR="."
@@ -119,6 +117,8 @@ elif command -v go >/dev/null 2>&1; then
             && echo "OK: planesgo-mcp instalado en $BIN_DIR/planesgo-mcp" \
             || echo "AVISO: fallo al compilar planesgo-mcp."
     fi
+elif [ -x "$BIN_DIR/planesgo-mcp" ]; then
+    echo "AVISO: 'go' no está disponible; se mantiene el planesgo-mcp ya instalado (puede no tener las últimas funciones)."
 else
     echo "AVISO: 'go' no está disponible; no se pudo instalar planesgo-mcp. El hook quedará en no-op hasta que lo instales manualmente."
 fi
