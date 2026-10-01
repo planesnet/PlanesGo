@@ -219,7 +219,7 @@
   function appBar(c, r, b = {}) {
     const cy = r.y + r.h / 2 + 2; let x = r.x + 40;
     if (b.nav) { icon(c, r.x + 52, cy, b.nav); x = r.x + 96; }
-    if (b.title !== '') txt(c, b.title || 'AutoPyme Logistics', x, cy, { size: 26, color: WF.title });
+    if (b.title !== '') txt(c, b.title || 'Título', x, cy, { size: 26, color: WF.title });
     let ax = r.x + r.w - 52;
     if (b.action) { const w = b.action.length * 14 + 56; button(c, r.x + r.w - 32 - w, cy - 32, w, 64, b.action); ax -= w + 8; }
     for (const a of b.actions || []) { icon(c, ax, cy, a); ax -= 72; }
@@ -249,7 +249,7 @@
   }
   function drawer(c, x, y, w, h, modal) {
     if (modal) sheet(c, x, y, w, h, [0, 32, 32, 0]); else { c.fillStyle = WF.container; c.fillRect(x, y, w, h); }
-    txt(c, 'AutoPyme', x + 56, y + 70, { size: 28, color: WF.dark });
+    txt(c, 'Mi app', x + 56, y + 70, { size: 28, color: WF.dark });
     let yy = y + 130;
     for (let k = 0; k < 9 && yy + 112 <= y + h; k++) {
       if (k === 4) { divider(c, x + 56, yy + 16, w - 112); bar(c, x + 56, yy + 50, 120, 14, WF.mid); yy += 90; continue; }
@@ -336,7 +336,7 @@
     const top = y + Math.max(40, (h - 680) / 2), cx = x + w / 2;
     disc(c, cx, top + 56, 56, WF.tonal); icon(c, cx, top + 56, 'dot', WF.dark);
     txt(c, 'Inicia sesión', cx, top + 166, { align: 'center', size: 40, weight: 700 });
-    txt(c, 'Usa tu cuenta de AutoPyme', cx, top + 214, { align: 'center', size: 22, weight: 400, color: WF.mid });
+    txt(c, 'Usa tu cuenta', cx, top + 214, { align: 'center', size: 22, weight: 400, color: WF.mid });
     field(c, x, top + 270, w, 'Correo', 2); field(c, x, top + 396, w, 'Contraseña', 4);
     button(c, x, top + 528, w, 84, 'Entrar');
     txt(c, '¿Has olvidado la contraseña?', cx, top + 656, { align: 'center', size: 22 });
