@@ -1451,12 +1451,18 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		"search_read",
 		[]interface{}{[]interface{}{[]interface{}{"id", "=", ticketID}}},
 	}
+	// "partner_email" y "close_date" NO son campos reales de helpdesk.ticket en este
+	// Odoo (los nombres correctos, ya usados con éxito en otras consultas de este
+	// mismo fichero, son "closed" y "closed_date"): pedir un campo inexistente hace
+	// que Odoo rechace la consulta ENTERA con un error genérico ("Odoo Server Error",
+	// código 200). "team_id" no está verificado en ningún otro sitio, así que se
+	// comprueba con HasField antes de pedirlo, en vez de asumirlo.
+	checkFields := []string{"id", "name", "number", "stage_id", "partner_id", "closed", "closed_date"}
+	if c.HasField(ctx, "helpdesk.ticket", "team_id") {
+		checkFields = append(checkFields, "team_id")
+	}
 	kwargsCheck := map[string]interface{}{
-		// "partner_email" NO es un campo real de helpdesk.ticket en este Odoo: pedirlo
-		// hace que Odoo rechace la consulta entera con un error genérico ("Odoo Server
-		// Error", código 200), rompiendo el cierre del ticket antes de llegar siquiera
-		// al fallback de más abajo que ya busca el email vía partner_id -> res.partner.
-		"fields": []string{"id", "name", "number", "stage_id", "team_id", "close_date", "partner_id"},
+		"fields": checkFields,
 		"limit":  1,
 	}
 
@@ -1466,20 +1472,21 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 	}
 
 	var tickets []struct {
-		ID        int      `json:"id"`
-		Name      string   `json:"name"`
-		Number    string   `json:"number"`
-		StageID   Many2One `json:"stage_id"`
-		TeamID    Many2One `json:"team_id"`
-		CloseDate string   `json:"close_date"`
-		PartnerID Many2One `json:"partner_id"`
+		ID         int      `json:"id"`
+		Name       string   `json:"name"`
+		Number     string   `json:"number"`
+		StageID    Many2One `json:"stage_id"`
+		TeamID     Many2One `json:"team_id"`
+		Closed     bool     `json:"closed"`
+		ClosedDate string   `json:"closed_date"`
+		PartnerID  Many2One `json:"partner_id"`
 	}
 	if err := json.Unmarshal(checkRaw, &tickets); err != nil || len(tickets) == 0 {
 		return "", fmt.Errorf("ticket %d no encontrado", ticketID)
 	}
 
 	t := tickets[0]
-	if t.CloseDate != "" && t.CloseDate != "false" {
+	if t.Closed || (t.ClosedDate != "" && t.ClosedDate != "false") {
 		return "", errors.New("el ticket ya se encuentra cerrado y no se puede volver a abrir")
 	}
 
