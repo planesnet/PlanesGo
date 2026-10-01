@@ -37,13 +37,19 @@ fi
 chmod +x "$HOOKS_DIR/planesgo_claude_hook.py"
 echo "OK: hook instalado en $HOOKS_DIR/planesgo_claude_hook.py"
 
-# 1b. Comando /planesgo (diagnóstico bajo demanda): siempre la versión actual del repo -----
+# 1b. Comando /planesgo (diagnóstico, búsqueda/vinculación, +N horas, --update) y su
+# alias corto /pgo: siempre la versión actual del repo -----
 COMMANDS_DIR="$HOME/.claude/commands"
 mkdir -p "$COMMANDS_DIR"
 if curl -fsSL "$REPO_RAW/.claude/commands/planesgo.md" -o "$COMMANDS_DIR/planesgo.md"; then
     echo "OK: comando /planesgo instalado en $COMMANDS_DIR/planesgo.md"
 else
     echo "AVISO: no se pudo descargar el comando /planesgo (no crítico, el tracking funciona igual)."
+fi
+if curl -fsSL "$REPO_RAW/.claude/commands/pgo.md" -o "$COMMANDS_DIR/pgo.md"; then
+    echo "OK: alias /pgo instalado en $COMMANDS_DIR/pgo.md"
+else
+    echo "AVISO: no se pudo descargar el alias /pgo (no crítico, /planesgo sigue funcionando)."
 fi
 
 # 2. settings.json de usuario: fusiona los hooks sin machacar lo que ya haya -
