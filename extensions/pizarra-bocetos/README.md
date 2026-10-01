@@ -21,13 +21,15 @@ imagen (por ejemplo, pegándola en un chat).
   el dispositivo; en vertical, la lista en el dispositivo y el detalle como segunda pantalla en el
   tapete, enlazada con una flecha «Al pulsar». La imagen copiada o descargada incluye todo el tapete.
 - Herramientas: seleccionar y mover (V), lápiz (P), rectángulo (R), línea (L), flecha (A),
-  texto (T) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
+  texto (T), caja de texto (B) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
+- **Caja de texto**: arrastra para crearla y escribe dentro; el texto se ajusta al ancho de la caja.
+  Doble clic sobre una caja o un texto (o clic con la herramienta de texto) para cambiar su texto.
 - **Redimensionar**: con la herramienta de selección, arrastra los tiradores de las esquinas del
   objeto seleccionado. El texto se escala de forma proporcional.
 - **Ajustar a rejilla** (G): rectángulos, líneas, flechas, texto, movimientos y redimensionados se
   ajustan a la rejilla; el lápiz va siempre a mano alzada.
 - Color (negro y cinco colores) y grosor. Deshacer/rehacer con Ctrl+Z / Ctrl+Y.
-- **Copiar** (icono) deja el PNG en el portapapeles para pegarlo con Ctrl+V; **Descargar** (icono)
+- **Copiar** (icono) deja el PNG en el portapapeles (con el tapete y el patrón) para pegarlo con Ctrl+V; **Descargar** (icono)
   lo guarda en un fichero.
 - El dibujo se guarda solo en el navegador (borrador local) y no se envía a ningún sitio.
 

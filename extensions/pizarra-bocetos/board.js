@@ -153,7 +153,18 @@
     lay.screens.forEach((s, i) => { const a = anchors[i - 1]; if (i && a) drawLink(c, a, [s.x, a[1]], p.panes[i - 1].link || ''); });
     c.restore();
   }
-  function pathShape(c, s) {
+  const HAND = "'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive";
+  // Parte el texto en líneas que caben en maxW (para las cajas de texto)
+  function wrapText(c, text, maxW) {
+    const out = [];
+    for (const para of String(text).split('\n')) {
+      let line = '';
+      for (const word of para.split(/\s+/)) { const t = line ? line + ' ' + word : word; if (c.measureText(t).width > maxW && line) { out.push(line); line = word; } else line = t; }
+      out.push(line);
+    }
+    return out;
+  }
+  function pathShape(c, s, noText) {
     c.save(); c.strokeStyle = s.color; c.fillStyle = s.color; c.lineWidth = s.size; c.lineCap = 'round'; c.lineJoin = 'round';
     if (s.type === 'pen') {
       c.beginPath(); s.pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]));
@@ -168,7 +179,17 @@
         c.beginPath(); c.moveTo(s.x2, s.y2); c.lineTo(s.x2 - l * Math.cos(a - 0.45), s.y2 - l * Math.sin(a - 0.45));
         c.moveTo(s.x2, s.y2); c.lineTo(s.x2 - l * Math.cos(a + 0.45), s.y2 - l * Math.sin(a + 0.45)); c.stroke();
       }
-    } else if (s.type === 'text') {
+    } else if (s.type === 'box') {
+      // Caja de texto: fondo blanco, borde y texto ajustado al ancho de la caja
+      const x1 = Math.min(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), w = Math.abs(s.x2 - s.x1), h = Math.abs(s.y2 - s.y1);
+      c.beginPath(); c.roundRect(x1, y1, w, h, 8); c.fillStyle = 'rgba(255,255,255,.92)'; c.fill();
+      c.lineWidth = Math.max(2, s.size / 2); c.stroke();
+      if (!noText && s.text) {
+        c.clip(); c.fillStyle = s.color; c.font = `${18 + s.size * 2}px ${HAND}`; c.textBaseline = 'top';
+        const lh = 22 + s.size * 2.4;
+        wrapText(c, s.text, w - 28).forEach((ln, i) => c.fillText(ln, x1 + 14, y1 + 12 + i * lh));
+      }
+    } else if (s.type === 'text' && !noText) {
       const k = s.k || 1;
       c.font = `${Math.round((18 + s.size * 2) * k)}px 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive`; c.textBaseline = 'top';
       String(s.text).split('\n').forEach((ln, i) => c.fillText(ln, s.x, s.y + i * (22 + s.size * 2.4) * k));
@@ -177,7 +198,7 @@
   }
   function render() {
     ctx.clearRect(0, 0, W, H);
-    for (const s of state.shapes) pathShape(ctx, s);
+    state.shapes.forEach((s, i) => pathShape(ctx, s, textBox && textBox.index === i));
     if (current) pathShape(ctx, current);
     if (sel >= 0 && state.shapes[sel]) {
       const [x1, y1, x2, y2] = bbox(state.shapes[sel]);
@@ -237,6 +258,7 @@
     const segDist = (ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy; let t = l ? ((x - ax) * dx + (y - ay) * dy) / l : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(x - (ax + t * dx), y - (ay + t * dy)); };
     if (s.type === 'pen') { for (let i = 1; i < s.pts.length; i++) if (segDist(...s.pts[i - 1], ...s.pts[i]) < tol) return true; return s.pts.length === 1 && Math.hypot(x - s.pts[0][0], y - s.pts[0][1]) < tol; }
     if (s.type === 'line' || s.type === 'arrow') return segDist(s.x1, s.y1, s.x2, s.y2) < tol;
+    if (s.type === 'box') { const x1 = Math.min(s.x1, s.x2), x2 = Math.max(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), y2 = Math.max(s.y1, s.y2); return x >= x1 - tol && x <= x2 + tol && y >= y1 - tol && y <= y2 + tol; }
     if (s.type === 'rect') { const x1 = Math.min(s.x1, s.x2), x2 = Math.max(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), y2 = Math.max(s.y1, s.y2);
       return [segDist(x1, y1, x2, y1), segDist(x2, y1, x2, y2), segDist(x1, y2, x2, y2), segDist(x1, y1, x1, y2)].some(d => d < tol); }
     if (s.type === 'text') { const lines = String(s.text).split('\n'); const k = s.k || 1; const w = Math.max(...lines.map(l => l.length)) * (10 + s.size) * k; const h = lines.length * (22 + s.size * 2.4) * k + 10; return x >= s.x - 6 && x <= s.x + w && y >= s.y - 6 && y <= s.y + h; }
@@ -246,28 +268,50 @@
     const i = pick(x, y); if (i >= 0) { sel = -1; mutate(() => state.shapes.splice(i, 1)); }
   }
 
-  function openText(x, y) {
+  // Editor de texto sobre el lienzo: crea un texto nuevo en (x, y) o cambia el de un texto o una
+  // caja ya dibujados (index). Intro termina, Mayús+Intro añade una línea, Esc cancela.
+  const editable = (i) => i >= 0 && (state.shapes[i].type === 'text' || state.shapes[i].type === 'box');
+  function openText(x, y, index = -1) {
     closeText(true);
-    const r = draw.getBoundingClientRect();
+    const s = index >= 0 ? state.shapes[index] : null, f = draw.getBoundingClientRect().width / W;
     const ta = document.createElement('textarea');
-    ta.className = 'text-input'; ta.id = 'canvas-text'; ta.rows = 1; ta.setAttribute('aria-label', 'Texto del boceto');
-    ta.style.left = (x * r.width / W) + 'px'; ta.style.top = (y * r.height / H) + 'px';
-    ta.style.color = state.color; ta.style.fontSize = Math.max(14, (18 + state.size * 2) * r.width / W) + 'px';
-    paper.appendChild(ta); textBox = { el: ta, x, y };
-    setTimeout(() => ta.focus(), 0);
+    ta.className = 'text-input'; ta.id = 'canvas-text'; ta.setAttribute('aria-label', 'Texto del boceto');
+    ta.value = s ? s.text || '' : ''; ta.style.color = s ? s.color : state.color;
+    if (s && s.type === 'box') {
+      const [x1, y1, x2, y2] = bbox(s);
+      ta.classList.add('in-box');
+      Object.assign(ta.style, { left: x1 * f + 'px', top: y1 * f + 'px', width: (x2 - x1) * f + 'px', height: (y2 - y1) * f + 'px',
+        fontSize: (18 + s.size * 2) * f + 'px', lineHeight: (22 + s.size * 2.4) * f + 'px', padding: `${12 * f}px ${14 * f}px` });
+    } else {
+      const sx = s ? s.x : x, sy = s ? s.y : y, size = s ? s.size : state.size;
+      ta.style.left = sx * f + 'px'; ta.style.top = sy * f + 'px';
+      ta.style.fontSize = Math.max(14, (18 + size * 2) * (s && s.k || 1) * f) + 'px';
+      const rows = () => { ta.rows = Math.max(1, ta.value.split('\n').length); }; rows(); ta.addEventListener('input', rows);
+    }
+    paper.appendChild(ta); textBox = { el: ta, x, y, index };
+    setTimeout(() => { ta.focus(); ta.select(); }, 0);
     ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeText(true); } else if (e.key === 'Escape') { closeText(false); } });
     ta.addEventListener('blur', () => closeText(true));
+    render();
   }
   function closeText(keep) {
-    if (!textBox) return; const { el, x, y } = textBox; textBox = null;
+    if (!textBox) return; const { el, x, y, index } = textBox; textBox = null;
     const v = el.value.trim(); el.remove();
+    if (index >= 0) {
+      const s = state.shapes[index];
+      if (keep && s && v !== (s.text || '')) {
+        if (!v && s.type === 'text') { sel = -1; mutate(() => state.shapes.splice(index, 1)); }
+        else mutate(() => { s.text = v; });
+      } else render();
+      return;
+    }
     if (keep && v) commit({ type: 'text', text: v, x, y, color: state.color, size: state.size });
   }
 
   draw.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     const [x, y] = (state.tool === 'pen' || state.tool === 'eraser') ? pos(e) : snapPos(e);
-    if (state.tool === 'text') { e.preventDefault(); openText(x, y); return; }
+    if (state.tool === 'text') { e.preventDefault(); const i = pick(...pos(e)); editable(i) ? openText(0, 0, i) : openText(x, y); return; }
     draw.setPointerCapture(e.pointerId);
     if (state.tool === 'select') {
       const [rx, ry] = pos(e); const h = pickHandle(rx, ry);
@@ -307,7 +351,15 @@
     if (!current) return; const s = current; current = null;
     if (s.type === 'erasing') return;
     if (s.type !== 'pen' && Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 4) { render(); return; }
+    if (s.type === 'box') {
+      // Tamaño mínimo para poder escribir; al soltar se abre para escribir dentro
+      if (Math.abs(s.x2 - s.x1) < 80) s.x2 = s.x1 + (s.x2 < s.x1 ? -1 : 1) * 200;
+      if (Math.abs(s.y2 - s.y1) < 40) s.y2 = s.y1 + (s.y2 < s.y1 ? -1 : 1) * 60;
+      s.text = ''; commit(s); openText(0, 0, state.shapes.length - 1); return;
+    }
     commit(s); };
+  // Doble clic sobre un texto o una caja: cambiar su texto
+  draw.addEventListener('dblclick', (e) => { const i = pick(...pos(e)); if (editable(i)) { drag = null; openText(0, 0, i); } });
   draw.addEventListener('pointerup', end); draw.addEventListener('pointercancel', end);
 
   // Herramientas
@@ -348,7 +400,7 @@
     if (!e.ctrlKey && !e.metaKey && k === 'g') { setSnap(!state.snap); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (sel >= 0) { e.preventDefault(); deleteSelected(); } return; }
     if (e.key === 'Escape') { sel = -1; render(); return; }
-    const map = { v: 'select', p: 'pen', r: 'rect', l: 'line', a: 'arrow', t: 'text', e: 'eraser' };
+    const map = { v: 'select', p: 'pen', r: 'rect', l: 'line', a: 'arrow', t: 'text', b: 'box', e: 'eraser' };
     if (!e.ctrlKey && !e.metaKey && map[k]) document.querySelector(`[data-tool="${map[k]}"]`).click();
   });
 
@@ -379,10 +431,10 @@
 
   document.getElementById('copy-btn').addEventListener('click', async () => {
     closeText(true);
-    if (!state.shapes.length && state.orient !== 'c') { setStatus('Dibuja algo antes de copiarlo.', 'err'); return; }
+    if (!state.shapes.length && !state.pattern && state.orient !== 'c') { setStatus('Dibuja algo o carga un patrón antes de copiarlo.', 'err'); return; }
     try {
-      const blob = await exportPng();
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      // La promesa va dentro del ClipboardItem: write() se llama en el propio clic y no pierde el permiso
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': exportPng() })]);
       setStatus('Imagen copiada. Pégala con Ctrl+V.', 'ok');
     } catch (err) {
       setStatus('No se ha podido copiar la imagen; descárgala.', 'err');
