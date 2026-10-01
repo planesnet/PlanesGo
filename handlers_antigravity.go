@@ -778,7 +778,14 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				desc = fmt.Sprintf("[%s] %s", canonicalType, cleanAntigravityTaskName(payload.TaskName))
 			}
 
-			activeTimer, startErr := client.StartTimerExtended(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, payload.UnitAmount, "", true)
+			// elapsed_seconds también cuenta al crear (no solo al acumular sobre uno ya existente),
+			// para que un latido retroactivo de N horas funcione igual si es el primero del día.
+			initialHours := payload.UnitAmount
+			if payload.ElapsedSeconds > 0 {
+				initialHours += float64(payload.ElapsedSeconds) / 3600.0
+			}
+
+			activeTimer, startErr := client.StartTimerExtended(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, initialHours, "", true)
 			if startErr != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar tarea en Odoo: " + startErr.Error()})
