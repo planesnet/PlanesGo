@@ -1,13 +1,16 @@
 (() => {
-  // Coordenadas lógicas del papel = la pantalla del móvil (390 × 844 a escala ×2)
-  const DIMS = { v: [780, 1560], h: [1560, 780], c: [1560, 878] };
-  let capture = null; // imagen de la pestaña desde la que se abrió la pizarra (fondo "Captura")
+  // El papel es un tapete con el dispositivo dibujado encima (pantalla del móvil 390 × 844 a
+  // escala ×2). Con un patrón que no cabe entero, sus otras partes salen como pantallas
+  // adicionales en el tapete, a la derecha del dispositivo.
+  const DEV = { v: [780, 1560], h: [1560, 780] };
+  const M = 80, GAP = 200, HEADER = 100; // margen del tapete, hueco entre pantallas, cabecera de la app
+  let capture = null, capH = 878; // imagen de la pestaña desde la que se abrió la pizarra (fondo "Captura")
   const GRID = 20;
-  let W = 1560, H = 780;
+  let W = 1720, H = 940, lay = { screens: [] };
   const paper = document.getElementById('paper');
   const bg = document.getElementById('bg'), draw = document.getElementById('draw');
   const bctx = bg.getContext('2d'), ctx = draw.getContext('2d');
-  const state = { tool: 'pen', color: '#142030', size: 4, orient: 'h', snap: true, shapes: [], redo: [] };
+  const state = { tool: 'pen', color: '#142030', size: 4, orient: 'h', snap: true, pattern: '', shapes: [], redo: [] };
   // Todo cambio guarda antes una instantánea: deshacer/rehacer cubren dibujar, mover y eliminar.
   const snapshot = () => JSON.stringify(state.shapes);
   function mutate(fn) { history.push(snapshot()); if (history.length > 200) history.shift(); state.redo = []; fn(); saveDraft(); render(); }
@@ -16,8 +19,7 @@
 
   // Borrador local (comodidad: no se pierde el dibujo al recargar)
   const DRAFT = 'pizarra-bocetos-borrador';
-  try { const d = JSON.parse(localStorage.getItem(DRAFT) || 'null'); if (d && Array.isArray(d.shapes)) { state.shapes = d.shapes; state.orient = d.orient === 'v' ? 'v' : 'h'; if (d.snap === false) state.snap = false; } } catch (e) {}
-  const saveDraft = () => { try { localStorage.setItem(DRAFT, JSON.stringify({ shapes: state.shapes, orient: state.orient, snap: state.snap })); } catch (e) {} };
+  function saveDraft() { try { localStorage.setItem(DRAFT, JSON.stringify({ v: 2, shapes: state.shapes, orient: state.orient, snap: state.snap, pattern: state.pattern })); } catch (e) {} }
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -28,8 +30,114 @@
     renderBg(bctx); render();
   }
 
-  // Fondo: pantalla del móvil con rejilla ligera (líneas cada 20, más marcadas cada 100) y la
-  // cabecera de la app como referencia. Va en su propio lienzo: el borrador no lo toca.
+  // ── Patrones de diseño ───────────────────────────────────────────────────────────────
+  // Cada patrón son paneles. Si el dispositivo es lo bastante ancho (wideMin) van todos juntos
+  // dentro; si no, el primero va en el dispositivo y los demás como pantallas en el tapete,
+  // enlazadas con una flecha desde el elemento que las abre.
+  const WF = { line: '#cbd5e1', mid: '#94a3b8', dark: '#64748b', soft: '#f1f5f9', sel: '#e0f2fe', selLine: '#38bdf8', font: 'system-ui, sans-serif' };
+  const bar = (c, x, y, w, h, color) => { c.fillStyle = color; c.beginPath(); c.roundRect(x, y, w, h, h / 2); c.fill(); };
+
+  // Lista con barra de búsqueda; devuelve el punto de salida (elemento seleccionado) para la flecha.
+  function paneList(c, r, o) {
+    const pad = 32; let y = r.y + pad;
+    c.fillStyle = '#f8fafc'; c.strokeStyle = WF.line; c.lineWidth = 2;
+    c.beginPath(); c.roundRect(r.x + pad, y, r.w - 2 * pad, 64, 32); c.fill(); c.stroke();
+    c.strokeStyle = WF.mid; c.lineWidth = 3; c.beginPath(); c.arc(r.x + pad + 38, y + 30, 11, 0, Math.PI * 2); c.moveTo(r.x + pad + 46, y + 38); c.lineTo(r.x + pad + 55, y + 47); c.stroke();
+    c.fillStyle = WF.mid; c.font = `400 26px ${WF.font}`; c.textBaseline = 'middle'; c.fillText('Buscar…', r.x + pad + 72, y + 33);
+    y += 64 + 24;
+    const rowH = 112, widths = [0.62, 0.48, 0.7, 0.55, 0.42, 0.66, 0.5, 0.58, 0.45, 0.68, 0.52, 0.6];
+    let anchor = null;
+    for (let i = 0; y + rowH <= r.y + r.h - 8; i++, y += rowH) {
+      const selRow = i === 1;
+      if (selRow) { c.fillStyle = WF.sel; c.fillRect(r.x, y, r.w, rowH); c.fillStyle = WF.selLine; c.fillRect(r.x, y, 6, rowH); anchor = [r.x + r.w, y + rowH / 2]; }
+      c.fillStyle = selRow ? '#bae6fd' : WF.soft; c.beginPath(); c.arc(r.x + pad + 30, y + rowH / 2, 30, 0, Math.PI * 2); c.fill();
+      const tx = r.x + pad + 84, tw = r.w - pad * 2 - 84 - (o.chevron ? 40 : 0);
+      bar(c, tx, y + 34, tw * widths[i % widths.length], 18, WF.mid);
+      bar(c, tx, y + 66, tw * widths[(i + 5) % widths.length] * 0.8, 14, WF.line);
+      if (o.chevron) { c.strokeStyle = WF.mid; c.lineWidth = 3; c.beginPath(); c.moveTo(r.x + r.w - pad - 14, y + rowH / 2 - 12); c.lineTo(r.x + r.w - pad - 2, y + rowH / 2); c.lineTo(r.x + r.w - pad - 14, y + rowH / 2 + 12); c.stroke(); }
+      c.fillStyle = WF.line; c.fillRect(r.x + pad, y + rowH - 1, r.w - pad * 2, 2);
+    }
+    return anchor;
+  }
+  // Detalle: título, imagen, campos (dos columnas si hay ancho) y acciones abajo.
+  function paneDetail(c, r) {
+    const pad = 40; let y = r.y + pad;
+    bar(c, r.x + pad, y, Math.min(420, r.w * 0.5), 30, WF.dark); y += 50;
+    bar(c, r.x + pad, y, Math.min(300, r.w * 0.36), 16, WF.line); y += 44;
+    const ih = Math.round(Math.min(260, r.h * 0.26));
+    c.fillStyle = WF.soft; c.strokeStyle = WF.line; c.lineWidth = 2; c.beginPath(); c.roundRect(r.x + pad, y, r.w - 2 * pad, ih, 12); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(r.x + pad, y); c.lineTo(r.x + r.w - pad, y + ih); c.moveTo(r.x + r.w - pad, y); c.lineTo(r.x + pad, y + ih); c.stroke();
+    y += ih + 40;
+    const cols = r.w > 900 ? 2 : 1, cw = (r.w - 2 * pad - (cols - 1) * 40) / cols, btnY = r.y + r.h - pad - 64;
+    for (let i = 0; y + 70 <= btnY - 24; i++) {
+      const cx = r.x + pad + (i % cols) * (cw + 40);
+      bar(c, cx, y, cw * 0.3, 12, WF.line); bar(c, cx, y + 26, cw * [0.8, 0.6, 0.72, 0.5][i % 4], 18, WF.mid);
+      if (i % cols === cols - 1) y += 84;
+    }
+    const bw = r.w > 900 ? 200 : (r.w - 2 * pad - 24) / 2;
+    c.strokeStyle = WF.mid; c.lineWidth = 2; c.beginPath(); c.roundRect(r.x + r.w - pad - bw * 2 - 24, btnY, bw, 64, 12); c.stroke();
+    c.fillStyle = WF.dark; c.beginPath(); c.roundRect(r.x + r.w - pad - bw, btnY, bw, 64, 12); c.fill();
+    c.font = `600 24px ${WF.font}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = WF.dark; c.fillText('Cancelar', r.x + r.w - pad - bw * 1.5 - 24, btnY + 33);
+    c.fillStyle = '#ffffff'; c.fillText('Guardar', r.x + r.w - pad - bw / 2, btnY + 33); c.textAlign = 'start';
+  }
+  const PATTERNS = {
+    'lista-detalle': { name: 'Lista + detalle con búsqueda', wideMin: 1200, panes: [
+      { title: 'AutoPyme Logistics', weight: 0.36, draw: paneList, link: 'Al pulsar' },
+      { title: 'Detalle', weight: 0.64, draw: paneDetail },
+    ] },
+  };
+
+  // Disposición del tapete según orientación y patrón
+  function layout() {
+    if (state.orient === 'c') return { W: 1560, H: capH, screens: [] };
+    const [dw, dh] = DEV[state.orient], p = PATTERNS[state.pattern];
+    const wide = !p || dw >= p.wideMin, n = wide ? 1 : p.panes.length, screens = [];
+    for (let i = 0; i < n; i++) screens.push({ x: M + i * (dw + GAP), y: M, w: dw, h: dh, extra: i > 0, panes: !p ? [] : wide ? p.panes : [p.panes[i]] });
+    return { W: M * 2 + n * dw + (n - 1) * GAP, H: M * 2 + dh, screens, wide };
+  }
+
+  function gridLines(c, x0, y0, w, h, minor, major) {
+    c.lineWidth = 1;
+    for (let x = x0; x <= x0 + w; x += GRID) { c.strokeStyle = x % (GRID * 5) ? minor : major; c.beginPath(); c.moveTo(x + 0.5, y0); c.lineTo(x + 0.5, y0 + h); c.stroke(); }
+    for (let y = y0; y <= y0 + h; y += GRID) { c.strokeStyle = y % (GRID * 5) ? minor : major; c.beginPath(); c.moveTo(x0, y + 0.5); c.lineTo(x0 + w, y + 0.5); c.stroke(); }
+  }
+  function drawScreen(c, s) {
+    const frame = () => { c.beginPath(); c.roundRect(s.x, s.y, s.w, s.h, 36); };
+    c.save(); c.shadowColor = 'rgba(15,23,42,.14)'; c.shadowBlur = 30; c.shadowOffsetY = 10; c.fillStyle = '#ffffff'; frame(); c.fill(); c.restore();
+    c.save(); frame(); c.clip();
+    gridLines(c, s.x, s.y, s.w, s.h, '#eef2f7', '#dde5ee');
+    // Paneles del patrón (de izquierda a derecha según su peso)
+    let x = s.x, anchor = null; const tot = s.panes.reduce((a, p) => a + p.weight, 0);
+    s.panes.forEach((p, i) => {
+      const w = i === s.panes.length - 1 ? s.x + s.w - x : Math.round(s.w * p.weight / tot / GRID) * GRID;
+      if (i) { c.fillStyle = WF.line; c.fillRect(x - 1, s.y + HEADER, 2, s.h - HEADER); }
+      const a = p.draw(c, { x, y: s.y + HEADER, w, h: s.h - HEADER }, { chevron: !lay.wide });
+      if (i === 0) anchor = a; x += w;
+    });
+    c.restore();
+    // Marco y cabecera de la app (en las pantallas adicionales, con «atrás» y el título del panel)
+    c.save(); c.strokeStyle = s.extra ? WF.mid : '#64748b'; c.lineWidth = 4; if (s.extra) c.setLineDash([14, 10]); frame(); c.stroke(); c.setLineDash([]);
+    c.strokeStyle = '#cbd5e1'; c.lineWidth = 2; c.beginPath(); c.moveTo(s.x + 2, s.y + HEADER); c.lineTo(s.x + s.w - 2, s.y + HEADER); c.stroke();
+    c.fillStyle = '#b6c2d1'; c.font = `600 26px ${WF.font}`; c.textBaseline = 'middle';
+    if (s.extra) {
+      c.strokeStyle = '#b6c2d1'; c.lineWidth = 4; c.lineCap = 'round'; c.beginPath(); c.moveTo(s.x + 52, s.y + 38); c.lineTo(s.x + 38, s.y + 52); c.lineTo(s.x + 52, s.y + 66); c.stroke();
+      c.fillText(s.panes[0].title, s.x + 76, s.y + 52);
+    } else c.fillText('AutoPyme Logistics', s.x + 40, s.y + 52);
+    c.restore();
+    return anchor;
+  }
+  // Flecha en el tapete desde el elemento que abre la pantalla siguiente
+  function drawLink(c, from, to, label) {
+    c.save(); c.strokeStyle = WF.dark; c.fillStyle = WF.dark; c.lineWidth = 3; c.setLineDash([10, 8]);
+    c.beginPath(); c.moveTo(from[0] + 12, from[1]); c.lineTo(to[0] - 16, from[1]); c.stroke(); c.setLineDash([]);
+    c.beginPath(); c.moveTo(to[0] - 4, from[1]); c.lineTo(to[0] - 22, from[1] - 11); c.lineTo(to[0] - 22, from[1] + 11); c.closePath(); c.fill();
+    c.font = `600 22px ${WF.font}`; c.textAlign = 'center'; c.textBaseline = 'bottom'; c.fillText(label, (from[0] + to[0]) / 2, from[1] - 12);
+    c.restore();
+  }
+
+  // Fondo: tapete con rejilla, dispositivo(s) con la cabecera de la app y el patrón elegido.
+  // Va en su propio lienzo: el borrador no lo toca.
   function renderBg(c) {
     if (state.orient === 'c' && capture) {
       c.save(); c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H); c.drawImage(capture, 0, 0, W, H);
@@ -38,14 +146,11 @@
         for (let y = 0; y <= H; y += GRID * 5) { c.beginPath(); c.moveTo(0, y + 0.5); c.lineTo(W, y + 0.5); c.stroke(); } }
       c.restore(); return;
     }
-    c.save(); c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H);
-    for (let x = 0; x <= W; x += GRID) { c.strokeStyle = x % (GRID * 5) ? '#eef2f7' : '#dde5ee'; c.lineWidth = 1; c.beginPath(); c.moveTo(x + 0.5, 0); c.lineTo(x + 0.5, H); c.stroke(); }
-    for (let y = 0; y <= H; y += GRID) { c.strokeStyle = y % (GRID * 5) ? '#eef2f7' : '#dde5ee'; c.lineWidth = 1; c.beginPath(); c.moveTo(0, y + 0.5); c.lineTo(W, y + 0.5); c.stroke(); }
-    // Marco del dispositivo y cabecera de la app
-    c.strokeStyle = '#64748b'; c.lineWidth = 4; c.beginPath(); c.roundRect(2, 2, W - 4, H - 4, 36); c.stroke();
-    c.strokeStyle = '#cbd5e1'; c.lineWidth = 2; c.beginPath(); c.moveTo(2, 100); c.lineTo(W - 2, 100); c.stroke();
-    c.fillStyle = '#b6c2d1'; c.font = '600 26px system-ui, sans-serif'; c.textBaseline = 'middle';
-    c.fillText('AutoPyme Logistics', 40, 52);
+    c.save(); c.fillStyle = '#e9eef4'; c.fillRect(0, 0, W, H);
+    gridLines(c, 0, 0, W, H, '#e1e7ee', '#d6dee8');
+    const anchors = lay.screens.map(s => drawScreen(c, s));
+    const p = PATTERNS[state.pattern];
+    lay.screens.forEach((s, i) => { const a = anchors[i - 1]; if (i && a) drawLink(c, a, [s.x, a[1]], p.panes[i - 1].link || ''); });
     c.restore();
   }
   function pathShape(c, s) {
@@ -210,14 +315,21 @@
   document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => { closeText(true); state.tool = b.dataset.tool; press('[data-tool]', b); if (state.tool !== 'select') sel = -1; render(); draw.style.cursor = { text: 'text', eraser: 'cell', select: 'default' }[state.tool] || 'crosshair'; }));
   document.querySelectorAll('[data-color]').forEach(b => b.addEventListener('click', () => { state.color = b.dataset.color; press('[data-color]', b); }));
   document.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { state.size = +b.dataset.size; press('[data-size]', b); }));
-  const paperEl = document.getElementById('paper');
+  const paperEl = document.getElementById('paper'), patternSel = document.getElementById('pattern');
+  for (const [id, p] of Object.entries(PATTERNS)) patternSel.add(new Option(p.name, id));
+  function applyLayout() {
+    lay = layout(); W = lay.W; H = lay.H;
+    paperEl.style.aspectRatio = W + ' / ' + H;
+    paperEl.style.width = `min(100%, calc((100vh - 230px) * ${(W / H).toFixed(4)}))`;
+    patternSel.value = state.pattern; patternSel.disabled = state.orient === 'c';
+    saveDraft(); requestAnimationFrame(resize);
+  }
+  patternSel.addEventListener('change', () => { closeText(true); sel = -1; state.pattern = patternSel.value; applyLayout(); });
   function setOrient(o) {
     if (o === 'c' && !capture) o = 'h';
-    closeText(true); sel = -1; state.orient = o; [W, H] = DIMS[o];
-    paperEl.style.aspectRatio = W + ' / ' + H;
-    paperEl.classList.toggle('portrait', o === 'v');
+    closeText(true); sel = -1; state.orient = o;
     document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === o)));
-    saveDraft(); requestAnimationFrame(resize);
+    applyLayout();
   }
   document.querySelectorAll('[data-orient]').forEach(b => b.addEventListener('click', () => { if (state.orient !== b.dataset.orient) setOrient(b.dataset.orient); }));
   const snapBtn = document.getElementById('snap');
@@ -296,7 +408,7 @@
       const img = new Image();
       await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = captura; });
       capture = img;
-      DIMS.c = [1560, Math.round(1560 * img.naturalHeight / img.naturalWidth)];
+      capH = Math.round(1560 * img.naturalHeight / img.naturalWidth);
       document.querySelector('[data-orient="c"]').hidden = false;
       if (capturaTitulo) fileName = capturaTitulo;
       if (location.hash === '#captura') setOrient('c');
@@ -305,6 +417,15 @@
     }
   }
 
+  // Borrador guardado (va aquí: necesita PATTERNS y moveShape)
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT) || 'null');
+    if (d && Array.isArray(d.shapes)) {
+      state.shapes = d.shapes; state.orient = d.orient === 'v' ? 'v' : 'h'; if (d.snap === false) state.snap = false;
+      if (PATTERNS[d.pattern]) state.pattern = d.pattern;
+      if (!d.v) state.shapes.forEach(sh => moveShape(sh, M, M)); // borradores anteriores al tapete
+    }
+  } catch (e) {}
   setSnap(state.snap); setOrient(state.orient === 'c' ? 'h' : state.orient); loadCapture();
   window.addEventListener('resize', resize);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);

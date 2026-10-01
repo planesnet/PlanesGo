@@ -15,6 +15,11 @@ imagen (por ejemplo, pegándola en un chat).
 - **Pizarra** abre la pizarra en una pestaña nueva. Si estabas en una página web, arranca con el
   fondo **Captura** (una imagen de esa página) para marcar sobre ella.
 - Fondos (solo icono): móvil en vertical, captura o móvil en horizontal, con rejilla.
+- El lienzo es un tapete con el dispositivo dibujado encima.
+- **Patrones** (desplegable de la barra): cargan una plantilla de fondo sobre la que dibujar, que se
+  adapta a la orientación. *Lista + detalle con búsqueda*: en horizontal, lista y detalle juntos en
+  el dispositivo; en vertical, la lista en el dispositivo y el detalle como segunda pantalla en el
+  tapete, enlazada con una flecha «Al pulsar». La imagen copiada o descargada incluye todo el tapete.
 - Herramientas: seleccionar y mover (V), lápiz (P), rectángulo (R), línea (L), flecha (A),
   texto (T) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
 - **Redimensionar**: con la herramienta de selección, arrastra los tiradores de las esquinas del
