@@ -5,9 +5,19 @@ argument-hint: [texto de búsqueda del proyecto de Odoo (opcional)]
 
 Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
 
+## Caso A0: argumento es "--update" → instalar/actualizar todo
+
+Si "$ARGUMENTS" es exactamente `--update` (o empieza por `--update`), NO lo trates como texto de búsqueda de proyecto (Caso A) ni hagas el diagnóstico (Caso B). Ejecuta directamente:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash
+```
+
+Esto reconstruye en un solo paso el hook global, el comando `/planesgo`, el binario `planesgo-mcp` y el servidor MCP, todos con la versión actual de `master`. Muestra la salida real del instalador (no la resumas) y termina con una frase: todo actualizado, o qué paso concreto falló. Si el servidor MCP se acaba de registrar por primera vez, recuerda que no se carga en caliente — hace falta una sesión nueva para que la herramienta `mcp__planesgo__*` aparezca disponible.
+
 ## Caso A: con argumento → vincular directamente
 
-Si "$ARGUMENTS" NO está vacío, trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
+Si "$ARGUMENTS" NO está vacío (y no es `--update`, ya cubierto arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
 
 1. Determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo), en silencio.
 2. Busca con `planesgo-mcp --search-project "$ARGUMENTS"` (o la herramienta MCP `planesgo_search_projects` con `{"query": "$ARGUMENTS"}`), en silencio.
