@@ -1452,7 +1452,11 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 		[]interface{}{[]interface{}{[]interface{}{"id", "=", ticketID}}},
 	}
 	kwargsCheck := map[string]interface{}{
-		"fields": []string{"id", "name", "number", "stage_id", "team_id", "close_date", "partner_id", "partner_email"},
+		// "partner_email" NO es un campo real de helpdesk.ticket en este Odoo: pedirlo
+		// hace que Odoo rechace la consulta entera con un error genérico ("Odoo Server
+		// Error", código 200), rompiendo el cierre del ticket antes de llegar siquiera
+		// al fallback de más abajo que ya busca el email vía partner_id -> res.partner.
+		"fields": []string{"id", "name", "number", "stage_id", "team_id", "close_date", "partner_id"},
 		"limit":  1,
 	}
 
@@ -1462,14 +1466,13 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 	}
 
 	var tickets []struct {
-		ID           int      `json:"id"`
-		Name         string   `json:"name"`
-		Number       string   `json:"number"`
-		StageID      Many2One `json:"stage_id"`
-		TeamID       Many2One `json:"team_id"`
-		CloseDate    string   `json:"close_date"`
-		PartnerID    Many2One `json:"partner_id"`
-		PartnerEmail string   `json:"partner_email"`
+		ID        int      `json:"id"`
+		Name      string   `json:"name"`
+		Number    string   `json:"number"`
+		StageID   Many2One `json:"stage_id"`
+		TeamID    Many2One `json:"team_id"`
+		CloseDate string   `json:"close_date"`
+		PartnerID Many2One `json:"partner_id"`
 	}
 	if err := json.Unmarshal(checkRaw, &tickets); err != nil || len(tickets) == 0 {
 		return "", fmt.Errorf("ticket %d no encontrado", ticketID)
@@ -1593,8 +1596,8 @@ func (c *Client) CloseTicket(ctx context.Context, ticketID int, subject, descrip
 
 	// 5. Si sendReport es true, enviar el informe de partes de trabajo por correo al contacto
 	if sendReport {
-		targetEmail := strings.TrimSpace(t.PartnerEmail)
-		if targetEmail == "" && t.PartnerID.ID > 0 {
+		targetEmail := ""
+		if t.PartnerID.ID > 0 {
 			partArgs := []interface{}{
 				c.config.DB,
 				uid,
