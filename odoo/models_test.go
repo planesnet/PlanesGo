@@ -84,3 +84,35 @@ func TestCreateTimeLocal(t *testing.T) {
 		}
 	}
 }
+
+// TestTicketUnmarshalOpenTicket reproduce el JSON real que Odoo devuelve para un
+// ticket ABIERTO: closed_date y team_id vienen como "false" (booleano), no como
+// string vacío ni objeto vacío. Un struct ingenuo con esos campos tipados como
+// string/Many2One sin el manejo especial de Ticket.UnmarshalJSON falla el parseo
+// en silencio, lo que CloseTicket confundía con "ticket no encontrado" (bug real
+// detectado en producción: el ticket existía pero search_read nunca llegaba a
+// devolver nada legible porque el propio Unmarshal reventaba antes).
+func TestTicketUnmarshalOpenTicket(t *testing.T) {
+	raw := []byte(`[{"id":24283,"name":"prueba","number":"HT24268","stage_id":[1,"New"],"team_id":false,"partner_id":false,"closed":false,"closed_date":false}]`)
+
+	var tickets []Ticket
+	if err := json.Unmarshal(raw, &tickets); err != nil {
+		t.Fatalf("Unmarshal de un ticket abierto no debería fallar: %v", err)
+	}
+	if len(tickets) != 1 {
+		t.Fatalf("esperado 1 ticket, obtenidos %d", len(tickets))
+	}
+	ticket := tickets[0]
+	if ticket.ID != 24283 {
+		t.Errorf("ID esperado 24283, obtenido %d", ticket.ID)
+	}
+	if ticket.Closed {
+		t.Errorf("Closed esperado false para un ticket abierto")
+	}
+	if ticket.ClosedDate != "" {
+		t.Errorf("ClosedDate esperado vacío, obtenido %q", ticket.ClosedDate)
+	}
+	if ticket.TeamID.ID != 0 {
+		t.Errorf("TeamID.ID esperado 0 (sin equipo asignado), obtenido %d", ticket.TeamID.ID)
+	}
+}

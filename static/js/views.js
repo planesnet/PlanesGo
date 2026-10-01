@@ -3356,9 +3356,9 @@ function renderTicketsView() {
                         <span>Parar</span>
                     </button>
 
-                    <!-- Botón Dar por Cerrado -->
+                    <!-- Botón Dar por Cerrado (oculto si el ticket ya está cerrado) -->
                     <button type="button" onclick="openCloseTicketModal(${ticketId})"
-                            class="px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700"
+                            class="px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 ${t.closed ? 'hidden' : ''}"
                             title="Cerrar ticket definitivamente en Helpdesk">
                         <span>🔒</span>
                         <span>Cerrar</span>
@@ -3587,7 +3587,7 @@ function renderTicketsTable() {
                     </button>
                     <button type="button"
                             onclick="openCloseTicketModal(${ticketId})"
-                            class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer"
+                            class="inline-flex items-center justify-center w-7 h-7 text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition cursor-pointer ${t.closed ? 'hidden' : ''}"
                             title="Dar por cerrado este ticket en Odoo">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
