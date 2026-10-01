@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -448,6 +450,96 @@ func cleanURL(u string) string {
 		return DefaultServer
 	}
 	return strings.TrimRight(u, "/")
+}
+
+// ---------------------------------------------------------------------------
+// Auto-actualización: en vez de duplicar en Go la lógica de compilación que ya
+// vive en scripts/install-claude-hook.sh (justo ese tipo de duplicación fue lo
+// que dejó binarios desactualizados sin --search-project), el propio binario
+// simplemente relanza ese mismo instalador probado (curl | bash) de vez en
+// cuando. Un único camino de actualización, el mismo que ya se usa a mano.
+// ---------------------------------------------------------------------------
+
+const (
+	selfUpdateCheckInterval = 6 * time.Hour
+	selfUpdateInstallURL    = "https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh"
+)
+
+func selfUpdateMarkerPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "planesgo-mcp-last-self-update")
+}
+
+// selfUpdateDue indica si ya toca volver a autoactualizar (como mucho cada selfUpdateCheckInterval).
+func selfUpdateDue() bool {
+	p := selfUpdateMarkerPath()
+	if p == "" {
+		return false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return true
+	}
+	last, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return true
+	}
+	return time.Since(time.Unix(last, 0)) > selfUpdateCheckInterval
+}
+
+func touchSelfUpdateMarker() {
+	p := selfUpdateMarkerPath()
+	if p == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0755)
+	_ = os.WriteFile(p, []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0644)
+}
+
+// runSelfUpdate reutiliza el instalador de siempre (curl | bash): reconstruye
+// el hook, el comando /planesgo y el binario con la versión actual de master.
+// No falla nunca de forma ruidosa (ni bloquea nada): cualquier problema (sin
+// bash, sin red, instalación fallida) solo se imprime si verbose=true.
+func runSelfUpdate(verbose bool) {
+	touchSelfUpdateMarker()
+	if _, err := exec.LookPath("bash"); err != nil {
+		if verbose {
+			fmt.Println("AVISO: 'bash' no está disponible; no se puede autoactualizar.")
+		}
+		return
+	}
+	cmd := exec.Command("bash", "-c", "curl -fsSL "+selfUpdateInstallURL+" | bash")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if verbose {
+			fmt.Printf("AVISO: fallo al autoactualizar: %v\n%s\n", err, string(out))
+		}
+		return
+	}
+	if verbose {
+		fmt.Println(string(out))
+		fmt.Println("✅ planesgo-mcp y el hook de PlanesGo actualizados a la versión actual de master.")
+	}
+}
+
+// maybeSpawnBackgroundSelfUpdate lanza la actualización en un proceso aparte y
+// no bloqueante, como mucho una vez cada selfUpdateCheckInterval, para no añadir
+// latencia ni dependencia de red a la invocación actual (beat, check, etc.).
+func maybeSpawnBackgroundSelfUpdate() {
+	if !selfUpdateDue() {
+		return
+	}
+	touchSelfUpdateMarker()
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exePath, "--self-update")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	_ = cmd.Start()
 }
 
 // PlanesGoClient gestiona peticiones HTTP a PlanesGo
@@ -1920,6 +2012,7 @@ func main() {
 	modelFlag := flag.String("model", "", "Modelo de IA utilizado (ej. Gemini 3.8 Flash)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
+	selfUpdateFlag := flag.Bool("self-update", false, "Reconstruye planesgo-mcp (y el hook/comando) con la versión actual de master")
 
 	flag.Parse()
 
@@ -1927,6 +2020,14 @@ func main() {
 		fmt.Printf("planesgo-mcp v%s\n", Version)
 		return
 	}
+
+	if *selfUpdateFlag {
+		runSelfUpdate(true)
+		return
+	}
+
+	// Al menos una vez cada selfUpdateCheckInterval, de forma no bloqueante
+	maybeSpawnBackgroundSelfUpdate()
 
 	// Modo CLI directo
 	if *closeTicketFlag != "" {
