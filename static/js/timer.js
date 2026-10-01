@@ -199,7 +199,7 @@ function startWorkTimer(projectId, projectName, taskId, taskName, description, t
     window.__lastTimerActionTime = Date.now();
 
     // Determinar la fecha objetivo de trabajo (parámetro, input modal o hoy)
-    const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || new Date().toISOString().split('T')[0];
+    const targetDate = workDate || (document.getElementById('modal-date-input')?.value?.trim()) || formatISODate(new Date());
 
     const now = Date.now();
     const initialAccumulated = (typeof accumulatedMs === 'number' && accumulatedMs >= 0) ? accumulatedMs : 0;
@@ -1360,7 +1360,7 @@ async function confirmFinishAndStartNewTimer() {
     const hoursDecimal = parseFloat((totalMinutes / 60).toFixed(2));
 
     const isExistingTimesheet = Boolean(state.timesheetId && !String(state.timesheetId).startsWith('temp-') && parseInt(state.timesheetId, 10) > 0);
-    const targetDate = state.date || new Date().toISOString().split('T')[0];
+    const targetDate = state.date || formatISODate(new Date());
 
     // Cerrar el modal de confirmación de inmediato
     hideTimerConfirmModal();

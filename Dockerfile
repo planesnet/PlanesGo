@@ -44,6 +44,7 @@ EXPOSE 8080
 
 # Variables de entorno por defecto
 ENV PORT=8080
+ENV TZ=Europe/Madrid
 ENV ODOO_URL=https://planesnet.autopyme.com
 ENV ODOO_DB=ap113
 
