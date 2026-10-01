@@ -16,10 +16,16 @@ imagen (por ejemplo, pegándola en un chat).
   fondo **Captura** (una imagen de esa página) para marcar sobre ella.
 - Fondos (solo icono): móvil en vertical, captura o móvil en horizontal, con rejilla.
 - El lienzo es un tapete con el dispositivo dibujado encima.
-- **Patrones** (desplegable de la barra): cargan una plantilla de fondo sobre la que dibujar, que se
-  adapta a la orientación. *Lista + detalle con búsqueda*: en horizontal, lista y detalle juntos en
-  el dispositivo; en vertical, la lista en el dispositivo y el detalle como segunda pantalla en el
-  tapete, enlazada con una flecha «Al pulsar». La imagen copiada o descargada incluye todo el tapete.
+- **Patrones** (desplegable de la barra): layouts de Material Design 3 agrupados por categorías,
+  como plantilla de fondo sobre la que dibujar. Se adaptan a la orientación: en horizontal
+  (expandido) el patrón cabe en el dispositivo; en vertical (compacto) puede descomponerse en
+  varias pantallas en el tapete, enlazadas con flechas. Están en `patterns.js`:
+  - Layouts canónicos: lista + detalle con búsqueda, panel de apoyo, feed.
+  - Navegación: barra de navegación ↔ riel, cajón de navegación, pestañas.
+  - Barras de app: barra superior grande, barra inferior con FAB.
+  - Contenido: cuadrícula de tarjetas, carrusel, detalle con imagen, ajustes.
+  - Entrada de datos: búsqueda, formulario, inicio de sesión.
+  - Superposiciones: diálogo, hoja inferior ↔ lateral.
 - Herramientas: seleccionar y mover (V), lápiz (P), rectángulo (R), línea (L), flecha (A),
   texto (T), caja de texto (B) y borrador (E). **Eliminar** (o Supr) borra el objeto seleccionado.
 - **Caja de texto**: arrastra para crearla y escribe dentro; el texto se ajusta al ancho de la caja.
