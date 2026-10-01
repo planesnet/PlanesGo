@@ -42,6 +42,9 @@
                             data-write-date="{{.WriteDate}}">
                             <td class="py-2.5 px-3 whitespace-nowrap">
                                 <span class="font-medium text-slate-900 font-mono text-xs">{{.Date}}</span>
+                                {{if .CreateTimeLocal}}
+                                <span class="block text-slate-400 font-mono text-[10px]" title="Hora de creación del registro">{{.CreateTimeLocal}}</span>
+                                {{end}}
                             </td>
                             <td class="py-2.5 px-3 whitespace-nowrap">
                                 <div class="flex items-center space-x-1.5">
