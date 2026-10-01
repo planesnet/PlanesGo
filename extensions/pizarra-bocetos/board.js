@@ -515,6 +515,97 @@
     setStatus('Imagen descargada.', 'ok');
   });
 
+  // ── Copiar para Claude: explicación en Markdown + JSON ─────────────────────────────────
+  // Describe el patrón en sus dos modos (compacto y expandido) y las anotaciones del usuario (los
+  // objetos que no vienen del patrón) con su pantalla, zona y posición en dp (1 dp = 2 unidades).
+  const COLOR_NAMES = { '#142030': 'negro', '#0284c7': 'azul', '#dc2626': 'rojo', '#059669': 'verde', '#ea580c': 'naranja', '#7c3aed': 'morado' };
+  const TYPE_NAMES = { text: 'texto', box: 'caja de texto', arrow: 'flecha', line: 'línea', rect: 'rectángulo', pen: 'trazo a mano' };
+  const dp = (v) => Math.round(v / 2);
+  function screensOf(p, mode) {
+    const specs = mode === 'compacto' ? p.compact : p.wide;
+    return specs.map((sp, i) => ({
+      pantalla: i + 1,
+      nombre: sp.name || (specs.length > 1 ? `Pantalla ${i + 1}` : p.name),
+      ...(sp.bar && sp.bar.title ? { tituloBarra: sp.bar.title } : {}),
+      ...(sp.link && specs[i + 1] ? { abre: { pantalla: i + 2, cuando: sp.link } } : {}),
+    }));
+  }
+  function zone(x, y, sc) {
+    const fx = (x - sc.x) / sc.w, fy = (y - sc.y) / sc.h;
+    return `${fy < 1 / 3 ? 'arriba' : fy < 2 / 3 ? 'en medio' : 'abajo'} ${fx < 1 / 3 ? 'a la izquierda' : fx < 2 / 3 ? 'en el centro' : 'a la derecha'}`;
+  }
+  function annotations() {
+    const scs = lay.screens.length ? lay.screens : [{ x: 0, y: 0, w: W, h: H, spec: {} }];
+    return state.shapes.filter(s => !s.hand).map(s => {
+      const b = bbox(s), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      let k = scs.findIndex(sc => cx >= sc.x && cx <= sc.x + sc.w && cy >= sc.y && cy <= sc.y + sc.h);
+      const sc = scs[k] || scs[0], a = { tipo: TYPE_NAMES[s.type] || s.type, color: COLOR_NAMES[s.color] || s.color };
+      if (s.text) a.texto = s.text;
+      a.pantalla = k >= 0 ? k + 1 : null; a.zona = k >= 0 ? zone(cx, cy, sc) : 'fuera de las pantallas';
+      if (s.type === 'arrow' || s.type === 'line') { a.desdeDp = [dp(s.x1 - sc.x), dp(s.y1 - sc.y)]; a.hastaDp = [dp(s.x2 - sc.x), dp(s.y2 - sc.y)]; }
+      else { a.xDp = dp(b[0] - sc.x); a.yDp = dp(b[1] - sc.y); a.anchoDp = dp(b[2] - b[0]); a.altoDp = dp(b[3] - b[1]); }
+      if (s.g) a.grupo = s.g;
+      return a;
+    });
+  }
+  function describeForClaude() {
+    const p = PATTERNS[state.pattern], mode = state.orient === 'v' ? 'compacto' : 'expandido';
+    const [dw, dh] = state.orient === 'c' ? [W, H] : DEV[state.orient];
+    const notes = annotations(), hand = state.shapes.filter(s => s.hand);
+    const spec = {
+      formato: 'pizarra-bocetos/v1',
+      boceto: {
+        vista: state.orient === 'c' ? 'captura de la página' : state.orient === 'v' ? 'móvil en vertical' : 'móvil en horizontal',
+        ...(state.orient !== 'c' ? { modo: mode, claseTamanoVentana: mode === 'compacto' ? 'compact' : 'expanded' } : { pagina: fileName }),
+        dispositivoDp: [dp(dw), dp(dh)],
+      },
+    };
+    if (p) {
+      spec.patron = {
+        id: p.id, nombre: p.name, categoria: p.cat, materialDesign3: p.info.m3, componentes: p.info.componentes,
+        modificadoAMano: hand.length > 0 && !hand.some(s => s.pat),
+      };
+      spec.modos = {
+        compacto: { cuando: 'ventana compacta (< 600 dp, móvil en vertical)', comportamiento: p.info.compacto, pantallas: screensOf(p, 'compacto') },
+        expandido: { cuando: 'ventana mediana o expandida (≥ 600 dp, móvil en horizontal, tableta, escritorio)', comportamiento: p.info.expandido, pantallas: screensOf(p, 'expandido') },
+      };
+    }
+    spec.estilo = 'No incluido: el patrón solo define estructura y comportamiento. Usa el tema y los estilos del proyecto (colores, tipografía, formas); los grises y el trazo a mano son del boceto.';
+    spec.anotaciones = notes;
+
+    const L = [];
+    L.push('## Boceto de pantalla', '');
+    if (p) {
+      L.push(`Usa el patrón **${p.name}** de Material Design 3 (${p.info.m3}) como base de esta pantalla. Tiene que ser adaptativo: implementa los dos modos.`, '');
+      L.push(`- **Compacto** (ventana < 600 dp, móvil en vertical): ${p.info.compacto}`);
+      const cs = screensOf(p, 'compacto');
+      if (cs.length > 1) L.push(`  - Pantallas: ${cs.map(x => `${x.pantalla}. ${x.nombre}${x.abre ? ` → «${x.abre.cuando}» abre la ${x.abre.pantalla}` : ''}`).join('; ')}.`);
+      L.push(`- **Expandido** (ventana ≥ 600 dp, horizontal, tableta o escritorio): ${p.info.expandido}`);
+      L.push(`- Componentes: ${p.info.componentes.join(', ')}.`);
+      L.push('- **Estilo**: no va en el patrón. Usa el tema y los estilos del proyecto (colores, tipografía, formas); los grises y el trazo a mano son solo del boceto.');
+      if (spec.patron.modificadoAMano) L.push('- He modificado el patrón a mano: si la imagen y esta descripción no coinciden, manda la imagen en la distribución.');
+      L.push('');
+    } else if (state.orient === 'c') {
+      L.push(`Anotaciones sobre la página «${fileName}». La imagen es una captura con mis marcas encima.`, '');
+    } else {
+      L.push('Boceto libre, sin patrón de base.', '');
+    }
+    L.push(`El boceto está dibujado en **${spec.boceto.vista}**${state.orient !== 'c' ? ` (modo ${mode}, ${spec.boceto.dispositivoDp.join(' × ')} dp)` : ''}.`);
+    if (notes.length) {
+      L.push(p ? `Mis anotaciones se refieren a ese modo; aplica lo que pidan también al otro modo cuando tenga sentido:` : 'Mis anotaciones:', '');
+      notes.forEach((a, i) => L.push(`${i + 1}. ${a.tipo[0].toUpperCase() + a.tipo.slice(1)}${a.texto ? ` «${a.texto.replace(/\n/g, ' ')}»` : ''} en ${a.color}, ${a.pantalla ? `pantalla ${a.pantalla}, ` : ''}${a.zona}.`));
+      if (notes.some(a => a.color === 'rojo')) L.push('', 'Lo marcado en rojo es lo que hay que cambiar.');
+    } else L.push('No hay anotaciones: implementa el patrón tal cual.');
+    L.push('', 'Si pego también la imagen del boceto, úsala como referencia visual; la estructura y los modos son los de esta descripción.', '', '```json', JSON.stringify(spec, null, 2), '```');
+    return L.join('\n');
+  }
+  document.getElementById('claude-btn').addEventListener('click', async () => {
+    closeText(true);
+    const text = describeForClaude();
+    try { await navigator.clipboard.writeText(text); setStatus('Explicación y JSON copiados. Pégalos en el chat junto a la imagen.', 'ok'); }
+    catch (err) { setStatus('No se ha podido copiar la explicación.', 'err'); }
+  });
+
   // Captura de la pestaña de origen (la guarda background.js al pulsar el icono)
   async function loadCapture() {
     try {

@@ -484,5 +484,45 @@
       } }] },
   ];
 
+  // Descripción para comunicar el patrón (botón «Copiar para Claude»): nombre en Material 3,
+  // componentes, cómo se ve en compacto y en expandido, y nombre de cada pantalla en compacto.
+  const INFO = {
+    'lista-detalle': ['List-detail (canonical layout)', ['Top app bar', 'Search bar', 'Lists (dos líneas, avatar, chevron en compacto)', 'Buttons'],
+      'La lista ocupa la pantalla; al pulsar un elemento se abre el detalle en otra pantalla con botón atrás.',
+      'Lista (≈36 %) y detalle lado a lado; el elemento seleccionado queda resaltado en la lista.', ['Lista', 'Detalle']],
+    'panel-apoyo': ['Supporting pane (canonical layout)', ['Top app bar', 'Imagen', 'Texto', 'Bottom sheet', 'Lists'],
+      'Contenido principal a pantalla completa; el contenido de apoyo se abre en una hoja inferior desde «Ver relacionados».',
+      'Contenido principal (≈64 %) y panel de apoyo fijo a la derecha.', ['Contenido principal', 'Relacionados (hoja inferior)']],
+    'feed': ['Feed (canonical layout)', ['Top app bar', 'Cards'], 'Una columna de tarjetas con imagen.', 'Cuadrícula de tarjetas en 3 columnas.'],
+    'barra-riel': ['Navigation bar → Navigation rail', ['Navigation bar', 'Navigation rail', 'FAB', 'Cards'],
+      'Barra de navegación inferior con 4 destinos y FAB encima, a la derecha.', 'Riel de navegación a la izquierda (menú, FAB y destinos) y contenido en cuadrícula.'],
+    'cajon': ['Navigation drawer (modal → standard)', ['Top app bar', 'Navigation drawer', 'Lists'],
+      'Botón de menú en la barra superior que abre un cajón modal sobre un velo.', 'Cajón de navegación fijo a la izquierda y contenido a la derecha.', ['Principal', 'Cajón abierto']],
+    'pestanas': ['Tabs (primary)', ['Top app bar', 'Tabs', 'Lists', 'Cards'], 'Pestañas bajo la barra superior y lista.', 'Pestañas y cuadrícula de 3 columnas.'],
+    'barra-grande': ['Large top app bar', ['Large top app bar', 'Lists'], 'Barra superior grande (atrás, título grande, acciones) y lista.', 'La misma barra y contenido en dos columnas.'],
+    'barra-inferior': ['Bottom app bar + FAB', ['Bottom app bar', 'FAB', 'Lists', 'Cards'], 'Lista y barra inferior con acciones y FAB a la derecha.', 'Cuadrícula de 3 columnas y la misma barra inferior.'],
+    'cuadricula': ['Card grid', ['Top app bar', 'Cards'], 'Cuadrícula de tarjetas en 2 columnas.', 'Cuadrícula de tarjetas en 4 columnas.'],
+    'carrusel': ['Carousel (multi-browse)', ['Top app bar', 'Carousel', 'Lists', 'Cards'], 'Carrusel con un elemento grande, uno mediano y uno pequeño; debajo, una lista.', 'Carrusel con más elementos y cuadrícula de 4 columnas debajo.'],
+    'detalle-imagen': ['Detail with hero image', ['Top app bar', 'Imagen', 'Chips', 'Texto', 'Buttons'], 'Imagen arriba; título, chips, texto y dos botones abajo.', 'Imagen a la izquierda y contenido a la derecha.'],
+    'ajustes': ['Settings list (list-detail)', ['Top app bar', 'Lists', 'Switches'], 'Lista de ajustes por secciones, con interruptores y chevrons.', 'Categorías a la izquierda y ajustes de la categoría a la derecha.'],
+    'tema': ['Theme selection (radio dialog / segmented button)', ['Top app bar', 'Lists', 'Dialog', 'Radio buttons', 'Segmented button', 'Switch'],
+      'En Ajustes, la fila «Tema» abre un diálogo con opciones de radio: Claro, Oscuro y Automático (según el sistema).',
+      'Ajustes con categorías a la izquierda; en Apariencia, botón segmentado Claro / Oscuro / Automático con miniaturas de cada tema.', ['Ajustes', 'Diálogo de tema']],
+    'busqueda': ['Search bar → Search view (full screen / docked)', ['Search bar', 'Search view', 'Lists', 'Cards'],
+      'Barra de búsqueda arriba; al pulsarla, vista de búsqueda a pantalla completa con sugerencias y teclado.',
+      'Búsqueda acoplada: la barra despliega las sugerencias sobre el contenido.', ['Inicio con búsqueda', 'Vista de búsqueda']],
+    'formulario': ['Form (outlined text fields)', ['Top app bar con cerrar y Guardar', 'Text fields (outlined)'], 'Campos de texto en una columna.', 'Campos de texto en dos columnas.'],
+    'inicio-sesion': ['Sign-in', ['Text fields (outlined)', 'Filled button', 'Text button'], 'Logo, título, correo, contraseña, botón Entrar y enlace de contraseña olvidada.', 'Imagen a la izquierda y formulario a la derecha.'],
+    'dialogo': ['Dialog (full-screen → basic)', ['Lists', 'FAB', 'Full-screen dialog', 'Basic dialog'],
+      'Lista con FAB; al pulsarlo se abre un diálogo a pantalla completa con campos y Guardar.', 'Diálogo básico centrado sobre un velo, con título, texto y dos acciones.', ['Lista', 'Diálogo a pantalla completa']],
+    'hojas': ['Bottom sheet → Side sheet', ['Bottom sheet', 'Side sheet', 'Chips', 'Text fields', 'Buttons'],
+      'Hoja inferior modal con opciones sobre un velo.', 'Hoja lateral fija a la derecha (filtros) junto al contenido.'],
+  };
+  for (const p of PATRONES) {
+    const [m3, componentes, compacto, expandido, pantallas] = INFO[p.id] || [];
+    p.info = { m3, componentes, compacto, expandido };
+    (pantallas || []).forEach((n, i) => { if (p.compact[i]) p.compact[i].name = n; });
+  }
+
   window.PizarraPatrones = { list: PATRONES, appBar };
 })();

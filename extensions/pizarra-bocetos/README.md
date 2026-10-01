@@ -45,6 +45,12 @@ imagen (por ejemplo, pegándola en un chat).
 - Color (negro y cinco colores) y grosor. Deshacer/rehacer con Ctrl+Z / Ctrl+Y.
 - **Copiar** (icono) deja el PNG en el portapapeles (con el tapete y el patrón) para pegarlo con Ctrl+V; **Descargar** (icono)
   lo guarda en un fichero.
+- **Copiar para Claude** (icono `{ }`) copia una explicación en Markdown con un bloque JSON
+  (`pizarra-bocetos/v1`): el patrón con su nombre de Material Design 3 y sus componentes, su
+  comportamiento en **los dos modos** (compacto y expandido) con las pantallas y el flujo entre
+  ellas, y tus anotaciones (textos, cajas, flechas, rectángulos y trazos) con color, pantalla,
+  zona y posición en dp. El patrón es solo estructura: el estilo (colores, tipografía, formas) se
+  deja al tema del proyecto. Pégalo en el chat junto con la imagen (botón Copiar).
 - El dibujo se guarda solo en el navegador (borrador local) y no se envía a ningún sitio.
 
 ## Permisos
