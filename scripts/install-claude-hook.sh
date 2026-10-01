@@ -123,6 +123,21 @@ else
     echo "AVISO: 'go' no está disponible; no se pudo instalar planesgo-mcp. El hook quedará en no-op hasta que lo instales manualmente."
 fi
 
+# 3b. Servidor MCP: registra planesgo-mcp como herramienta nativa (user scope) -
+# Evita el guard de Bash y los problemas de escapado de shell al buscar/vincular
+# proyectos. Idempotente: se borra y se vuelve a añadir, porque "claude mcp add"
+# falla si ya existe.
+if [ -x "$BIN_DIR/planesgo-mcp" ] && command -v claude >/dev/null 2>&1; then
+    claude mcp remove planesgo-mcp -s user >/dev/null 2>&1 || true
+    if claude mcp add --scope user --transport stdio planesgo-mcp -- "$BIN_DIR/planesgo-mcp" >/dev/null 2>&1; then
+        echo "OK: planesgo-mcp registrado como servidor MCP (user scope)."
+    else
+        echo "AVISO: no se pudo registrar planesgo-mcp como servidor MCP; se seguirá usando por CLI."
+    fi
+else
+    echo "AVISO: 'claude' no disponible o falta el binario; se seguirá usando planesgo-mcp por CLI."
+fi
+
 # 4. Comprobación de autenticación -------------------------------------------
 if [ -n "${PLANESGO_TOKEN:-}" ] || [ -n "${ANTIGRAVITY_TOKEN:-}" ]; then
     echo "OK: token de empleado presente en el entorno."

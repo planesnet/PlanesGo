@@ -31,10 +31,13 @@ Si "$ARGUMENTS" está vacío, haz un diagnóstico completo del sistema de tracki
 
 5. **Conexión real**: si hay binario y el proyecto está vinculado, ejecuta `planesgo-mcp --check` y muestra el resultado tal cual.
 
+6. **Servidor MCP**: comprueba si existe la herramienta `mcp__planesgo__planesgo_check` (o cualquier otra `mcp__planesgo__*`) ya cargada en esta sesión. Si no aparece ninguna, usa el comando `ls ~/.claude.json` (permitido siempre, sin pipes) y, si existe, revisa si contiene `"planesgo-mcp"` bajo `mcpServers` — si está ahí pero la herramienta no apareció, es que se registró después de arrancar esta sesión y hará falta una sesión nueva para que cargue; si no está en absoluto, no se ha registrado todavía.
+
 Según lo que encuentres:
 - Si el proyecto **no está vinculado**: pregunta al usuario a qué proyecto de Odoo corresponde (nunca lo asumas ni uses PLANESGO por defecto), o sugiérele usar directamente `/planesgo <texto de búsqueda>` para vincularlo sin más preguntas. Si no conoce el nombre exacto, búscalo con `planesgo-mcp --search-project "<texto parcial>"` (o la herramienta MCP `planesgo_search_projects`), muéstrale las coincidencias, y una vez confirmado vincula con `planesgo-mcp --set-project "<nombre exacto>"`.
 - Si **falta el token**: indica al usuario que lo genere en https://planesgo.autopyme.com/settings y lo guarde en `~/.planesgo_auth.json`, o lo exporte como `$PLANESGO_TOKEN`.
-- Si **falta el hook global o el binario**: sugiere ejecutar
+- Si **falta el hook global, el binario o el servidor MCP**: sugiere ejecutar
   `curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash`
+  y, si el servidor MCP sigue sin aparecer tras eso, que entienda que necesita abrir una sesión nueva para que Claude Code cargue el servidor recién registrado (no se recarga en caliente en la sesión actual).
 
 Termina con un resumen de una frase: si el tracking está operativo para esta sesión, o qué es exactamente lo único que falta.
