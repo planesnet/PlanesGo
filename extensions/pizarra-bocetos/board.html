@@ -37,18 +37,22 @@
       <button class="tbtn" data-size="9" title="Grueso" aria-label="Trazo grueso"><span class="size-dot" style="width:12px;height:12px"></span></button>
     </div>
     <div class="group" aria-label="Orientación de la pantalla">
-      <button class="tbtn" data-orient="v" aria-pressed="false" title="Móvil en vertical"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg>Vertical</button>
-      <button class="tbtn" data-orient="c" hidden title="Dibujar encima de la página desde la que abriste la pizarra"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg>Captura</button>
-      <button class="tbtn" data-orient="h" aria-pressed="true" title="Móvil en horizontal"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M18 11v2"/></svg>Horizontal</button>
+      <button class="tbtn" data-orient="v" aria-pressed="false" title="Móvil en vertical" aria-label="Móvil en vertical"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg></button>
+      <button class="tbtn" data-orient="c" hidden title="Dibujar encima de la página desde la que abriste la pizarra" aria-label="Captura de la página"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg></button>
+      <button class="tbtn" data-orient="h" aria-pressed="true" title="Móvil en horizontal" aria-label="Móvil en horizontal"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M18 11v2"/></svg></button>
     </div>
     <div class="group">
-      <button class="tbtn" id="snap" aria-pressed="true" title="Ajustar rectángulos, líneas, flechas y texto a la rejilla (G)"><svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M9 4v16M15 4v16"/></svg>Ajustar a rejilla</button>
+      <button class="tbtn" id="snap" aria-pressed="true" title="Ajustar rectángulos, líneas, flechas y texto a la rejilla (G)" aria-label="Ajustar a rejilla"><svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M9 4v16M15 4v16"/></svg></button>
     </div>
     <div class="group">
       <button class="tbtn" id="undo" title="Deshacer (Ctrl+Z)" aria-label="Deshacer"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
       <button class="tbtn" id="redo" title="Rehacer (Ctrl+Y)" aria-label="Rehacer"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
       <button class="tbtn" id="delete-sel" disabled title="Eliminar el objeto seleccionado (Supr)"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Eliminar</button>
       <span id="clear-wrap"><button class="tbtn" id="clear" title="Borrar todo">Borrar todo</button></span>
+    </div>
+    <div class="group">
+      <button class="tbtn" id="copy-btn" title="Copiar imagen al portapapeles (Ctrl+V para pegarla)" aria-label="Copiar imagen"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg></button>
+      <button class="tbtn" id="download-btn" title="Descargar PNG" aria-label="Descargar PNG"><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg></button>
     </div>
   </div>
 
@@ -57,27 +61,10 @@
       <canvas id="bg" aria-hidden="true"></canvas>
       <canvas id="draw" aria-label="Lienzo de dibujo"></canvas>
     </div>
-    <p class="hint" id="hint">Rojo para señalar lo que está mal; flechas para mover cosas; texto para explicar. El borrador quita trazos enteros.</p>
   </section>
 
-  <form class="send" id="send-form">
-    <div class="fields">
-      <div>
-        <label for="sketch-title">Pantalla</label>
-        <input id="sketch-title" type="text" maxlength="120" placeholder="Ej. Ficha de punto de origen en horizontal">
-      </div>
-      <div>
-        <label for="sketch-note">Qué quieres que cambie</label>
-        <textarea id="sketch-note" maxlength="4000" placeholder="Se añade como pie de la imagen al copiarla o descargarla."></textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn" id="copy-btn" type="submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>Copiar imagen</button>
-      <button class="btn ghost" id="download-btn" type="button">Descargar PNG</button>
-    </div>
-    <div class="status" id="status" role="status" aria-live="polite">Pega la imagen copiada en el chat (Ctrl+V) para compartir el boceto.</div>
-  </form>
 </div>
+<div class="toast" id="status" role="status" aria-live="polite"></div>
 
 <script src="board.js"></script>
 </body>

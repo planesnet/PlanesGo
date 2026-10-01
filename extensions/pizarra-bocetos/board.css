@@ -1,5 +1,5 @@
-/* Layout: barra de herramientas arriba (se parte en filas en móvil), lienzo de papel a todo el ancho
-   con su plantilla de pantalla, y debajo la nota + enviar y los bocetos ya enviados. */
+/* Layout: barra de herramientas arriba (se parte en filas en móvil) y lienzo de papel a todo el
+   ancho con su plantilla de pantalla. Los avisos (copiado, descargado) salen en un toast. */
 :root {
   --bg: #eef2f6;
   --surface: #ffffff;
@@ -48,7 +48,7 @@ button, select { font: inherit; color: inherit; }
 .tbtn:hover { background: var(--surface-2); }
 .tbtn:disabled { opacity: .4; cursor: default; }
 .tbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
-.tbtn:focus-visible, .btn:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tbtn:focus-visible, .btn:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
@@ -61,28 +61,20 @@ select { height: 38px; border-radius: 9px; border: 1px solid var(--line); backgr
 #draw { cursor: crosshair; }
 .text-input { position: absolute; z-index: 3; font-family: var(--font-hand); font-size: 22px; color: #142030; background: rgba(255,255,255,.92); border: 1px dashed #0284c7; border-radius: 4px; padding: 2px 6px; min-width: 140px; outline: none; }
 .paper.portrait { width: min(100%, 420px); }
-.hint { margin: 8px 2px 0; color: var(--muted); font-size: 0.82rem; }
 
-.send { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
-.send label { display: block; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-.send input, .send textarea { width: 100%; font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; }
-.send textarea { min-height: 76px; resize: vertical; }
-.fields { display: grid; gap: 10px; min-width: 0; }
 .btn { height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: var(--accent); color: var(--accent-fg); font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .btn[disabled] { opacity: .55; cursor: default; }
 .btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); height: 38px; font-weight: 600; }
 .btn.danger { background: var(--danger); color: #fff; height: 38px; }
-.status { font-size: 0.86rem; color: var(--muted); grid-column: 1 / -1; min-height: 1.2em; }
-.status.ok { color: var(--ok); } .status.err { color: var(--danger); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px); max-width: calc(100% - 32px); background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; font-size: 0.88rem; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.18); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 10; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.ok { color: var(--ok); } .toast.err { color: var(--danger); }
 .confirm { display: inline-flex; gap: 6px; align-items: center; font-size: 0.84rem; }
 
 
 @media (max-width: 640px) {
   .group { border-right: 0; padding-right: 0; }
-  .send { grid-template-columns: minmax(0, 1fr); }
-  .btn { justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
 html, body { margin: 0; }
 body { min-height: 100vh; }

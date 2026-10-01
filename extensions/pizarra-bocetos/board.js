@@ -64,8 +64,9 @@
         c.moveTo(s.x2, s.y2); c.lineTo(s.x2 - l * Math.cos(a + 0.45), s.y2 - l * Math.sin(a + 0.45)); c.stroke();
       }
     } else if (s.type === 'text') {
-      c.font = `${Math.round(18 + s.size * 2)}px 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive`; c.textBaseline = 'top';
-      String(s.text).split('\n').forEach((ln, i) => c.fillText(ln, s.x, s.y + i * (22 + s.size * 2.4)));
+      const k = s.k || 1;
+      c.font = `${Math.round((18 + s.size * 2) * k)}px 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive`; c.textBaseline = 'top';
+      String(s.text).split('\n').forEach((ln, i) => c.fillText(ln, s.x, s.y + i * (22 + s.size * 2.4) * k));
     }
     c.restore();
   }
@@ -76,7 +77,10 @@
     if (sel >= 0 && state.shapes[sel]) {
       const [x1, y1, x2, y2] = bbox(state.shapes[sel]);
       ctx.save(); ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
-      ctx.strokeRect(x1 - 8, y1 - 8, x2 - x1 + 16, y2 - y1 + 16); ctx.restore();
+      ctx.strokeRect(x1 - PAD, y1 - PAD, x2 - x1 + 2 * PAD, y2 - y1 + 2 * PAD); ctx.setLineDash([]);
+      ctx.fillStyle = '#ffffff';
+      for (const [, hx, hy] of handles(state.shapes[sel])) { ctx.fillRect(hx - HS / 2, hy - HS / 2, HS, HS); ctx.strokeRect(hx - HS / 2, hy - HS / 2, HS, HS); }
+      ctx.restore();
     }
     document.getElementById('undo').disabled = !history.length;
     document.getElementById('redo').disabled = !state.redo.length;
@@ -91,7 +95,7 @@
   // Caja que ocupa cada objeto (selección y movimiento)
   function bbox(s) {
     if (s.type === 'pen') { const xs = s.pts.map(p => p[0]), ys = s.pts.map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
-    if (s.type === 'text') { const lines = String(s.text).split('\n'); return [s.x, s.y, s.x + Math.max(...lines.map(l => l.length)) * (10 + s.size), s.y + lines.length * (22 + s.size * 2.4)]; }
+    if (s.type === 'text') { const lines = String(s.text).split('\n'), k = s.k || 1; return [s.x, s.y, s.x + Math.max(...lines.map(l => l.length)) * (10 + s.size) * k, s.y + lines.length * (22 + s.size * 2.4) * k]; }
     return [Math.min(s.x1, s.x2), Math.min(s.y1, s.y2), Math.max(s.x1, s.x2), Math.max(s.y1, s.y2)];
   }
   function moveShape(s, dx, dy) {
@@ -99,6 +103,27 @@
     else if (s.type === 'text') { s.x += dx; s.y += dy; }
     else { s.x1 += dx; s.y1 += dy; s.x2 += dx; s.y2 += dy; }
   }
+  // Redimensionar: tiradores en las esquinas de la caja de selección. Se escala el objeto de la
+  // caja original a la nueva (el texto, de forma proporcional según la altura).
+  const PAD = 8, HS = 14, MIN = 10;
+  const handles = (s) => { const [x1, y1, x2, y2] = bbox(s); return [['nw', x1 - PAD, y1 - PAD], ['ne', x2 + PAD, y1 - PAD], ['sw', x1 - PAD, y2 + PAD], ['se', x2 + PAD, y2 + PAD]]; };
+  function pickHandle(x, y) {
+    if (!(state.tool === 'select' && sel >= 0 && state.shapes[sel])) return null;
+    for (const [h, hx, hy] of handles(state.shapes[sel])) if (Math.abs(x - hx) <= HS && Math.abs(y - hy) <= HS) return h;
+    return null;
+  }
+  function scaleShape(o, b, n) {
+    const bw = b[2] - b[0], bh = b[3] - b[1];
+    const fx = (v) => bw ? n[0] + (v - b[0]) * (n[2] - n[0]) / bw : v;
+    const fy = (v) => bh ? n[1] + (v - b[1]) * (n[3] - n[1]) / bh : v;
+    const s = JSON.parse(JSON.stringify(o));
+    if (s.type === 'pen') s.pts = o.pts.map(p => [Math.round(fx(p[0]) * 10) / 10, Math.round(fy(p[1]) * 10) / 10]);
+    else if (s.type === 'text') { s.k = Math.max(0.3, Math.min(8, (o.k || 1) * (bh ? (n[3] - n[1]) / bh : 1))); s.x = n[0]; s.y = n[1]; }
+    else { s.x1 = fx(o.x1); s.y1 = fy(o.y1); s.x2 = fx(o.x2); s.y2 = fy(o.y2); }
+    return s;
+  }
+  const handleCursor = (h) => h ? (h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize') : 'default';
+
   function pick(x, y) { for (let i = state.shapes.length - 1; i >= 0; i--) if (hit(state.shapes[i], x, y)) return i; return -1; }
   function deleteSelected() { if (!(sel >= 0 && state.shapes[sel])) return; const i = sel; sel = -1; mutate(() => state.shapes.splice(i, 1)); }
 
@@ -109,7 +134,7 @@
     if (s.type === 'line' || s.type === 'arrow') return segDist(s.x1, s.y1, s.x2, s.y2) < tol;
     if (s.type === 'rect') { const x1 = Math.min(s.x1, s.x2), x2 = Math.max(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), y2 = Math.max(s.y1, s.y2);
       return [segDist(x1, y1, x2, y1), segDist(x2, y1, x2, y2), segDist(x1, y2, x2, y2), segDist(x1, y1, x1, y2)].some(d => d < tol); }
-    if (s.type === 'text') { const lines = String(s.text).split('\n'); const w = Math.max(...lines.map(l => l.length)) * (10 + s.size); const h = lines.length * (22 + s.size * 2.4) + 10; return x >= s.x - 6 && x <= s.x + w && y >= s.y - 6 && y <= s.y + h; }
+    if (s.type === 'text') { const lines = String(s.text).split('\n'); const k = s.k || 1; const w = Math.max(...lines.map(l => l.length)) * (10 + s.size) * k; const h = lines.length * (22 + s.size * 2.4) * k + 10; return x >= s.x - 6 && x <= s.x + w && y >= s.y - 6 && y <= s.y + h; }
     return false;
   }
   function eraseAt(x, y) {
@@ -140,7 +165,9 @@
     if (state.tool === 'text') { e.preventDefault(); openText(x, y); return; }
     draw.setPointerCapture(e.pointerId);
     if (state.tool === 'select') {
-      const [rx, ry] = pos(e); sel = pick(rx, ry);
+      const [rx, ry] = pos(e); const h = pickHandle(rx, ry);
+      if (h) { drag = { resize: h, orig: JSON.parse(JSON.stringify(state.shapes[sel])), box: bbox(state.shapes[sel]), before: snapshot(), moved: false }; render(); return; }
+      sel = pick(rx, ry);
       drag = sel >= 0 ? { x: snapv(rx), y: snapv(ry), before: snapshot(), moved: false } : null;
       render(); return;
     }
@@ -150,12 +177,21 @@
     render();
   });
   draw.addEventListener('pointermove', (e) => {
+    if (drag && drag.resize && sel >= 0) {
+      const [rx, ry] = pos(e), h = drag.resize; let [x1, y1, x2, y2] = drag.box;
+      const nx = snapv(rx + (h.includes('w') ? PAD : -PAD)), ny = snapv(ry + (h.includes('n') ? PAD : -PAD));
+      if (h.includes('w')) x1 = Math.min(nx, x2 - MIN); else x2 = Math.max(nx, x1 + MIN);
+      if (h.includes('n')) y1 = Math.min(ny, y2 - MIN); else y2 = Math.max(ny, y1 + MIN);
+      state.shapes[sel] = scaleShape(drag.orig, drag.box, [x1, y1, x2, y2]); drag.moved = true; render();
+      return;
+    }
     if (drag && sel >= 0) {
       const [mx, my] = snapPos(e); const dx = mx - drag.x, dy = my - drag.y;
       if (dx || dy) { moveShape(state.shapes[sel], dx, dy); drag.x = mx; drag.y = my; drag.moved = true; render(); }
       return;
     }
-    if (!current) return; const [x, y] = (current.type === 'pen' || current.type === 'erasing') ? pos(e) : snapPos(e);
+    if (!current) { if (state.tool === 'select') draw.style.cursor = handleCursor(pickHandle(...pos(e))); return; }
+    const [x, y] = (current.type === 'pen' || current.type === 'erasing') ? pos(e) : snapPos(e);
     if (current.type === 'erasing') { eraseAt(x, y); return; }
     if (current.type === 'pen') current.pts.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
     else { current.x2 = x; current.y2 = y; }
@@ -214,47 +250,30 @@
   function resetClear() { clearWrap.innerHTML = '<button class="tbtn" id="clear" title="Borrar todo">Borrar todo</button>'; document.getElementById('clear').onclick = showClear; }
   document.getElementById('clear').onclick = showClear;
 
-  // Exportar: PNG con fondo, dibujo y, si hay, un pie con la pantalla y la nota (así quien lo
-  // recibe ve también qué se pide).
-  function wrapLines(c, text, maxW) {
-    const out = [];
-    for (const para of String(text).split('\n')) {
-      let line = '';
-      for (const word of para.split(/\s+/)) { const t = line ? line + ' ' + word : word; if (c.measureText(t).width > maxW && line) { out.push(line); line = word; } else line = t; }
-      out.push(line);
-    }
-    return out;
-  }
+  // Exportar: PNG con fondo y dibujo
   function exportPng() {
-    const title = document.getElementById('sketch-title').value.trim();
-    const note = document.getElementById('sketch-note').value.trim();
-    const m = document.createElement('canvas').getContext('2d');
-    m.font = '400 26px system-ui, sans-serif';
-    const lines = note ? wrapLines(m, note, W - 64) : [];
-    const foot = (title || note) ? 40 + (title ? 40 : 0) + lines.length * 36 : 0;
-    const c = document.createElement('canvas'); c.width = W; c.height = H + foot;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
     const x = c.getContext('2d'); renderBg(x); state.shapes.forEach(s => pathShape(x, s));
-    if (foot) {
-      x.fillStyle = '#f4f7fa'; x.fillRect(0, H, W, foot); x.fillStyle = '#d5dde6'; x.fillRect(0, H, W, 2);
-      let y = H + 30; x.textBaseline = 'top';
-      if (title) { x.fillStyle = '#142030'; x.font = '700 30px system-ui, sans-serif'; x.fillText(title, 32, y - 6); y += 40; }
-      x.fillStyle = '#334155'; x.font = '400 26px system-ui, sans-serif'; lines.forEach(l => { x.fillText(l, 32, y); y += 36; });
-    }
     return new Promise(res => c.toBlob(b => res(b), 'image/png'));
   }
 
   const statusEl = document.getElementById('status');
-  const setStatus = (msg, cls) => { statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); };
+  let statusTimer = 0;
+  const setStatus = (msg, cls) => {
+    statusEl.textContent = msg; statusEl.className = 'toast show' + (cls ? ' ' + cls : '');
+    clearTimeout(statusTimer); statusTimer = setTimeout(() => { statusEl.className = 'toast'; }, 2600);
+  };
+  let fileName = 'boceto';
 
-  document.getElementById('send-form').addEventListener('submit', async (e) => {
-    e.preventDefault(); closeText(true);
+  document.getElementById('copy-btn').addEventListener('click', async () => {
+    closeText(true);
     if (!state.shapes.length && state.orient !== 'c') { setStatus('Dibuja algo antes de copiarlo.', 'err'); return; }
     try {
       const blob = await exportPng();
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      setStatus('Imagen copiada. Pégala en el chat con Ctrl+V.', 'ok');
+      setStatus('Imagen copiada. Pégala con Ctrl+V.', 'ok');
     } catch (err) {
-      setStatus('No se ha podido copiar la imagen; usa «Descargar PNG».', 'err');
+      setStatus('No se ha podido copiar la imagen; descárgala.', 'err');
     }
   });
   document.getElementById('download-btn').addEventListener('click', async () => {
@@ -262,7 +281,7 @@
     const blob = await exportPng();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const name = (document.getElementById('sketch-title').value.trim() || 'boceto').toLowerCase().replace(/[^a-z0-9áéíóúñü]+/gi, '-').replace(/^-|-$/g, '');
+    const name = fileName.toLowerCase().replace(/[^a-z0-9áéíóúñü]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80);
     a.href = url; a.download = (name || 'boceto') + '.png'; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     setStatus('Imagen descargada.', 'ok');
@@ -279,7 +298,7 @@
       capture = img;
       DIMS.c = [1560, Math.round(1560 * img.naturalHeight / img.naturalWidth)];
       document.querySelector('[data-orient="c"]').hidden = false;
-      if (capturaTitulo && !document.getElementById('sketch-title').value) document.getElementById('sketch-title').value = capturaTitulo;
+      if (capturaTitulo) fileName = capturaTitulo;
       if (location.hash === '#captura') setOrient('c');
     } catch (e) {
       console.debug('[pizarra/board.js] sin captura disponible:', e && e.message);
