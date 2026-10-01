@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Pizarra de bocetos",
+  "short_name": "Pizarra",
+  "version": "1.0.0",
+  "description": "Boceta pantallas (móvil vertical u horizontal, con rejilla) o dibuja encima de la página actual, y copia la imagen para compartirla.",
+  "action": {
+    "default_title": "Abrir la pizarra de bocetos (captura la pestaña actual)",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["activeTab", "storage"]
+}
