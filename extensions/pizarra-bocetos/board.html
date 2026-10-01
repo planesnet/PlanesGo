@@ -68,9 +68,19 @@
   </section>
 
 </div>
+<div class="ctx-menu" id="ctx-menu" role="menu" aria-label="Acciones del objeto" hidden>
+  <button type="button" role="menuitem" data-act="group">Agrupar<kbd>Ctrl+G</kbd></button>
+  <button type="button" role="menuitem" data-act="ungroup">Desagrupar<kbd>Ctrl+Mayús+G</kbd></button>
+  <hr>
+  <button type="button" role="menuitem" data-act="front">Traer al frente</button>
+  <button type="button" role="menuitem" data-act="back">Enviar al fondo</button>
+  <hr>
+  <button type="button" role="menuitem" data-act="delete" class="danger">Eliminar<kbd>Supr</kbd></button>
+</div>
 <div class="toast" id="status" role="status" aria-live="polite"></div>
 
 <script src="patterns.js"></script>
+<script src="sketch.js"></script>
 <script src="board.js"></script>
 </body>
 </html>

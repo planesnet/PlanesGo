@@ -11,10 +11,13 @@
   const bg = document.getElementById('bg'), draw = document.getElementById('draw');
   const bctx = bg.getContext('2d'), ctx = draw.getContext('2d');
   const state = { tool: 'pen', color: '#142030', size: 4, orient: 'h', snap: true, pattern: '', shapes: [], redo: [] };
-  // Todo cambio guarda antes una instantánea: deshacer/rehacer cubren dibujar, mover y eliminar.
-  const snapshot = () => JSON.stringify(state.shapes);
+  // Todo cambio guarda antes una instantánea (objetos, orientación y patrón): deshacer/rehacer
+  // cubren dibujar, mover, agrupar, eliminar y cambiar de patrón u orientación.
+  const snapshot = () => JSON.stringify({ shapes: state.shapes, orient: state.orient, pattern: state.pattern });
   function mutate(fn) { history.push(snapshot()); if (history.length > 200) history.shift(); state.redo = []; fn(); saveDraft(); render(); }
-  let current = null, textBox = null, sel = -1, drag = null;
+  // selected: objetos seleccionados (referencias a state.shapes). Un clic sobre un objeto de un
+  // grupo selecciona el grupo entero.
+  let current = null, textBox = null, selected = [], drag = null;
   const history = [];
 
   // Borrador local (comodidad: no se pierde el dibujo al recargar)
@@ -57,26 +60,14 @@
     c.save(); c.shadowColor = 'rgba(15,23,42,.14)'; c.shadowBlur = 30; c.shadowOffsetY = 10; c.fillStyle = '#ffffff'; frame(); c.fill(); c.restore();
     c.save(); frame(); c.clip();
     gridLines(c, s.x, s.y, s.w, s.h, '#eef2f7', '#dde5ee');
-    // Barra superior de la app (salvo que la pantalla no la lleve) y contenido del patrón
-    const spec = s.spec, full = { x: s.x, y: s.y, w: s.w, h: s.h };
-    let r = full, anchor = null;
-    if (spec.bar !== false) { window.PizarraPatrones ? window.PizarraPatrones.appBar(c, { x: s.x, y: s.y, w: s.w, h: HEADER }, spec.bar || {}) : null; r = { x: s.x, y: s.y + HEADER, w: s.w, h: s.h - HEADER }; }
-    if (spec.draw) anchor = spec.draw(c, r, full) || null;
+    // Sin patrón, la cabecera de la app como referencia; con patrón, la barra va en sus objetos
+    if (!state.pattern && window.PizarraPatrones) window.PizarraPatrones.appBar(c, { x: s.x, y: s.y, w: s.w, h: HEADER }, {});
     c.restore();
     // Marco del dispositivo (discontinuo en las pantallas adicionales del tapete)
     c.save(); c.strokeStyle = s.extra ? '#94a3b8' : '#64748b'; c.lineWidth = 4; if (s.extra) c.setLineDash([14, 10]); frame(); c.stroke(); c.restore();
-    return anchor;
-  }
-  // Flecha en el tapete desde el elemento que abre la pantalla siguiente
-  function drawLink(c, from, to, label) {
-    c.save(); c.strokeStyle = '#64748b'; c.fillStyle = '#64748b'; c.lineWidth = 3; c.setLineDash([10, 8]);
-    c.beginPath(); c.moveTo(from[0] + 12, from[1]); c.lineTo(to[0] - 16, from[1]); c.stroke(); c.setLineDash([]);
-    c.beginPath(); c.moveTo(to[0] - 4, from[1]); c.lineTo(to[0] - 22, from[1] - 11); c.lineTo(to[0] - 22, from[1] + 11); c.closePath(); c.fill();
-    c.font = '600 22px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'bottom'; c.fillText(label, (from[0] + to[0]) / 2, from[1] - 12);
-    c.restore();
   }
 
-  // Fondo: tapete con rejilla, dispositivo(s) con la cabecera de la app y el patrón elegido.
+  // Fondo: tapete con rejilla y dispositivo(s). El patrón no va aquí: se incrusta como objetos.
   // Va en su propio lienzo: el borrador no lo toca.
   function renderBg(c) {
     if (state.orient === 'c' && capture) {
@@ -88,11 +79,7 @@
     }
     c.save(); c.fillStyle = '#e9eef4'; c.fillRect(0, 0, W, H);
     gridLines(c, 0, 0, W, H, '#e1e7ee', '#d6dee8');
-    const anchors = lay.screens.map(s => drawScreen(c, s));
-    lay.screens.forEach((s, i) => {
-      if (!i) return; const prev = lay.screens[i - 1], a = anchors[i - 1] || [prev.x + prev.w, prev.y + prev.h / 2];
-      drawLink(c, a, [s.x, a[1]], prev.spec.link || '');
-    });
+    lay.screens.forEach(s => drawScreen(c, s));
     c.restore();
   }
   const HAND = "'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive";
@@ -106,14 +93,46 @@
     }
     return out;
   }
+  // Trazo a mano (objetos de los patrones): líneas con una ligera curva y que se pasan un poco en
+  // las esquinas. La semilla de cada objeto hace que el temblor sea siempre el mismo.
+  function rng(seed) { let t = (Math.abs(seed | 0) % 2147483646) + 1; return () => { t = (t * 16807) % 2147483647; return (t - 1) / 2147483646; }; }
+  function roughSeg(c, x1, y1, x2, y2, R, over) {
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+    const o1 = over * (0.3 + R() * 0.7), o2 = over * (0.3 + R() * 0.7), j = () => (R() - 0.5) * 1.6;
+    const ax = x1 - ux * o1 + j(), ay = y1 - uy * o1 + j(), bx = x2 + ux * o2 + j(), by = y2 + uy * o2 + j();
+    const bend = (R() - 0.5) * Math.min(7, len * 0.025);
+    c.moveTo(ax, ay); c.quadraticCurveTo((ax + bx) / 2 - uy * bend, (ay + by) / 2 + ux * bend, bx, by);
+  }
+  function handShape(c, s) {
+    const R = rng(s.seed);
+    if (s.type === 'rect') {
+      const x1 = Math.min(s.x1, s.x2), y1 = Math.min(s.y1, s.y2), x2 = Math.max(s.x1, s.x2), y2 = Math.max(s.y1, s.y2), r = s.r || 0;
+      if (r >= 10) { // redondeado: dos pasadas algo desplazadas
+        for (const a of [1, 0.45]) { const j = () => (R() - 0.5) * 3; c.globalAlpha = a; c.beginPath(); c.roundRect(x1 + j(), y1 + j(), x2 - x1 + j(), y2 - y1 + j(), Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2)); c.stroke(); }
+        c.globalAlpha = 1; return;
+      }
+      const over = Math.min(6, Math.min(x2 - x1, y2 - y1) * 0.08 + 1);
+      c.beginPath(); roughSeg(c, x1, y1, x2, y1, R, over); roughSeg(c, x2, y1, x2, y2, R, over); roughSeg(c, x2, y2, x1, y2, R, over); roughSeg(c, x1, y2, x1, y1, R, over); c.stroke();
+    } else {
+      c.beginPath(); roughSeg(c, s.x1, s.y1, s.x2, s.y2, R, 0);
+      if (s.type === 'arrow') {
+        const a = Math.atan2(s.y2 - s.y1, s.x2 - s.x1), l = 12 + s.size * 2.2;
+        roughSeg(c, s.x2, s.y2, s.x2 - l * Math.cos(a - 0.45), s.y2 - l * Math.sin(a - 0.45), R, 0);
+        roughSeg(c, s.x2, s.y2, s.x2 - l * Math.cos(a + 0.45), s.y2 - l * Math.sin(a + 0.45), R, 0);
+      }
+      c.stroke();
+    }
+  }
   function pathShape(c, s, noText) {
     c.save(); c.strokeStyle = s.color; c.fillStyle = s.color; c.lineWidth = s.size; c.lineCap = 'round'; c.lineJoin = 'round';
-    if (s.type === 'pen') {
+    if (s.hand && (s.type === 'rect' || s.type === 'line' || s.type === 'arrow')) {
+      handShape(c, s);
+    } else if (s.type === 'pen') {
       c.beginPath(); s.pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]));
       if (s.pts.length === 1) c.lineTo(s.pts[0][0] + 0.1, s.pts[0][1]);
       c.stroke();
     } else if (s.type === 'rect') {
-      c.beginPath(); c.roundRect(Math.min(s.x1, s.x2), Math.min(s.y1, s.y2), Math.abs(s.x2 - s.x1), Math.abs(s.y2 - s.y1), 6); c.stroke();
+      c.beginPath(); c.roundRect(Math.min(s.x1, s.x2), Math.min(s.y1, s.y2), Math.abs(s.x2 - s.x1), Math.abs(s.y2 - s.y1), s.r || 6); c.stroke();
     } else if (s.type === 'line' || s.type === 'arrow') {
       c.beginPath(); c.moveTo(s.x1, s.y1); c.lineTo(s.x2, s.y2); c.stroke();
       if (s.type === 'arrow') {
@@ -142,17 +161,26 @@
     ctx.clearRect(0, 0, W, H);
     state.shapes.forEach((s, i) => pathShape(ctx, s, textBox && textBox.index === i));
     if (current) pathShape(ctx, current);
-    if (sel >= 0 && state.shapes[sel]) {
-      const [x1, y1, x2, y2] = bbox(state.shapes[sel]);
-      ctx.save(); ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+    selected = selected.filter(s => state.shapes.includes(s));
+    if (selected.length) {
+      const [x1, y1, x2, y2] = selBox();
+      ctx.save(); ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 2;
+      // Con varios objetos sueltos, una marca fina en cada uno
+      if (selected.length > 1 && !oneGroup()) { ctx.globalAlpha = 0.5; for (const o of selected) { const b = bbox(o); ctx.strokeRect(b[0] - 3, b[1] - 3, b[2] - b[0] + 6, b[3] - b[1] + 6); } ctx.globalAlpha = 1; }
+      ctx.setLineDash(oneGroup() ? [14, 5, 3, 5] : [8, 6]);
       ctx.strokeRect(x1 - PAD, y1 - PAD, x2 - x1 + 2 * PAD, y2 - y1 + 2 * PAD); ctx.setLineDash([]);
       ctx.fillStyle = '#ffffff';
-      for (const [, hx, hy] of handles(state.shapes[sel])) { ctx.fillRect(hx - HS / 2, hy - HS / 2, HS, HS); ctx.strokeRect(hx - HS / 2, hy - HS / 2, HS, HS); }
+      for (const [, hx, hy] of handles()) { ctx.fillRect(hx - HS / 2, hy - HS / 2, HS, HS); ctx.strokeRect(hx - HS / 2, hy - HS / 2, HS, HS); }
       ctx.restore();
+    }
+    if (drag && drag.marquee) {
+      const [ax, ay, bx, by] = drag.marquee;
+      ctx.save(); ctx.fillStyle = 'rgba(2,132,199,.08)'; ctx.strokeStyle = '#0284c7'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+      ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)); ctx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)); ctx.restore();
     }
     document.getElementById('undo').disabled = !history.length;
     document.getElementById('redo').disabled = !state.redo.length;
-    document.getElementById('delete-sel').disabled = !(sel >= 0 && state.shapes[sel]);
+    document.getElementById('delete-sel').disabled = !selected.length;
   }
 
   const pos = (e) => { const r = draw.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
@@ -174,10 +202,16 @@
   // Redimensionar: tiradores en las esquinas de la caja de selección. Se escala el objeto de la
   // caja original a la nueva (el texto, de forma proporcional según la altura).
   const PAD = 8, HS = 14, MIN = 10;
-  const handles = (s) => { const [x1, y1, x2, y2] = bbox(s); return [['nw', x1 - PAD, y1 - PAD], ['ne', x2 + PAD, y1 - PAD], ['sw', x1 - PAD, y2 + PAD], ['se', x2 + PAD, y2 + PAD]]; };
+  // Caja de toda la selección
+  function selBox() {
+    const bs = selected.map(bbox);
+    return [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])), Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
+  }
+  const oneGroup = () => selected.length > 1 && selected[0].g && selected.every(s => s.g === selected[0].g) && state.shapes.filter(s => s.g === selected[0].g).length === selected.length;
+  const handles = () => { const [x1, y1, x2, y2] = selBox(); return [['nw', x1 - PAD, y1 - PAD], ['ne', x2 + PAD, y1 - PAD], ['sw', x1 - PAD, y2 + PAD], ['se', x2 + PAD, y2 + PAD]]; };
   function pickHandle(x, y) {
-    if (!(state.tool === 'select' && sel >= 0 && state.shapes[sel])) return null;
-    for (const [h, hx, hy] of handles(state.shapes[sel])) if (Math.abs(x - hx) <= HS && Math.abs(y - hy) <= HS) return h;
+    if (!(state.tool === 'select' && selected.length)) return null;
+    for (const [h, hx, hy] of handles()) if (Math.abs(x - hx) <= HS && Math.abs(y - hy) <= HS) return h;
     return null;
   }
   function scaleShape(o, b, n) {
@@ -186,14 +220,30 @@
     const fy = (v) => bh ? n[1] + (v - b[1]) * (n[3] - n[1]) / bh : v;
     const s = JSON.parse(JSON.stringify(o));
     if (s.type === 'pen') s.pts = o.pts.map(p => [Math.round(fx(p[0]) * 10) / 10, Math.round(fy(p[1]) * 10) / 10]);
-    else if (s.type === 'text') { s.k = Math.max(0.3, Math.min(8, (o.k || 1) * (bh ? (n[3] - n[1]) / bh : 1))); s.x = n[0]; s.y = n[1]; }
+    else if (s.type === 'text') { s.k = Math.max(0.3, Math.min(8, (o.k || 1) * (bh ? (n[3] - n[1]) / bh : 1))); s.x = fx(o.x); s.y = fy(o.y); }
     else { s.x1 = fx(o.x1); s.y1 = fy(o.y1); s.x2 = fx(o.x2); s.y2 = fy(o.y2); }
     return s;
   }
   const handleCursor = (h) => h ? (h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize') : 'default';
 
   function pick(x, y) { for (let i = state.shapes.length - 1; i >= 0; i--) if (hit(state.shapes[i], x, y)) return i; return -1; }
-  function deleteSelected() { if (!(sel >= 0 && state.shapes[sel])) return; const i = sel; sel = -1; mutate(() => state.shapes.splice(i, 1)); }
+  // Grupos: los objetos de un grupo comparten g. Los de un patrón llevan además pat mientras no
+  // se toquen: así, al cambiar de orientación, se regeneran para la nueva forma.
+  const members = (s) => s.g ? state.shapes.filter(o => o.g === s.g) : [s];
+  function touch(objs) { for (const o of objs) for (const m of members(o)) delete m.pat; }
+  const newGroupId = () => 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function deleteSelected() {
+    if (!selected.length) return; const del = selected; selected = [];
+    mutate(() => { touch(del); state.shapes = state.shapes.filter(s => !del.includes(s)); });
+  }
+  const canGroup = () => selected.length > 1 && !oneGroup();
+  const canUngroup = () => selected.some(s => s.g);
+  function groupSelected() { if (!canGroup()) return; const g = newGroupId(), objs = selected; mutate(() => { touch(objs); objs.forEach(s => { s.g = g; }); }); }
+  function ungroupSelected() { if (!canUngroup()) return; const objs = selected; mutate(() => { touch(objs); objs.forEach(s => { delete s.g; }); }); }
+  function reorder(front) {
+    if (!selected.length) return; const objs = state.shapes.filter(s => selected.includes(s));
+    mutate(() => { const rest = state.shapes.filter(s => !objs.includes(s)); state.shapes = front ? [...rest, ...objs] : [...objs, ...rest]; });
+  }
 
   function hit(s, x, y) {
     const tol = Math.max(10, s.size + 6);
@@ -207,7 +257,7 @@
     return false;
   }
   function eraseAt(x, y) {
-    const i = pick(x, y); if (i >= 0) { sel = -1; mutate(() => state.shapes.splice(i, 1)); }
+    const i = pick(x, y); if (i >= 0) { const s = state.shapes[i]; selected = selected.filter(o => o !== s); mutate(() => { touch([s]); state.shapes.splice(i, 1); }); }
   }
 
   // Editor de texto sobre el lienzo: crea un texto nuevo en (x, y) o cambia el de un texto o una
@@ -242,8 +292,8 @@
     if (index >= 0) {
       const s = state.shapes[index];
       if (keep && s && v !== (s.text || '')) {
-        if (!v && s.type === 'text') { sel = -1; mutate(() => state.shapes.splice(index, 1)); }
-        else mutate(() => { s.text = v; });
+        if (!v && s.type === 'text') { selected = []; mutate(() => { touch([s]); state.shapes.splice(index, 1); }); }
+        else mutate(() => { touch([s]); s.text = v; });
       } else render();
       return;
     }
@@ -257,9 +307,19 @@
     draw.setPointerCapture(e.pointerId);
     if (state.tool === 'select') {
       const [rx, ry] = pos(e); const h = pickHandle(rx, ry);
-      if (h) { drag = { resize: h, orig: JSON.parse(JSON.stringify(state.shapes[sel])), box: bbox(state.shapes[sel]), before: snapshot(), moved: false }; render(); return; }
-      sel = pick(rx, ry);
-      drag = sel >= 0 ? { x: snapv(rx), y: snapv(ry), before: snapshot(), moved: false } : null;
+      if (h) { drag = { resize: h, objs: selected.slice(), origs: selected.map(o => JSON.parse(JSON.stringify(o))), box: selBox(), before: snapshot(), moved: false }; render(); return; }
+      const i = pick(rx, ry);
+      if (i >= 0) {
+        // Clic: el objeto (o su grupo); Mayús+clic: añadir o quitar de la selección
+        const m = members(state.shapes[i]);
+        if (e.shiftKey) selected = m.every(o => selected.includes(o)) ? selected.filter(o => !m.includes(o)) : [...selected, ...m.filter(o => !selected.includes(o))];
+        else if (!selected.includes(state.shapes[i])) selected = m;
+        drag = { x: snapv(rx), y: snapv(ry), before: snapshot(), moved: false };
+      } else {
+        // Arrastrar en vacío: selección por área
+        drag = { marquee: [rx, ry, rx, ry], base: e.shiftKey ? selected.slice() : [] };
+        if (!e.shiftKey) selected = [];
+      }
       render(); return;
     }
     if (state.tool === 'eraser') { current = { type: 'erasing' }; eraseAt(x, y); return; }
@@ -268,17 +328,19 @@
     render();
   });
   draw.addEventListener('pointermove', (e) => {
-    if (drag && drag.resize && sel >= 0) {
+    if (drag && drag.marquee) { const [rx, ry] = pos(e); drag.marquee[2] = rx; drag.marquee[3] = ry; render(); return; }
+    if (drag && drag.resize) {
       const [rx, ry] = pos(e), h = drag.resize; let [x1, y1, x2, y2] = drag.box;
       const nx = snapv(rx + (h.includes('w') ? PAD : -PAD)), ny = snapv(ry + (h.includes('n') ? PAD : -PAD));
       if (h.includes('w')) x1 = Math.min(nx, x2 - MIN); else x2 = Math.max(nx, x1 + MIN);
       if (h.includes('n')) y1 = Math.min(ny, y2 - MIN); else y2 = Math.max(ny, y1 + MIN);
-      state.shapes[sel] = scaleShape(drag.orig, drag.box, [x1, y1, x2, y2]); drag.moved = true; render();
+      drag.objs.forEach((o, k) => Object.assign(o, scaleShape(drag.origs[k], drag.box, [x1, y1, x2, y2])));
+      drag.moved = true; render();
       return;
     }
-    if (drag && sel >= 0) {
+    if (drag && selected.length) {
       const [mx, my] = snapPos(e); const dx = mx - drag.x, dy = my - drag.y;
-      if (dx || dy) { moveShape(state.shapes[sel], dx, dy); drag.x = mx; drag.y = my; drag.moved = true; render(); }
+      if (dx || dy) { selected.forEach(o => moveShape(o, dx, dy)); drag.x = mx; drag.y = my; drag.moved = true; render(); }
       return;
     }
     if (!current) { if (state.tool === 'select') draw.style.cursor = handleCursor(pickHandle(...pos(e))); return; }
@@ -289,7 +351,16 @@
     render();
   });
   const end = () => {
-    if (drag) { const d = drag; drag = null; if (d.moved) { history.push(d.before); state.redo = []; saveDraft(); render(); } return; }
+    if (drag) {
+      const d = drag; drag = null;
+      if (d.marquee) {
+        const [ax, ay, bx, by] = d.marquee, x1 = Math.min(ax, bx), x2 = Math.max(ax, bx), y1 = Math.min(ay, by), y2 = Math.max(ay, by);
+        const inside = state.shapes.filter(s => { const b = bbox(s); return b[0] >= x1 && b[2] <= x2 && b[1] >= y1 && b[3] <= y2; });
+        const add = []; for (const s of inside) for (const m of members(s)) if (!add.includes(m)) add.push(m);
+        selected = [...d.base, ...add.filter(o => !d.base.includes(o))];
+      } else if (d.moved) { history.push(d.before); state.redo = []; touch(selected); saveDraft(); }
+      render(); return;
+    }
     if (!current) return; const s = current; current = null;
     if (s.type === 'erasing') return;
     if (s.type !== 'pen' && Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 4) { render(); return; }
@@ -306,7 +377,7 @@
 
   // Herramientas
   const press = (sel, btn) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
-  document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => { closeText(true); state.tool = b.dataset.tool; press('[data-tool]', b); if (state.tool !== 'select') sel = -1; render(); draw.style.cursor = { text: 'text', eraser: 'cell', select: 'default' }[state.tool] || 'crosshair'; }));
+  document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => { closeText(true); state.tool = b.dataset.tool; press('[data-tool]', b); if (state.tool !== 'select') selected = []; render(); draw.style.cursor = { text: 'text', eraser: 'cell', select: 'default' }[state.tool] || 'crosshair'; }));
   document.querySelectorAll('[data-color]').forEach(b => b.addEventListener('click', () => { state.color = b.dataset.color; press('[data-color]', b); }));
   document.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { state.size = +b.dataset.size; press('[data-size]', b); }));
   const paperEl = document.getElementById('paper'), patternSel = document.getElementById('pattern');
@@ -322,19 +393,38 @@
     patternSel.value = state.pattern; patternSel.disabled = state.orient === 'c';
     saveDraft(); requestAnimationFrame(resize);
   }
-  patternSel.addEventListener('change', () => { closeText(true); sel = -1; state.pattern = patternSel.value; applyLayout(); });
+  // Incrusta el patrón como un grupo de objetos dibujados a mano (debajo de lo que ya hay). Sin
+  // force, solo se regenera si sus objetos siguen sin tocar.
+  function placePattern(force) {
+    if (!force && !state.shapes.some(s => s.pat)) return;
+    const keep = state.shapes.filter(s => !s.pat);
+    const gen = state.pattern && window.PizarraBoceto ? window.PizarraBoceto.generate(lay.screens, HEADER) : [];
+    const g = newGroupId(); gen.forEach(s => { s.g = g; s.pat = true; });
+    state.shapes = [...gen, ...keep];
+    selected = gen.length && force ? gen : [];
+  }
+  patternSel.addEventListener('change', () => {
+    closeText(true); selected = [];
+    mutate(() => { state.pattern = patternSel.value; lay = layout(); placePattern(true); });
+    applyLayout();
+  });
+  const pressOrient = () => document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === state.orient)));
   function setOrient(o) {
     if (o === 'c' && !capture) o = 'h';
-    closeText(true); sel = -1; state.orient = o;
-    document.querySelectorAll('[data-orient]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.orient === o)));
-    applyLayout();
+    closeText(true); selected = [];
+    mutate(() => { state.orient = o; lay = layout(); placePattern(false); });
+    pressOrient(); applyLayout();
   }
   document.querySelectorAll('[data-orient]').forEach(b => b.addEventListener('click', () => { if (state.orient !== b.dataset.orient) setOrient(b.dataset.orient); }));
   const snapBtn = document.getElementById('snap');
   const setSnap = (v) => { state.snap = v; snapBtn.setAttribute('aria-pressed', String(v)); saveDraft(); };
   snapBtn.addEventListener('click', () => setSnap(!state.snap));
-  const undo = () => { if (!history.length) return; state.redo.push(snapshot()); state.shapes = JSON.parse(history.pop()); sel = -1; saveDraft(); render(); };
-  const redo = () => { if (!state.redo.length) return; history.push(snapshot()); state.shapes = JSON.parse(state.redo.pop()); sel = -1; saveDraft(); render(); };
+  function restore(snap) {
+    const d = JSON.parse(snap); state.shapes = d.shapes; selected = [];
+    if (d.orient !== state.orient || d.pattern !== state.pattern) { state.orient = d.orient; state.pattern = d.pattern; pressOrient(); applyLayout(); }
+  }
+  const undo = () => { if (!history.length) return; closeText(false); state.redo.push(snapshot()); restore(history.pop()); saveDraft(); render(); };
+  const redo = () => { if (!state.redo.length) return; closeText(false); history.push(snapshot()); restore(state.redo.pop()); saveDraft(); render(); };
   document.getElementById('delete-sel').addEventListener('click', deleteSelected);
   document.getElementById('undo').addEventListener('click', undo);
   document.getElementById('redo').addEventListener('click', redo);
@@ -343,18 +433,46 @@
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); render(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); document.querySelector('[data-tool="select"]').click(); selected = state.shapes.slice(); render(); return; }
     if (!e.ctrlKey && !e.metaKey && k === 'g') { setSnap(!state.snap); return; }
-    if (e.key === 'Delete' || e.key === 'Backspace') { if (sel >= 0) { e.preventDefault(); deleteSelected(); } return; }
-    if (e.key === 'Escape') { sel = -1; render(); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { if (selected.length) { e.preventDefault(); deleteSelected(); } return; }
+    if (e.key === 'Escape') { hideMenu(); selected = []; render(); return; }
     const map = { v: 'select', p: 'pen', r: 'rect', l: 'line', a: 'arrow', t: 'text', b: 'box', e: 'eraser' };
     if (!e.ctrlKey && !e.metaKey && map[k]) document.querySelector(`[data-tool="${map[k]}"]`).click();
   });
+
+  // Menú contextual (clic derecho): agrupar, desagrupar, orden y eliminar
+  const menu = document.getElementById('ctx-menu');
+  const ACTIONS = { group: groupSelected, ungroup: ungroupSelected, front: () => reorder(true), back: () => reorder(false), delete: deleteSelected };
+  function hideMenu() { menu.hidden = true; }
+  draw.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); closeText(true);
+    const [x, y] = pos(e), i = pick(x, y);
+    if (i >= 0 && !selected.includes(state.shapes[i])) selected = members(state.shapes[i]);
+    render();
+    const can = { group: canGroup(), ungroup: canUngroup(), front: !!selected.length, back: !!selected.length, delete: !!selected.length };
+    menu.querySelectorAll('[data-act]').forEach(b => { b.disabled = !can[b.dataset.act]; });
+    menu.hidden = false;
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.min(e.clientX, window.innerWidth - mw - 8) + 'px'; menu.style.top = Math.min(e.clientY, window.innerHeight - mh - 8) + 'px';
+    const first = menu.querySelector('[data-act]:not(:disabled)'); if (first) first.focus();
+  });
+  menu.addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (!b || b.disabled) return; hideMenu(); ACTIONS[b.dataset.act](); render(); });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { hideMenu(); draw.focus && draw.focus(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return; e.preventDefault();
+    const items = [...menu.querySelectorAll('[data-act]:not(:disabled)')], k = items.indexOf(document.activeElement);
+    items[(k + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+  });
+  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target)) hideMenu(); }, true);
+  window.addEventListener('blur', hideMenu); window.addEventListener('resize', hideMenu);
 
   // Borrar todo con confirmación en la propia página
   const clearWrap = document.getElementById('clear-wrap');
   function showClear() {
     clearWrap.innerHTML = '<span class="confirm">¿Borrar el dibujo? <button class="btn danger" id="clear-yes" type="button">Borrar</button><button class="btn ghost" id="clear-no" type="button">Cancelar</button></span>';
-    document.getElementById('clear-yes').onclick = () => { sel = -1; mutate(() => { state.shapes = []; }); resetClear(); };
+    document.getElementById('clear-yes').onclick = () => { selected = []; mutate(() => { state.shapes = []; }); resetClear(); };
     document.getElementById('clear-no').onclick = resetClear;
   }
   function resetClear() { clearWrap.innerHTML = '<button class="tbtn" id="clear" title="Borrar todo">Borrar todo</button>'; document.getElementById('clear').onclick = showClear; }
@@ -409,7 +527,7 @@
       capH = Math.round(1560 * img.naturalHeight / img.naturalWidth);
       document.querySelector('[data-orient="c"]').hidden = false;
       if (capturaTitulo) fileName = capturaTitulo;
-      if (location.hash === '#captura') setOrient('c');
+      if (location.hash === '#captura') { state.orient = 'c'; pressOrient(); lay = layout(); placePattern(false); applyLayout(); }
     } catch (e) {
       console.debug('[pizarra/board.js] sin captura disponible:', e && e.message);
     }
@@ -424,7 +542,11 @@
       if (!d.v) state.shapes.forEach(sh => moveShape(sh, M, M)); // borradores anteriores al tapete
     }
   } catch (e) {}
-  setSnap(state.snap); setOrient(state.orient === 'c' ? 'h' : state.orient); loadCapture();
+  if (state.orient === 'c') state.orient = 'h';
+  setSnap(state.snap); pressOrient(); lay = layout();
+  // Borradores con el patrón como fondo fijo (versión anterior): se incrusta como objetos
+  if (state.pattern && !state.shapes.some(s => s.hand)) placePattern(true);
+  selected = []; applyLayout(); loadCapture();
   window.addEventListener('resize', resize);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
   resize();

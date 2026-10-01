@@ -149,6 +149,71 @@
     return a;
   }
 
+  function radio(c, cx, cy, on) {
+    c.strokeStyle = on ? WF.dark : WF.mid; c.lineWidth = 3; c.beginPath(); c.arc(cx, cy, 20, 0, Math.PI * 2); c.stroke();
+    if (on) disc(c, cx, cy, 10, WF.dark);
+  }
+  // Botón segmentado (la opción activa, rellena y con marca)
+  function segmented(c, x, y, w, labels, active) {
+    const h = 80, sw = w / labels.length;
+    labels.forEach((l, k) => {
+      const sx = x + k * sw;
+      if (k === active) { c.fillStyle = WF.tonal; rr(c, sx, y, sw, h, k === 0 ? [40, 0, 0, 40] : k === labels.length - 1 ? [0, 40, 40, 0] : 0); c.fill(); }
+      if (k) vdivider(c, sx, y, h);
+      const tx = sx + sw / 2 + (k === active ? 16 : 0);
+      if (k === active) { c.strokeStyle = WF.dark; c.lineWidth = 3; c.beginPath(); c.moveTo(tx - 64 - l.length * 6.5, y + 41); c.lineTo(tx - 56 - l.length * 6.5, y + 49); c.lineTo(tx - 42 - l.length * 6.5, y + 31); c.stroke(); }
+      txt(c, l, tx, y + h / 2 + 1, { align: 'center', color: k === active ? WF.dark : WF.mid });
+    });
+    c.strokeStyle = WF.mid; c.lineWidth = 2; rr(c, x, y, w, h, h / 2); c.stroke();
+    return y + h;
+  }
+  // Fila de ajuste con texto real (título y valor)
+  function settingRow(c, x, y, w, title, value, o = {}) {
+    const h = 128;
+    if (o.sel) { c.fillStyle = WF.sel; c.fillRect(x, y, w, h); }
+    icon(c, x + PAD + 16, y + h / 2, 'dot');
+    txt(c, title, x + PAD + 64, y + 46, { size: 26, color: WF.dark });
+    if (value) txt(c, value, x + PAD + 64, y + 86, { size: 22, weight: 400, color: WF.mid });
+    if (o.trail === 'switch') toggle(c, x + w - PAD - 104, y + h / 2 - 32, true);
+    divider(c, x + PAD, y + h - 1, w - 2 * PAD);
+    return y + h;
+  }
+  // Miniatura de una pantalla en claro u oscuro
+  function themeThumb(c, x, y, w, h, dark, label, on) {
+    rr(c, x, y, w, h, 20); c.fillStyle = dark ? WF.dark : '#ffffff'; c.fill(); c.strokeStyle = on ? WF.dark : WF.line; c.lineWidth = on ? 4 : 2; c.stroke();
+    const fg = dark ? WF.mid : WF.line;
+    bar(c, x + 24, y + 28, w * 0.5, 14, fg);
+    for (let k = 0; k < 3; k++) { disc(c, x + 40, y + 84 + k * 52, 14, fg); bar(c, x + 68, y + 78 + k * 52, w * wv(k) * 0.6, 12, fg); }
+    txt(c, label, x + w / 2, y + h + 34, { align: 'center', size: 22, color: on ? WF.dark : WF.mid });
+  }
+  function appearancePane(c, r) {
+    const x = r.x + 48, w = r.w - 96; let y = r.y + 40;
+    txt(c, 'Apariencia', x, y + 10, { size: 30, weight: 700 }); y += 60;
+    txt(c, 'Tema', x, y + 10, { size: 22, color: WF.mid }); y += 36;
+    y = segmented(c, x, y, Math.min(w, 760), ['Claro', 'Oscuro', 'Automático'], 2) + 48;
+    const tw = Math.min(220, (w - 48) / 3), th = Math.round(tw * 1.1);
+    themeThumb(c, x, y, tw, th, false, 'Claro', false);
+    themeThumb(c, x + tw + 24, y, tw, th, true, 'Oscuro', false);
+    // Automático: mitad clara, mitad oscura
+    const ax = x + 2 * (tw + 24);
+    c.save(); rr(c, ax, y, tw, th, 20); c.clip(); c.fillStyle = '#ffffff'; c.fillRect(ax, y, tw / 2, th); c.fillStyle = WF.dark; c.fillRect(ax + tw / 2, y, tw / 2, th); c.restore();
+    c.strokeStyle = WF.dark; c.lineWidth = 4; rr(c, ax, y, tw, th, 20); c.stroke();
+    txt(c, 'Automático', ax + tw / 2, y + th + 34, { align: 'center', size: 22 });
+    y += th + 90;
+    if (y + 128 <= r.y + r.h) settingRow(c, r.x + 16, y, r.w - 32, 'Colores dinámicos', 'Según el fondo de pantalla', { trail: 'switch' });
+  }
+  function themeSettings(c, r) {
+    let y = r.y + 16;
+    txt(c, 'Apariencia', r.x + PAD, y + 28, { size: 22, color: WF.dark }); y += 56;
+    const anchorY = y + 64;
+    y = settingRow(c, r.x, y, r.w, 'Tema', 'Automático (según el sistema)');
+    y = settingRow(c, r.x, y, r.w, 'Colores dinámicos', 'Según el fondo de pantalla', { trail: 'switch' });
+    y = settingRow(c, r.x, y, r.w, 'Tamaño del texto', 'Mediano');
+    txt(c, 'General', r.x + PAD, y + 44, { size: 22, color: WF.dark });
+    rows(c, r.x, y + 72, r.w, r.y + r.h, { lead: 'icon', trail: 'chevron', oneLine: true });
+    return [r.x + r.w, anchorY];
+  }
+
   // ── Barras de app y navegación ─────────────────────────────────────────────────────────
   // Barra superior: icono de navegación, título, acciones (iconos) y un botón opcional
   function appBar(c, r, b = {}) {
@@ -353,6 +418,19 @@
     { cat: CONT, id: 'ajustes', name: 'Ajustes',
       compact: [{ bar: { nav: 'back', title: 'Ajustes' }, draw: settingsList }],
       wide: [{ bar: { title: 'Ajustes' }, draw: (c, r) => split(c, r, 0.34, (c2, a) => rows(c2, a.x, a.y + 16, a.w, a.y + a.h, { lead: 'icon', oneLine: true, sel: 0, divider: false }), settingsList) }] },
+
+    { cat: CONT, id: 'tema', name: 'Tema: claro, oscuro, automático',
+      compact: [
+        { bar: { nav: 'back', title: 'Ajustes' }, draw: themeSettings, link: 'Al pulsar' },
+        { bar: { nav: 'back', title: 'Ajustes' }, draw: (c, r, s) => {
+          themeSettings(c, r); scrim(c, s);
+          const w = s.w - 96, h = 560, x = s.x + 48, y = s.y + (s.h - h) / 2;
+          sheet(c, x, y, w, h, 56); txt(c, 'Tema', x + 48, y + 72, { size: 34, weight: 700 });
+          ['Claro', 'Oscuro', 'Automático (según el sistema)'].forEach((l, k) => { radio(c, x + 76, y + 160 + k * 96, k === 2); txt(c, l, x + 124, y + 161 + k * 96, { size: 26, weight: 400 }); });
+          button(c, x + w - 48 - 380, y + h - 48 - 80, 180, 80, 'Cancelar', 'text'); button(c, x + w - 48 - 180, y + h - 48 - 80, 180, 80, 'Aceptar', 'text');
+        } },
+      ],
+      wide: [{ bar: { title: 'Ajustes' }, draw: (c, r) => split(c, r, 0.32, (c2, a) => { ['Apariencia', 'Notificaciones', 'Cuenta', 'Privacidad', 'Acerca de'].forEach((l, k) => { const y = a.y + 16 + k * 104; if (k === 0) { c2.fillStyle = WF.pill; rr(c2, a.x + 16, y + 8, a.w - 32, 88, 44); c2.fill(); } icon(c2, a.x + 64, y + 52, 'dot', k === 0 ? WF.dark : WF.mid); txt(c2, l, a.x + 104, y + 53, { size: 24, color: k === 0 ? WF.dark : WF.mid }); }); }, appearancePane) }] },
 
     { cat: INPUT, id: 'busqueda', name: 'Búsqueda',
       compact: [
