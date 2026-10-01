@@ -1463,8 +1463,9 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			tokensTotal = tokensInput + tokensOutput
 		}
 
-		// Si no se proporcionaron tokens explícitamente, intentar estimarlos de la sesión activa
-		if tokensTotal <= 0 {
+		// Si no se proporcionaron tokens explícitamente, intentar estimarlos de la sesión activa.
+		// El estimador lee transcripts de Antigravity: no aplica a sesiones de Claude Code
+		if tokensTotal <= 0 && !strings.Contains(strings.ToLower(aiModel), "claude") {
 			estTotal, estIn, estOut, estModel := estimateTokensFromActiveSession()
 			if estTotal > 0 {
 				tokensTotal = estTotal
@@ -2184,6 +2185,7 @@ func main() {
 	tokensInFlag := flag.Int("tokens-in", 0, "Tokens de entrada / prompt")
 	tokensOutFlag := flag.Int("tokens-out", 0, "Tokens de salida / respuesta")
 	modelFlag := flag.String("model", "", "Modelo de IA utilizado (ej. Gemini 3.8 Flash)")
+	sessionIDFlag := flag.String("session-id", "", "Identificador de la sesión de IA (se guarda como ai_session_id)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
 	selfUpdateFlag := flag.Bool("self-update", false, "Reconstruye planesgo-mcp (y el hook/comando) con la versión actual de master")
@@ -2283,6 +2285,9 @@ func main() {
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
 		}
+		if *sessionIDFlag != "" {
+			args["ai_session_id"] = *sessionIDFlag
+		}
 		res := executeToolCall("planesgo_beat", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2318,6 +2323,9 @@ func main() {
 		}
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
+		}
+		if *sessionIDFlag != "" {
+			args["ai_session_id"] = *sessionIDFlag
 		}
 		res := executeToolCall("planesgo_stop", args)
 		if len(res.Content) > 0 {

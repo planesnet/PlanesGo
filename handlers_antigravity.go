@@ -858,8 +858,10 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				cur.UnitAmount = 24.0
 				cur.AccumulatedMs = 24 * 3600 * 1000
 			}
-			if payload.Description != "" && payload.Description != "Trabajo en curso" {
+			descChanged := false
+			if payload.Description != "" && payload.Description != "Trabajo en curso" && payload.Description != cur.Description {
 				cur.Description = payload.Description
+				descChanged = true
 			}
 			if payload.TokensTotal > 0 {
 				cur.TokensTotal = payload.TokensTotal
@@ -881,13 +883,21 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			}
 			state.setActiveTimer(userUID, cur)
 
-			// Actualizar unidades acumuladas en Odoo de forma asíncrona
+			// Actualizar unidades acumuladas (y la descripción si cambió) en Odoo de forma asíncrona,
+			// para que el parte refleje el trabajo aunque el cronómetro en memoria se pierda
 			if cur.TimesheetID > 0 {
-				go func(tID int, units float64) {
+				newDesc := ""
+				if descChanged {
+					newDesc = cur.Description
+				}
+				go func(tID int, units float64, desc string) {
 					updateCtx, cancelUpdate := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancelUpdate()
 					_ = client.UpdateTimerUnits(updateCtx, tID, units)
-				}(cur.TimesheetID, cur.UnitAmount)
+					if desc != "" {
+						_ = client.UpdateTimerDescription(updateCtx, tID, desc)
+					}
+				}(cur.TimesheetID, cur.UnitAmount, newDesc)
 			}
 
 			state.broadcastUserEvent(userUID, "timer_tick", cur)

@@ -11,6 +11,9 @@ Modos (argv[1]):
   track          PostToolUse       -> latidos de imputación (el primero abre el cronómetro)
   session-end    SessionEnd        -> cierra e imputa los cronómetros abiertos en la sesión
 
+La descripción del parte se construye con lo que se ha hecho en la sesión: commits nuevos,
+ficheros editados, rama y, si aún no hay nada de eso, la primera petición del usuario.
+
 Contrato de no interferencia: ante cualquier error inesperado el hook termina en 0 sin salida.
 """
 import sys
@@ -25,6 +28,9 @@ HOME = os.path.expanduser("~")
 TASK_NAME = "Claude Code - Sesión IA"
 TASK_TYPE = "Desarrollo"
 DESC = "Trabajo de codificación asistido con Claude Code"
+DESC_MAX = 480
+MAX_FILES_LISTED = 5
+MAX_COMMITS_LISTED = 6
 # El backend distingue Claude de Antigravity por este valor
 AI_MODEL_LABEL = "Claude Code"
 STATE_ROOT = "/tmp/planesgo-claude"
@@ -163,11 +169,20 @@ def session_dir(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
 
-def run_bin(args, background=False):
+def run_bin(args, background=False, payload=None, with_tokens=False):
     binp = find_bin()
     if not binp:
         return False
     cmd = [binp] + args + ["--task", TASK_NAME, "--type", TASK_TYPE, "--model", AI_MODEL_LABEL]
+    if payload:
+        sid = str(payload.get("session_id") or "").strip()
+        if sid:
+            cmd += ["--session-id", sid]
+    if payload and with_tokens:
+        # Solo al cerrar: el transcript puede ser grande y los latidos deben ser baratos
+        tin, tout = transcript_tokens(payload.get("transcript_path"))
+        if tin or tout:
+            cmd += ["--tokens-in", str(tin), "--tokens-out", str(tout), "--tokens", str(tin + tout)]
     if background:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return True
@@ -177,7 +192,148 @@ def run_bin(args, background=False):
         return False
 
 
+def transcript_tokens(path):
+    """Tokens de la sesión según el transcript de Claude Code (uso real informado por la API).
+
+    Cada respuesta puede ocupar varias líneas con el mismo message.id, así que se cuenta una vez por id.
+    La entrada excluye las lecturas de caché: se releen en cada turno y multiplicarían la cifra
+    sin reflejar trabajo nuevo.
+    """
+    if not path or not os.path.isfile(path):
+        return 0, 0
+    usages = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                msg = entry.get("message") if isinstance(entry, dict) else None
+                if not isinstance(msg, dict) or not isinstance(msg.get("usage"), dict):
+                    continue
+                key = msg.get("id") or entry.get("uuid") or len(usages)
+                usages[key] = msg["usage"]
+    except Exception:
+        return 0, 0
+    tin = sum(int(u.get("input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0) for u in usages.values())
+    tout = sum(int(u.get("output_tokens") or 0) for u in usages.values())
+    return tin, tout
+
+
+def git(root, *args):
+    try:
+        res = subprocess.run(["git", "-C", root] + list(args), stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=5, text=True)
+        return res.stdout.strip() if res.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def write_text(path, text):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception:
+        pass
+
+
+def record_prompt(payload):
+    """Guarda la primera petición de la sesión (el resto suelen ser aclaraciones o "sí")."""
+    prompt = " ".join(str(payload.get("prompt") or "").split())
+    if not prompt or prompt.startswith("/") or prompt.startswith("<"):
+        return
+    sdir = session_state_dir(payload)
+    os.makedirs(sdir, exist_ok=True)
+    path = os.path.join(sdir, "first_prompt")
+    if not os.path.exists(path):
+        write_text(path, prompt[:300])
+
+
+def init_project_state(state, root):
+    """Punto de partida de la sesión en el proyecto: con él se distinguen los commits nuevos."""
+    path = os.path.join(state, "start_head")
+    if not os.path.exists(path):
+        write_text(path, git(root, "rev-parse", "HEAD") or "-")
+        write_text(os.path.join(state, "start_time"), str(int(time.time())))
+
+
+def record_file(payload, state, root):
+    args = payload.get("tool_input") or {}
+    path = args.get("file_path") or args.get("notebook_path") or ""
+    if not path:
+        return
+    rel = os.path.relpath(os.path.abspath(path), root)
+    if rel.startswith(".."):
+        return
+    files_path = os.path.join(state, "files")
+    files = read_text(files_path).splitlines()
+    if rel not in files:
+        files.append(rel)
+        write_text(files_path, "\n".join(files))
+
+
+def session_commits(root, state):
+    start = read_text(os.path.join(state, "start_head"))
+    if start and start != "-":
+        out = git(root, "log", "--no-merges", "--format=%s", f"{start}..HEAD")
+    else:
+        since = read_text(os.path.join(state, "start_time"))
+        out = git(root, "log", "--no-merges", "--format=%s", f"--since=@{since}") if since else ""
+    return [c.strip() for c in out.splitlines() if c.strip()]
+
+
+def changed_files(root, state):
+    """Ficheros editados con Edit/Write más los que cambian los commits o el árbol de trabajo (p. ej. vía Bash)."""
+    files = read_text(os.path.join(state, "files")).splitlines()
+    start = read_text(os.path.join(state, "start_head"))
+    extra = git(root, "diff", "--name-only", start) if start and start != "-" else git(root, "diff", "--name-only", "HEAD")
+    for f in extra.splitlines():
+        if f and f not in files:
+            files.append(f)
+    return files
+
+
+def build_description(payload, root, state):
+    """Descripción del parte con lo realmente hecho; DESC si todavía no hay nada que contar."""
+    commits = session_commits(root, state)
+    files = changed_files(root, state)
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    parts = []
+    if commits:
+        shown = list(reversed(commits))[:MAX_COMMITS_LISTED]
+        more = f" (+{len(commits) - len(shown)} commits más)" if len(commits) > len(shown) else ""
+        parts.append("; ".join(shown) + more)
+    else:
+        prompt = read_text(os.path.join(session_state_dir(payload), "first_prompt"))
+        if prompt:
+            parts.append(f"Petición: {prompt[:200]}")
+    if files:
+        names = ", ".join(os.path.basename(f) for f in files[:MAX_FILES_LISTED])
+        more = f" y {len(files) - MAX_FILES_LISTED} más" if len(files) > MAX_FILES_LISTED else ""
+        parts.append(f"{len(files)} fichero{'s' if len(files) != 1 else ''} ({names}{more})")
+    if not parts:
+        return DESC
+    if branch and branch != "HEAD":
+        parts.append(f"rama {branch}")
+    desc = "[Claude Code] " + " · ".join(parts)
+    return desc if len(desc) <= DESC_MAX else desc[:DESC_MAX - 1] + "…"
+
+
 def on_context(payload, event):
+    if event == "UserPromptSubmit":
+        try:
+            record_prompt(payload)
+        except Exception:
+            pass
     root = project_root_for_dir(session_dir(payload))
     if not root:
         return
@@ -299,13 +455,15 @@ def on_track(payload):
         return
     state = os.path.join(session_state_dir(payload), str(int(cfg["odoo_project_id"])))
     os.makedirs(state, exist_ok=True)
+    init_project_state(state, root)
+    record_file(payload, state, root)
     active = os.path.join(state, "active")
     last_file = os.path.join(state, "last_beat")
     now = time.time()
     if not os.path.isfile(active):
         # Primer latido en primer plano: solo se marca activo si Odoo confirma el cronómetro,
         # así el stop final nunca queda huérfano
-        if run_bin(["--beat", "--path", root, "--desc", DESC]):
+        if run_bin(["--beat", "--path", root, "--desc", build_description(payload, root, state)], payload=payload):
             with open(active, "w", encoding="utf-8") as f:
                 f.write(root)
             with open(last_file, "w", encoding="utf-8") as f:
@@ -319,7 +477,8 @@ def on_track(payload):
     if now - last >= heartbeat_interval(cfg):
         with open(last_file, "w", encoding="utf-8") as f:
             f.write(str(now))
-        run_bin(["--beat", "--path", root, "--desc", DESC], background=True)
+        run_bin(["--beat", "--path", root, "--desc", build_description(payload, root, state)],
+                background=True, payload=payload)
 
 
 def on_session_end(payload):
@@ -333,7 +492,10 @@ def on_session_end(payload):
                 root = f.read().strip()
         except Exception:
             continue
-        run_bin(["--stop", "--path", root, "--desc", "Sesión Claude Code finalizada"])
+        # La descripción final resume la sesión completa (antes se sobrescribía con un texto fijo)
+        state = os.path.join(sdir, proj)
+        run_bin(["--stop", "--path", root, "--desc", build_description(payload, root, state)],
+                payload=payload, with_tokens=True)
     shutil.rmtree(sdir, ignore_errors=True)
 
 

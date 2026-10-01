@@ -2410,6 +2410,33 @@ func (c *Client) StartTimerExtended(ctx context.Context, projectID int, projectN
 	}, nil
 }
 
+// UpdateTimerDescription actualiza la descripción (name) de un parte de horas en curso sin pausarlo
+func (c *Client) UpdateTimerDescription(ctx context.Context, timesheetID int, description string) error {
+	description = strings.TrimSpace(description)
+	if timesheetID <= 0 || description == "" {
+		return nil
+	}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+	writeArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"account.analytic.line",
+		"write",
+		[]interface{}{
+			[]int{timesheetID},
+			map[string]interface{}{
+				"name": description,
+			},
+		},
+	}
+	_, err = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	return err
+}
+
 // UpdateTimerUnits actualiza el unit_amount acumulado de un parte de horas en Odoo periódicamente sin pausarlo
 func (c *Client) UpdateTimerUnits(ctx context.Context, timesheetID int, unitAmount float64) error {
 	uid, err := c.Authenticate(ctx)
