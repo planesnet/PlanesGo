@@ -340,7 +340,8 @@ function isClaudeTask(taskName, description) {
     if (!taskName && !description) return false;
     const tn = String(taskName || '').toUpperCase();
     const ds = String(description || '').toUpperCase();
-    return tn.startsWith('[CLAUDE]') || ds.startsWith('[CLAUDE]') || tn.includes('CLAUDE') || ds.includes('CLAUDE');
+    // Mismo criterio que el servidor: prefijo [CLAUDE…] o el texto "Claude Code" del hook, no cualquier mención
+    return tn.startsWith('[CLAUDE') || ds.startsWith('[CLAUDE') || tn.includes('CLAUDE CODE') || ds.includes('CLAUDE CODE');
 }
 
 function renderTaskBadgeHTML(taskName) {
