@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	Version       = "1.2.72"
+	Version       = "1.2.73"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -268,6 +268,12 @@ func NormalizeTaskType(taskName, description, explicitType string) (string, stri
 	// El nombre de la tarea es exclusivamente el nombre canónico sin prefijos [AGY]
 	return detectedType, detectedType
 }
+
+// mcpInstructions se envía al cliente MCP (Claude Code, Antigravity) al inicializar
+const mcpInstructions = "Todo texto que se envíe a PlanesGo (nombres de tarea, descripciones de los partes de horas, " +
+	"asuntos y descripciones de cierre de tickets) debe redactarse en español, aunque la conversación, " +
+	"el código o los commits estén en otro idioma. Las descripciones deben resumir el trabajo realizado " +
+	"de forma clara y concreta."
 
 // Config representa el archivo .planesgo.json encontrado en el proyecto
 type Config struct {
@@ -1808,7 +1814,7 @@ func getToolsDefinition() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"task_name": map[string]interface{}{
 						"type":        "string",
-						"description": "Nombre de la tarea sobre la que se van a imputar horas",
+						"description": "Nombre de la tarea sobre la que se van a imputar horas. Redáctalo siempre en español",
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
@@ -1855,7 +1861,7 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Resumen breve del trabajo para el parte de horas en Odoo (opcional)",
+						"description": "Resumen breve del trabajo para el parte de horas en Odoo (opcional). Redáctalo siempre en español",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -1873,7 +1879,7 @@ func getToolsDefinition() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"task_name": map[string]interface{}{
 						"type":        "string",
-						"description": "Nombre descriptivo de la tarea que se está ejecutando",
+						"description": "Nombre descriptivo de la tarea que se está ejecutando. Redáctalo siempre en español",
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
@@ -1890,7 +1896,7 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Resumen breve del trabajo o progreso actual para el parte de horas en Odoo",
+						"description": "Resumen breve del trabajo o progreso actual para el parte de horas en Odoo. Redáctalo siempre en español",
 					},
 					"tokens_total": map[string]interface{}{
 						"type":        "integer",
@@ -1941,7 +1947,7 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Resumen breve, claro y sustantivo del trabajo realizado para el parte de horas en Odoo",
+						"description": "Resumen breve, claro y sustantivo del trabajo realizado para el parte de horas en Odoo. Redáctalo siempre en español",
 					},
 					"tokens_total": map[string]interface{}{
 						"type":        "integer",
@@ -1978,11 +1984,11 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"subject": map[string]interface{}{
 						"type":        "string",
-						"description": "Asunto o resumen de la resolución del ticket para el chatter de Odoo",
+						"description": "Asunto o resumen de la resolución del ticket para el chatter de Odoo. Redáctalo siempre en español",
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
-						"description": "Descripción detallada del cierre y solución aplicada",
+						"description": "Descripción detallada del cierre y solución aplicada. Redáctalo siempre en español",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -2091,6 +2097,7 @@ func runMCPServer() {
 						"name":    "planesgo-mcp",
 						"version": Version,
 					},
+					"instructions": mcpInstructions,
 				},
 			}
 			sendResponse(resp)
