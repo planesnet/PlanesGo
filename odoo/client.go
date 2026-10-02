@@ -423,6 +423,10 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 	if c.HasField(ctx, "account.analytic.line", "is_timer_running") {
 		fields = append(fields, "is_timer_running")
 	}
+	// ai_model identifica el origen (Claude/Antigravity) de cada parte, sin depender de las etiquetas de la tarea
+	if c.HasField(ctx, "account.analytic.line", "ai_model") {
+		fields = append(fields, "ai_model")
+	}
 
 	kwargs := map[string]interface{}{
 		"fields": fields,
@@ -2000,7 +2004,12 @@ func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []T
 				}
 			}
 		}
-		if entries[i].IsAntigravity() {
+		isAgy, isClaude := entries[i].IsAntigravity(), entries[i].IsClaude()
+		// La tarea puede tener las dos etiquetas de origen; el parte solo conserva la suya
+		if isAgy != isClaude {
+			entries[i].Tags = withoutOriginTags(entries[i].Tags, isAgy)
+		}
+		if isAgy {
 			hasAgyTag := false
 			for _, tg := range entries[i].Tags {
 				if strings.EqualFold(tg.Name, "Antigravity") || strings.EqualFold(tg.Name, "AGY") {
@@ -2012,7 +2021,7 @@ func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []T
 				entries[i].Tags = append(entries[i].Tags, Tag{Name: "Antigravity"})
 			}
 		}
-		if entries[i].IsClaude() {
+		if isClaude {
 			hasClaudeTag := false
 			for _, tg := range entries[i].Tags {
 				if strings.EqualFold(tg.Name, "Claude") || strings.EqualFold(tg.Name, "CL") {
@@ -2025,6 +2034,20 @@ func (c *Client) populateTimesheetTags(ctx context.Context, uid int, entries []T
 			}
 		}
 	}
+}
+
+// withoutOriginTags quita las etiquetas del otro origen: las de Claude si dropClaude, si no las de Antigravity.
+func withoutOriginTags(tags []Tag, dropClaude bool) []Tag {
+	out := tags[:0:0]
+	for _, tg := range tags {
+		isClaudeTag := strings.EqualFold(tg.Name, "Claude") || strings.EqualFold(tg.Name, "CL")
+		isAgyTag := strings.EqualFold(tg.Name, "Antigravity") || strings.EqualFold(tg.Name, "AGY")
+		if (dropClaude && isClaudeTag) || (!dropClaude && isAgyTag) {
+			continue
+		}
+		out = append(out, tg)
+	}
+	return out
 }
 
 // CreateTimesheet crea un nuevo parte de horas (account.analytic.line) en Odoo.

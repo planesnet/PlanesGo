@@ -169,8 +169,31 @@ func (t *TimesheetEntry) CreateTimeLocal() string {
 	return parsed.In(loc).Format("15:04")
 }
 
+// entryOrigin deduce el origen ("claude", "antigravity" o "") a partir de la propia imputación.
+// Las etiquetas de origen están en la tarea, y Claude y Antigravity comparten tareas canónicas
+// (p. ej. "Desarrollo"), así que la tarea acaba con las dos y no sirve para distinguir cada parte.
+func entryOrigin(aiModel, description string) string {
+	if m := strings.ToLower(strings.TrimSpace(aiModel)); m != "" {
+		if strings.Contains(m, "claude") {
+			return "claude"
+		}
+		return "antigravity"
+	}
+	d := strings.ToUpper(strings.TrimSpace(description))
+	switch {
+	case strings.HasPrefix(d, "[CLAUDE") || strings.Contains(d, "CLAUDE CODE"):
+		return "claude"
+	case strings.HasPrefix(d, "[AGY]") || strings.HasPrefix(d, "[ANTIGRAVITY]"):
+		return "antigravity"
+	}
+	return ""
+}
+
 // IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.
 func (t *TimesheetEntry) IsAntigravity() bool {
+	if origin := entryOrigin(t.AIModel, t.Name); origin != "" {
+		return origin == "antigravity"
+	}
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Antigravity") || strings.EqualFold(tag.Name, "AGY") {
 			return true
@@ -187,6 +210,9 @@ func (t *TimesheetEntry) IsAntigravity() bool {
 
 // IsClaude indica si la imputación o su tarea proviene del hook de Claude Code.
 func (t *TimesheetEntry) IsClaude() bool {
+	if origin := entryOrigin(t.AIModel, t.Name); origin != "" {
+		return origin == "claude"
+	}
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Claude") || strings.EqualFold(tag.Name, "CL") {
 			return true
@@ -577,8 +603,11 @@ type ActiveTimer struct {
 
 // IsAntigravity indica si el temporizador activo proviene de Antigravity.
 func (t *ActiveTimer) IsAntigravity() bool {
-	if strings.EqualFold(t.Source, "antigravity") {
-		return true
+	if t.Source != "" {
+		return strings.EqualFold(t.Source, "antigravity")
+	}
+	if origin := entryOrigin(t.AIModel, t.Description); origin != "" {
+		return origin == "antigravity"
 	}
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Antigravity") || strings.EqualFold(tag.Name, "AGY") {
@@ -596,8 +625,11 @@ func (t *ActiveTimer) IsAntigravity() bool {
 
 // IsClaude indica si el temporizador activo proviene del hook de Claude Code.
 func (t *ActiveTimer) IsClaude() bool {
-	if strings.EqualFold(t.Source, "claude") {
-		return true
+	if t.Source != "" {
+		return strings.EqualFold(t.Source, "claude")
+	}
+	if origin := entryOrigin(t.AIModel, t.Description); origin != "" {
+		return origin == "claude"
 	}
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Claude") || strings.EqualFold(tag.Name, "CL") {
