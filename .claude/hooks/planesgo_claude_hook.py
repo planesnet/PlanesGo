@@ -13,6 +13,7 @@ Modos (argv[1]):
 
 La descripción del parte se construye con lo que se ha hecho en la sesión: commits nuevos,
 ficheros editados, rama y, si aún no hay nada de eso, la primera petición del usuario.
+Siempre en español: los prefijos de commit se traducen y los textos en inglés se omiten.
 
 Contrato de no interferencia: ante cualquier error inesperado el hook termina en 0 sin salida.
 """
@@ -31,6 +32,30 @@ DESC = "Trabajo de codificación asistido con Claude Code"
 DESC_MAX = 480
 MAX_FILES_LISTED = 5
 MAX_COMMITS_LISTED = 6
+
+# Los partes de PlanesGo se redactan siempre en español
+COMMIT_TYPES_ES = {
+    "feat": "Nueva funcionalidad", "fix": "Corrección", "docs": "Documentación",
+    "refactor": "Refactorización", "test": "Pruebas", "tests": "Pruebas", "perf": "Rendimiento",
+    "style": "Estilo", "chore": "Mantenimiento", "build": "Compilación",
+    "ci": "Integración continua", "revert": "Reversión",
+}
+COMMIT_PREFIX = re.compile(r"^(?:\[(\w+)\]|(\w+)(?:\([^)]*\))?!?:)\s*(.+)$")
+WORDS = re.compile(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+")
+EN_WORDS = {
+    "the", "and", "add", "adds", "added", "fix", "fixes", "fixed", "update", "updates", "updated",
+    "remove", "removes", "removed", "use", "uses", "for", "with", "to", "of", "in", "on", "when",
+    "from", "into", "is", "are", "be", "should", "now", "this", "that", "new", "support", "improve",
+    "make", "allow", "change", "rename", "move", "bump", "implement", "create", "delete", "show",
+    "handle", "please", "can", "you", "it", "my", "how", "what", "why", "was", "were", "has",
+    "have", "had", "not", "an", "by", "at", "as", "if", "but", "or", "all", "missing", "wrong",
+    "only", "after", "before", "instead", "via", "per", "its", "too", "also",
+}
+ES_WORDS = {
+    "el", "la", "los", "las", "de", "del", "que", "en", "con", "para", "por", "se", "una", "un",
+    "al", "y", "añade", "corrige", "actualiza", "elimina", "usa", "ya", "cuando", "sin", "su", "es",
+    "mejora", "nuevo", "nueva", "muestra", "quita", "cambia", "crea", "como", "qué", "cómo",
+}
 # El backend distingue Claude de Antigravity por este valor
 AI_MODEL_LABEL = "Claude Code"
 STATE_ROOT = "/tmp/planesgo-claude"
@@ -302,20 +327,60 @@ def changed_files(root, state):
     return files
 
 
+EN_SHAPE = re.compile(r"(?:tion|tions|ing|ness|ed)$|th|sh|ck|w")
+QUOTED = re.compile(r"\"[^\"]*\"|`[^`]*`|'[^']*'")
+ES_SHAPE = re.compile(r"(?:ción|ciones|mente|ado|ada|ados|adas|ido|ida|idos|idas)$")
+
+
+def looks_english(text):
+    """Heurística ligera: palabras y formas típicas del inglés frente a las del español (tildes, ñ, -ción…).
+
+    Se ignoran identificadores (CamelCase, SIGLAS) y las formas inglesas cuentan la mitad que las
+    palabras clave, para no confundir un commit en español que cita nombres de código.
+    """
+    # Fuera citas literales ("Invalid field…") y tokens de código (snake_case, versiones, rutas)
+    plain = " ".join(t for t in QUOTED.sub(" ", text).split()
+                     if not re.search(r"[_\d/.=-]", t.strip(",;:()[]")))
+    words = [w.lower() for w in WORDS.findall(plain) if len(w) > 1 and not any(c.isupper() for c in w[1:])]
+    en = sum(1.0 if w in EN_WORDS else 0.5 if len(w) > 3 and EN_SHAPE.search(w) else 0.0 for w in words)
+    es = sum(w in ES_WORDS or bool(ES_SHAPE.search(w)) for w in words) + sum(ch in "áéíóúñ¿¡" for ch in text.lower())
+    return en > es
+
+
+def commit_es(subject):
+    """Traduce el prefijo convencional (feat:, fix(x):, [FEAT]) y devuelve None si el texto está en inglés."""
+    m = COMMIT_PREFIX.match(subject)
+    if m:
+        kind = (m.group(1) or m.group(2) or "").lower()
+        if kind in COMMIT_TYPES_ES:
+            subject = f"{COMMIT_TYPES_ES[kind]}: {m.group(3)}"
+            body = m.group(3)
+        else:
+            body = subject
+    else:
+        body = subject
+    return None if looks_english(body) else subject
+
+
 def build_description(payload, root, state):
     """Descripción del parte con lo realmente hecho; DESC si todavía no hay nada que contar."""
     commits = session_commits(root, state)
     files = changed_files(root, state)
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     parts = []
-    if commits:
-        shown = list(reversed(commits))[:MAX_COMMITS_LISTED]
-        more = f" (+{len(commits) - len(shown)} commits más)" if len(commits) > len(shown) else ""
+    spanish = [c for c in (commit_es(c) for c in reversed(commits)) if c]
+    if spanish:
+        shown = spanish[:MAX_COMMITS_LISTED]
+        rest = len(commits) - len(shown)
+        more = f" (+{rest} commit{'s' if rest != 1 else ''} más)" if rest > 0 else ""
         parts.append("; ".join(shown) + more)
-    else:
+    elif commits:
+        # Commits con mensaje en inglés: se cuentan pero no se copian
+        parts.append(f"{len(commits)} commit{'s' if len(commits) != 1 else ''}")
+    if not spanish:
         prompt = read_text(os.path.join(session_state_dir(payload), "first_prompt"))
-        if prompt:
-            parts.append(f"Petición: {prompt[:200]}")
+        if prompt and not looks_english(prompt):
+            parts.insert(0, f"Petición: {prompt[:200]}")
     if files:
         names = ", ".join(os.path.basename(f) for f in files[:MAX_FILES_LISTED])
         more = f" y {len(files) - MAX_FILES_LISTED} más" if len(files) > MAX_FILES_LISTED else ""
