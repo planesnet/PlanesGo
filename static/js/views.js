@@ -1535,6 +1535,7 @@ function loadExpressTimesheets(forceReload = false, isSilent = false) {
                     projectId: act.project_id,
                     projectName: act.project_name || ('Proyecto #' + act.project_id),
                     taskId: act.task_id || null,
+                    ticketId: act.ticket_id || 0,
                     taskName: act.task_name || '',
                     description: act.description || '',
                     status: act.is_running ? 'running' : 'paused',
@@ -2555,6 +2556,7 @@ function updateExpressTimerState() {
                     timesheetId: t.timesheet_id,
                     projectId: t.project_id,
                     taskId: t.task_id || 0,
+                    ticketId: t.ticket_id || 0,
                     description: t.description || '',
                     status: t.is_running ? 'running' : 'paused',
                     startedAt: t.started_at ? (t.started_at > 1e11 ? t.started_at : t.started_at * 1000) : Date.now(),
@@ -2775,6 +2777,28 @@ function updateTicketsTimerState(activeMap, current, formattedClock) {
         const stopBtn = row.querySelector('.btn-ticket-stop');
         const iconPlay = row.querySelector('.icon-play');
         const iconPause = row.querySelector('.icon-pause');
+        const hoursBadge = row.querySelector('.ticket-hours-badge');
+        const liveClockEl = row.querySelector('.ticket-live-clock');
+
+        if (isRunning || isPaused) {
+            if (liveClockEl) {
+                let rowClockStr = formattedClock;
+                if (matchedTimer) {
+                    const actAccum = (typeof matchedTimer.accumulatedMs === 'number' && matchedTimer.accumulatedMs >= 0)
+                        ? matchedTimer.accumulatedMs
+                        : Math.round((matchedTimer.unitAmount || 0) * 3600 * 1000);
+                    const actStart = matchedTimer.lastStartTime || matchedTimer.startedAt || Date.now();
+                    const liveMs = isRunning ? (actAccum + (Date.now() - actStart)) : actAccum;
+                    if (typeof formatElapsedMs === 'function') rowClockStr = formatElapsedMs(Math.max(0, liveMs));
+                }
+                liveClockEl.textContent = rowClockStr;
+                liveClockEl.classList.remove('hidden');
+            }
+            if (hoursBadge) hoursBadge.classList.add('hidden');
+        } else {
+            if (liveClockEl) liveClockEl.classList.add('hidden');
+            if (hoursBadge) hoursBadge.classList.remove('hidden');
+        }
 
         if (isRunning) {
             row.classList.add('bg-amber-50/70', 'ring-1', 'ring-amber-300');
@@ -3551,6 +3575,9 @@ function renderTicketsTable() {
             <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-slate-800 text-xs">
                 <span class="ticket-hours-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
                     ${hoursSpent} h
+                </span>
+                <span class="ticket-live-clock hidden inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-300 animate-pulse">
+                    00:00:00
                 </span>
             </td>
             <td class="py-2.5 px-3 text-right whitespace-nowrap">
