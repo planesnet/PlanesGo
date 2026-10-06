@@ -1639,6 +1639,7 @@ async function syncActiveTimerFromOdoo() {
                             projectId: item.project_id,
                             projectName: item.project_name || ('Proyecto #' + item.project_id),
                             taskId: item.task_id || null,
+                            ticketId: item.ticket_id || 0,
                             taskName: item.task_name || '',
                             description: item.description || '',
                             status: item.is_running ? 'running' : 'paused',
