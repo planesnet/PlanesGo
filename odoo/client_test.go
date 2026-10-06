@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"pasigo/config"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -288,5 +289,86 @@ func TestHasField(t *testing.T) {
 	if calls := atomic.LoadInt32(&fieldsGetCalls); calls != 2 {
 		t.Fatalf("Esperado que se sirva desde caché (2 llamadas), pero hubo %d", calls)
 	}
+}
+
+// TestGetPartnersCompanyFilter comprueba que, cuando se pasa companyID, el dominio
+// enviado a Odoo restringe a esa empresa y a sus contactos hijos (parent_id), en vez
+// de listar todos los contactos de la base de datos (el bug que reportó el usuario:
+// el desplegable de "Contacto" del ticket mostraba toda la base de contactos).
+func TestGetPartnersCompanyFilter(t *testing.T) {
+	var lastDomain []interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["service"] == "common" && params["method"] == "authenticate" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": 10})
+			return
+		}
+		if params["service"] == "object" && params["method"] == "execute_kw" {
+			args, _ := params["args"].([]interface{})
+			if len(args) >= 6 && args[3] == "res.partner" && args[4] == "search_read" {
+				if posArgs, ok := args[5].([]interface{}); ok && len(posArgs) > 0 {
+					if domain, ok := posArgs[0].([]interface{}); ok {
+						lastDomain = domain
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result": []map[string]interface{}{
+						{"id": 332, "name": "MADERAS PLANES S.L.", "display_name": "MADERAS PLANES S.L.", "email": "esteban@maderasplanes.com"},
+						{"id": 898, "name": "laura@maderasplanes.com", "display_name": "MADERAS PLANES S.L., laura@maderasplanes.com", "email": "laura@maderasplanes.com"},
+					},
+				})
+				return
+			}
+		}
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	cfg := config.OdooConfig{URL: server.URL, DB: "testdb", Username: "user@example.com", Password: "password"}
+	client := &Client{config: cfg, httpClient: server.Client(), userUIDCache: make(map[string]int)}
+	ctx := context.Background()
+
+	partners, err := client.GetPartners(ctx, "", 332)
+	if err != nil {
+		t.Fatalf("GetPartners con companyID falló: %v", err)
+	}
+	if len(partners) != 2 {
+		t.Fatalf("esperados 2 contactos, obtenidos %d", len(partners))
+	}
+
+	domainJSON, _ := json.Marshal(lastDomain)
+	domainStr := string(domainJSON)
+	if !containsAll(domainStr, `"id"`, `"="`, `332`, `"parent_id"`, "|") {
+		t.Fatalf("el dominio enviado a Odoo no restringe por companyID: %s", domainStr)
+	}
+
+	// Sin companyID, no debe mandar ninguna condición de empresa (lista general)
+	lastDomain = nil
+	if _, err := client.GetPartners(ctx, "", 0); err != nil {
+		t.Fatalf("GetPartners sin companyID falló: %v", err)
+	}
+	domainJSON2, _ := json.Marshal(lastDomain)
+	if string(domainJSON2) != "[]" {
+		t.Fatalf("esperado dominio vacío sin companyID, obtenido: %s", string(domainJSON2))
+	}
+}
+
+func containsAll(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }
 

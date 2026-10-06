@@ -2873,13 +2873,23 @@ func (c *Client) GetActiveTimer(ctx context.Context, userUID int) (*ActiveTimer,
 }
 
 // GetPartners busca contactos o clientes en res.partner
-func (c *Client) GetPartners(ctx context.Context, query string) ([]Partner, error) {
+// GetPartners devuelve contactos de res.partner. Si companyID > 0, se restringe a esa
+// empresa y a sus contactos hijos (parent_id = companyID), para no listar toda la base
+// de contactos cuando ya se sabe a qué cliente pertenece el ticket/proyecto.
+func (c *Client) GetPartners(ctx context.Context, query string, companyID int) ([]Partner, error) {
 	uid, err := c.Authenticate(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	domain := []interface{}{}
+	if companyID > 0 {
+		domain = append(domain, []interface{}{
+			"|",
+			[]interface{}{"id", "=", companyID},
+			[]interface{}{"parent_id", "=", companyID},
+		})
+	}
 	if strings.TrimSpace(query) != "" {
 		q := strings.TrimSpace(query)
 		domain = append(domain, []interface{}{"name", "ilike", "%" + q + "%"})
