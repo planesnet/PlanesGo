@@ -2815,7 +2815,6 @@ function updateTicketsTimerState(activeMap, current, formattedClock) {
 window.__activeExpressTab = 'express';
 window.pendingTickets = [];
 let __cachedProjectsForTickets = null;
-let __cachedPartnersForTickets = null;
 let __cachedUsersForTickets = null;
 
 /**
@@ -3677,19 +3676,11 @@ async function openCreateTicketModal() {
         }
     }
 
-    // Cargar contactos/partners
+    // Los contactos se cargan al elegir proyecto (onTicketModalProjectChange), limitados
+    // al cliente de ese proyecto, no a toda la base de contactos de Odoo
     const partnerSelect = document.getElementById('create-ticket-partner');
-    if (partnerSelect && (!__cachedPartnersForTickets || partnerSelect.options.length <= 1)) {
-        try {
-            const res = await fetch('/api/partners');
-            if (res.ok) {
-                __cachedPartnersForTickets = await res.json();
-                partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>' +
-                    __cachedPartnersForTickets.map(pt => `<option value="${pt.id}">${pt.name}${pt.email ? ' (' + pt.email + ')' : ''}</option>`).join('');
-            }
-        } catch (e) {
-            console.warn('[PlanesGo] Error cargando partners:', e);
-        }
+    if (partnerSelect) {
+        partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>';
     }
 
     // Cargar usuarios asignables y preseleccionar usuario actual
@@ -3751,15 +3742,42 @@ async function onTicketModalProjectChange(projectId) {
         taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
     }
 
-    // Si el proyecto tiene partner_id y el selector no tiene partner, auto-asignarlo
-    if (__cachedProjectsForTickets && projectId) {
-        const proj = __cachedProjectsForTickets.find(p => p.id === parseInt(projectId, 10));
-        if (proj && proj.partner_id && proj.partner_id.id) {
-            const partnerSelect = document.getElementById('create-ticket-partner');
-            if (partnerSelect && !partnerSelect.value) {
-                partnerSelect.value = proj.partner_id.id;
-            }
+    // Recargar los contactos limitados al cliente del proyecto seleccionado (en vez de
+    // la lista completa de contactos de toda la base de datos)
+    await reloadPartnersForProject('create-ticket-partner', projectId);
+}
+
+/**
+ * Recarga el <select> de contacto con solo los contactos del cliente asociado al
+ * proyecto (la propia empresa y sus contactos hijos), en vez de listar todos los
+ * contactos de Odoo. Preselecciona la propia empresa si no había nada elegido.
+ */
+async function reloadPartnersForProject(selectId, projectId, currentPartnerId) {
+    const partnerSelect = document.getElementById(selectId);
+    if (!partnerSelect) return;
+
+    const proj = (__cachedProjectsForTickets || []).find(p => p.id === parseInt(projectId, 10));
+    const companyId = proj && proj.partner_id ? proj.partner_id.id : 0;
+
+    if (!companyId) {
+        partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>';
+        partnerSelect.value = '';
+        return;
+    }
+
+    partnerSelect.innerHTML = '<option value="">Cargando contactos...</option>';
+    try {
+        const res = await fetch(`/api/partners?company_id=${companyId}`);
+        const partners = res.ok ? await res.json() : [];
+        partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>' +
+            partners.map(pt => `<option value="${pt.id}">${pt.name}</option>`).join('');
+        const wanted = currentPartnerId || companyId;
+        if (wanted && partnerSelect.querySelector(`option[value="${wanted}"]`)) {
+            partnerSelect.value = String(wanted);
         }
+    } catch (e) {
+        console.warn('[PlanesGo] Error cargando contactos del cliente:', e);
+        partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>';
     }
 }
 
@@ -3916,26 +3934,6 @@ async function openEditTicketModal(ticketId) {
         }
     }
 
-    // Cargar partners
-    const partnerSelect = document.getElementById('edit-ticket-partner');
-    if (partnerSelect) {
-        if (!__cachedPartnersForTickets || partnerSelect.options.length <= 1) {
-            try {
-                const res = await fetch('/api/partners');
-                if (res.ok) {
-                    __cachedPartnersForTickets = await res.json();
-                }
-            } catch (e) {
-                console.warn('[PlanesGo] Error cargando partners:', e);
-            }
-        }
-        if (__cachedPartnersForTickets) {
-            partnerSelect.innerHTML = '<option value="">-- Sin contacto específico / Cliente de proyecto --</option>' +
-                __cachedPartnersForTickets.map(pt => `<option value="${pt.id}">${pt.name}${pt.email ? ' (' + pt.email + ')' : ''}</option>`).join('');
-            partnerSelect.value = partnerId ? String(partnerId) : '';
-        }
-    }
-
     // Cargar usuarios asignables
     const userSelect = document.getElementById('edit-ticket-user');
     if (userSelect) {
@@ -3948,7 +3946,7 @@ async function openEditTicketModal(ticketId) {
     }
 
     // Cargar tareas del proyecto seleccionado
-    await onEditTicketModalProjectChange(projId, taskId);
+    await onEditTicketModalProjectChange(projId, taskId, partnerId);
 }
 
 function closeEditTicketModal() {
@@ -3956,29 +3954,32 @@ function closeEditTicketModal() {
     if (modal) modal.classList.add('hidden');
 }
 
-async function onEditTicketModalProjectChange(projectId, selectedTaskId = null) {
+async function onEditTicketModalProjectChange(projectId, selectedTaskId = null, selectedPartnerId = null) {
     const taskSelect = document.getElementById('edit-ticket-task');
-    if (!taskSelect) return;
-
-    taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
-    if (!projectId) {
-        taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
-        return;
-    }
-
-    try {
-        const res = await fetch(`/api/tasks?project_id=${projectId}`);
-        if (res.ok) {
-            const tasks = await res.json();
-            taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>' +
-                tasks.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-            if (selectedTaskId) {
-                taskSelect.value = String(selectedTaskId);
+    if (taskSelect) {
+        taskSelect.innerHTML = '<option value="">Cargando tareas...</option>';
+        if (!projectId) {
+            taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
+        } else {
+            try {
+                const res = await fetch(`/api/tasks?project_id=${projectId}`);
+                if (res.ok) {
+                    const tasks = await res.json();
+                    taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>' +
+                        tasks.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+                    if (selectedTaskId) {
+                        taskSelect.value = String(selectedTaskId);
+                    }
+                }
+            } catch (e) {
+                taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
             }
         }
-    } catch (e) {
-        taskSelect.innerHTML = '<option value="">-- Sin tarea específica asignada --</option>';
     }
+
+    // Recargar los contactos limitados al cliente de este proyecto (la propia sesión de
+    // edición conserva el contacto actual del ticket si cambia de proyecto a uno distinto)
+    await reloadPartnersForProject('edit-ticket-partner', projectId, selectedPartnerId);
 }
 
 function setEditTicketPriorityStar(rating) {

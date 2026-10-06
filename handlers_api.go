@@ -627,7 +627,11 @@ func (state *AppState) handleAPIPartners(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 
 	query := r.URL.Query().Get("q")
-	partners, err := client.GetPartners(ctx, query)
+	companyID := 0
+	if cidStr := r.URL.Query().Get("company_id"); cidStr != "" {
+		companyID, _ = strconv.Atoi(cidStr)
+	}
+	partners, err := client.GetPartners(ctx, query, companyID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
