@@ -1,9 +1,32 @@
 ---
-description: Revisa el estado del tracking de PlanesGo, vincula un proyecto por búsqueda, imputa horas manuales (+N) o actualiza todo (--update)
-argument-hint: [texto de búsqueda | +N horas | --update]
+description: Revisa el estado del tracking de PlanesGo, vincula un proyecto por búsqueda, imputa horas manuales (+N), actualiza todo (--update), inicializa el proyecto (init) o activa/desactiva PSF (psf on|off|estado)
+argument-hint: [texto de búsqueda | +N horas | --update | init | psf on|off|estado]
 ---
 
 Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
+
+## Caso P: argumento empieza por "psf" → activar, desactivar o ver PSF en este proyecto
+
+Si "$ARGUMENTS" es `psf`, `psf on`, `psf off` o `psf estado` (sin distinguir mayúsculas), NO es texto de búsqueda (Caso A). Gestiona Planes Software Factory (PSF, repositorio privado planesnet/PSF) en el proyecto actual. Responde en español y de forma breve.
+
+1. **Localiza PSF** (directorio con `hooks/psf_hook.py` y `commands/psf.md`), en este orden: `$PSF_DIR`; `/home/user/PSF`; `~/cowork/PSF`; la ruta «Read from» de `psf@psf` en `claude plugin list`.
+   - Si no lo encuentras y la sesión tiene la herramienta `add_repo` (Claude Code en la nube): añade `planesnet/PSF` con acceso de lectura y clónalo en `/home/user/PSF` siguiendo lo que indique.
+   - Si tampoco así, di que PSF no está disponible en esta máquina (en local se instala con `./install.sh` de PSF) y para.
+2. **`psf on`**:
+   - Comprueba primero el proyecto de PlanesGo (`.planesgo.json` con `odoo_project_id > 0`); si falta, haz el Caso B para vincularlo antes de seguir.
+   - Lee `<PSF>/commands/psf.md` y sigue su apartado «`on`», usando `<PSF>` donde diga `${CLAUDE_PLUGIN_ROOT}`.
+   - Si existe `/opt/psf-arranque.sh` (nube), ejecútalo y aplica como contexto de la sesión el `additionalContext` que devuelve; si no, ejecuta `CLAUDE_PLUGIN_ROOT=<PSF> python3 <PSF>/hooks/psf_hook.py session-start` y haz lo mismo. Así PSF queda aplicado desde ya, sin esperar a la siguiente sesión.
+3. **`psf off`**: lee `<PSF>/commands/psf.md` y sigue su apartado «`off`» (pone `activo: false` en `.psf/proyecto.yml` sin borrar nada). La imputación de PlanesGo sigue igual: no depende de PSF.
+4. **`psf` o `psf estado`**: sigue el apartado «`estado`» de `<PSF>/commands/psf.md`; si el proyecto no tiene `.psf/proyecto.yml`, dilo y sugiere `/planesgo psf on`.
+
+Nunca hagas commit ni push de los cambios sin que la persona lo pida, y nunca en la rama de producción del proyecto.
+
+## Caso I: argumento es "init" → inicializar el proyecto (PlanesGo + PSF)
+
+Si "$ARGUMENTS" es exactamente `init`:
+1. Haz el Caso B (diagnóstico) y, si el proyecto no está vinculado, vincúlalo preguntando a la persona a qué proyecto de Odoo corresponde (nunca lo deduzcas ni uses PLANESGO por defecto).
+2. Pregunta si este proyecto va a seguir PSF (opción recomendada: sí). Si dice que sí, haz el Caso P con `psf on`; si no, termina.
+3. Termina con un resumen de una frase: proyecto de PlanesGo vinculado y si PSF queda activo.
 
 ## Caso A0: argumento es "--update" → instalar/actualizar todo
 
@@ -25,7 +48,7 @@ Si "$ARGUMENTS" coincide con el patrón `+<número>` (ej. `+3.5`, `+1`, `+0.5`; 
 
 ## Caso A: con argumento → vincular directamente
 
-Si "$ARGUMENTS" NO está vacío (y no es `--update` ni `+N`, ya cubiertos arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
+Si "$ARGUMENTS" NO está vacío (y no es `psf…`, `init`, `--update` ni `+N`, ya cubiertos arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula la sesión directamente. Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso (qué comando has usado, qué has comprobado, etc.) — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
 
 1. Determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo), en silencio.
 2. Busca con `planesgo-mcp --search-project "$ARGUMENTS"` (o la herramienta MCP `planesgo_search_projects` con `{"query": "$ARGUMENTS"}`), en silencio.
