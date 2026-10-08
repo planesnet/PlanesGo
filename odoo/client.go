@@ -2088,6 +2088,22 @@ func (c *Client) CreateTimesheetExtended(ctx context.Context, date string, proje
 	return c.CreateTimesheetFull(ctx, date, projectID, taskID, 0, unitAmount, description, isAntigravity)
 }
 
+// ticketLinkField determina el nombre real del campo que vincula account.analytic.line
+// con helpdesk.ticket en esta instancia de Odoo. GetPendingTickets ya lee con éxito el
+// campo "ticket_id" para calcular el total de horas de cada ticket, así que se prioriza
+// ese nombre; "helpdesk_ticket_id" (el nombre habitual en instalaciones estándar de
+// Odoo) se usa solo si "ticket_id" no existe como campo real. Sin esto, escribir
+// siempre en "helpdesk_ticket_id" podía fallar silenciosamente si ese no es el campo
+// real, dejando el parte de horas creado o editado SIN vincular al ticket: Odoo
+// guardaba el resto de los datos pero la columna "Acumulado" del ticket nunca veía
+// ese parte, porque la agregación filtra por "ticket_id".
+func (c *Client) ticketLinkField(ctx context.Context) string {
+	if c.HasField(ctx, "account.analytic.line", "ticket_id") {
+		return "ticket_id"
+	}
+	return "helpdesk_ticket_id"
+}
+
 // CreateTimesheetFull crea un nuevo parte de horas en Odoo con soporte explícito para vincular helpdesk_ticket_id y si proviene de Antigravity.
 func (c *Client) CreateTimesheetFull(ctx context.Context, date string, projectID int, taskID int, ticketID int, unitAmount float64, description string, isAntigravity bool) (int, error) {
 	uid, err := c.Authenticate(ctx)
@@ -2118,7 +2134,7 @@ func (c *Client) CreateTimesheetFull(ctx context.Context, date string, projectID
 		vals["task_id"] = taskID
 	}
 	if ticketID > 0 {
-		vals["helpdesk_ticket_id"] = ticketID
+		vals[c.ticketLinkField(ctx)] = ticketID
 	}
 	if isAntigravity {
 		vals["is_antigravity"] = true
@@ -2139,9 +2155,11 @@ func (c *Client) CreateTimesheetFull(ctx context.Context, date string, projectID
 			args[1] = newUID
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
-		// Fallback: Si falla por campo helpdesk_ticket_id no existente en el modelo Odoo
+		// Último recurso: si el campo de vínculo con el ticket resultó no existir pese a
+		// HasField (caché obsoleta, permisos, etc.), quitarlo para no perder también el
+		// resto de los datos del parte (hora, descripción...).
 		if err != nil && ticketID > 0 {
-			delete(vals, "helpdesk_ticket_id")
+			delete(vals, c.ticketLinkField(ctx))
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		// Fallback: Si falla por is_antigravity
@@ -2199,7 +2217,7 @@ func (c *Client) UpdateTimesheetWithTicket(ctx context.Context, timesheetID int,
 		vals["task_id"] = false
 	}
 	if ticketID > 0 {
-		vals["helpdesk_ticket_id"] = ticketID
+		vals[c.ticketLinkField(ctx)] = ticketID
 	}
 
 	if len(vals) == 0 {
@@ -2225,7 +2243,7 @@ func (c *Client) UpdateTimesheetWithTicket(ctx context.Context, timesheetID int,
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil && ticketID > 0 {
-			delete(vals, "helpdesk_ticket_id")
+			delete(vals, c.ticketLinkField(ctx))
 			resultRaw, err = c.call(ctx, "object", "execute_kw", args, nil)
 		}
 		if err != nil {

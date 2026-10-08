@@ -464,3 +464,96 @@ func TestGetPendingTicketsLastTimesheet(t *testing.T) {
 	}
 }
 
+// TestUpdateTimesheetWithTicketFieldName verifica que UpdateTimesheetWithTicket escribe
+// en el campo real de vínculo con el ticket ("ticket_id" o "helpdesk_ticket_id" según lo
+// que exponga fields_get) en lugar de asumir siempre "helpdesk_ticket_id". GetPendingTickets
+// agrega las horas de un ticket leyendo el campo "ticket_id"; si la escritura usara siempre
+// un nombre distinto al que Odoo realmente tiene, el parte se guardaría pero sin vincularse
+// al ticket, y la columna "Acumulado" nunca reflejaría el cambio.
+func TestUpdateTimesheetWithTicketFieldName(t *testing.T) {
+	cases := []struct {
+		name          string
+		fieldsPresent map[string]bool
+		wantField     string
+	}{
+		{"usa ticket_id cuando existe", map[string]bool{"ticket_id": true}, "ticket_id"},
+		{"usa helpdesk_ticket_id si ticket_id no existe", map[string]bool{"helpdesk_ticket_id": true}, "helpdesk_ticket_id"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var writeVals map[string]interface{}
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				params, _ := req.Params.(map[string]interface{})
+				w.Header().Set("Content-Type", "application/json")
+
+				if params["service"] == "common" && params["method"] == "authenticate" {
+					json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": 10})
+					return
+				}
+				if params["service"] != "object" || params["method"] != "execute_kw" {
+					http.Error(w, "unexpected", http.StatusBadRequest)
+					return
+				}
+				args, _ := params["args"].([]interface{})
+				if len(args) < 6 {
+					http.Error(w, "unexpected args", http.StatusBadRequest)
+					return
+				}
+				switch args[4] {
+				case "fields_get":
+					res := map[string]interface{}{}
+					if posArgs, ok := args[5].([]interface{}); ok && len(posArgs) > 0 {
+						if fieldList, ok := posArgs[0].([]interface{}); ok {
+							for _, f := range fieldList {
+								if fStr, ok := f.(string); ok && tc.fieldsPresent[fStr] {
+									res[fStr] = map[string]interface{}{"type": "many2one"}
+								}
+							}
+						}
+					}
+					json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": res})
+				case "write":
+					if posArgs, ok := args[5].([]interface{}); ok && len(posArgs) >= 2 {
+						writeVals, _ = posArgs[1].(map[string]interface{})
+					}
+					json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": true})
+				default:
+					http.Error(w, "unexpected method", http.StatusBadRequest)
+				}
+			}))
+			defer server.Close()
+
+			client := &Client{
+				config: config.OdooConfig{
+					URL:      server.URL,
+					DB:       "testdb",
+					Username: "user@example.com",
+					Password: "password",
+				},
+				httpClient:       server.Client(),
+				userUIDCache:     make(map[string]int),
+				modelFieldsCache: make(map[string]map[string]bool),
+			}
+
+			ctx := context.Background()
+			if err := client.UpdateTimesheetWithTicket(ctx, 501, "2026-10-08", 0, 9001, 2.75, "Trabajo de prueba"); err != nil {
+				t.Fatalf("UpdateTimesheetWithTicket devolvió error inesperado: %v", err)
+			}
+
+			if _, ok := writeVals[tc.wantField]; !ok {
+				t.Fatalf("esperado que el write incluyera el campo %q, vals=%v", tc.wantField, writeVals)
+			}
+			if got, ok := writeVals[tc.wantField].(float64); !ok || int(got) != 9001 {
+				t.Fatalf("esperado %s=9001, obtenido %v", tc.wantField, writeVals[tc.wantField])
+			}
+		})
+	}
+}
+
