@@ -785,14 +785,24 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 				initialHours += float64(payload.ElapsedSeconds) / 3600.0
 			}
 
-			activeTimer, startErr := client.StartTimerExtended(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, initialHours, "", true)
+			// is_antigravity solo para Antigravity: lo de Claude no se mezcla con lo de Antigravity
+			fromClaude := isClaudeOrigin(payload.AIModel)
+			activeTimer, startErr := client.StartTimerExtended(ctx, payload.ProjectID, payload.ProjectName, payload.TaskID, payload.TaskName, payload.TimesheetID, desc, initialHours, "", !fromClaude)
 			if startErr != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Error al iniciar tarea en Odoo: " + startErr.Error()})
 				return
 			}
+			// El origen queda fijado en el parte desde que se crea (antes ai_model solo se escribía al cerrar)
+			if activeTimer.TimesheetID > 0 && payload.AIModel != "" {
+				go func(tID int, model string) {
+					aiCtx, cancelAI := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancelAI()
+					_ = client.UpdateTimesheetAIModel(aiCtx, tID, model)
+				}(activeTimer.TimesheetID, payload.AIModel)
+			}
 			activeTimer.TimerKey = timerKey
-			if isClaudeOrigin(payload.AIModel) {
+			if fromClaude {
 				activeTimer.Source = "claude"
 			} else {
 				activeTimer.Source = "antigravity"

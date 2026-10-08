@@ -2463,6 +2463,32 @@ func (c *Client) StartTimerExtended(ctx context.Context, projectID int, projectN
 	}, nil
 }
 
+// UpdateTimesheetAIModel guarda en el parte el modelo de IA que lo origina (identifica Claude o Antigravity).
+// No hace nada si la instancia de Odoo no tiene el campo ai_model.
+func (c *Client) UpdateTimesheetAIModel(ctx context.Context, timesheetID int, aiModel string) error {
+	aiModel = strings.TrimSpace(aiModel)
+	if timesheetID <= 0 || aiModel == "" || !c.HasField(ctx, "account.analytic.line", "ai_model") {
+		return nil
+	}
+	uid, err := c.Authenticate(ctx)
+	if err != nil {
+		return err
+	}
+	writeArgs := []interface{}{
+		c.config.DB,
+		uid,
+		c.config.Password,
+		"account.analytic.line",
+		"write",
+		[]interface{}{
+			[]int{timesheetID},
+			map[string]interface{}{"ai_model": aiModel},
+		},
+	}
+	_, err = c.call(ctx, "object", "execute_kw", writeArgs, nil)
+	return err
+}
+
 // UpdateTimerDescription actualiza la descripción (name) de un parte de horas en curso sin pausarlo
 func (c *Client) UpdateTimerDescription(ctx context.Context, timesheetID int, description string) error {
 	description = strings.TrimSpace(description)
