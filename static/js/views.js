@@ -3518,7 +3518,8 @@ function editTicketTime(ticketId) {
             activeTimer.projectId || projectId,
             activeTimer.taskId || (t && t.task_id ? t.task_id.id : 0),
             activeTimer.description || (t ? t.name : ''),
-            liveHours
+            liveHours,
+            ticketId
         );
         return;
     }
@@ -3530,7 +3531,8 @@ function editTicketTime(ticketId) {
             projectId,
             t.last_timesheet_task_id || (t.task_id ? t.task_id.id : 0),
             t.last_timesheet_desc || t.name || '',
-            typeof t.last_timesheet_hours === 'number' ? t.last_timesheet_hours : 0
+            typeof t.last_timesheet_hours === 'number' ? t.last_timesheet_hours : 0,
+            ticketId
         );
         return;
     }

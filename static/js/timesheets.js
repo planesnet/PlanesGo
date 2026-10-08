@@ -188,7 +188,7 @@ function executeDeleteTimesheet() {
 // --- MODAL DE CREACIÓN Y EDICIÓN DE PARTES DE HORAS ---
 // ==============================================================
 
-function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, hours) {
+function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, hours, ticketId) {
     const fakeBtn = {
         dataset: {
             id: id,
@@ -196,7 +196,8 @@ function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, ho
             projectId: projectId,
             taskId: taskId,
             name: desc,
-            hours: hours
+            hours: hours,
+            ticketId: ticketId || ''
         }
     };
     openEditTimesheetModal(fakeBtn);
@@ -352,8 +353,10 @@ function openEditTimesheetModal(btn) {
 
     if (!modal || !btn) return;
     modal.dataset.isFinalizingTimer = 'false';
+    // Se preserva el ticket_id cuando la edición viene de editTicketTime() (ticket
+    // asociado a este parte de horas), para poder refrescar su tarjeta tras guardar.
     const ticketIdInput = document.getElementById('modal-ticket-id');
-    if (ticketIdInput) ticketIdInput.value = '';
+    if (ticketIdInput) ticketIdInput.value = btn.dataset.ticketId || '';
 
     const id = btn.dataset.id;
     const date = btn.dataset.date;
@@ -924,6 +927,7 @@ function submitTimesheetForm(event) {
         id: parseInt(entryId, 10),
         date: date,
         task_id: taskId ? parseInt(taskId, 10) : 0,
+        ticket_id: ticketIdForCreate,
         unit_amount: hours,
         description: desc
     } : {
@@ -1116,9 +1120,11 @@ function submitTimesheetForm(event) {
             loadExpressTimesheets(true, true);
         }
 
-        // Si se creó el parte desde un ticket sin ninguno previo, refrescar la vista de
-        // tickets para que aparezca ya con su nuevo total_hours_spent/last_timesheet_id
-        if (!isEdit && ticketIdForCreate > 0 && typeof loadTicketsView === 'function') {
+        // Si el parte creado o editado está asociado a un ticket, refrescar la vista de
+        // tickets para que su tarjeta muestre ya el total_hours_spent/last_timesheet_*
+        // actualizado (sin esto, el guardado llegaba a Odoo pero la tarjeta del ticket
+        // seguía mostrando el valor antiguo, dando la falsa impresión de que no se grababa)
+        if (ticketIdForCreate > 0 && typeof loadTicketsView === 'function') {
             loadTicketsView(true);
         }
 
