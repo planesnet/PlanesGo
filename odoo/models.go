@@ -416,6 +416,14 @@ type Ticket struct {
 	CloseDate       string   `json:"close_date,omitempty"`
 	KanbanState     string   `json:"kanban_state,omitempty"`
 	TotalHoursSpent float64  `json:"total_hours_spent,omitempty"`
+	// Datos del parte de horas (account.analytic.line) más reciente asociado al ticket,
+	// para poder editarlo directamente desde la vista de tickets sin necesitar un
+	// cronómetro activo (p.ej. corregir el tiempo de un trabajo ya registrado).
+	LastTimesheetID     int     `json:"last_timesheet_id,omitempty"`
+	LastTimesheetDate   string  `json:"last_timesheet_date,omitempty"`
+	LastTimesheetTaskID int     `json:"last_timesheet_task_id,omitempty"`
+	LastTimesheetDesc   string  `json:"last_timesheet_desc,omitempty"`
+	LastTimesheetHours  float64 `json:"last_timesheet_hours,omitempty"`
 }
 
 func (t *Ticket) UnmarshalJSON(data []byte) error {

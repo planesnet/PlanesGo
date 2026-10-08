@@ -3379,6 +3379,13 @@ function renderTicketsView() {
                         <span>Parar</span>
                     </button>
 
+                    <!-- Botón Editar tiempo (funciona con cronómetro activo o con el último parte registrado) -->
+                    <button type="button" onclick="editTicketTime(${ticketId})"
+                            class="px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white border border-slate-600"
+                            title="Editar directamente el tiempo imputado a este ticket">
+                        <span>✏️</span>
+                    </button>
+
                     <!-- Botón Dar por Cerrado (oculto si el ticket ya está cerrado) -->
                     <button type="button" onclick="openCloseTicketModal(${ticketId})"
                             class="px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 ${t.closed ? 'hidden' : ''}"
@@ -3445,6 +3452,94 @@ function pauseTimerOnTicket(ticketId) {
     setTimeout(() => {
         updateExpressTimerState();
     }, 80);
+}
+
+/**
+ * Busca si hay un cronómetro activo (en marcha o pausado) para un ticket concreto,
+ * sea el principal (widget superior) o uno concurrente (p.ej. iniciado desde otra
+ * pestaña, Claude Code o Antigravity). Reconstruye el mismo mapa que
+ * updateExpressTimerState() para no depender de que ya se haya ejecutado antes.
+ */
+function findActiveTimerForTicket(ticketId) {
+    const tId = parseInt(ticketId, 10) || 0;
+    if (!tId) return null;
+
+    const current = (typeof getTimerState === 'function') ? getTimerState() : null;
+    if (current && current.ticketId && parseInt(current.ticketId, 10) === tId) {
+        return current;
+    }
+    if (window.__activeTimersMap) {
+        for (const t of window.__activeTimersMap.values()) {
+            if (t.ticketId && parseInt(t.ticketId, 10) === tId) return t;
+        }
+    }
+    if (Array.isArray(window.__activeTimersList)) {
+        for (const t of window.__activeTimersList) {
+            if (t.ticket_id && parseInt(t.ticket_id, 10) === tId) {
+                return {
+                    timesheetId: t.timesheet_id,
+                    projectId: t.project_id,
+                    taskId: t.task_id || 0,
+                    description: t.description || '',
+                    status: t.is_running ? 'running' : 'paused',
+                    startedAt: t.started_at ? (t.started_at > 1e11 ? t.started_at : t.started_at * 1000) : Date.now(),
+                    lastStartTime: Date.now(),
+                    accumulatedMs: t.accumulated_ms || Math.round((t.unit_amount || 0) * 3600 * 1000)
+                };
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Edita directamente el tiempo del parte de horas de un ticket: si tiene un
+ * cronómetro activo (en marcha o pausado), edita ESE parte y rebasa el cronómetro
+ * sin detenerlo ("modo cronómetro"); si no, edita el último parte de horas
+ * registrado para ese ticket, si existe ("modo ticket editable").
+ */
+function editTicketTime(ticketId) {
+    const t = (window.pendingTickets || []).find(x => x.id === ticketId);
+    const projectId = t && t.project_id ? t.project_id.id : 0;
+
+    const activeTimer = findActiveTimerForTicket(ticketId);
+    if (activeTimer) {
+        const accum = (typeof activeTimer.accumulatedMs === 'number' && activeTimer.accumulatedMs >= 0)
+            ? activeTimer.accumulatedMs
+            : 0;
+        const liveMs = activeTimer.status === 'running'
+            ? accum + (Date.now() - (activeTimer.lastStartTime || activeTimer.startedAt || Date.now()))
+            : accum;
+        const liveHours = parseFloat((liveMs / 3600000).toFixed(2));
+        const today = new Date().toISOString().slice(0, 10);
+        openEditTimesheetModalFromRowData(
+            activeTimer.timesheetId,
+            today,
+            activeTimer.projectId || projectId,
+            activeTimer.taskId || (t && t.task_id ? t.task_id.id : 0),
+            activeTimer.description || (t ? t.name : ''),
+            liveHours
+        );
+        return;
+    }
+
+    if (t && t.last_timesheet_id) {
+        openEditTimesheetModalFromRowData(
+            t.last_timesheet_id,
+            t.last_timesheet_date || new Date().toISOString().slice(0, 10),
+            projectId,
+            t.last_timesheet_task_id || (t.task_id ? t.task_id.id : 0),
+            t.last_timesheet_desc || t.name || '',
+            typeof t.last_timesheet_hours === 'number' ? t.last_timesheet_hours : 0
+        );
+        return;
+    }
+
+    if (typeof showToast === 'function') {
+        showToast('Este ticket todavía no tiene ningún parte de horas que editar', 'info');
+    } else {
+        alert('Este ticket todavía no tiene ningún parte de horas que editar.');
+    }
 }
 
 /**
@@ -3601,6 +3696,14 @@ function renderTicketsTable() {
                             title="Detener cronómetro y consolidar tiempo">
                         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button type="button"
+                            onclick="editTicketTime(${ticketId})"
+                            class="inline-flex items-center justify-center w-7 h-7 text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 rounded-lg transition cursor-pointer"
+                            title="Editar directamente el tiempo imputado a este ticket (con o sin cronómetro activo)">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </button>
                     <button type="button"
@@ -4292,6 +4395,7 @@ window.renderTicketsView = renderTicketsView;
 window.startTimerOnTicket = startTimerOnTicket;
 window.pauseTimerOnTicket = pauseTimerOnTicket;
 window.stopTimerOnTicket = stopTimerOnTicket;
+window.editTicketTime = editTicketTime;
 window.openCreateTicketModal = openCreateTicketModal;
 window.closeCreateTicketModal = closeCreateTicketModal;
 window.onTicketModalProjectChange = onTicketModalProjectChange;

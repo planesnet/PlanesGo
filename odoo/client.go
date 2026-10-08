@@ -1219,23 +1219,51 @@ func (c *Client) GetPendingTickets(ctx context.Context, userUID int) ([]Ticket, 
 			[]interface{}{aalDomain},
 		}
 		aalKwargs := map[string]interface{}{
-			"fields": []string{"ticket_id", "unit_amount"},
+			"fields": []string{"id", "ticket_id", "unit_amount", "date", "task_id", "name"},
+			"order":  "date desc, id desc",
 			"limit":  200,
 		}
 		if aalRaw, aalErr := c.call(ctx, "object", "execute_kw", aalArgs, aalKwargs); aalErr == nil {
 			var aalEntries []struct {
+				ID     int      `json:"id"`
 				Ticket Many2One `json:"ticket_id"`
 				Hours  float64  `json:"unit_amount"`
+				Date   string   `json:"date"`
+				TaskID Many2One `json:"task_id"`
+				Name   string   `json:"name"`
 			}
 			if json.Unmarshal(aalRaw, &aalEntries) == nil {
+				type latestEntry struct {
+					ID     int
+					Date   string
+					TaskID int
+					Name   string
+					Hours  float64
+				}
 				spentMap := make(map[int]float64)
+				latestMap := make(map[int]latestEntry)
 				for _, entry := range aalEntries {
-					if entry.Ticket.ID > 0 {
-						spentMap[entry.Ticket.ID] += entry.Hours
+					if entry.Ticket.ID <= 0 {
+						continue
+					}
+					spentMap[entry.Ticket.ID] += entry.Hours
+					// Al venir ordenado por fecha/id descendente, la primera entrada vista
+					// por ticket es la más reciente: es la que se ofrece para editar.
+					if _, seen := latestMap[entry.Ticket.ID]; !seen {
+						latestMap[entry.Ticket.ID] = latestEntry{
+							ID: entry.ID, Date: entry.Date, TaskID: entry.TaskID.ID, Name: entry.Name, Hours: entry.Hours,
+						}
 					}
 				}
 				for i := range pending {
 					pending[i].TotalHoursSpent = spentMap[pending[i].ID]
+					if latest, ok := latestMap[pending[i].ID]; ok {
+						pending[i].LastTimesheetID = latest.ID
+						pending[i].LastTimesheetDate = latest.Date
+						pending[i].LastTimesheetTaskID = latest.TaskID
+						pending[i].LastTimesheetDesc = latest.Name
+						pending[i].LastTimesheetHours = latest.Hours
+					}
 				}
 			}
 		}

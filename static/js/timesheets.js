@@ -1054,16 +1054,36 @@ function submitTimesheetForm(event) {
             clearTimer(true);
         }
 
-        // Si se modificó la misma imputación que coincide con el cronómetro activo, actualizar su descripción/tarea sin detenerlo
-        if (isEdit && !isFinalizing && typeof getTimerState === 'function') {
-            const currentTimer = getTimerState();
-            if (currentTimer && targetId && String(currentTimer.timesheetId) === String(targetId)) {
-                currentTimer.description = desc;
-                if (taskId) currentTimer.taskId = parseInt(taskId, 10);
-                if (taskName) currentTimer.taskName = taskName;
-                if (typeof saveTimerState === 'function') saveTimerState(currentTimer);
-                if (typeof renderTimerBar === 'function') renderTimerBar(currentTimer);
+        // Si se modificó la misma imputación que coincide con un cronómetro activo (el
+        // principal o uno concurrente, p.ej. de un ticket), actualizar su descripción/tarea
+        // Y rebasar su acumulado a las horas editadas, sin detenerlo. (Antes esta rama nunca
+        // se ejecutaba: comparaba contra "targetId", una variable que no existe en esta
+        // función — el nombre real es "entryId" — así que ni siquiera la sincronización de
+        // descripción/tarea llegaba a aplicarse.)
+        if (isEdit && !isFinalizing && entryId) {
+            const newAccumulatedMs = Math.round(hours * 3600 * 1000);
+            const rebase = (t) => {
+                t.description = desc;
+                if (taskId) t.taskId = parseInt(taskId, 10);
+                if (taskName) t.taskName = taskName;
+                t.accumulatedMs = newAccumulatedMs;
+                if (t.status === 'running') t.lastStartTime = Date.now();
+            };
+
+            if (typeof getTimerState === 'function') {
+                const currentTimer = getTimerState();
+                if (currentTimer && String(currentTimer.timesheetId) === String(entryId)) {
+                    rebase(currentTimer);
+                    if (typeof saveTimerState === 'function') saveTimerState(currentTimer);
+                    if (typeof renderTimerBar === 'function') renderTimerBar(currentTimer);
+                }
             }
+            if (window.__activeTimersMap && window.__activeTimersMap.has(parseInt(entryId, 10))) {
+                rebase(window.__activeTimersMap.get(parseInt(entryId, 10)));
+            } else if (window.__activeTimersMap && window.__activeTimersMap.has(entryId)) {
+                rebase(window.__activeTimersMap.get(entryId));
+            }
+            if (typeof updateExpressTimerState === 'function') updateExpressTimerState();
         }
 
         // Si era una nueva inserción, actualizar el ID temporal con el ID real retornado por Odoo
