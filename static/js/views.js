@@ -3535,10 +3535,14 @@ function editTicketTime(ticketId) {
         return;
     }
 
-    if (typeof showToast === 'function') {
-        showToast('Este ticket todavía no tiene ningún parte de horas que editar', 'info');
-    } else {
-        alert('Este ticket todavía no tiene ningún parte de horas que editar.');
+    // Sin cronómetro activo ni parte previo: crear uno nuevo para este ticket en vez
+    // de limitarse a avisar de que no hay nada que editar.
+    if (typeof openCreateTimesheetModal === 'function') {
+        const projectName = (t && t.project_id && t.project_id.name) ? t.project_id.name : '';
+        const taskId = (t && t.task_id) ? t.task_id.id : 0;
+        const desc = t ? t.name : '';
+        const today = new Date().toISOString().slice(0, 10);
+        openCreateTimesheetModal(projectId || '', projectName, today, false, desc, taskId, 0, ticketId);
     }
 }
 
