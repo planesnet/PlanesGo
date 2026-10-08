@@ -496,6 +496,15 @@ func (t *Ticket) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// TotalHoursHHMM devuelve el tiempo acumulado del ticket en formato h:mm (p.ej. 2:45).
+func (t *Ticket) TotalHoursHHMM() string {
+	totalMinutes := int(math.Round(t.TotalHoursSpent * 60))
+	if totalMinutes < 0 {
+		totalMinutes = 0
+	}
+	return fmt.Sprintf("%d:%02d", totalMinutes/60, totalMinutes%60)
+}
+
 func (t *Ticket) DisplayTitle() string {
 	ref := t.Number
 	if ref == "" {

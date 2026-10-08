@@ -116,3 +116,23 @@ func TestTicketUnmarshalOpenTicket(t *testing.T) {
 		t.Errorf("TeamID.ID esperado 0 (sin equipo asignado), obtenido %d", ticket.TeamID.ID)
 	}
 }
+
+func TestTicketTotalHoursHHMM(t *testing.T) {
+	cases := []struct {
+		hours float64
+		want  string
+	}{
+		{0, "0:00"},
+		{0.75, "0:45"},
+		{1.5, "1:30"},
+		{2.75, "2:45"},
+		{10.01, "10:01"},
+		{-1, "0:00"},
+	}
+	for _, c := range cases {
+		tk := Ticket{TotalHoursSpent: c.hours}
+		if got := tk.TotalHoursHHMM(); got != c.want {
+			t.Errorf("TotalHoursHHMM(%v) = %q, esperado %q", c.hours, got, c.want)
+		}
+	}
+}

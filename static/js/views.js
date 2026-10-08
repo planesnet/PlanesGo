@@ -3271,6 +3271,7 @@ function renderTicketsView() {
         const partnerName = (t.partner_id && t.partner_id.name) ? t.partner_id.name : 'Cliente no asignado';
         const createDate = t.create_date ? t.create_date.split(' ')[0] : '';
         const hoursSpent = typeof t.total_hours_spent === 'number' ? t.total_hours_spent.toFixed(2) : '0.00';
+        const hoursSpentHHMM = formatHoursToHHMM(t.total_hours_spent, '0:00');
 
         // Widget de Prioridad (Estrellas)
         const priorityVal = parseInt(t.priority, 10) || 0;
@@ -3313,7 +3314,10 @@ function renderTicketsView() {
                     <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <span>${hoursSpent} h</span>
+                    <span class="inline-flex flex-col items-end leading-tight" title="${hoursSpent} h">
+                        <span>${hoursSpentHHMM} h</span>
+                        <span class="text-[9px] font-normal text-slate-500">${hoursSpent}</span>
+                    </span>
                 </div>
             </div>
 
@@ -3614,6 +3618,7 @@ function renderTicketsTable() {
         const userName = (t.user_id && t.user_id.name) ? t.user_id.name : '';
         const createDate = t.create_date ? t.create_date.split(' ')[0] : '';
         const hoursSpent = typeof t.total_hours_spent === 'number' ? t.total_hours_spent.toFixed(2) : '0.00';
+        const hoursSpentHHMM = formatHoursToHHMM(t.total_hours_spent, '0:00');
 
         const priorityVal = parseInt(t.priority, 10) || 0;
         let starsHtml = '';
@@ -3674,8 +3679,9 @@ function renderTicketsTable() {
                 ${userName ? `<span class="inline-flex items-center space-x-1" title="Asignado a: ${userName}"><span class="text-slate-400">👤</span><span class="truncate max-w-[120px]">${userName}</span></span>` : '<span class="text-slate-400 italic text-xs">Sin asignar</span>'}
             </td>
             <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-slate-800 text-xs">
-                <span class="ticket-hours-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                    ${hoursSpent} h
+                <span class="ticket-hours-badge inline-flex flex-col items-end px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200" title="${hoursSpent} h">
+                    <span class="leading-tight">${hoursSpentHHMM} h</span>
+                    <span class="text-[9px] font-normal text-slate-400 leading-tight">${hoursSpent}</span>
                 </span>
                 <span class="ticket-live-clock hidden inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-300 animate-pulse">
                     00:00:00
