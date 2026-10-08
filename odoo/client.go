@@ -2882,13 +2882,15 @@ func (c *Client) GetPartners(ctx context.Context, query string, companyID int) (
 		return nil, err
 	}
 
+	// El dominio de Odoo es una lista PLANA: el operador "|" y sus dos operandos van
+	// como tres elementos seguidos, no anidados en una lista aparte. Anidarlos (como
+	// se hacía antes) produce un dominio inválido que Odoo rechaza con un error
+	// genérico ("Odoo Server Error", código 200) — el mismo síntoma que el bug de
+	// CloseTicket, aquí por una razón distinta (sintaxis del dominio, no un campo
+	// inexistente).
 	domain := []interface{}{}
 	if companyID > 0 {
-		domain = append(domain, []interface{}{
-			"|",
-			[]interface{}{"id", "=", companyID},
-			[]interface{}{"parent_id", "=", companyID},
-		})
+		domain = append(domain, "|", []interface{}{"id", "=", companyID}, []interface{}{"parent_id", "=", companyID})
 	}
 	if strings.TrimSpace(query) != "" {
 		q := strings.TrimSpace(query)

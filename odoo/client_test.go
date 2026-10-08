@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"pasigo/config"
-	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -346,10 +345,15 @@ func TestGetPartnersCompanyFilter(t *testing.T) {
 		t.Fatalf("esperados 2 contactos, obtenidos %d", len(partners))
 	}
 
+	// Comparación ESTRUCTURAL exacta, no de subcadenas: el dominio de Odoo es una
+	// lista plana ["|", cond1, cond2], no una lista anidada [["|", cond1, cond2]].
+	// Un simple "contiene estas subcadenas" no habría detectado el bug real (el "|"
+	// y sus dos condiciones quedaban envueltos en una lista de más), ya que todas
+	// las subcadenas seguían apareciendo igual en el JSON mal anidado.
 	domainJSON, _ := json.Marshal(lastDomain)
-	domainStr := string(domainJSON)
-	if !containsAll(domainStr, `"id"`, `"="`, `332`, `"parent_id"`, "|") {
-		t.Fatalf("el dominio enviado a Odoo no restringe por companyID: %s", domainStr)
+	wantDomain := `["|",["id","=",332],["parent_id","=",332]]`
+	if string(domainJSON) != wantDomain {
+		t.Fatalf("dominio esperado %s, obtenido %s", wantDomain, string(domainJSON))
 	}
 
 	// Sin companyID, no debe mandar ninguna condición de empresa (lista general)
@@ -361,14 +365,5 @@ func TestGetPartnersCompanyFilter(t *testing.T) {
 	if string(domainJSON2) != "[]" {
 		t.Fatalf("esperado dominio vacío sin companyID, obtenido: %s", string(domainJSON2))
 	}
-}
-
-func containsAll(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if !strings.Contains(s, sub) {
-			return false
-		}
-	}
-	return true
 }
 
