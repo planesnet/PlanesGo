@@ -844,6 +844,12 @@ function insertOptimisticTimesheetRow(data) {
 function submitTimesheetForm(event) {
     if (event && event.preventDefault) event.preventDefault();
 
+    // Se usa más abajo para leer/limpiar modal.dataset.isFinalizingTimer. Antes no se
+    // declaraba aquí y la referencia solo "funcionaba" por un global accidental del
+    // navegador (un elemento con id="modal" en otra parte de la página) — ausente en
+    // la vista de tickets, donde reventaba con "modal is not defined" al guardar.
+    const modal = document.getElementById('timesheet-modal');
+
     const entryId = document.getElementById('modal-entry-id').value;
     const projectSelect = document.getElementById('modal-project-select');
     const projectId = projectSelect ? projectSelect.value : '';
