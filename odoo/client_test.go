@@ -367,3 +367,100 @@ func TestGetPartnersCompanyFilter(t *testing.T) {
 	}
 }
 
+// TestGetPendingTicketsLastTimesheet comprueba que, cuando un ticket tiene varias
+// imputaciones (account.analytic.line), el ticket se queda con los datos de la MÁS
+// RECIENTE para poder editarla directamente (LastTimesheetID/Hours/...), mientras que
+// TotalHoursSpent sigue siendo la suma de todas. Esto respalda la función "editar
+// tiempo del ticket" en modo no-cronómetro (sin un temporizador activo).
+func TestGetPendingTicketsLastTimesheet(t *testing.T) {
+	var aalOrder string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["service"] == "common" && params["method"] == "authenticate" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": 10})
+			return
+		}
+		if params["service"] == "object" && params["method"] == "execute_kw" {
+			args, _ := params["args"].([]interface{})
+			if len(args) >= 6 && args[3] == "helpdesk.ticket" && args[4] == "search_read" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result": []map[string]interface{}{
+						{"id": 500, "name": "Ticket de prueba", "number": "T500", "stage_id": []interface{}{1, "New"}, "closed": false},
+					},
+				})
+				return
+			}
+			if len(args) >= 6 && args[3] == "account.analytic.line" && args[4] == "search_read" {
+				if len(args) >= 7 {
+					if kwargs, ok := args[6].(map[string]interface{}); ok {
+						if order, ok := kwargs["order"].(string); ok {
+							aalOrder = order
+						}
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				// Devueltas ya en el orden que pediría la consulta real (más reciente primero),
+				// ya que el código de GetPendingTickets confía en el "order" pedido a Odoo y
+				// no vuelve a ordenar en memoria.
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result": []map[string]interface{}{
+						{"id": 2, "ticket_id": []interface{}{500, "T500"}, "unit_amount": 2.5, "date": "2026-01-05", "task_id": []interface{}{9, "Soporte"}, "name": "Trabajo más reciente"},
+						{"id": 1, "ticket_id": []interface{}{500, "T500"}, "unit_amount": 1.0, "date": "2026-01-01", "task_id": []interface{}{9, "Soporte"}, "name": "Trabajo antiguo"},
+					},
+				})
+				return
+			}
+		}
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	cfg := config.OdooConfig{URL: server.URL, DB: "testdb", Username: "user@example.com", Password: "password"}
+	client := &Client{config: cfg, httpClient: server.Client(), userUIDCache: make(map[string]int)}
+	ctx := context.Background()
+
+	tickets, err := client.GetPendingTickets(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetPendingTickets falló: %v", err)
+	}
+	if len(tickets) != 1 {
+		t.Fatalf("esperado 1 ticket, obtenidos %d", len(tickets))
+	}
+
+	if aalOrder != "date desc, id desc" {
+		t.Errorf("orden esperado 'date desc, id desc' en la consulta a Odoo, obtenido %q", aalOrder)
+	}
+
+	ticket := tickets[0]
+	if ticket.TotalHoursSpent != 3.5 {
+		t.Errorf("TotalHoursSpent esperado 3.5 (suma de ambas), obtenido %v", ticket.TotalHoursSpent)
+	}
+	if ticket.LastTimesheetID != 2 {
+		t.Errorf("LastTimesheetID esperado 2 (la más reciente), obtenido %d", ticket.LastTimesheetID)
+	}
+	if ticket.LastTimesheetHours != 2.5 {
+		t.Errorf("LastTimesheetHours esperado 2.5, obtenido %v", ticket.LastTimesheetHours)
+	}
+	if ticket.LastTimesheetDate != "2026-01-05" {
+		t.Errorf("LastTimesheetDate esperado 2026-01-05, obtenido %q", ticket.LastTimesheetDate)
+	}
+	if ticket.LastTimesheetDesc != "Trabajo más reciente" {
+		t.Errorf("LastTimesheetDesc esperado 'Trabajo más reciente', obtenido %q", ticket.LastTimesheetDesc)
+	}
+	if ticket.LastTimesheetTaskID != 9 {
+		t.Errorf("LastTimesheetTaskID esperado 9, obtenido %d", ticket.LastTimesheetTaskID)
+	}
+}
+
