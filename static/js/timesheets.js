@@ -202,11 +202,12 @@ function openEditTimesheetModalFromRowData(id, date, projectId, taskId, desc, ho
     openEditTimesheetModal(fakeBtn);
 }
 
-function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode, preselectedDesc, preselectedTaskId, initialHours) {
+function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, initialDate, isStartTimerMode, preselectedDesc, preselectedTaskId, initialHours, preselectedTicketId) {
     const modal = document.getElementById('timesheet-modal');
     const container = document.getElementById('timesheet-modal-container');
     const title = document.getElementById('modal-title');
     const entryIdInput = document.getElementById('modal-entry-id');
+    const ticketIdInput = document.getElementById('modal-ticket-id');
     const projectSelect = document.getElementById('modal-project-select');
     const dateInput = document.getElementById('modal-date-input');
     const hoursInput = document.getElementById('modal-hours-input');
@@ -221,6 +222,7 @@ function openCreateTimesheetModal(preselectedProjectId, preselectedProjectName, 
 
     // Reset estado
     entryIdInput.value = '';
+    if (ticketIdInput) ticketIdInput.value = preselectedTicketId ? String(preselectedTicketId) : '';
     title.innerText = isStartTimerMode ? 'Iniciar Trabajo' : 'Registrar Horas';
     submitBtnText.innerText = 'Guardar';
     toggleInlineCreateTask(false);
@@ -350,6 +352,8 @@ function openEditTimesheetModal(btn) {
 
     if (!modal || !btn) return;
     modal.dataset.isFinalizingTimer = 'false';
+    const ticketIdInput = document.getElementById('modal-ticket-id');
+    if (ticketIdInput) ticketIdInput.value = '';
 
     const id = btn.dataset.id;
     const date = btn.dataset.date;
@@ -908,6 +912,7 @@ function submitTimesheetForm(event) {
     if (feedback) feedback.className = 'hidden';
 
     const isEdit = Boolean(entryId);
+    const ticketIdForCreate = parseInt(document.getElementById('modal-ticket-id')?.value, 10) || 0;
     const url = isEdit ? '/api/timesheets/update' : '/api/timesheets';
     const payload = isEdit ? {
         id: parseInt(entryId, 10),
@@ -919,6 +924,7 @@ function submitTimesheetForm(event) {
         date: date,
         project_id: parseInt(projectId, 10),
         task_id: taskId ? parseInt(taskId, 10) : 0,
+        ticket_id: ticketIdForCreate,
         unit_amount: hours,
         description: desc
     };
@@ -1102,6 +1108,12 @@ function submitTimesheetForm(event) {
         // Actualizar silenciosamente la botonera Express si está disponible
         if (typeof loadExpressTimesheets === 'function') {
             loadExpressTimesheets(true, true);
+        }
+
+        // Si se creó el parte desde un ticket sin ninguno previo, refrescar la vista de
+        // tickets para que aparezca ya con su nuevo total_hours_spent/last_timesheet_id
+        if (!isEdit && ticketIdForCreate > 0 && typeof loadTicketsView === 'function') {
+            loadTicketsView(true);
         }
 
         if (typeof showToast === 'function') {
