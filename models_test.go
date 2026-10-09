@@ -286,5 +286,36 @@ func TestCalculateWallClockHours(t *testing.T) {
 	if wc4 != 6.0 {
 		t.Errorf("Esperado 6.0h para dos días distintos, obtenido: %f", wc4)
 	}
+
+	// Caso 5: parte de 2h creado el lunes y modificado el jueves (create→write abarca ~3 días).
+	// El reloj humano no puede superar las horas imputadas.
+	entriesEditedLater := []odoo.TimesheetEntry{
+		{
+			ID:         9,
+			Date:       "2026-10-05",
+			UnitAmount: 2.0,
+			CreateDate: "2026-10-05 08:00:00",
+			WriteDate:  "2026-10-08 17:00:00",
+		},
+	}
+	wc5 := CalculateWallClockHours(entriesEditedLater)
+	if wc5 != 2.0 {
+		t.Errorf("Esperado 2.0h (no más que las horas imputadas) para parte editado días después, obtenido: %f", wc5)
+	}
+
+	// Caso 6: varios partes con intervalos create→write gigantes nunca pueden sumar más reloj
+	// que horas declaradas, y el reloj de un día nunca supera 24h.
+	entriesHuge := []odoo.TimesheetEntry{
+		{ID: 10, Date: "2026-10-05", UnitAmount: 1.5, CreateDate: "2026-10-05 07:00:00", WriteDate: "2026-10-09 07:00:00"},
+		{ID: 11, Date: "2026-10-05", UnitAmount: 3.0, CreateDate: "2026-10-04 20:00:00", WriteDate: "2026-10-08 20:00:00"},
+		{ID: 12, Date: "2026-10-05", UnitAmount: 1.0, CreateDate: "2026-10-05 09:00:00", WriteDate: "2026-10-06 09:00:00"},
+	}
+	wc6 := CalculateWallClockHours(entriesHuge)
+	if wc6 > 5.5+0.01 {
+		t.Errorf("El reloj humano (%f) no puede superar las horas declaradas (5.5)", wc6)
+	}
+	if wc6 > 24 {
+		t.Errorf("El reloj humano de un día no puede superar 24h, obtenido: %f", wc6)
+	}
 }
 

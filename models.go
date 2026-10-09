@@ -636,6 +636,14 @@ func CalculateWallClockHours(entries []odoo.TimesheetEntry) float64 {
 				}
 			}
 
+			// Un parte nunca puede ocupar más reloj que las horas imputadas: si create_date →
+			// write_date abarca más (parte editado días después, cronómetro olvidado abierto...),
+			// se conserva solo el último tramo de su duración real, de modo que el tiempo
+			// humano jamás supere al total declarado.
+			if startSec > 0 && endSec > startSec && endSec-startSec > expectedDurationSec {
+				startSec = endSec - expectedDurationSec
+			}
+
 			if startSec < endSec {
 				intervals = append(intervals, TimeInterval{Start: startSec, End: endSec})
 			}
