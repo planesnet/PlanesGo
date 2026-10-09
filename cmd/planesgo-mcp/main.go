@@ -473,7 +473,7 @@ func cleanURL(u string) string {
 
 const (
 	selfUpdateCheckInterval = 6 * time.Hour
-	selfUpdateInstallURL    = "https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh"
+	selfUpdateInstallURL    = DefaultServer + "/install/claude-hook.sh"
 )
 
 func selfUpdateMarkerPath() string {

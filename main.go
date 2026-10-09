@@ -93,6 +93,9 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	// Health check y ping
 	mux.HandleFunc("/health", state.handleHealth)
 	mux.HandleFunc("/ping", state.handlePing)
+
+	// Instalación del hook de Claude Code y de PSF (handlers_install.go)
+	setupInstallRoutes(mux, state)
 }
 
 func main() {

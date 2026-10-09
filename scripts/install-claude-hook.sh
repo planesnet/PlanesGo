@@ -8,19 +8,26 @@
 # (proyecto vinculado, token, hook, binario) en cualquier sesión, a demanda.
 #
 # Uso genérico en cualquier sesión de Claude Code (nueva o ya abierta), local
-# o en la nube — siempre descarga la versión más reciente del propio repo:
-#   curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash
+# o en la nube — siempre descarga la versión más reciente desde el servidor de PlanesGo
+# (no depende de que el repositorio sea público):
+#   curl -fsSL https://planesgo.autopyme.com/install/claude-hook.sh | bash
 #
 # También sirve como "Setup script" del entorno cloud pegando ese mismo
 # curl|bash, o el contenido de este fichero directamente.
 #
-# Requisitos: curl, python3, git y go (para compilar planesgo-mcp si no existe
-# ya), y $PLANESGO_TOKEN o $ANTIGRAVITY_TOKEN, o ~/.planesgo_auth.json.
+# Requisitos: curl, tar, python3 y go (para compilar planesgo-mcp), y $PLANESGO_TOKEN o
+# $ANTIGRAVITY_TOKEN, o ~/.planesgo_auth.json. Con token, instala también PSF (Planes Software Factory)
+# en ~/.planesgo/PSF; sin token (p. ej. en el «Setup script» de la nube), PSF se descarga al empezar la sesión.
 # Idempotente: se puede ejecutar varias veces sin duplicar nada.
 # ==============================================================================
 set -uo pipefail
 
-REPO_RAW="https://raw.githubusercontent.com/planesnet/PlanesGo/master"
+PLANESGO_URL="${PLANESGO_URL:-}"
+if [ -z "$PLANESGO_URL" ] && [ -f "$HOME/.planesgo_auth.json" ]; then
+    PLANESGO_URL="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("planesgo_url") or "")' 2>/dev/null)"
+fi
+PLANESGO_URL="${PLANESGO_URL:-https://planesgo.autopyme.com}"
+PLANESGO_URL="${PLANESGO_URL%/}"
 HOOKS_DIR="$HOME/.claude/hooks"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$HOOKS_DIR" "$BIN_DIR"
@@ -28,29 +35,34 @@ mkdir -p "$HOOKS_DIR" "$BIN_DIR"
 # Limpieza: retira el hook bash antiguo (versión anterior) si existe
 rm -f "$HOOKS_DIR/planesgo-track.sh"
 
-# 1. Hook Python unificado: siempre la versión actual del repo -----------------
-echo "==> Descargando el hook unificado desde $REPO_RAW ..."
-if ! curl -fsSL "$REPO_RAW/.claude/hooks/planesgo_claude_hook.py" -o "$HOOKS_DIR/planesgo_claude_hook.py"; then
-    echo "ERROR: no se pudo descargar planesgo_claude_hook.py. Abortando." >&2
-    exit 1
+# 0. Origen de los ficheros: el repositorio local si se ejecuta desde él; si no, el paquete del servidor --
+SRC_DIR=""
+if [ -f "./cmd/planesgo-mcp/main.go" ] && [ -f "./.claude/hooks/planesgo_claude_hook.py" ]; then
+    SRC_DIR="$(pwd)"
+else
+    SRC_DIR="$(mktemp -d)"
+    echo "==> Descargando PlanesGo desde $PLANESGO_URL ..."
+    if ! curl -fsSL "$PLANESGO_URL/install/planesgo.tar.gz" | tar -xz -C "$SRC_DIR"; then
+        echo "ERROR: no se pudo descargar $PLANESGO_URL/install/planesgo.tar.gz. Abortando." >&2
+        exit 1
+    fi
 fi
+
+# 1. Hook Python unificado ------------------------------------------------------
+cp "$SRC_DIR/.claude/hooks/planesgo_claude_hook.py" "$HOOKS_DIR/planesgo_claude_hook.py"
 chmod +x "$HOOKS_DIR/planesgo_claude_hook.py"
 echo "OK: hook instalado en $HOOKS_DIR/planesgo_claude_hook.py"
 
-# 1b. Comando /planesgo (diagnóstico, búsqueda/vinculación, +N horas, --update) y su
-# alias corto /pgo: siempre la versión actual del repo -----
+# 1b. Comando /planesgo (diagnóstico, búsqueda/vinculación, +N horas, --update, init, psf) y su alias /pgo --
 COMMANDS_DIR="$HOME/.claude/commands"
 mkdir -p "$COMMANDS_DIR"
-if curl -fsSL "$REPO_RAW/.claude/commands/planesgo.md" -o "$COMMANDS_DIR/planesgo.md"; then
-    echo "OK: comando /planesgo instalado en $COMMANDS_DIR/planesgo.md"
-else
-    echo "AVISO: no se pudo descargar el comando /planesgo (no crítico, el tracking funciona igual)."
-fi
-if curl -fsSL "$REPO_RAW/.claude/commands/pgo.md" -o "$COMMANDS_DIR/pgo.md"; then
-    echo "OK: alias /pgo instalado en $COMMANDS_DIR/pgo.md"
-else
-    echo "AVISO: no se pudo descargar el alias /pgo (no crítico, /planesgo sigue funcionando)."
-fi
+for c in planesgo pgo; do
+    if cp "$SRC_DIR/.claude/commands/$c.md" "$COMMANDS_DIR/$c.md" 2>/dev/null; then
+        echo "OK: comando /$c instalado en $COMMANDS_DIR/$c.md"
+    else
+        echo "AVISO: no se pudo instalar el comando /$c (no crítico, el tracking funciona igual)."
+    fi
+done
 
 # 2. settings.json de usuario: fusiona los hooks sin machacar lo que ya haya -
 SETTINGS_FILE="$HOME/.claude/settings.json"
@@ -105,19 +117,6 @@ PY_EOF
 
 # 3. Binario planesgo-mcp: siempre se reconstruye con la versión actual del repo ---
 if command -v go >/dev/null 2>&1; then
-    SRC_DIR=""
-    if [ -f "./cmd/planesgo-mcp/main.go" ]; then
-        SRC_DIR="."
-    else
-        SRC_DIR="$(mktemp -d)"
-        echo "==> Clonando planesnet/PlanesGo (solo para compilar planesgo-mcp)..."
-        if command -v git >/dev/null 2>&1 && git clone --depth 1 https://github.com/planesnet/PlanesGo "$SRC_DIR" >/dev/null 2>&1; then
-            :
-        else
-            echo "AVISO: no se pudo clonar PlanesGo; omitiendo compilación de planesgo-mcp."
-            SRC_DIR=""
-        fi
-    fi
     if [ -n "$SRC_DIR" ] && [ -f "$SRC_DIR/cmd/planesgo-mcp/main.go" ]; then
         echo "==> Compilando planesgo-mcp..."
         (cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_DIR/planesgo-mcp" cmd/planesgo-mcp/main.go) \
@@ -143,6 +142,26 @@ if [ -x "$BIN_DIR/planesgo-mcp" ] && command -v claude >/dev/null 2>&1; then
     fi
 else
     echo "AVISO: 'claude' no disponible o falta el binario; se seguirá usando planesgo-mcp por CLI."
+fi
+
+# 3c. PSF (Planes Software Factory): solo con token de empleado ------------------
+PSF_TOKEN="${PLANESGO_TOKEN:-${ANTIGRAVITY_TOKEN:-}}"
+if [ -z "$PSF_TOKEN" ] && [ -f "$HOME/.planesgo_auth.json" ]; then
+    PSF_TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token") or "")' 2>/dev/null)"
+fi
+PSF_HOME="${PSF_HOME:-$HOME/.planesgo/PSF}"
+if [ -n "$PSF_TOKEN" ]; then
+    PSF_TMP="$(mktemp -d)"
+    if curl -fsSL -H "Authorization: Bearer $PSF_TOKEN" "$PLANESGO_URL/install/psf.tar.gz" | tar -xz -C "$PSF_TMP" 2>/dev/null \
+        && [ -f "$PSF_TMP/PSF/hooks/psf_hook.py" ]; then
+        rm -rf "$PSF_HOME" && mkdir -p "$(dirname "$PSF_HOME")" && mv "$PSF_TMP/PSF" "$PSF_HOME"
+        bash "$PSF_HOME/install.sh" --copy >/dev/null 2>&1 \
+            && echo "OK: PSF instalado en $PSF_HOME" \
+            || echo "AVISO: PSF descargado en $PSF_HOME, pero su instalador falló (bash $PSF_HOME/install.sh)."
+    else
+        echo "AVISO: no se pudo descargar PSF desde $PLANESGO_URL (no crítico)."
+    fi
+    rm -rf "$PSF_TMP"
 fi
 
 # 4. Comprobación de autenticación -------------------------------------------

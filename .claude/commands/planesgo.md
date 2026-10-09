@@ -33,7 +33,7 @@ Si "$ARGUMENTS" es exactamente `init`:
 Si "$ARGUMENTS" es exactamente `--update` (o empieza por `--update`), NO lo trates como texto de búsqueda de proyecto (Caso A) ni hagas el diagnóstico (Caso B). Ejecuta directamente:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash
+curl -fsSL https://planesgo.autopyme.com/install/claude-hook.sh | bash
 ```
 
 Esto reconstruye en un solo paso el hook global, el comando `/planesgo`, el binario `planesgo-mcp` y el servidor MCP, todos con la versión actual de `master`. Muestra la salida real del instalador (no la resumas) y termina con una frase: todo actualizado, o qué paso concreto falló. Si el servidor MCP se acaba de registrar por primera vez, recuerda que no se carga en caliente — hace falta una sesión nueva para que la herramienta `mcp__planesgo__*` aparezca disponible.
@@ -78,7 +78,7 @@ Según lo que encuentres:
 - Si el proyecto **no está vinculado**: pregunta al usuario a qué proyecto de Odoo corresponde (nunca lo asumas ni uses PLANESGO por defecto), o sugiérele usar directamente `/planesgo <texto de búsqueda>` para vincularlo sin más preguntas. Si no conoce el nombre exacto, búscalo con `planesgo-mcp --search-project "<texto parcial>"` (o la herramienta MCP `planesgo_search_projects`), muéstrale las coincidencias, y una vez confirmado vincula con `planesgo-mcp --set-project "<nombre exacto>"`.
 - Si **falta el token**: indica al usuario que lo genere en https://planesgo.autopyme.com/settings y lo guarde en `~/.planesgo_auth.json`, o lo exporte como `$PLANESGO_TOKEN`.
 - Si **falta el hook global, el binario o el servidor MCP**: sugiere ejecutar
-  `curl -fsSL https://raw.githubusercontent.com/planesnet/PlanesGo/master/scripts/install-claude-hook.sh | bash`
+  `curl -fsSL https://planesgo.autopyme.com/install/claude-hook.sh | bash`
   y, si el servidor MCP sigue sin aparecer tras eso, que entienda que necesita abrir una sesión nueva para que Claude Code cargue el servidor recién registrado (no se recarga en caliente en la sesión actual).
 
 Termina con un resumen de una frase: si el tracking está operativo para esta sesión, o qué es exactamente lo único que falta.
