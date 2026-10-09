@@ -18,7 +18,7 @@ import (
 //     el instalador necesita en el «Setup script» de la nube, donde no hay variables de entorno).
 //   - /install/psf.tar.gz: Planes Software Factory (carpeta PSF/). Solo con token de empleado.
 
-//go:embed scripts/install-claude-hook.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/planesgo.md .claude/commands/pgo.md go.mod go.sum cmd/planesgo-mcp/main.go
+//go:embed scripts/install-claude-hook.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/planesgo.md .claude/commands/pgo.md go.mod go.sum cmd/planesgo-mcp/main.go
 var planesgoBundleFS embed.FS
 
 //go:embed all:PSF

@@ -7,15 +7,15 @@ Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
 
 ## Caso P: argumento empieza por "psf" → activar, desactivar o ver PSF en este proyecto
 
-Si "$ARGUMENTS" es `psf`, `psf on`, `psf off` o `psf estado` (sin distinguir mayúsculas), NO es texto de búsqueda (Caso A). Gestiona Planes Software Factory (PSF, repositorio privado planesnet/PSF) en el proyecto actual. Responde en español y de forma breve.
+Si "$ARGUMENTS" es `psf`, `psf on`, `psf off` o `psf estado` (sin distinguir mayúsculas), NO es texto de búsqueda (Caso A). Gestiona Planes Software Factory (PSF, carpeta `PSF/` de PlanesGo, que el servidor de PlanesGo sirve solo con token de empleado) en el proyecto actual. Responde en español y de forma breve.
 
-1. **Localiza PSF** (directorio con `hooks/psf_hook.py` y `commands/psf.md`), en este orden: `$PSF_DIR`; `/home/user/PSF`; `~/cowork/PSF`; la ruta «Read from» de `psf@psf` en `claude plugin list`.
-   - Si no lo encuentras y la sesión tiene la herramienta `add_repo` (Claude Code en la nube): añade `planesnet/PSF` con acceso de lectura y clónalo en `/home/user/PSF` siguiendo lo que indique.
-   - Si tampoco así, di que PSF no está disponible en esta máquina (en local se instala con `./install.sh` de PSF) y para.
+1. **Localiza PSF** (directorio con `hooks/psf_hook.py` y `commands/psf.md`), en este orden: `$PSF_DIR`; `~/.planesgo/PSF`; la carpeta `PSF/` de un clon de PlanesGo; la ruta «Read from» de `psf@psf` en `claude plugin list`.
+   - Si no lo encuentras, descárgalo: `mkdir -p ~/.planesgo && curl -fsSL -H "Authorization: Bearer $PLANESGO_TOKEN" https://planesgo.autopyme.com/install/psf.tar.gz | tar -xz -C ~/.planesgo` (si no hay `$PLANESGO_TOKEN`, usa `antigravity_token` de `~/.planesgo_auth.json`).
+   - Si tampoco así, di que PSF no está disponible (falta el token de empleado o el servidor no responde) y para.
 2. **`psf on`**:
    - Comprueba primero el proyecto de PlanesGo (`.planesgo.json` con `odoo_project_id > 0`); si falta, haz el Caso B para vincularlo antes de seguir.
    - Lee `<PSF>/commands/psf.md` y sigue su apartado «`on`», usando `<PSF>` donde diga `${CLAUDE_PLUGIN_ROOT}`.
-   - Si existe `/opt/psf-arranque.sh` (nube), ejecútalo y aplica como contexto de la sesión el `additionalContext` que devuelve; si no, ejecuta `CLAUDE_PLUGIN_ROOT=<PSF> python3 <PSF>/hooks/psf_hook.py session-start` y haz lo mismo. Así PSF queda aplicado desde ya, sin esperar a la siguiente sesión.
+   - Si existe `~/.planesgo/psf-arranque.sh`, ejecútalo y aplica como contexto de la sesión el `additionalContext` que devuelve; si no, ejecuta `CLAUDE_PLUGIN_ROOT=<PSF> python3 <PSF>/hooks/psf_hook.py session-start` y haz lo mismo. Así PSF queda aplicado desde ya, sin esperar a la siguiente sesión.
 3. **`psf off`**: lee `<PSF>/commands/psf.md` y sigue su apartado «`off`» (pone `activo: false` en `.psf/proyecto.yml` sin borrar nada). La imputación de PlanesGo sigue igual: no depende de PSF.
 4. **`psf` o `psf estado`**: sigue el apartado «`estado`» de `<PSF>/commands/psf.md`; si el proyecto no tiene `.psf/proyecto.yml`, dilo y sugiere `/planesgo psf on`.
 
