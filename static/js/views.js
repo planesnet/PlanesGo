@@ -704,6 +704,14 @@ function calculateWallClockHours(entries) {
                 endMs = startMs + expectedDurationMs;
             }
 
+            // Un parte nunca puede ocupar más reloj que las horas imputadas: si create_date →
+            // write_date abarca más (parte editado días después, cronómetro olvidado abierto...),
+            // se conserva solo el último tramo de su duración real. Así la unión de intervalos
+            // nunca supera la suma de horas del día y el tiempo humano jamás excede al total.
+            if (startMs > 0 && endMs > startMs && (endMs - startMs) > expectedDurationMs) {
+                startMs = endMs - expectedDurationMs;
+            }
+
             if (startMs < endMs) {
                 intervals.push({ start: startMs, end: endMs });
             }
