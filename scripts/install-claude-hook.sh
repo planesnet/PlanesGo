@@ -144,7 +144,29 @@ else
     echo "AVISO: 'claude' no disponible o falta el binario; se seguirá usando planesgo-mcp por CLI."
 fi
 
-# 3c. PSF (Planes Software Factory): solo con token de empleado ------------------
+# 3c. Arranque de PSF en cada sesión (hook SessionStart): descarga PSF con el token de la sesión y carga su
+# contexto en los proyectos con perfil .psf/proyecto.yml. En la nube es la única vía, porque el «Setup script» no
+# tiene el token. Sustituye al antiguo /opt/psf-arranque.sh (bloque de PSF del Setup script).
+mkdir -p "$HOME/.planesgo"
+if cp "$SRC_DIR/scripts/psf-arranque.sh" "$HOME/.planesgo/psf-arranque.sh" 2>/dev/null; then
+    chmod +x "$HOME/.planesgo/psf-arranque.sh"
+    python3 - "$SETTINGS_FILE" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+data = json.load(open(path)) if os.path.exists(path) else {}
+ss = data.setdefault("hooks", {}).setdefault("SessionStart", [])
+cmd = 'bash "$HOME/.planesgo/psf-arranque.sh"'
+for group in ss:
+    group["hooks"] = [h for h in group.get("hooks", []) if h.get("command") != "bash /opt/psf-arranque.sh"]
+ss[:] = [g for g in ss if g.get("hooks")]
+if not any(h.get("command") == cmd for g in ss for h in g.get("hooks", [])):
+    ss.append({"hooks": [{"type": "command", "command": cmd, "timeout": 40}]})
+json.dump(data, open(path, "w"), indent=2, ensure_ascii=False)
+PY
+    echo "OK: arranque de PSF registrado (SessionStart)"
+fi
+
+# 3d. PSF (Planes Software Factory) en esta máquina: solo con token de empleado ------------------
 PSF_TOKEN="${PLANESGO_TOKEN:-${ANTIGRAVITY_TOKEN:-}}"
 if [ -z "$PSF_TOKEN" ] && [ -f "$HOME/.planesgo_auth.json" ]; then
     PSF_TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token") or "")' 2>/dev/null)"
