@@ -122,7 +122,17 @@ def project_root_for_dir(d):
     d = os.path.abspath(d)
     if os.path.isfile(os.path.join(d, ".planesgo.json")):
         return d
-    return git_root(d) or d
+    root = git_root(d)
+    if root:
+        return root
+    # En la nube, tras reiniciarse el worker el directorio de trabajo puede quedar en el padre de los repositorios
+    # de la sesión (/home/user): si solo uno de ellos está vinculado, es ese proyecto
+    try:
+        linked = [os.path.join(d, n) for n in sorted(os.listdir(d))
+                  if os.path.isdir(os.path.join(d, n, ".git")) and load_config(os.path.join(d, n))]
+    except OSError:
+        linked = []
+    return linked[0] if len(linked) == 1 else d
 
 
 def project_root_for_file(path, session_dir):
