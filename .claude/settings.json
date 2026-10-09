@@ -66,6 +66,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/planesgo_claude_hook.py\" turn-end",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
