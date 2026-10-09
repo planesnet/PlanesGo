@@ -9,7 +9,13 @@ Modos (argv[1]):
   guard          PreToolUse        -> bloquea Edit/Write/NotebookEdit/Bash en proyectos sin .planesgo.json válido
   mcp            PreToolUse        -> añade project_path (proyecto de esta sesión) a las llamadas al MCP planesgo
   track          PostToolUse       -> latidos de imputación (el primero abre el cronómetro)
+  turn-end       Stop              -> programa la consolidación: si en 5 minutos no hay actividad, se imputa
+  consolidate    (interno)         -> espera, y si el agente sigue parado cierra e imputa el parte en Odoo
   session-end    SessionEnd        -> cierra e imputa los cronómetros abiertos en la sesión
+
+Consolidación: un agente que ha terminado su trabajo no envía más latidos y, sobre todo en la nube, la sesión
+puede tardar horas en cerrarse. Por eso, a los 5 minutos de terminar un turno sin actividad nueva, se cierra el
+parte con lo hecho hasta ese momento; si el agente vuelve a trabajar, el siguiente latido abre un parte nuevo.
 
 La descripción del parte se construye con lo que se ha hecho en la sesión: commits nuevos,
 ficheros editados, rama y, si aún no hay nada de eso, la primera petición del usuario.
@@ -59,6 +65,8 @@ ES_WORDS = {
 # El backend distingue Claude de Antigravity por este valor
 AI_MODEL_LABEL = "Claude Code"
 STATE_ROOT = "/tmp/planesgo-claude"
+# Espera tras terminar un turno antes de consolidar (PLANESGO_CONSOLIDATE_SECONDS lo cambia, p. ej. en pruebas)
+CONSOLIDATE_AFTER = 300
 
 EXEMPT_PREFIXES = (
     os.path.join(HOME, ".claude"),
@@ -194,7 +202,7 @@ def session_dir(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
 
-def run_bin(args, background=False, payload=None, with_tokens=False):
+def run_bin(args, background=False, payload=None, with_tokens=False, tokens=None):
     binp = find_bin()
     if not binp:
         return False
@@ -205,9 +213,9 @@ def run_bin(args, background=False, payload=None, with_tokens=False):
             cmd += ["--session-id", sid]
     if payload and with_tokens:
         # Solo al cerrar: el transcript puede ser grande y los latidos deben ser baratos
-        tin, tout = transcript_tokens(payload.get("transcript_path"))
-        if tin or tout:
-            cmd += ["--tokens-in", str(tin), "--tokens-out", str(tout), "--tokens", str(tin + tout)]
+        cmd += tokens_args(*transcript_tokens(payload.get("transcript_path")))
+    if tokens:
+        cmd += tokens_args(*tokens)
     if background:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return True
@@ -215,6 +223,10 @@ def run_bin(args, background=False, payload=None, with_tokens=False):
         return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20).returncode == 0
     except Exception:
         return False
+
+
+def tokens_args(tin, tout):
+    return ["--tokens-in", str(tin), "--tokens-out", str(tout), "--tokens", str(tin + tout)] if (tin or tout) else []
 
 
 def transcript_tokens(path):
@@ -397,6 +409,9 @@ def on_context(payload, event):
     if event == "UserPromptSubmit":
         try:
             record_prompt(payload)
+            # Un mensaje nuevo reanuda el trabajo: la consolidación pendiente ya no toca
+            for state, _root in active_projects(session_state_dir(payload)):
+                cancel_consolidation(state)
         except Exception:
             pass
     root = project_root_for_dir(session_dir(payload))
@@ -525,6 +540,7 @@ def on_track(payload):
     active = os.path.join(state, "active")
     last_file = os.path.join(state, "last_beat")
     now = time.time()
+    cancel_consolidation(state)
     if not os.path.isfile(active):
         # Primer latido en primer plano: solo se marca activo si Odoo confirma el cronómetro,
         # así el stop final nunca queda huérfano
@@ -546,21 +562,97 @@ def on_track(payload):
                 background=True, payload=payload)
 
 
+def cancel_consolidation(state):
+    try:
+        os.remove(os.path.join(state, "pending"))
+    except OSError:
+        pass
+
+
+def active_projects(sdir):
+    """(estado, raíz) de cada proyecto con cronómetro abierto en la sesión."""
+    try:
+        names = os.listdir(sdir)
+    except OSError:
+        return []
+    found = []
+    for proj in names:
+        state = os.path.join(sdir, proj)
+        root = read_text(os.path.join(state, "active"))
+        if root:
+            found.append((state, root))
+    return found
+
+
+def session_tokens(payload, state):
+    """Tokens de la sesión aún no imputados en otro parte (los ya consolidados se descuentan)."""
+    tin, tout = transcript_tokens(payload.get("transcript_path"))
+    try:
+        done_in, done_out = (int(x) for x in read_text(os.path.join(state, "tokens_done")).split())
+    except Exception:
+        done_in, done_out = 0, 0
+    write_text(os.path.join(state, "tokens_done"), f"{tin} {tout}")
+    return max(tin - done_in, 0), max(tout - done_out, 0)
+
+
+def close_part(payload, state, root):
+    """Cierra e imputa en Odoo el parte abierto del proyecto y deja la sesión lista para abrir otro."""
+    ok = run_bin(["--stop", "--path", root, "--desc", build_description(payload, root, state)],
+                 payload=payload, tokens=session_tokens(payload, state))
+    if ok:
+        # Lo siguiente que haga el agente es trabajo nuevo: otro parte, con su propia descripción
+        for name in ("active", "last_beat", "files", "start_head", "start_time"):
+            try:
+                os.remove(os.path.join(state, name))
+            except OSError:
+                pass
+        init_project_state(state, root)
+    return ok
+
+
+def on_turn_end(payload):
+    """Stop: el agente ha terminado su turno. Si en CONSOLIDATE_AFTER segundos no vuelve a trabajar, se consolida."""
+    if payload.get("stop_hook_active"):
+        return
+    sdir = session_state_dir(payload)
+    projects = active_projects(sdir)
+    if not projects:
+        return
+    stamp = str(time.time())
+    for state, _root in projects:
+        write_text(os.path.join(state, "pending"), stamp)
+    write_text(os.path.join(sdir, "payload.json"), json.dumps(
+        {"session_id": payload.get("session_id"), "transcript_path": payload.get("transcript_path")}))
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "consolidate", sdir, stamp],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def on_consolidate(sdir, stamp):
+    try:
+        delay = int(os.environ.get("PLANESGO_CONSOLIDATE_SECONDS") or CONSOLIDATE_AFTER)
+    except ValueError:
+        delay = CONSOLIDATE_AFTER
+    time.sleep(max(delay, 0))
+    try:
+        payload = json.loads(read_text(os.path.join(sdir, "payload.json")) or "{}")
+    except Exception:
+        payload = {}
+    for state, root in active_projects(sdir):
+        # Si ha habido un latido o un turno nuevo desde entonces, esta consolidación ya no toca
+        if read_text(os.path.join(state, "pending")) != stamp:
+            continue
+        cancel_consolidation(state)
+        close_part(payload, state, root)
+
+
 def on_session_end(payload):
     sdir = session_state_dir(payload)
     if not os.path.isdir(sdir):
         return
-    for proj in os.listdir(sdir):
-        active = os.path.join(sdir, proj, "active")
-        try:
-            with open(active, "r", encoding="utf-8") as f:
-                root = f.read().strip()
-        except Exception:
-            continue
-        # La descripción final resume la sesión completa (antes se sobrescribía con un texto fijo)
-        state = os.path.join(sdir, proj)
-        run_bin(["--stop", "--path", root, "--desc", build_description(payload, root, state)],
-                payload=payload, with_tokens=True)
+    for state, root in active_projects(sdir):
+        # La descripción final resume lo hecho desde el último parte consolidado
+        close_part(payload, state, root)
     shutil.rmtree(sdir, ignore_errors=True)
 
 
@@ -579,6 +671,12 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if shadowed_by_global_hook():
         sys.exit(0)
+    if mode == "consolidate":
+        try:
+            on_consolidate(sys.argv[2], sys.argv[3])
+        except Exception:
+            pass
+        sys.exit(0)
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
@@ -595,6 +693,8 @@ def main():
             on_mcp(payload)
         elif mode == "track":
             on_track(payload)
+        elif mode == "turn-end":
+            on_turn_end(payload)
         elif mode == "session-end":
             on_session_end(payload)
     except Exception:

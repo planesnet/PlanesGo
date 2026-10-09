@@ -93,6 +93,7 @@ ensure("UserPromptSubmit", None, "prompt", 10)
 ensure("PreToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "guard", 10)
 ensure("PreToolUse", "mcp__planesgo__.*", "mcp", 10)
 ensure("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "track", 25)
+ensure("Stop", None, "turn-end", 10)
 ensure("SessionEnd", None, "session-end", 30)
 
 with open(path, "w") as f:
