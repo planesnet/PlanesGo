@@ -22,8 +22,8 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-# Instalar certificados para conexiones HTTPS seguras a Odoo y zona horaria
-RUN apk --no-cache add ca-certificates tzdata
+# Instalar certificados para conexiones HTTPS seguras a Odoo, zona horaria y su-exec
+RUN apk --no-cache add ca-certificates tzdata su-exec
 
 # Crear usuario no privilegiado para mayor seguridad
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -33,11 +33,12 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Crear directorio de datos persistentes y asignar permisos
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 VOLUME ["/app/data"]
-USER appuser
 
 # Puerto por defecto para el servicio
 EXPOSE 8080
@@ -49,5 +50,5 @@ ENV ODOO_URL=https://planesnet.autopyme.com
 ENV ODOO_DB=ap113
 ENV GCP_BILLING_EXPORT_TABLE=planes-dev.gcp_billing_export
 
-# Comando de inicio
-ENTRYPOINT ["/app/planesgo"]
+# Comando de inicio seguro (resuelve secretos de Docker con root y ejecuta como appuser)
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
