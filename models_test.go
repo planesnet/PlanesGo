@@ -288,3 +288,55 @@ func TestCalculateWallClockHours(t *testing.T) {
 	}
 }
 
+func TestSessionDataIsAdmin(t *testing.T) {
+	// Caso 1: Sesión nil
+	var nilSess *SessionData
+	if nilSess.IsAdmin() {
+		t.Errorf("Sesión nil no debe ser admin")
+	}
+
+	// Caso 2: Sesión vacía
+	emptySess := &SessionData{}
+	if emptySess.IsAdmin() {
+		t.Errorf("Sesión vacía no debe ser admin")
+	}
+
+	// Caso 3: Usuario común
+	userSess := &SessionData{UserEmail: "empleado@planesnet.com"}
+	if userSess.IsAdmin() {
+		t.Errorf("empleado@planesnet.com no debe ser admin")
+	}
+
+	// Caso 4: Administradores por defecto (UserEmail)
+	luisSess := &SessionData{UserEmail: "luis@planesnet.com"}
+	if !luisSess.IsAdmin() {
+		t.Errorf("luis@planesnet.com debe ser admin por defecto")
+	}
+
+	isabelSess := &SessionData{UserEmail: "isabel@planesnet.com"}
+	if !isabelSess.IsAdmin() {
+		t.Errorf("isabel@planesnet.com debe ser admin por defecto")
+	}
+
+	// Caso 5: Mayúsculas y espacios
+	luisCaps := &SessionData{UserEmail: "  LUIS@planesnet.com  "}
+	if !luisCaps.IsAdmin() {
+		t.Errorf("LUIS@planesnet.com con mayúsculas y espacios debe ser admin")
+	}
+
+	// Caso 6: Fallback a Username si UserEmail está vacío
+	userFallback := &SessionData{Username: "isabel@planesnet.com"}
+	if !userFallback.IsAdmin() {
+		t.Errorf("Username como fallback debe reconocerse como admin")
+	}
+
+	// Caso 7: ADMIN_EMAILS personalizado
+	t.Setenv("ADMIN_EMAILS", "otro@planesnet.com, manager@empresa.com")
+	if luisSess.IsAdmin() {
+		t.Errorf("luis@planesnet.com no debería ser admin tras cambiar ADMIN_EMAILS")
+	}
+	customAdmin := &SessionData{UserEmail: "MANAGER@empresa.com"}
+	if !customAdmin.IsAdmin() {
+		t.Errorf("MANAGER@empresa.com debe ser admin con ADMIN_EMAILS personalizado")
+	}
+}

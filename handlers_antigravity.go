@@ -684,18 +684,18 @@ func (state *AppState) handleAntigravityUpdateTasks(w http.ResponseWriter, r *ht
 			"tokens_total": payload.TokensTotal,
 		})
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":      true,
-			"action":       "stopped",
-			"task_id":      payload.TaskID,
-			"task_name":    payload.TaskName,
-			"task_type":    canonicalType,
-			"ticket_id":    payload.TicketID,
-			"description":  payload.Description,
-			"tokens_total": payload.TokensTotal,
-			"tokens_input": payload.TokensInput,
+			"success":       true,
+			"action":        "stopped",
+			"task_id":       payload.TaskID,
+			"task_name":     payload.TaskName,
+			"task_type":     canonicalType,
+			"ticket_id":     payload.TicketID,
+			"description":   payload.Description,
+			"tokens_total":  payload.TokensTotal,
+			"tokens_input":  payload.TokensInput,
 			"tokens_output": payload.TokensOutput,
-			"ai_model":     payload.AIModel,
-			"message":      fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
+			"ai_model":      payload.AIModel,
+			"message":       fmt.Sprintf("Tarea '%s' (ID %d) detenida e imputada correctamente", payload.TaskName, payload.TaskID),
 		})
 		return
 

@@ -80,5 +80,3 @@ func TestLoadConfigPasiIgnored(t *testing.T) {
 		t.Errorf("Odoo DB debería ignorar el valor 'pasi', obtenida '%s'", cfg.Odoo.DB)
 	}
 }
-
-

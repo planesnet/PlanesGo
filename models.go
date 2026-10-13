@@ -8,12 +8,15 @@ import (
 	"html/template"
 	"log"
 	"math"
+	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"pasigo/config"
+	"pasigo/gcpbilling"
 	"pasigo/odoo"
 	"pasigo/store"
 )
@@ -36,6 +39,48 @@ type SessionData struct {
 	UserPicture string `json:"user_picture,omitempty"`
 }
 
+// IsAdmin comprueba si la sesión actual pertenece a un administrador autorizado.
+// Acepta una sesión nil y verifica UserEmail, o Username si UserEmail está vacío.
+// Los administradores se definen en ADMIN_EMAILS (separados por comas), o por defecto
+// "luis@planesnet.com,isabel@planesnet.com". La comparación no distingue mayúsculas ni espacios.
+func (s *SessionData) IsAdmin() bool {
+	if s == nil {
+		return false
+	}
+	rawEmail := s.UserEmail
+	if rawEmail == "" {
+		rawEmail = s.Username
+	}
+	email := strings.ToLower(strings.TrimSpace(rawEmail))
+	if email == "" {
+		return false
+	}
+	adminEnv := os.Getenv("ADMIN_EMAILS")
+	if adminEnv == "" {
+		adminEnv = "luis@planesnet.com,isabel@planesnet.com"
+	}
+	for _, admin := range strings.Split(adminEnv, ",") {
+		if strings.ToLower(strings.TrimSpace(admin)) == email {
+			return true
+		}
+	}
+	return false
+}
+
+// getSession extrae y decodifica la sesión del usuario a partir de la cookie de petición
+func (state *AppState) getSession(r *http.Request) *SessionData {
+	if r == nil {
+		return nil
+	}
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		if session, err := decodeSession(cookie.Value); err == nil {
+			return session
+		}
+	}
+	return nil
+}
+
 type AppState struct {
 	mu                      sync.RWMutex
 	cfg                     *config.Config
@@ -45,6 +90,25 @@ type AppState struct {
 	lastTimerConfirmedTimes map[int]int64
 	activeTimersMu          sync.RWMutex
 	activeTimers            map[int]map[string]*odoo.ActiveTimer // userUID -> timerKey -> timer
+	billingServiceMu        sync.RWMutex
+	billingService          *gcpbilling.BillingService
+}
+
+func (state *AppState) getBillingService() *gcpbilling.BillingService {
+	state.billingServiceMu.RLock()
+	if state.billingService != nil {
+		bs := state.billingService
+		state.billingServiceMu.RUnlock()
+		return bs
+	}
+	state.billingServiceMu.RUnlock()
+
+	state.billingServiceMu.Lock()
+	defer state.billingServiceMu.Unlock()
+	if state.billingService == nil {
+		state.billingService = gcpbilling.NewBillingService()
+	}
+	return state.billingService
 }
 
 // timerKeyFor genera una clave única y estable para un temporizador activo.
@@ -461,12 +525,12 @@ func (state *AppState) checkIdleTimers(now time.Time, idleTimeout time.Duration)
 				// Notificar al usuario mediante evento SSE
 				if state.sseHub != nil {
 					state.broadcastUserEvent(userUID, "timer_timeout", map[string]interface{}{
-						"timer_key":     key,
-						"task_id":       timer.TaskID,
-						"task_name":     timer.TaskName,
-						"unit_amount":   timer.UnitAmount,
+						"timer_key":      key,
+						"task_id":        timer.TaskID,
+						"task_name":      timer.TaskName,
+						"unit_amount":    timer.UnitAmount,
 						"accumulated_ms": timer.AccumulatedMs,
-						"reason":        "inactivity_timeout",
+						"reason":         "inactivity_timeout",
 					})
 				}
 			}
@@ -507,32 +571,32 @@ func (r WorkerRecentProject) FormattedDate() string {
 }
 
 type PageData struct {
-	Version              string
-	Build                string
-	CurrentView          string
-	Config               *config.Config
-	Session              *SessionData
-	HasOdooToken         bool
-	Entries              []odoo.TimesheetEntry
-	Projects             []odoo.Project
-	TotalHours           float64
-	TotalHorasHombre     float64
-	TotalHorasMaquina    float64
-	TotalHorasReloj      float64 // Tiempo humano real acumulado mediante unión de intervalos (wall-clock)
-	TotalProjectsCount   int
-	UniqueProjectsCount  int
-	UniqueEmployeesCount int
-	ProjectsList         []string
-	EmployeesList        []string
-	CurrentWorker        string
-	RecentProjects       []WorkerRecentProject
-	PendingTickets       []odoo.Ticket
-	PendingTicketsCount  int
-	OdooURL              string
-	Today                string
-	ActiveTimer          *odoo.ActiveTimer
+	Version               string
+	Build                 string
+	CurrentView           string
+	Config                *config.Config
+	Session               *SessionData
+	HasOdooToken          bool
+	Entries               []odoo.TimesheetEntry
+	Projects              []odoo.Project
+	TotalHours            float64
+	TotalHorasHombre      float64
+	TotalHorasMaquina     float64
+	TotalHorasReloj       float64 // Tiempo humano real acumulado mediante unión de intervalos (wall-clock)
+	TotalProjectsCount    int
+	UniqueProjectsCount   int
+	UniqueEmployeesCount  int
+	ProjectsList          []string
+	EmployeesList         []string
+	CurrentWorker         string
+	RecentProjects        []WorkerRecentProject
+	PendingTickets        []odoo.Ticket
+	PendingTicketsCount   int
+	OdooURL               string
+	Today                 string
+	ActiveTimer           *odoo.ActiveTimer
 	ProjectPartnerMapJSON template.JS
-	Error                string
+	Error                 string
 }
 
 // FormatHoursToHHMM convierte un valor decimal de horas a formato Horas:Minutos (ej. 2.62 -> "2:37", 3.00 -> "3:00").

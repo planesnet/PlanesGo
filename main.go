@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.69"
+var Version = "1.2.73"
 
 // BuildStamp identifica de forma única cada arranque del proceso (cada despliegue reinicia
 // el binario). Se usa como cache-buster de los estáticos de /m y para la auto-actualización
@@ -53,6 +53,10 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/settings", state.handleSettings)
 	mux.HandleFunc("/api/settings/test-connection", state.handleTestConnection)
 	mux.HandleFunc("/api/settings/generate-antigravity-token", state.handleGenerateAntigravityToken)
+
+	// Administración y facturación GCP
+	mux.HandleFunc("/admin", state.handleAdmin)
+	mux.HandleFunc("/api/admin/gcp-invoices", state.handleAPIAdminGCPInvoices)
 
 	// API REST
 	mux.HandleFunc("/api/timesheets", state.handleAPITimesheets)

@@ -289,4 +289,3 @@ func TestHasField(t *testing.T) {
 		t.Fatalf("Esperado que se sirva desde caché (2 llamadas), pero hubo %d", calls)
 	}
 }
-

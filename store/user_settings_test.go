@@ -179,4 +179,3 @@ func TestSaveSettingsPreservesAntigravityToken(t *testing.T) {
 		t.Fatalf("el nuevo OdooToken no se actualizó: %s", updated.OdooToken)
 	}
 }
-

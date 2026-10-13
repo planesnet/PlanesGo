@@ -19,11 +19,12 @@
 
             <!-- Usuario y Acciones -->
             <div class="flex items-center space-x-2 sm:space-x-3">
+                {{if .Session}}
                 <!-- Perfil de Usuario -->
                 <div class="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800">
                     {{if .Session.UserPicture}}
                     <img src="{{.Session.UserPicture}}" alt="{{.Session.UserName}}" class="w-6 h-6 rounded-full border border-sky-500/40 object-cover">
-                    {{else}}
+                    {{else if .Session.Username}}
                     <div class="w-6 h-6 rounded-full bg-sky-900 text-sky-200 text-xs font-bold flex items-center justify-center uppercase">
                         {{slice .Session.Username 0 1}}
                     </div>
@@ -34,10 +35,11 @@
                         </span>
                         <span class="text-[10px] text-emerald-400 flex items-center font-mono">
                             <span class="w-1.5 h-1.5 mr-1 bg-emerald-400 rounded-full animate-pulse"></span>
-                            {{.Config.Odoo.DB}}
+                            {{if .Config}}{{.Config.Odoo.DB}}{{end}}
                         </span>
                     </div>
                 </div>
+                {{end}}
 
                 <!-- Botón Probar Avisos del Cronómetro -->
                 <button type="button" onclick="testTimerNotification()" id="btn-test-notification" title="Probar avisos sonoros del cronómetro" class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 rounded-xl transition border border-amber-800/50 shadow-sm cursor-pointer">
@@ -46,6 +48,16 @@
                     </svg>
                     <span class="hidden md:inline">Probar avisos</span>
                 </button>
+
+                {{if .Session.IsAdmin}}
+                <!-- Botón Administración -->
+                <a href="/admin" title="Panel de Administración" class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60 shadow-sm">
+                    <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <span class="hidden md:inline">Administración</span>
+                </a>
+                {{end}}
 
                 <!-- Botón Ajustes -->
                 <a href="/settings" title="Ajustes de Usuario y Token Odoo" class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60 shadow-sm">

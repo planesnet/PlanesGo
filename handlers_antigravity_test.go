@@ -188,10 +188,10 @@ func TestProjectNamesMatchAndTaskIsolation(t *testing.T) {
 
 func TestNormalizeTaskType(t *testing.T) {
 	testCases := []struct {
-		rawTitle    string
-		realWork    string
-		wantType    string
-		wantClean   string
+		rawTitle  string
+		realWork  string
+		wantType  string
+		wantClean string
 	}{
 		{
 			rawTitle:  "Implementación de tag_ids y vistas en PlanesGo",
@@ -265,4 +265,3 @@ func TestNormalizeTaskType(t *testing.T) {
 		}
 	}
 }
-

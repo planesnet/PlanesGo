@@ -15,20 +15,20 @@ type Partner struct {
 
 // User representa un usuario del sistema (res.users)
 type User struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	Login   string `json:"login"`
-	Email   string `json:"email"`
-	Active  bool   `json:"active"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Login  string `json:"login"`
+	Email  string `json:"email"`
+	Active bool   `json:"active"`
 }
 
 // Employee representa un trabajador (hr.employee)
 type Employee struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
 	WorkEmail string `json:"work_email"`
-	UserID int    `json:"user_id"`
-	Active bool   `json:"active"`
+	UserID    int    `json:"user_id"`
+	Active    bool   `json:"active"`
 }
 
 // Project representa un proyecto (project.project)
@@ -41,35 +41,35 @@ type Project struct {
 
 // Ticket representa un ticket de soporte / helpdesk (helpdesk.ticket)
 type Ticket struct {
-	ID             int             `json:"id"`
-	Name           string          `json:"name"`
-	TicketRef      string          `json:"ticket_ref,omitempty"`
-	Description    string          `json:"description,omitempty"`
-	CreateDate     string          `json:"create_date"`
-	CloseDate      string          `json:"close_date,omitempty"`
-	StageID        json.RawMessage `json:"stage_id,omitempty"` // [id, name] o id
-	TeamID         json.RawMessage `json:"team_id,omitempty"`
-	PartnerID      json.RawMessage `json:"partner_id,omitempty"`
-	PartnerName    string          `json:"partner_name,omitempty"`
-	PartnerEmail   string          `json:"partner_email,omitempty"`
-	UserID         json.RawMessage `json:"user_id,omitempty"`
-	Priority       string          `json:"priority,omitempty"`
-	ProjectID      json.RawMessage `json:"project_id,omitempty"`
-	RawFields      map[string]interface{} `json:"raw_fields,omitempty"`
+	ID           int                    `json:"id"`
+	Name         string                 `json:"name"`
+	TicketRef    string                 `json:"ticket_ref,omitempty"`
+	Description  string                 `json:"description,omitempty"`
+	CreateDate   string                 `json:"create_date"`
+	CloseDate    string                 `json:"close_date,omitempty"`
+	StageID      json.RawMessage        `json:"stage_id,omitempty"` // [id, name] o id
+	TeamID       json.RawMessage        `json:"team_id,omitempty"`
+	PartnerID    json.RawMessage        `json:"partner_id,omitempty"`
+	PartnerName  string                 `json:"partner_name,omitempty"`
+	PartnerEmail string                 `json:"partner_email,omitempty"`
+	UserID       json.RawMessage        `json:"user_id,omitempty"`
+	Priority     string                 `json:"priority,omitempty"`
+	ProjectID    json.RawMessage        `json:"project_id,omitempty"`
+	RawFields    map[string]interface{} `json:"raw_fields,omitempty"`
 }
 
 // TimesheetEntry representa una línea de parte de horas (account.analytic.line)
 type TimesheetEntry struct {
-	ID          int             `json:"id"`
-	Date        string          `json:"date"`
-	Name        string          `json:"name"`
-	UnitAmount  float64         `json:"unit_amount"`
-	ProjectID   json.RawMessage `json:"project_id,omitempty"`
-	TaskID      json.RawMessage `json:"task_id,omitempty"`
-	TicketID    json.RawMessage `json:"ticket_id,omitempty"` // o helpdesk_ticket_id
-	EmployeeID  json.RawMessage `json:"employee_id,omitempty"`
-	UserID      json.RawMessage `json:"user_id,omitempty"`
-	RawFields   map[string]interface{} `json:"raw_fields,omitempty"`
+	ID         int                    `json:"id"`
+	Date       string                 `json:"date"`
+	Name       string                 `json:"name"`
+	UnitAmount float64                `json:"unit_amount"`
+	ProjectID  json.RawMessage        `json:"project_id,omitempty"`
+	TaskID     json.RawMessage        `json:"task_id,omitempty"`
+	TicketID   json.RawMessage        `json:"ticket_id,omitempty"` // o helpdesk_ticket_id
+	EmployeeID json.RawMessage        `json:"employee_id,omitempty"`
+	UserID     json.RawMessage        `json:"user_id,omitempty"`
+	RawFields  map[string]interface{} `json:"raw_fields,omitempty"`
 }
 
 // Helper para extraer [ID, Nombre] de campos Many2one

@@ -407,4 +407,3 @@ func (state *AppState) handleGenerateAntigravityToken(w http.ResponseWriter, r *
 		"email":   userEmail,
 	})
 }
-

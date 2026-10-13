@@ -66,7 +66,7 @@ type MasterRegistry struct {
 
 func NewMasterRegistry(database *db.DB) *MasterRegistry {
 	return &MasterRegistry{
-		db:                     database,
+		db:                    database,
 		targetPartnersByVAT:   make(map[string]Partner),
 		targetPartnersByEmail: make(map[string]Partner),
 		targetPartnersByName:  make(map[string]Partner),

@@ -55,9 +55,9 @@ type Client struct {
 	mu         sync.RWMutex
 
 	// Caché en memoria para datos maestros poco volátiles
-	projectsCache     []Project
-	projectsCachedAt  time.Time
-	employeesCache    []Employee
+	projectsCache       []Project
+	projectsCachedAt    time.Time
+	employeesCache      []Employee
 	employeesCachedAt   time.Time
 	ticketsCache        []Ticket
 	ticketsCacheUID     int
@@ -2856,4 +2856,3 @@ func (c *Client) GetPartners(ctx context.Context, query string) ([]Partner, erro
 	}
 	return partners, nil
 }
-

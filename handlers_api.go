@@ -1643,16 +1643,16 @@ func (state *AppState) handleAPITimerHeartbeat(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		ProjectID       int     `json:"project_id"`
-		ProjectName     string  `json:"project_name"`
-		TaskID          int     `json:"task_id"`
-		TaskName        string  `json:"task_name"`
-		TimesheetID     int     `json:"timesheet_id"`
-		Description     string  `json:"description"`
-		Source          string  `json:"source"`
-		ElapsedSeconds  int     `json:"elapsed_seconds"`
-		ClientTimestamp int64   `json:"client_timestamp"`
-		UserEmail       string  `json:"user_email,omitempty"`
+		ProjectID       int    `json:"project_id"`
+		ProjectName     string `json:"project_name"`
+		TaskID          int    `json:"task_id"`
+		TaskName        string `json:"task_name"`
+		TimesheetID     int    `json:"timesheet_id"`
+		Description     string `json:"description"`
+		Source          string `json:"source"`
+		ElapsedSeconds  int    `json:"elapsed_seconds"`
+		ClientTimestamp int64  `json:"client_timestamp"`
+		UserEmail       string `json:"user_email,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1970,4 +1970,3 @@ func (state *AppState) handleAPIPartnerAvatar(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Cache-Control", "public, max-age=600")
 	w.Write(imgData)
 }
-
