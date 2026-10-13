@@ -385,6 +385,7 @@ func BuildDetailQuerySQL(fullTable, invoiceMonthClean string) string {
 FROM `+"`%s`"+`
 WHERE REPLACE(invoice.month, '-', '') = '%s'
 GROUP BY service_description, project_id, project_name, sku_description, currency
+HAVING SUM(cost) != 0
 ORDER BY service_description ASC, cost DESC`, fullTable, invoiceMonthClean)
 }
 
@@ -532,6 +533,10 @@ func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth stri
 		projName := getStringVal(r.F[2].V)
 		skuDesc := getStringVal(r.F[3].V)
 		cost := round2(parseFloat(getStringVal(r.F[4].V)))
+		if cost == 0 {
+			// Mostrar únicamente partidas con coste bruto distinto de cero (<> 0)
+			continue
+		}
 		credits := round2(parseFloat(getStringVal(r.F[5].V)))
 		curr := getStringVal(r.F[6].V)
 		if curr != "" {

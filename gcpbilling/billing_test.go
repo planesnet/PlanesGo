@@ -531,6 +531,17 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 						{V: "USD"},
 					},
 				},
+				{
+					F: []BQField{
+						{V: "Cloud Storage"},
+						{V: "planesnet-backup"},
+						{V: "PlanesNet Backup"},
+						{V: "Standard Storage US Regional"},
+						{V: "0.00"},
+						{V: "0.00"},
+						{V: "USD"},
+					},
+				},
 			},
 		}
 		json.NewEncoder(w).Encode(resp)
