@@ -145,15 +145,15 @@
             </div>
         </div>
 
-        <!-- Estado Vacío -->
+        <!-- Estado Vacío / En espera de datos -->
         <div id="empty-state" class="hidden py-16 text-center bg-white rounded-3xl border border-slate-200/80 p-8 shadow-sm">
-            <div class="p-3 bg-slate-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-slate-400 mb-3">
+            <div class="p-3 bg-emerald-50 text-emerald-600 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </svg>
             </div>
-            <h3 class="text-sm font-semibold text-slate-900">No hay facturas de meses cerrados</h3>
-            <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">La exportación en BigQuery aún no contiene meses completos anteriores al mes actual.</p>
+            <h3 class="text-sm font-semibold text-slate-900">Conexión con BigQuery establecida con éxito</h3>
+            <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto">Las credenciales y el dataset de BigQuery están correctamente sincronizados. Si acabas de activar la exportación en Google Cloud, la primera tabla se generará automáticamente en las próximas horas tras el primer volcado de facturación.</p>
         </div>
 
         <!-- Contenedor de Facturas por Año -->

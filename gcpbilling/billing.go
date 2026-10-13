@@ -433,8 +433,13 @@ func (s *BillingService) executeQuery(ctx context.Context, cfg TableConfig, toke
 		}
 
 		if rawMsg != "" {
-			if strings.Contains(strings.ToLower(rawMsg), "insufficient authentication scopes") {
+			lowerMsg := strings.ToLower(rawMsg)
+			if strings.Contains(lowerMsg, "insufficient authentication scopes") {
 				return nil, fmt.Errorf("error de BigQuery (%d): %s. Causa: la máquina virtual de Google Cloud donde ejecuta PlanesGo tiene restringidos los ámbitos de acceso (Access Scopes). Solución: configure una clave de cuenta de servicio en la variable GCP_BILLING_SA_JSON (o GOOGLE_APPLICATION_CREDENTIALS), o bien edite la VM en Google Cloud para habilitar el ámbito 'cloud-platform'", code, rawMsg)
+			}
+			if strings.Contains(lowerMsg, "does not match any table") || strings.Contains(lowerMsg, "not found: table") {
+				// El dataset existe y la conexión es válida, pero Google Cloud aún no ha volcado la tabla de facturación
+				return nil, nil
 			}
 			return nil, fmt.Errorf("error de BigQuery (%d): %s", code, rawMsg)
 		}
