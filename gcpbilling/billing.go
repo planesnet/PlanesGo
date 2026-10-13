@@ -385,7 +385,7 @@ func BuildDetailQuerySQL(fullTable, invoiceMonthClean string) string {
 FROM `+"`%s`"+`
 WHERE REPLACE(invoice.month, '-', '') = '%s'
 GROUP BY service_description, project_id, project_name, sku_description, currency
-HAVING SUM(cost) != 0
+HAVING cost != 0
 ORDER BY service_description ASC, cost DESC`, fullTable, invoiceMonthClean)
 }
 

@@ -601,3 +601,14 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 	}
 }
 
+// 10. Test: BuildDetailQuerySQL
+func TestBuildDetailQuerySQL(t *testing.T) {
+	sql := BuildDetailQuerySQL("my-project.my_dataset.my_table", "202609")
+	if !strings.Contains(sql, "HAVING cost != 0") {
+		t.Errorf("SQL debe contener 'HAVING cost != 0' para evitar error de aggregations of aggregations en BigQuery, obtenido:\n%s", sql)
+	}
+	if strings.Contains(sql, "HAVING SUM(cost)") {
+		t.Errorf("SQL NO debe contener 'HAVING SUM(cost)' porque causa error 400 en BigQuery:\n%s", sql)
+	}
+}
+
