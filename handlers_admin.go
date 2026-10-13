@@ -94,7 +94,8 @@ func (state *AppState) handleAdminInvoiceDetail(w http.ResponseWriter, r *http.R
 	}
 
 	monthParam := strings.TrimSpace(r.URL.Query().Get("month"))
-	if monthParam == "" {
+	cleanMonth := strings.ReplaceAll(monthParam, "-", "")
+	if monthParam == "" || monthParam == "undefined" || len(cleanMonth) != 6 {
 		http.Redirect(w, r, "/admin", http.StatusFound)
 		return
 	}

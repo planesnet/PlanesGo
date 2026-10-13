@@ -226,7 +226,11 @@
     </footer>
 
     <script>
-        const monthParam = "{{.Month}}";
+        const urlParams = new URLSearchParams(window.location.search);
+        let monthParam = "{{.Month}}";
+        if (!monthParam || monthParam === "undefined") {
+            monthParam = urlParams.get('month') || "";
+        }
         let detailData = null;
 
         function formatCurrency(amount, currency) {
