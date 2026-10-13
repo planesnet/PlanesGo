@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -405,3 +406,46 @@ func TestJWTTokenExchangeWithHTTPServer(t *testing.T) {
 		t.Fatalf("token en caché inconsistente: %s", token2)
 	}
 }
+
+// 7. Test: ResolveTokenProvider con ruta de archivo en GCP_BILLING_SA_JSON
+func TestResolveTokenProviderFilePath(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("error generando clave privada RSA: %v", err)
+	}
+	privKeyBytes := x509.MarshalPKCS1PrivateKey(privKey)
+	pemBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privKeyBytes,
+	})
+
+	saKey := ServiceAccountKey{
+		Type:         "service_account",
+		ProjectID:    "mi-proyecto",
+		PrivateKeyID: "clave123",
+		PrivateKey:   string(pemBytes),
+		ClientEmail:  "test-sa@mi-proyecto.iam.gserviceaccount.com",
+		ClientID:     "123456789",
+		TokenURI:     "https://oauth2.googleapis.com/token",
+	}
+
+	saBytes, err := json.Marshal(saKey)
+	if err != nil {
+		t.Fatalf("error serializando clave: %v", err)
+	}
+
+	tmpFile := t.TempDir() + "/sa_test.json"
+	if err := os.WriteFile(tmpFile, saBytes, 0600); err != nil {
+		t.Fatalf("error escribiendo archivo temporal: %v", err)
+	}
+
+	t.Setenv("GCP_BILLING_SA_JSON", tmpFile)
+	provider, err := ResolveTokenProvider(http.DefaultClient)
+	if err != nil {
+		t.Fatalf("error resolviendo provider desde ruta de archivo: %v", err)
+	}
+	if provider == nil {
+		t.Fatalf("provider no debería ser nil")
+	}
+}
+

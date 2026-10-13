@@ -350,10 +350,21 @@ func (m *MetadataTokenProvider) fetchToken(ctx context.Context) (string, time.Ti
 // 2. GOOGLE_APPLICATION_CREDENTIALS (ruta a archivo JSON)
 // 3. Servidor de metadatos de GCP
 func ResolveTokenProvider(httpClient *http.Client) (TokenProvider, error) {
-	// 1. GCP_BILLING_SA_JSON
+	// 1. GCP_BILLING_SA_JSON (acepta tanto el JSON en crudo como una ruta a un archivo de clave)
 	if saJSON := strings.TrimSpace(os.Getenv("GCP_BILLING_SA_JSON")); saJSON != "" {
+		jsonData := []byte(saJSON)
+
+		// Si parece una ruta de archivo (empieza por /, ./, ../ o termina en .json) o no empieza por '{'
+		if strings.HasPrefix(saJSON, "/") || strings.HasPrefix(saJSON, "./") || strings.HasPrefix(saJSON, "../") || strings.HasSuffix(saJSON, ".json") || !strings.HasPrefix(saJSON, "{") {
+			if fileData, err := os.ReadFile(saJSON); err == nil {
+				jsonData = fileData
+			} else if strings.HasPrefix(saJSON, "/") || strings.HasSuffix(saJSON, ".json") {
+				return nil, fmt.Errorf("la variable GCP_BILLING_SA_JSON contiene una ruta de archivo (%s) que no se pudo leer: %w. Si ejecuta dentro de un contenedor Docker, copie el contenido del JSON directamente en el valor de GCP_BILLING_SA_JSON o monte el volumen del archivo", saJSON, err)
+			}
+		}
+
 		var sa ServiceAccountKey
-		if err := json.Unmarshal([]byte(saJSON), &sa); err != nil {
+		if err := json.Unmarshal(jsonData, &sa); err != nil {
 			return nil, fmt.Errorf("la variable GCP_BILLING_SA_JSON contiene un JSON inválido: %w", err)
 		}
 		provider, err := NewServiceAccountTokenProvider(&sa, httpClient)
