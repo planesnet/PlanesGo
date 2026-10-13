@@ -31,7 +31,7 @@ type TableConfig struct {
 }
 
 // DefaultBillingExportTable es la tabla o dataset de exportación por defecto
-const DefaultBillingExportTable = "autopyme.gcp_billing_export"
+const DefaultBillingExportTable = "planes-dev.gcp_billing_export"
 
 // ResolveTableConfig analiza y resuelve la configuración de tabla y proyecto desde el entorno
 func ResolveTableConfig() (TableConfig, error) {

@@ -47,7 +47,7 @@ ENV PORT=8080
 ENV TZ=Europe/Madrid
 ENV ODOO_URL=https://planesnet.autopyme.com
 ENV ODOO_DB=ap113
-ENV GCP_BILLING_EXPORT_TABLE=autopyme.gcp_billing_export
+ENV GCP_BILLING_EXPORT_TABLE=planes-dev.gcp_billing_export
 
 # Comando de inicio
 ENTRYPOINT ["/app/planesgo"]
