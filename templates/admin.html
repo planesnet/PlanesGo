@@ -156,8 +156,28 @@
             <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto">Las credenciales y el dataset de BigQuery están correctamente sincronizados. Si acabas de activar la exportación en Google Cloud, la primera tabla se generará automáticamente en las próximas horas tras el primer volcado de facturación.</p>
         </div>
 
-        <!-- Contenedor de Facturas por Año -->
-        <div id="invoices-container" class="space-y-10"></div>
+        <!-- Tabla Principal Simplificada de Costes por Mes -->
+        <div id="table-card" class="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden hidden">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-100">
+                    <thead class="bg-slate-50/90 text-slate-500 uppercase tracking-wider text-[11px]">
+                        <tr>
+                            <th scope="col" class="px-6 py-3.5 text-left font-semibold">Mes / Factura</th>
+                            <th scope="col" class="px-4 py-3.5 text-left font-semibold">Emisión</th>
+                            <th scope="col" class="px-4 py-3.5 text-left font-semibold">Cuenta</th>
+                            <th scope="col" class="px-4 py-3.5 text-center font-semibold">Proyectos</th>
+                            <th scope="col" class="px-4 py-3.5 text-right font-semibold">Coste Bruto</th>
+                            <th scope="col" class="px-4 py-3.5 text-right font-semibold">Créditos</th>
+                            <th scope="col" class="px-6 py-3.5 text-right font-semibold">Total Neto</th>
+                            <th scope="col" class="px-6 py-3.5 text-center font-semibold">Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoices-tbody" class="divide-y divide-slate-100 bg-white">
+                        <!-- Filas inyectadas dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
 
     </main>
 
@@ -171,14 +191,16 @@
 
     <!-- Lógica JavaScript del Cliente -->
     <script>
+        const detailsDataStore = {};
+
         function formatCurrency(amount, currency) {
             try {
                 return new Intl.NumberFormat('es-ES', {
                     style: 'currency',
-                    currency: currency || 'EUR'
-                }).format(amount);
+                    currency: currency || 'USD'
+                }).format(amount || 0);
             } catch (e) {
-                return (amount || 0).toFixed(2) + ' ' + (currency || 'EUR');
+                return (amount || 0).toFixed(2) + ' ' + (currency || 'USD');
             }
         }
 
@@ -198,7 +220,8 @@
             const errorBox = document.getElementById('error-box');
             const errorMessage = document.getElementById('error-message');
             const emptyState = document.getElementById('empty-state');
-            const container = document.getElementById('invoices-container');
+            const tableCard = document.getElementById('table-card');
+            const tbody = document.getElementById('invoices-tbody');
             const metaBanner = document.getElementById('meta-banner');
             const metaSource = document.getElementById('meta-source');
             const metaDate = document.getElementById('meta-date');
@@ -211,10 +234,13 @@
             loadingState.classList.remove('hidden');
             errorBox.classList.add('hidden');
             emptyState.classList.add('hidden');
-            if (refresh) container.innerHTML = '';
+            if (refresh) {
+                tbody.innerHTML = '';
+                tableCard.classList.add('hidden');
+            }
 
             try {
-                const url = '/api/admin/gcp-invoices' + (refresh ? '?refresh=1' : '');
+                const url = '/api/admin/gcp-invoices?_t=' + Date.now() + (refresh ? '&refresh=1' : '');
                 const response = await fetch(url);
                 const data = await response.json();
 
@@ -224,6 +250,7 @@
                     errorMessage.textContent = data.error || 'Ocurrió un error inesperado al procesar la solicitud.';
                     errorBox.classList.remove('hidden');
                     metaBanner.classList.add('hidden');
+                    tableCard.classList.add('hidden');
                     return;
                 }
 
@@ -237,146 +264,326 @@
                 }
 
                 if (!data.years || data.years.length === 0) {
+                    tableCard.classList.add('hidden');
                     emptyState.classList.remove('hidden');
                     return;
                 }
 
-                renderInvoices(data.years);
+                renderInvoicesTable(data.years);
+                tableCard.classList.remove('hidden');
 
             } catch (err) {
                 loadingState.classList.add('hidden');
                 errorMessage.textContent = 'Error de red o comunicación: ' + err.message;
                 errorBox.classList.remove('hidden');
                 metaBanner.classList.add('hidden');
+                tableCard.classList.add('hidden');
             } finally {
                 btnRefresh.disabled = false;
                 iconRefresh.classList.remove('animate-spin');
             }
         }
 
-        function renderInvoices(years) {
-            const container = document.getElementById('invoices-container');
-            container.innerHTML = '';
+        function renderInvoicesTable(years) {
+            const tbody = document.getElementById('invoices-tbody');
+            tbody.innerHTML = '';
 
             years.forEach(yearData => {
-                const yearSection = document.createElement('section');
-                yearSection.className = 'space-y-5';
+                yearData.months.forEach(month => {
+                    month.invoices.forEach(inv => {
+                        const mId = month.invoice_month.replace('-', '');
+                        const billingLink = `https://console.cloud.google.com/billing/${encodeURIComponent(inv.billing_account_id)}`;
+                        
+                        const tr = document.createElement('tr');
+                        tr.id = `row-${mId}`;
+                        tr.className = 'hover:bg-slate-50/80 transition-colors group cursor-pointer';
+                        tr.onclick = (e) => {
+                            if (e.target.closest('a') || e.target.closest('button')) return;
+                            toggleMonthDetail(mId, tr.querySelector('.btn-toggle-detail'));
+                        };
 
-                // Cabecera del Año
-                const yearHeader = document.createElement('div');
-                yearHeader.className = 'flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200/90 gap-2';
+                        tr.innerHTML = `
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="flex items-center space-x-2">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                                    <span class="text-sm font-bold text-slate-900">${month.label || month.invoice_month}</span>
+                                    <span class="text-xs text-slate-400 font-mono">(${month.invoice_month})</span>
+                                </div>
+                            </td>
+                            <td class="px-4 py-4 whitespace-nowrap text-xs text-slate-600">
+                                ${formatDateES(month.issue_date)}
+                            </td>
+                            <td class="px-4 py-4 whitespace-nowrap text-xs font-mono font-medium text-slate-700">
+                                <a href="${billingLink}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-1 text-sky-600 hover:text-sky-800 hover:underline" title="Ver cuenta en Google Cloud Console">
+                                    <span>${inv.billing_account_id}</span>
+                                    <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                </a>
+                            </td>
+                            <td class="px-4 py-4 whitespace-nowrap text-xs text-center">
+                                <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                    ${inv.projects} ${inv.projects === 1 ? 'proyecto' : 'proyectos'}
+                                </span>
+                            </td>
+                            <td class="px-4 py-4 whitespace-nowrap text-xs text-right font-mono text-slate-700">
+                                ${formatCurrency(inv.cost, inv.currency)}
+                            </td>
+                            <td class="px-4 py-4 whitespace-nowrap text-xs text-right font-mono ${inv.credits < 0 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}">
+                                ${inv.credits !== 0 ? formatCurrency(inv.credits, inv.currency) : '—'}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right">
+                                <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold font-mono bg-sky-50 text-sky-700 border border-sky-100">
+                                    ${formatCurrency(inv.total, inv.currency)}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-center">
+                                <button type="button" class="btn-toggle-detail inline-flex items-center space-x-1.5 px-3 py-1.5 bg-slate-100 hover:bg-sky-50 text-slate-700 hover:text-sky-700 rounded-xl text-xs font-semibold border border-slate-200/90 transition shadow-xs cursor-pointer" onclick="toggleMonthDetail('${mId}', this)">
+                                    <span class="btn-text">Ver Detalle</span>
+                                    <svg class="w-3.5 h-3.5 transition-transform duration-200 icon-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
 
-                let totalsHtml = '';
-                if (yearData.total_by_currency) {
-                    totalsHtml = Object.entries(yearData.total_by_currency).map(([curr, total]) => `
-                        <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-bold font-mono bg-sky-50 text-sky-700 border border-sky-100 shadow-sm">
-                            Total ${yearData.year}: ${formatCurrency(total, curr)}
-                        </span>
-                    `).join(' ');
+                        // Fila contenedora del desglose
+                        const detailTr = document.createElement('tr');
+                        detailTr.id = `detail-row-${mId}`;
+                        detailTr.className = 'hidden bg-slate-50/70 border-y border-slate-200/80';
+                        detailTr.innerHTML = `
+                            <td colspan="8" class="px-6 py-5">
+                                <div id="detail-content-${mId}" class="space-y-4">
+                                    <div class="py-8 text-center text-slate-500 text-xs">
+                                        <svg class="animate-spin w-6 h-6 text-sky-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                        </svg>
+                                        <span>Cargando desglose de costes por organización, proyecto, servicio, modelo y SKU...</span>
+                                    </div>
+                                </div>
+                            </td>
+                        `;
+                        tbody.appendChild(detailTr);
+                    });
+                });
+            });
+        }
+
+        async function toggleMonthDetail(monthRaw, btn) {
+            const detailRow = document.getElementById(`detail-row-${monthRaw}`);
+            if (!detailRow) return;
+
+            const isCurrentlyHidden = detailRow.classList.contains('hidden');
+            const iconChevron = btn.querySelector('.icon-chevron');
+            const btnText = btn.querySelector('.btn-text');
+
+            if (!isCurrentlyHidden) {
+                detailRow.classList.add('hidden');
+                if (iconChevron) iconChevron.classList.remove('rotate-180');
+                if (btnText) btnText.textContent = 'Ver Detalle';
+                return;
+            }
+
+            // Mostrar fila y rotar flecha
+            detailRow.classList.remove('hidden');
+            if (iconChevron) iconChevron.classList.add('rotate-180');
+            if (btnText) btnText.textContent = 'Ocultar';
+
+            // Si ya cargamos los datos, no volvemos a consultar a BigQuery
+            if (detailsDataStore[monthRaw]) {
+                return;
+            }
+
+            const contentDiv = document.getElementById(`detail-content-${monthRaw}`);
+            try {
+                const response = await fetch(`/api/admin/gcp-invoices/detail?month=${monthRaw}&_t=${Date.now()}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    contentDiv.innerHTML = `
+                        <div class="p-4 rounded-xl bg-red-50 text-red-700 text-xs border border-red-200 font-medium">
+                            Error al cargar desglose: ${data.error || 'Desconocido'}
+                        </div>
+                    `;
+                    return;
                 }
 
-                yearHeader.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <span class="w-3 h-3 rounded-full bg-sky-600"></span>
-                        <h2 class="text-xl font-bold text-slate-900 tracking-tight">Año ${yearData.year}</h2>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        ${totalsHtml}
+                detailsDataStore[monthRaw] = data;
+                renderDetailView(monthRaw, data);
+
+            } catch (err) {
+                contentDiv.innerHTML = `
+                    <div class="p-4 rounded-xl bg-red-50 text-red-700 text-xs border border-red-200 font-medium">
+                        Error de comunicación: ${err.message}
                     </div>
                 `;
-                yearSection.appendChild(yearHeader);
+            }
+        }
 
-                // Meses dentro del año
-                const monthsContainer = document.createElement('div');
-                monthsContainer.className = 'space-y-4';
+        function renderDetailView(monthRaw, data) {
+            const contentDiv = document.getElementById(`detail-content-${monthRaw}`);
+            const items = data.items || [];
 
-                yearData.months.forEach(month => {
-                    const monthCard = document.createElement('div');
-                    monthCard.className = 'bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden transition hover:border-slate-300';
+            // Servicios únicos para el filtro
+            const services = Array.from(new Set(items.map(it => it.service_description).filter(Boolean))).sort();
 
-                    // Cabecera del Mes
-                    const monthHeader = document.createElement('div');
-                    monthHeader.className = 'px-6 py-4 bg-slate-50/70 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2';
-                    monthHeader.innerHTML = `
-                        <div class="flex items-center space-x-3">
-                            <span class="text-sm font-bold text-slate-800">${month.label || month.invoice_month}</span>
-                            <span class="text-xs text-slate-400 font-mono">(${month.invoice_month})</span>
+            let servicesOptions = '<option value="">Todos los servicios</option>';
+            services.forEach(s => {
+                servicesOptions += `<option value="${s}">${s}</option>`;
+            });
+
+            contentDiv.innerHTML = `
+                <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-4">
+                    <!-- Barra de herramientas del detalle: Filtros y Resumen -->
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2 flex-1">
+                            <!-- Búsqueda en vivo -->
+                            <div class="relative flex-1 min-w-[220px] max-w-md">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                </span>
+                                <input type="text" id="detail-search-${monthRaw}" oninput="filterDetailRows('${monthRaw}')" placeholder="Buscar por proyecto, servicio, SKU, modelo..." class="w-full pl-9 pr-3 py-1.5 bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition">
+                            </div>
+
+                            <!-- Selector de Servicio -->
+                            <select id="detail-service-${monthRaw}" onchange="filterDetailRows('${monthRaw}')" class="px-3 py-1.5 bg-slate-50 hover:bg-white border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                ${servicesOptions}
+                            </select>
                         </div>
-                        <div class="flex items-center space-x-2 text-xs text-slate-500">
-                            <span>Emisión (estimada):</span>
-                            <span class="font-semibold text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">${formatDateES(month.issue_date)}</span>
+
+                        <!-- Resumen del mes -->
+                        <div class="flex items-center space-x-2 text-xs">
+                            <span class="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg font-medium">Líneas: <strong id="detail-count-${monthRaw}">${items.length}</strong></span>
+                            <span class="px-2.5 py-1 bg-sky-50 text-sky-800 border border-sky-100 rounded-lg font-bold font-mono">Neto: ${formatCurrency(data.total_net, data.currency)}</span>
                         </div>
-                    `;
-                    monthCard.appendChild(monthHeader);
+                    </div>
 
-                    // Tabla de Facturas del mes (Estilo DESIGN.md §4.4)
-                    const tableWrapper = document.createElement('div');
-                    tableWrapper.className = 'overflow-x-auto';
-
-                    let rowsHtml = '';
-                    month.invoices.forEach(inv => {
-                        const billingLink = `https://console.cloud.google.com/billing/${encodeURIComponent(inv.billing_account_id)}`;
-                        rowsHtml += `
-                            <tr class="hover:bg-slate-50/80 transition-colors">
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs font-mono font-medium text-slate-900">
-                                    <a href="${billingLink}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-1.5 text-sky-600 hover:text-sky-800 hover:underline group" title="Ver cuenta en Google Cloud Console">
-                                        <span>${inv.billing_account_id}</span>
-                                        <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                        </svg>
-                                    </a>
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs text-slate-600">
-                                    ${formatDateES(month.issue_date)}
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs text-center">
-                                    <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700">
-                                        ${inv.projects} ${inv.projects === 1 ? 'proyecto' : 'proyectos'}
-                                    </span>
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs text-right font-mono text-slate-700">
-                                    ${formatCurrency(inv.cost, inv.currency)}
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs text-right font-mono ${inv.credits < 0 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}">
-                                    ${inv.credits !== 0 ? formatCurrency(inv.credits, inv.currency) : '—'}
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-xs text-right font-mono text-slate-500">
-                                    ${inv.tax !== 0 ? formatCurrency(inv.tax, inv.currency) : '—'}
-                                </td>
-                                <td class="px-6 py-3.5 whitespace-nowrap text-right">
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-sky-50 text-sky-700 border border-sky-100">
-                                        ${formatCurrency(inv.total, inv.currency)}
-                                    </span>
-                                </td>
-                            </tr>
-                        `;
-                    });
-
-                    tableWrapper.innerHTML = `
-                        <table class="min-w-full divide-y divide-slate-100">
-                            <thead class="bg-slate-50/90 text-slate-500 uppercase tracking-wider text-[11px]">
+                    <!-- Tabla de Detalle -->
+                    <div class="overflow-x-auto max-h-[460px] overflow-y-auto rounded-xl border border-slate-200">
+                        <table class="min-w-full divide-y divide-slate-100 text-xs">
+                            <thead class="bg-slate-50 sticky top-0 z-10 text-slate-500 uppercase tracking-wider text-[10px]">
                                 <tr>
-                                    <th scope="col" class="px-6 py-3 text-left font-semibold">Cuenta de Facturación</th>
-                                    <th scope="col" class="px-6 py-3 text-left font-semibold">Emisión (estimada)</th>
-                                    <th scope="col" class="px-6 py-3 text-center font-semibold">Proyectos</th>
-                                    <th scope="col" class="px-6 py-3 text-right font-semibold">Coste</th>
-                                    <th scope="col" class="px-6 py-3 text-right font-semibold">Créditos</th>
-                                    <th scope="col" class="px-6 py-3 text-right font-semibold">Impuestos</th>
-                                    <th scope="col" class="px-6 py-3 text-right font-semibold">Total Factura</th>
+                                    <th scope="col" class="px-4 py-2.5 text-left font-semibold">Organización / Proyecto</th>
+                                    <th scope="col" class="px-3 py-2.5 text-left font-semibold">Servicio</th>
+                                    <th scope="col" class="px-3 py-2.5 text-left font-semibold">Modelo / Usuario</th>
+                                    <th scope="col" class="px-4 py-2.5 text-left font-semibold">SKU</th>
+                                    <th scope="col" class="px-3 py-2.5 text-right font-semibold">Coste Bruto</th>
+                                    <th scope="col" class="px-3 py-2.5 text-right font-semibold">Créditos</th>
+                                    <th scope="col" class="px-4 py-2.5 text-right font-semibold">Coste Neto</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-slate-100 bg-white">
-                                ${rowsHtml}
+                            <tbody id="detail-tbody-${monthRaw}" class="divide-y divide-slate-100 bg-white">
+                                <!-- Líneas inyectadas por renderDetailRows -->
                             </tbody>
                         </table>
-                    `;
-                    monthCard.appendChild(tableWrapper);
-                    monthsContainer.appendChild(monthCard);
-                });
+                    </div>
+                </div>
+            `;
 
-                yearSection.appendChild(monthsContainer);
-                container.appendChild(yearSection);
+            renderDetailRows(monthRaw, items);
+        }
+
+        function renderDetailRows(monthRaw, items) {
+            const tbody = document.getElementById(`detail-tbody-${monthRaw}`);
+            const countEl = document.getElementById(`detail-count-${monthRaw}`);
+            if (countEl) countEl.textContent = items.length;
+
+            if (items.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-4 py-8 text-center text-slate-400">
+                            No se encontraron partidas para los filtros seleccionados.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            items.forEach(it => {
+                const orgBadgeClass = it.organization.includes('maderas')
+                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-sky-50 text-sky-800 border-sky-100';
+
+                let modelBadge = '<span class="text-slate-300 font-mono">—</span>';
+                if (it.model) {
+                    modelBadge = `
+                        <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
+                            <span class="text-purple-500 font-bold">✦</span>
+                            <span>${it.model}</span>
+                        </span>
+                    `;
+                }
+
+                html += `
+                    <tr class="hover:bg-slate-50/70 transition-colors">
+                        <td class="px-4 py-2.5 whitespace-nowrap">
+                            <div class="flex flex-col">
+                                <span class="inline-flex items-center self-start px-2 py-0.5 rounded-md text-[10px] font-semibold border ${orgBadgeClass} mb-1">
+                                    ${it.organization}
+                                </span>
+                                <div class="flex items-center space-x-1.5">
+                                    <span class="font-bold text-slate-800">${it.project_name || it.project_id}</span>
+                                    <span class="text-[10px] font-mono text-slate-400">(${it.project_id})</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                ${it.service_description}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap">
+                            ${modelBadge}
+                        </td>
+                        <td class="px-4 py-2.5 max-w-xs text-slate-700 break-words leading-tight">
+                            ${it.sku_description}
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-right font-mono text-slate-600">
+                            ${formatCurrency(it.cost, it.currency)}
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-right font-mono ${it.credits < 0 ? 'text-emerald-600 font-semibold' : 'text-slate-300'}">
+                            ${it.credits !== 0 ? formatCurrency(it.credits, it.currency) : '—'}
+                        </td>
+                        <td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold text-slate-900">
+                            ${formatCurrency(it.net_cost, it.currency)}
+                        </td>
+                    </tr>
+                `;
             });
+
+            tbody.innerHTML = html;
+        }
+
+        function filterDetailRows(monthRaw) {
+            const data = detailsDataStore[monthRaw];
+            if (!data || !data.items) return;
+
+            const searchVal = (document.getElementById(`detail-search-${monthRaw}`)?.value || '').toLowerCase().trim();
+            const serviceVal = document.getElementById(`detail-service-${monthRaw}`)?.value || '';
+
+            const filtered = data.items.filter(it => {
+                if (serviceVal && it.service_description !== serviceVal) {
+                    return false;
+                }
+                if (searchVal) {
+                    const matchOrg = it.organization.toLowerCase().includes(searchVal);
+                    const matchProj = (it.project_name || '').toLowerCase().includes(searchVal) || it.project_id.toLowerCase().includes(searchVal);
+                    const matchServ = (it.service_description || '').toLowerCase().includes(searchVal);
+                    const matchSku = (it.sku_description || '').toLowerCase().includes(searchVal);
+                    const matchModel = (it.model || '').toLowerCase().includes(searchVal);
+                    if (!matchOrg && !matchProj && !matchServ && !matchSku && !matchModel) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            renderDetailRows(monthRaw, filtered);
         }
 
         // Carga inicial al montar la página

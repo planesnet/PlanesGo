@@ -449,3 +449,139 @@ func TestResolveTokenProviderFilePath(t *testing.T) {
 	}
 }
 
+// 8. Test: ExtractModel y ResolveOrganization
+func TestExtractModelAndResolveOrganization(t *testing.T) {
+	testsModel := []struct {
+		sku      string
+		expected string
+	}{
+		{"Generative AI text prompts - Gemini 3.8 Flash GA", "Gemini 3.8 Flash"},
+		{"Gemini 2.5 Pro Multimodal Input Token", "Gemini 2.5 Pro"},
+		{"Gemini 2.0 Flash Thought Token", "Gemini 2.0 Flash"},
+		{"Gemini 1.5 Flash input tokens", "Gemini 1.5 Flash"},
+		{"gemini-embedding-001 prompt tokens", "gemini-embedding-001"},
+		{"Claude 3.5 Sonnet prompt", "Claude 3.5 Sonnet"},
+		{"Duet AI Developer Subscription", "Duet AI"},
+		{"N2 Instance Core running in Americas", ""},
+		{"Standard Storage US Regional", ""},
+	}
+
+	for _, tt := range testsModel {
+		got := ExtractModel(tt.sku)
+		if got != tt.expected {
+			t.Errorf("ExtractModel(%q) = %q; want %q", tt.sku, got, tt.expected)
+		}
+	}
+
+	testsOrg := []struct {
+		projectID   string
+		projectName string
+		expected    string
+	}{
+		{"maderasplanes-odoo-erp", "maderasplanes-odoo", "maderasplanes.com"},
+		{"maderasplanes", "Maderas Planes", "maderasplanes.com"},
+		{"planes-dev", "planes-dev", "planesnet.com"},
+		{"autopyme", "AutoPyme Production", "planesnet.com"},
+		{"mazana-health", "Mazana Health", "planesnet.com"},
+	}
+
+	for _, tt := range testsOrg {
+		got := ResolveOrganization(tt.projectID, tt.projectName)
+		if got != tt.expected {
+			t.Errorf("ResolveOrganization(%q, %q) = %q; want %q", tt.projectID, tt.projectName, got, tt.expected)
+		}
+	}
+}
+
+type dummyTokenProvider struct {
+	token string
+}
+
+func (d *dummyTokenProvider) GetToken(ctx context.Context) (string, error) {
+	return d.token, nil
+}
+
+// 9. Test: GetInvoiceDetail con mock de BigQuery
+func TestGetInvoiceDetailMock(t *testing.T) {
+	mockBQ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := BQQueryResponse{
+			JobComplete: true,
+			TotalRows:   "2",
+			Rows: []BQRow{
+				{
+					F: []BQField{
+						{V: "planes-dev"},
+						{V: "Planes Dev"},
+						{V: "Vertex AI"},
+						{V: "Generative AI - Gemini 3.8 Flash GA input"},
+						{V: "120.50"},
+						{V: "-20.50"},
+						{V: "USD"},
+					},
+				},
+				{
+					F: []BQField{
+						{V: "maderasplanes-odoo-erp"},
+						{V: "Maderas Odoo"},
+						{V: "Compute Engine"},
+						{V: "N2 Instance Core"},
+						{V: "80.00"},
+						{V: "0.00"},
+						{V: "USD"},
+					},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer mockBQ.Close()
+
+	svc := NewBillingServiceWithClient(&dummyTokenProvider{token: "mock-token"}, mockBQ.Client(), mockBQ.URL)
+	detail, err := svc.GetInvoiceDetail(context.Background(), "2026-09", false)
+	if err != nil {
+		t.Fatalf("error inesperado en GetInvoiceDetail: %v", err)
+	}
+
+	if !detail.Success {
+		t.Errorf("se esperaba success true")
+	}
+	if len(detail.Items) != 2 {
+		t.Fatalf("se esperaban 2 items, obtenidos %d", len(detail.Items))
+	}
+
+	// Comprobar primer item (Vertex AI con Gemini)
+	item0 := detail.Items[0]
+	if item0.Organization != "planesnet.com" {
+		t.Errorf("organizacion esperada planesnet.com, obtenida %s", item0.Organization)
+	}
+	if item0.Model != "Gemini 3.8 Flash" {
+		t.Errorf("modelo esperado 'Gemini 3.8 Flash', obtenido %s", item0.Model)
+	}
+	if item0.NetCost != 100.00 {
+		t.Errorf("net cost esperado 100.00, obtenido %f", item0.NetCost)
+	}
+
+	// Comprobar segundo item (Maderas Planes)
+	item1 := detail.Items[1]
+	if item1.Organization != "maderasplanes.com" {
+		t.Errorf("organizacion esperada maderasplanes.com, obtenida %s", item1.Organization)
+	}
+	if item1.Model != "" {
+		t.Errorf("modelo esperado vacio, obtenido %s", item1.Model)
+	}
+	if item1.NetCost != 80.00 {
+		t.Errorf("net cost esperado 80.00, obtenido %f", item1.NetCost)
+	}
+
+	if detail.TotalCost != 200.50 {
+		t.Errorf("total cost esperado 200.50, obtenido %f", detail.TotalCost)
+	}
+	if detail.TotalCredits != -20.50 {
+		t.Errorf("total credits esperado -20.50, obtenido %f", detail.TotalCredits)
+	}
+	if detail.TotalNet != 180.00 {
+		t.Errorf("total net esperado 180.00, obtenido %f", detail.TotalNet)
+	}
+}
+

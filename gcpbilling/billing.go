@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -275,6 +276,117 @@ GROUP BY billing_account_id, invoice_month, currency
 ORDER BY invoice_month DESC, billing_account_id`, fullTable)
 }
 
+// InvoiceDetailItem representa una línea de desglose de facturación
+type InvoiceDetailItem struct {
+	Organization       string  `json:"organization"`
+	ProjectID          string  `json:"project_id"`
+	ProjectName        string  `json:"project_name"`
+	ServiceDescription string  `json:"service_description"`
+	SKUDescription     string  `json:"sku_description"`
+	Model              string  `json:"model,omitempty"`
+	Cost               float64 `json:"cost"`
+	Credits            float64 `json:"credits"`
+	NetCost            float64 `json:"net_cost"`
+	Currency           string  `json:"currency"`
+}
+
+// InvoiceDetailResponse representa el desglose de costes de un mes
+type InvoiceDetailResponse struct {
+	Success      bool                `json:"success"`
+	InvoiceMonth string              `json:"invoice_month"`
+	Label        string              `json:"label"`
+	Currency     string              `json:"currency"`
+	TotalCost    float64             `json:"total_cost"`
+	TotalCredits float64             `json:"total_credits"`
+	TotalNet     float64             `json:"total_net"`
+	Items        []InvoiceDetailItem `json:"items"`
+}
+
+type detailCacheEntry struct {
+	data     *InvoiceDetailResponse
+	cachedAt time.Time
+}
+
+var (
+	geminiRegex    = regexp.MustCompile(`(?i)(gemini\s*[\d\.]+(?:\s*(?:flash|pro|ultra|lite|preview|ga))*)`)
+	geminiEmbRegex = regexp.MustCompile(`(?i)(gemini-embedding-[^\s]+)`)
+	geminiGenRegex = regexp.MustCompile(`(?i)(gemini\s*[\d\.\/]+(?:\s*[a-zA-Z]+)?)`)
+	claudeRegex    = regexp.MustCompile(`(?i)(claude\s*[\d\.]+(?:\s*[a-zA-Z]+)?)`)
+)
+
+// ExtractModel extrae limpiamente el modelo de IA a partir de la descripción del SKU
+func ExtractModel(sku string) string {
+	if sku == "" {
+		return ""
+	}
+	if m := geminiRegex.FindStringSubmatch(sku); len(m) > 1 {
+		res := strings.TrimSpace(m[1])
+		res = strings.TrimSuffix(res, " GA")
+		res = strings.TrimSuffix(res, " preview")
+		parts := strings.Fields(res)
+		for i, p := range parts {
+			low := strings.ToLower(p)
+			if low == "gemini" || low == "flash" || low == "pro" || low == "ultra" || low == "lite" {
+				parts[i] = strings.ToUpper(low[:1]) + low[1:]
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	if m := geminiEmbRegex.FindStringSubmatch(sku); len(m) > 1 {
+		return strings.ToLower(m[1])
+	}
+	if m := geminiGenRegex.FindStringSubmatch(sku); len(m) > 1 {
+		parts := strings.Fields(m[1])
+		for i, p := range parts {
+			low := strings.ToLower(p)
+			if low == "gemini" || low == "flash" || low == "pro" || low == "ultra" || low == "lite" {
+				parts[i] = strings.ToUpper(low[:1]) + low[1:]
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	if m := claudeRegex.FindStringSubmatch(sku); len(m) > 1 {
+		parts := strings.Fields(m[1])
+		for i, p := range parts {
+			low := strings.ToLower(p)
+			if low == "claude" || low == "sonnet" || low == "haiku" || low == "opus" {
+				parts[i] = strings.ToUpper(low[:1]) + low[1:]
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	if strings.Contains(strings.ToLower(sku), "duet ai") {
+		return "Duet AI"
+	}
+	return ""
+}
+
+// ResolveOrganization mapea un proyecto a su organización corporativa correspondiente
+func ResolveOrganization(projectID, projectName string) string {
+	pid := strings.ToLower(projectID)
+	pname := strings.ToLower(projectName)
+	if strings.Contains(pid, "maderasplanes") || strings.Contains(pname, "maderasplanes") {
+		return "maderasplanes.com"
+	}
+	return "planesnet.com"
+}
+
+// BuildDetailQuerySQL genera la consulta SQL para extraer el detalle desglosado de un mes
+func BuildDetailQuerySQL(fullTable, invoiceMonthClean string) string {
+	return fmt.Sprintf(`SELECT
+  project.id AS project_id,
+  IFNULL(project.name, '') AS project_name,
+  service.description AS service_description,
+  sku.description AS sku_description,
+  SUM(cost) AS cost,
+  SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS credits,
+  currency
+FROM `+"`%s`"+`
+WHERE REPLACE(invoice.month, '-', '') = '%s'
+GROUP BY project_id, project_name, service_description, sku_description, currency
+ORDER BY cost DESC`, fullTable, invoiceMonthClean)
+}
+
 // BillingService administra las consultas a BigQuery y la caché en memoria de 15 minutos
 type BillingService struct {
 	mu            sync.RWMutex
@@ -283,12 +395,14 @@ type BillingService struct {
 	baseURL       string // Permite override en tests de integración
 	cachedData    *InvoicesResponse
 	cachedAt      time.Time
+	detailCache   map[string]*detailCacheEntry
 }
 
 func NewBillingService() *BillingService {
 	return &BillingService{
-		httpClient: &http.Client{Timeout: 60 * time.Second},
-		baseURL:    "https://bigquery.googleapis.com/bigquery/v2",
+		httpClient:  &http.Client{Timeout: 60 * time.Second},
+		baseURL:     "https://bigquery.googleapis.com/bigquery/v2",
+		detailCache: make(map[string]*detailCacheEntry),
 	}
 }
 
@@ -303,6 +417,7 @@ func NewBillingServiceWithClient(tokenProvider TokenProvider, httpClient *http.C
 		tokenProvider: tokenProvider,
 		httpClient:    httpClient,
 		baseURL:       baseURL,
+		detailCache:   make(map[string]*detailCacheEntry),
 	}
 }
 
@@ -331,19 +446,9 @@ func (s *BillingService) GetInvoices(ctx context.Context, forceRefresh bool) (*I
 		return nil, err
 	}
 
-	tokenProv := s.tokenProvider
-	if tokenProv == nil {
-		prov, err := ResolveTokenProvider(s.httpClient)
-		if err != nil {
-			return nil, err
-		}
-		s.tokenProvider = prov
-		tokenProv = prov
-	}
-
-	token, err := tokenProv.GetToken(ctx)
+	token, err := s.getToken(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error obteniendo token de acceso para BigQuery: %w", err)
+		return nil, err
 	}
 
 	rows, err := s.executeQuery(ctx, tblConfig, token)
@@ -368,15 +473,148 @@ func (s *BillingService) GetInvoices(ctx context.Context, forceRefresh bool) (*I
 		Years:       years,
 	}
 
-	s.cachedData = resp
-	s.cachedAt = time.Now()
+	if len(years) > 0 {
+		s.cachedData = resp
+		s.cachedAt = time.Now()
+	} else {
+		s.cachedData = nil
+	}
 
 	return resp, nil
 }
 
-func (s *BillingService) executeQuery(ctx context.Context, cfg TableConfig, token string) ([]BQRow, error) {
-	querySQL := BuildQuerySQL(cfg.FullTable)
+// GetInvoiceDetail obtiene el desglose detallado de costes por organización, proyecto, servicio, SKU y modelo para un mes
+func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth string, forceRefresh bool) (*InvoiceDetailResponse, error) {
+	monthClean := strings.ReplaceAll(strings.TrimSpace(invoiceMonth), "-", "")
+	if len(monthClean) != 6 {
+		return nil, fmt.Errorf("formato de mes inválido (%s): se espera YYYYMM o YYYY-MM", invoiceMonth)
+	}
 
+	if !forceRefresh {
+		s.mu.RLock()
+		if s.detailCache != nil {
+			if entry, ok := s.detailCache[monthClean]; ok && entry != nil && time.Since(entry.cachedAt) < 15*time.Minute {
+				data := entry.data
+				s.mu.RUnlock()
+				return data, nil
+			}
+		}
+		s.mu.RUnlock()
+	}
+
+	tblConfig, err := ResolveTableConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := s.getToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	detailSQL := BuildDetailQuerySQL(tblConfig.FullTable, monthClean)
+	rows, err := s.executeQuerySQL(ctx, tblConfig, token, detailSQL)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []InvoiceDetailItem
+	var totalCost, totalCredits float64
+	currency := "USD"
+
+	for _, r := range rows {
+		if len(r.F) < 7 {
+			continue
+		}
+		projID := getStringVal(r.F[0].V)
+		projName := getStringVal(r.F[1].V)
+		servDesc := getStringVal(r.F[2].V)
+		skuDesc := getStringVal(r.F[3].V)
+		cost := round2(parseFloat(getStringVal(r.F[4].V)))
+		credits := round2(parseFloat(getStringVal(r.F[5].V)))
+		curr := getStringVal(r.F[6].V)
+		if curr != "" {
+			currency = curr
+		}
+		netCost := round2(cost + credits)
+
+		org := ResolveOrganization(projID, projName)
+		model := ExtractModel(skuDesc)
+
+		items = append(items, InvoiceDetailItem{
+			Organization:       org,
+			ProjectID:          projID,
+			ProjectName:        projName,
+			ServiceDescription: servDesc,
+			SKUDescription:     skuDesc,
+			Model:              model,
+			Cost:               cost,
+			Credits:            credits,
+			NetCost:            netCost,
+			Currency:           currency,
+		})
+
+		totalCost = round2(totalCost + cost)
+		totalCredits = round2(totalCredits + credits)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].NetCost > items[j].NetCost
+	})
+
+	_, label, _, _, _ := EstimateIssueDate(monthClean)
+
+	resp := &InvoiceDetailResponse{
+		Success:      true,
+		InvoiceMonth: monthClean,
+		Label:        label,
+		Currency:     currency,
+		TotalCost:    totalCost,
+		TotalCredits: totalCredits,
+		TotalNet:     round2(totalCost + totalCredits),
+		Items:        items,
+	}
+
+	s.mu.Lock()
+	if s.detailCache == nil {
+		s.detailCache = make(map[string]*detailCacheEntry)
+	}
+	if len(items) > 0 {
+		s.detailCache[monthClean] = &detailCacheEntry{
+			data:     resp,
+			cachedAt: time.Now(),
+		}
+	} else {
+		delete(s.detailCache, monthClean)
+	}
+	s.mu.Unlock()
+
+	return resp, nil
+}
+
+func (s *BillingService) getToken(ctx context.Context) (string, error) {
+	tokenProv := s.tokenProvider
+	if tokenProv == nil {
+		prov, err := ResolveTokenProvider(s.httpClient)
+		if err != nil {
+			return "", err
+		}
+		s.tokenProvider = prov
+		tokenProv = prov
+	}
+
+	token, err := tokenProv.GetToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error obteniendo token de acceso para BigQuery: %w", err)
+	}
+	return token, nil
+}
+
+func (s *BillingService) executeQuery(ctx context.Context, cfg TableConfig, token string) ([]BQRow, error) {
+	return s.executeQuerySQL(ctx, cfg, token, BuildQuerySQL(cfg.FullTable))
+}
+
+func (s *BillingService) executeQuerySQL(ctx context.Context, cfg TableConfig, token, querySQL string) ([]BQRow, error) {
 	type queryRequest struct {
 		Query        string `json:"query"`
 		UseLegacySQL bool   `json:"useLegacySql"`
