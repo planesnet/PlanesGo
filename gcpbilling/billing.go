@@ -372,19 +372,18 @@ func ResolveOrganization(projectID, projectName string) string {
 	return "planesnet.com"
 }
 
-// BuildDetailQuerySQL genera la consulta SQL para extraer el detalle desglosado de un mes
+// BuildDetailQuerySQL genera la consulta SQL para extraer el detalle agrupado por servicio y proyecto (sin SKU)
 func BuildDetailQuerySQL(fullTable, invoiceMonthClean string) string {
 	return fmt.Sprintf(`SELECT
   service.description AS service_description,
   project.id AS project_id,
   IFNULL(project.name, '') AS project_name,
-  sku.description AS sku_description,
   SUM(cost) AS cost,
   SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS credits,
   currency
 FROM `+"`%s`"+`
 WHERE REPLACE(invoice.month, '-', '') = '%s'
-GROUP BY service_description, project_id, project_name, sku_description, currency
+GROUP BY service_description, project_id, project_name, currency
 HAVING cost != 0
 ORDER BY service_description ASC, cost DESC`, fullTable, invoiceMonthClean)
 }
@@ -525,36 +524,31 @@ func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth stri
 	currency := "USD"
 
 	for _, r := range rows {
-		if len(r.F) < 7 {
+		if len(r.F) < 6 {
 			continue
 		}
 		servDesc := getStringVal(r.F[0].V)
 		projID := getStringVal(r.F[1].V)
 		projName := getStringVal(r.F[2].V)
-		skuDesc := getStringVal(r.F[3].V)
-		cost := round2(parseFloat(getStringVal(r.F[4].V)))
+		cost := round2(parseFloat(getStringVal(r.F[3].V)))
 		if cost == 0 {
 			// Mostrar únicamente partidas con coste bruto distinto de cero (<> 0)
 			continue
 		}
-		credits := round2(parseFloat(getStringVal(r.F[5].V)))
-		curr := getStringVal(r.F[6].V)
+		credits := round2(parseFloat(getStringVal(r.F[4].V)))
+		curr := getStringVal(r.F[5].V)
 		if curr != "" {
 			currency = curr
 		}
 		netCost := round2(cost + credits)
 
 		org := ResolveOrganization(projID, projName)
-		model := ExtractModel(skuDesc)
 
 		items = append(items, InvoiceDetailItem{
 			ServiceDescription: servDesc,
 			Organization:       org,
 			ProjectID:          projID,
 			ProjectName:        projName,
-			SKUDescription:     skuDesc,
-			Model:              model,
-			User:               "",
 			Cost:               cost,
 			Credits:            credits,
 			NetCost:            netCost,

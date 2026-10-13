@@ -130,7 +130,7 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                         </span>
-                        <input type="text" id="filter-search" oninput="applyFilters()" placeholder="Buscar por servicio, proyecto, SKU, modelo, usuario..." class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-2xs">
+                        <input type="text" id="filter-search" oninput="applyFilters()" placeholder="Buscar por servicio, proyecto..." class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-2xs">
                     </div>
 
                     <!-- Filtro Selector de Servicio -->
@@ -157,7 +157,7 @@
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                 </svg>
                 <p class="text-sm font-medium text-slate-700">Cargando desglose de BigQuery...</p>
-                <p class="text-xs text-slate-400 mt-1">Consultando partidas agrupadas por servicio, proyecto, SKU y modelo</p>
+                <p class="text-xs text-slate-400 mt-1">Consultando consumos agrupados por servicio y proyecto</p>
             </div>
 
             <!-- Estado de Error -->
@@ -179,49 +179,31 @@
                 <table class="w-full text-left text-xs border-collapse">
                     <thead>
                         <tr class="bg-slate-50/90 border-b border-slate-200 text-slate-600 uppercase tracking-wider text-[11px] font-bold select-none">
-                            <th onclick="sortBy('service_description')" class="px-3 py-3 cursor-pointer hover:bg-slate-100 transition group w-[13%] min-w-[120px]" title="Ordenar por Servicio">
+                            <th onclick="sortBy('service_description')" class="px-5 py-3.5 cursor-pointer hover:bg-slate-100 transition group min-w-[200px]" title="Ordenar por Servicio">
                                 <div class="flex items-center space-x-1.5">
                                     <span>Servicio</span>
                                     <span id="sort-icon-service_description" class="inline-flex items-center"></span>
                                 </div>
                             </th>
-                            <th onclick="sortBy('project')" class="px-3 py-3 cursor-pointer hover:bg-slate-100 transition group w-[18%] min-w-[150px]" title="Ordenar por Organización / Proyecto">
+                            <th onclick="sortBy('project')" class="px-5 py-3.5 cursor-pointer hover:bg-slate-100 transition group min-w-[260px]" title="Ordenar por Organización / Proyecto">
                                 <div class="flex items-center space-x-1.5">
                                     <span>Organización / Proyecto</span>
                                     <span id="sort-icon-project" class="inline-flex items-center"></span>
                                 </div>
                             </th>
-                            <th onclick="sortBy('sku_description')" class="px-3 py-3 cursor-pointer hover:bg-slate-100 transition group min-w-[180px]" title="Ordenar por SKU">
-                                <div class="flex items-center space-x-1.5">
-                                    <span>SKU</span>
-                                    <span id="sort-icon-sku_description" class="inline-flex items-center"></span>
-                                </div>
-                            </th>
-                            <th onclick="sortBy('model')" class="px-2 py-3 text-center cursor-pointer hover:bg-slate-100 transition group w-[10%] min-w-[90px]" title="Ordenar por Modelo">
-                                <div class="flex items-center justify-center space-x-1">
-                                    <span>Modelo</span>
-                                    <span id="sort-icon-model" class="inline-flex items-center"></span>
-                                </div>
-                            </th>
-                            <th onclick="sortBy('user')" class="px-2 py-3 text-center cursor-pointer hover:bg-slate-100 transition group w-[8%] min-w-[70px]" title="Ordenar por Usuario">
-                                <div class="flex items-center justify-center space-x-1">
-                                    <span>Usuario</span>
-                                    <span id="sort-icon-user" class="inline-flex items-center"></span>
-                                </div>
-                            </th>
-                            <th onclick="sortBy('cost')" class="px-3 py-3 text-right cursor-pointer hover:bg-slate-100 transition group w-[10%] min-w-[90px]" title="Ordenar por Coste Bruto">
+                            <th onclick="sortBy('cost')" class="px-5 py-3.5 text-right cursor-pointer hover:bg-slate-100 transition group w-44 min-w-[130px]" title="Ordenar por Coste Bruto">
                                 <div class="flex items-center justify-end space-x-1">
                                     <span>Coste Bruto</span>
                                     <span id="sort-icon-cost" class="inline-flex items-center"></span>
                                 </div>
                             </th>
-                            <th onclick="sortBy('credits')" class="px-3 py-3 text-right cursor-pointer hover:bg-slate-100 transition group w-[9%] min-w-[80px]" title="Ordenar por Créditos">
+                            <th onclick="sortBy('credits')" class="px-5 py-3.5 text-right cursor-pointer hover:bg-slate-100 transition group w-44 min-w-[130px]" title="Ordenar por Créditos">
                                 <div class="flex items-center justify-end space-x-1">
                                     <span>Créditos</span>
                                     <span id="sort-icon-credits" class="inline-flex items-center"></span>
                                 </div>
                             </th>
-                            <th onclick="sortBy('net_cost')" class="px-3 py-3 text-right cursor-pointer hover:bg-slate-100 transition group w-[10%] min-w-[90px]" title="Ordenar por Coste Neto">
+                            <th onclick="sortBy('net_cost')" class="px-5 py-3.5 text-right cursor-pointer hover:bg-slate-100 transition group w-48 min-w-[140px]" title="Ordenar por Coste Neto">
                                 <div class="flex items-center justify-end space-x-1 text-slate-800">
                                     <span>Coste Neto</span>
                                     <span id="sort-icon-net_cost" class="inline-flex items-center"></span>
@@ -234,12 +216,12 @@
                     </tbody>
                     <tfoot id="detail-tfoot" class="bg-slate-50/80 border-t-2 border-slate-200 font-semibold text-slate-800">
                         <tr>
-                            <td colspan="5" class="px-3 py-3 text-right uppercase text-[11px] tracking-wider text-slate-500">
+                            <td colspan="2" class="px-5 py-3.5 text-right uppercase text-[11px] tracking-wider text-slate-500 font-semibold">
                                 Total Filtrado:
                             </td>
-                            <td class="px-3 py-3 text-right font-mono text-slate-700 text-xs" id="tfoot-cost">0,00 €</td>
-                            <td class="px-3 py-3 text-right font-mono text-emerald-600 text-xs" id="tfoot-credits">0,00 €</td>
-                            <td class="px-3 py-3 text-right font-mono font-bold text-slate-900 text-xs" id="tfoot-net">0,00 €</td>
+                            <td class="px-5 py-3.5 text-right font-mono text-slate-700 text-xs" id="tfoot-cost">0,00 €</td>
+                            <td class="px-5 py-3.5 text-right font-mono text-emerald-600 text-xs" id="tfoot-credits">0,00 €</td>
+                            <td class="px-5 py-3.5 text-right font-mono font-bold text-slate-900 text-xs" id="tfoot-net">0,00 €</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -376,7 +358,7 @@
         }
 
         function updateSortIcons() {
-            const cols = ['service_description', 'project', 'sku_description', 'model', 'user', 'cost', 'credits', 'net_cost'];
+            const cols = ['service_description', 'project', 'cost', 'credits', 'net_cost'];
             cols.forEach(c => {
                 const icon = document.getElementById(`sort-icon-${c}`);
                 if (!icon) return;
@@ -409,10 +391,7 @@
                     const matchServ = (it.service_description || '').toLowerCase().includes(searchVal);
                     const matchOrg = (it.organization || '').toLowerCase().includes(searchVal);
                     const matchProj = (it.project_name || '').toLowerCase().includes(searchVal) || (it.project_id || '').toLowerCase().includes(searchVal);
-                    const matchSku = (it.sku_description || '').toLowerCase().includes(searchVal);
-                    const matchModel = (it.model || '').toLowerCase().includes(searchVal);
-                    const matchUser = (it.user || '').toLowerCase().includes(searchVal);
-                    if (!matchServ && !matchOrg && !matchProj && !matchSku && !matchModel && !matchUser) {
+                    if (!matchServ && !matchOrg && !matchProj) {
                         return false;
                     }
                 }
@@ -430,18 +409,6 @@
                     case 'project':
                         valA = (a.organization || '') + ' ' + (a.project_name || a.project_id || '');
                         valB = (b.organization || '') + ' ' + (b.project_name || b.project_id || '');
-                        break;
-                    case 'sku_description':
-                        valA = a.sku_description || '';
-                        valB = b.sku_description || '';
-                        break;
-                    case 'model':
-                        valA = a.model || '';
-                        valB = b.model || '';
-                        break;
-                    case 'user':
-                        valA = a.user || '';
-                        valB = b.user || '';
                         break;
                     case 'cost':
                         valA = a.cost || 0;
@@ -510,52 +477,33 @@
                 // 1. Servicio
                 const servBadge = getServiceBadge(it.service_description);
 
-                // 2. Organización / Proyecto (en la misma celda, apilados limpiamente)
+                // 2. Organización / Proyecto (en la misma celda, en la misma línea)
                 const orgBadge = it.organization === 'maderasplanes.com'
-                    ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">maderasplanes.com</span>'
-                    : '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">planesnet.com</span>';
+                    ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">maderasplanes.com</span>'
+                    : '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">planesnet.com</span>';
 
-                const projHtml = `<div class="flex flex-col gap-0.5 items-start">
+                const projHtml = `<div class="inline-flex items-center space-x-2 flex-wrap gap-y-1">
                     ${orgBadge}
-                    <span class="text-xs font-semibold text-slate-800 break-words leading-tight" title="ID: ${it.project_id}">${it.project_name || it.project_id}</span>
+                    <span class="text-xs font-semibold text-slate-800" title="ID: ${it.project_id}">${it.project_name || it.project_id}</span>
                 </div>`;
 
-                // 3. SKU
-                const skuHtml = `<div class="font-medium text-slate-800 leading-snug break-words" title="${it.sku_description}">${it.sku_description}</div>`;
-
-                // 4. Modelo [modelo]
-                const modelHtml = it.model
-                    ? `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs whitespace-nowrap">
-                        <span class="text-purple-500">✦</span>
-                        <span>${it.model}</span>
-                    </span>`
-                    : '<span class="text-slate-300 font-mono text-center block">-</span>';
-
-                // 5. Usuario [usuario]
-                const userHtml = it.user
-                    ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">${it.user}</span>`
-                    : '<span class="text-slate-300 font-mono text-center block">-</span>';
-
-                // 6. Coste Bruto
+                // 3. Coste Bruto
                 const costHtml = `<span class="font-mono text-slate-700">${formatCurrency(it.cost, currency)}</span>`;
 
-                // 7. Créditos
+                // 4. Créditos
                 const creditsHtml = it.credits < 0
                     ? `<span class="font-mono text-emerald-600 font-medium">${formatCurrency(it.credits, currency)}</span>`
                     : `<span class="font-mono text-slate-400">0,00 ${currency === 'EUR' ? '€' : '$'}</span>`;
 
-                // 8. Coste Neto
+                // 5. Coste Neto
                 const netHtml = `<span class="font-mono font-bold text-slate-900">${formatCurrency(it.net_cost, currency)}</span>`;
 
                 tr.innerHTML = `
-                    <td class="px-3 py-2.5 whitespace-nowrap">${servBadge}</td>
-                    <td class="px-3 py-2.5">${projHtml}</td>
-                    <td class="px-3 py-2.5">${skuHtml}</td>
-                    <td class="px-2 py-2.5 text-center whitespace-nowrap">${modelHtml}</td>
-                    <td class="px-2 py-2.5 text-center whitespace-nowrap">${userHtml}</td>
-                    <td class="px-3 py-2.5 text-right whitespace-nowrap font-mono">${costHtml}</td>
-                    <td class="px-3 py-2.5 text-right whitespace-nowrap font-mono">${creditsHtml}</td>
-                    <td class="px-3 py-2.5 text-right whitespace-nowrap font-mono">${netHtml}</td>
+                    <td class="px-5 py-3.5 whitespace-nowrap">${servBadge}</td>
+                    <td class="px-5 py-3.5">${projHtml}</td>
+                    <td class="px-5 py-3.5 text-right whitespace-nowrap font-mono">${costHtml}</td>
+                    <td class="px-5 py-3.5 text-right whitespace-nowrap font-mono">${creditsHtml}</td>
+                    <td class="px-5 py-3.5 text-right whitespace-nowrap font-mono">${netHtml}</td>
                 `;
 
                 tbody.appendChild(tr);

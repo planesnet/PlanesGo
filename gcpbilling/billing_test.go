@@ -514,7 +514,6 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 						{V: "Vertex AI"},
 						{V: "planes-dev"},
 						{V: "Planes Dev"},
-						{V: "Generative AI - Gemini 3.8 Flash GA input"},
 						{V: "120.50"},
 						{V: "-20.50"},
 						{V: "USD"},
@@ -525,7 +524,6 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 						{V: "Compute Engine"},
 						{V: "maderasplanes-odoo-erp"},
 						{V: "Maderas Odoo"},
-						{V: "N2 Instance Core"},
 						{V: "80.00"},
 						{V: "0.00"},
 						{V: "USD"},
@@ -536,7 +534,6 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 						{V: "Cloud Storage"},
 						{V: "planesnet-backup"},
 						{V: "PlanesNet Backup"},
-						{V: "Standard Storage US Regional"},
 						{V: "0.00"},
 						{V: "0.00"},
 						{V: "USD"},
@@ -569,9 +566,6 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 	if item0.Organization != "maderasplanes.com" {
 		t.Errorf("organizacion esperada maderasplanes.com, obtenida %s", item0.Organization)
 	}
-	if item0.Model != "" {
-		t.Errorf("modelo esperado vacio, obtenido %s", item0.Model)
-	}
 	if item0.NetCost != 80.00 {
 		t.Errorf("net cost esperado 80.00, obtenido %f", item0.NetCost)
 	}
@@ -582,9 +576,6 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 	}
 	if item1.Organization != "planesnet.com" {
 		t.Errorf("organizacion esperada planesnet.com, obtenida %s", item1.Organization)
-	}
-	if item1.Model != "Gemini 3.8 Flash" {
-		t.Errorf("modelo esperado 'Gemini 3.8 Flash', obtenido %s", item1.Model)
 	}
 	if item1.NetCost != 100.00 {
 		t.Errorf("net cost esperado 100.00, obtenido %f", item1.NetCost)
@@ -609,6 +600,12 @@ func TestBuildDetailQuerySQL(t *testing.T) {
 	}
 	if strings.Contains(sql, "HAVING SUM(cost)") {
 		t.Errorf("SQL NO debe contener 'HAVING SUM(cost)' porque causa error 400 en BigQuery:\n%s", sql)
+	}
+	if strings.Contains(sql, "sku.description") {
+		t.Errorf("SQL NO debe agrupar ni consultar sku.description, obtenido:\n%s", sql)
+	}
+	if !strings.Contains(sql, "GROUP BY service_description, project_id, project_name, currency") {
+		t.Errorf("SQL debe agrupar únicamente por service_description, project_id, project_name, currency, obtenido:\n%s", sql)
 	}
 }
 
