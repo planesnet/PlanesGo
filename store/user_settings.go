@@ -231,5 +231,3 @@ func (s *UserSettingsStore) GetUserByAntigravityToken(token string) (UserSetting
 	}
 	return UserSettings{}, false
 }
-
-

@@ -556,4 +556,3 @@ func TestUpdateTimesheetWithTicketFieldName(t *testing.T) {
 		})
 	}
 }
-

@@ -236,3 +236,57 @@ func TestExpressStandaloneTemplateRendering(t *testing.T) {
 	}
 }
 
+func TestNavbarAdminLinkVisibility(t *testing.T) {
+	tmpl, err := template.ParseFiles("templates/partials/navbar.html")
+	if err != nil {
+		t.Fatalf("Error parseando templates/partials/navbar.html: %v", err)
+	}
+
+	type navData struct {
+		Version string
+		Session *SessionData
+		Config  *config.Config
+	}
+
+	// 1. Sesión nil -> no debe mostrar botón de Administración
+	var bufNil bytes.Buffer
+	dataNil := navData{
+		Version: Version,
+		Session: nil,
+	}
+	if err := tmpl.ExecuteTemplate(&bufNil, "navbar", dataNil); err != nil {
+		t.Fatalf("Error ejecutando navbar con sesión nil: %v", err)
+	}
+	if strings.Contains(bufNil.String(), "/admin") || strings.Contains(bufNil.String(), "Administración") {
+		t.Errorf("Navbar con sesión nil no debe contener enlace a /admin")
+	}
+
+	// 2. Sesión no admin -> no debe mostrar botón de Administración
+	var bufUser bytes.Buffer
+	dataUser := navData{
+		Version: Version,
+		Session: &SessionData{UserEmail: "empleado@planesnet.com", AuthMethod: "google"},
+	}
+	if err := tmpl.ExecuteTemplate(&bufUser, "navbar", dataUser); err != nil {
+		t.Fatalf("Error ejecutando navbar con usuario estándar: %v", err)
+	}
+	if strings.Contains(bufUser.String(), "/admin") || strings.Contains(bufUser.String(), "Administración") {
+		t.Errorf("Navbar con usuario común no debe contener enlace a /admin")
+	}
+
+	// 3. Sesión admin (luis@planesnet.com) -> SÍ debe mostrar botón de Administración
+	var bufAdmin bytes.Buffer
+	dataAdmin := navData{
+		Version: Version,
+		Session: &SessionData{UserEmail: "luis@planesnet.com", AuthMethod: "google"},
+	}
+	if err := tmpl.ExecuteTemplate(&bufAdmin, "navbar", dataAdmin); err != nil {
+		t.Fatalf("Error ejecutando navbar con admin: %v", err)
+	}
+	if !strings.Contains(bufAdmin.String(), `href="/admin"`) {
+		t.Errorf("Navbar con admin debe contener enlace 'href=\"/admin\"'")
+	}
+	if !strings.Contains(bufAdmin.String(), "Administración") {
+		t.Errorf("Navbar con admin debe contener texto 'Administración'")
+	}
+}

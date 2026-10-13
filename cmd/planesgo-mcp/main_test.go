@@ -71,10 +71,10 @@ func TestToolsDefinition(t *testing.T) {
 
 func TestNormalizeTaskType(t *testing.T) {
 	testCases := []struct {
-		rawTitle    string
-		realWork    string
-		wantType    string
-		wantClean   string
+		rawTitle  string
+		realWork  string
+		wantType  string
+		wantClean string
 	}{
 		{
 			rawTitle:  "Implementación de tag_ids y vistas en PlanesGo",
@@ -324,4 +324,3 @@ func TestSendTaskActionWithTokens(t *testing.T) {
 		t.Errorf("ai_session_id esperado 'session-abc', obtenido %v", receivedPayload["ai_session_id"])
 	}
 }
-

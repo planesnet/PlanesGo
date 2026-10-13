@@ -294,15 +294,15 @@ type Project struct {
 	ID                int      `json:"id"`
 	Name              string   `json:"name"`
 	DisplayName       string   `json:"display_name"`
-	UserID            Many2One `json:"user_id"`            // Responsable del proyecto
-	PartnerID         Many2One `json:"partner_id"`         // Cliente o contacto asociado
-	TaskCount         int      `json:"task_count"`         // Cantidad de tareas
-	Active            bool     `json:"active"`             // Estado activo / archivado
-	PrivacyVisibility string   `json:"privacy_visibility"` // Visibilidad
-	TotalHours        float64  `json:"total_hours"`        // Horas totales registradas
+	UserID            Many2One `json:"user_id"`                   // Responsable del proyecto
+	PartnerID         Many2One `json:"partner_id"`                // Cliente o contacto asociado
+	TaskCount         int      `json:"task_count"`                // Cantidad de tareas
+	Active            bool     `json:"active"`                    // Estado activo / archivado
+	PrivacyVisibility string   `json:"privacy_visibility"`        // Visibilidad
+	TotalHours        float64  `json:"total_hours"`               // Horas totales registradas
 	TimesheetCount    int      `json:"timesheet_count,omitempty"` // Número de partes de horas registrados
-	LastDate          string   `json:"last_date,omitempty"` // Fecha de última imputación (YYYY-MM-DD)
-	LastTask          string   `json:"last_task,omitempty"` // Última tarea imputada
+	LastDate          string   `json:"last_date,omitempty"`       // Fecha de última imputación (YYYY-MM-DD)
+	LastTask          string   `json:"last_task,omitempty"`       // Última tarea imputada
 	OpenTicketCount   int      `json:"open_ticket_count,omitempty"`
 	TicketTitle       string   `json:"ticket_title,omitempty"`
 }
@@ -591,31 +591,31 @@ func (t *Ticket) FormattedDate() string {
 
 // ActiveTimer representa el estado del cronómetro de trabajo en vivo sincronizado con Odoo.
 type ActiveTimer struct {
-	TimerKey      string   `json:"timer_key,omitempty"`      // Clave identificadora única del temporizador (ej. task_id o hash)
-	TimesheetID   int      `json:"timesheet_id"`
-	TaskID        int      `json:"task_id"`
-	ProjectID     int      `json:"project_id"`
-	ProjectName   string   `json:"project_name"`
-	TaskName      string   `json:"task_name"`
-	TicketID      int      `json:"ticket_id,omitempty"`
-	TicketRef     string   `json:"ticket_ref,omitempty"`
-	TicketName    string   `json:"ticket_name,omitempty"`
-	Description   string   `json:"description"`
-	IsRunning     bool     `json:"is_running"`
-	StartedAt     int64    `json:"started_at"`      // Timestamp unix en milisegundos
-	LastHeartbeat int64    `json:"last_heartbeat,omitempty"` // Timestamp unix del último latido de actividad
-	AccumulatedMs int64    `json:"accumulated_ms"`  // Milisegundos acumulados
-	UnitAmount    float64  `json:"unit_amount"`     // Horas calculadas en decimal
-	Date          string   `json:"date,omitempty"`
-	Source        string   `json:"source,omitempty"`        // Origen del temporizador: "antigravity", "web", "extension"
-	EmployeeName  string   `json:"employee_name,omitempty"`
-	Tags          []Tag    `json:"tags,omitempty"`
-	TokensInput   int      `json:"tokens_input,omitempty"`
-	TokensOutput  int      `json:"tokens_output,omitempty"`
-	TokensTotal   int      `json:"tokens_total,omitempty"`
-	AIModel       string   `json:"ai_model,omitempty"`
-	AICost        float64  `json:"ai_cost,omitempty"`
-	AISessionID   string   `json:"ai_session_id,omitempty"`
+	TimerKey      string  `json:"timer_key,omitempty"` // Clave identificadora única del temporizador (ej. task_id o hash)
+	TimesheetID   int     `json:"timesheet_id"`
+	TaskID        int     `json:"task_id"`
+	ProjectID     int     `json:"project_id"`
+	ProjectName   string  `json:"project_name"`
+	TaskName      string  `json:"task_name"`
+	TicketID      int     `json:"ticket_id,omitempty"`
+	TicketRef     string  `json:"ticket_ref,omitempty"`
+	TicketName    string  `json:"ticket_name,omitempty"`
+	Description   string  `json:"description"`
+	IsRunning     bool    `json:"is_running"`
+	StartedAt     int64   `json:"started_at"`               // Timestamp unix en milisegundos
+	LastHeartbeat int64   `json:"last_heartbeat,omitempty"` // Timestamp unix del último latido de actividad
+	AccumulatedMs int64   `json:"accumulated_ms"`           // Milisegundos acumulados
+	UnitAmount    float64 `json:"unit_amount"`              // Horas calculadas en decimal
+	Date          string  `json:"date,omitempty"`
+	Source        string  `json:"source,omitempty"` // Origen del temporizador: "antigravity", "web", "extension"
+	EmployeeName  string  `json:"employee_name,omitempty"`
+	Tags          []Tag   `json:"tags,omitempty"`
+	TokensInput   int     `json:"tokens_input,omitempty"`
+	TokensOutput  int     `json:"tokens_output,omitempty"`
+	TokensTotal   int     `json:"tokens_total,omitempty"`
+	AIModel       string  `json:"ai_model,omitempty"`
+	AICost        float64 `json:"ai_cost,omitempty"`
+	AISessionID   string  `json:"ai_session_id,omitempty"`
 }
 
 // IsAntigravity indica si el temporizador activo proviene de Antigravity.
@@ -705,4 +705,3 @@ func (p *Partner) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-

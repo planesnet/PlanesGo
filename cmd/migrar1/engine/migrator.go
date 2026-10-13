@@ -12,22 +12,22 @@ import (
 )
 
 type MigrationConfig struct {
-	StartDate     string `json:"start_date"` // "2025-01-01"
-	BatchSize     int    `json:"batch_size"`
+	StartDate         string `json:"start_date"` // "2025-01-01"
+	BatchSize         int    `json:"batch_size"`
 	SourceTicketModel string `json:"source_ticket_model"` // "helpdesk.ticket"
 	TargetTicketModel string `json:"target_ticket_model"`
 }
 
 type DryRunReport struct {
-	TotalSourceTickets     int                  `json:"total_source_tickets"`
-	TotalSourceTimesheets  int                  `json:"total_source_timesheets"`
-	AlreadySyncedTickets   int                  `json:"already_synced_tickets"`
-	PendingTickets         int                  `json:"pending_tickets"`
-	UnresolvedPartners     []odoo.Partner       `json:"unresolved_partners"`
-	UnresolvedUsers        []odoo.User          `json:"unresolved_users"`
-	UnresolvedProjects     []odoo.Project       `json:"unresolved_projects"`
-	ReadyToMigrateTickets  int                  `json:"ready_to_migrate_tickets"`
-	Timestamp              time.Time            `json:"timestamp"`
+	TotalSourceTickets    int            `json:"total_source_tickets"`
+	TotalSourceTimesheets int            `json:"total_source_timesheets"`
+	AlreadySyncedTickets  int            `json:"already_synced_tickets"`
+	PendingTickets        int            `json:"pending_tickets"`
+	UnresolvedPartners    []odoo.Partner `json:"unresolved_partners"`
+	UnresolvedUsers       []odoo.User    `json:"unresolved_users"`
+	UnresolvedProjects    []odoo.Project `json:"unresolved_projects"`
+	ReadyToMigrateTickets int            `json:"ready_to_migrate_tickets"`
+	Timestamp             time.Time      `json:"timestamp"`
 }
 
 type Migrator struct {

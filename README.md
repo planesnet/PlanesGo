@@ -1,4 +1,4 @@
-# PlanesGo (v1.2.19)
+# PlanesGo (v1.2.84)
 
 Aplicación moderna, minimalista y de alto rendimiento en Go para consultar y visualizar de forma interactiva los partes de horas trabajadas (timesheets / `account.analytic.line`) y proyectos (`project.project`) de Odoo.
 
@@ -35,6 +35,14 @@ ODOO_DB=ap113
 ODOO_USER=
 ODOO_PASSWORD=
 PORT=8080
+
+# Administración y Facturación de Google Cloud (BigQuery)
+ADMIN_EMAILS=luis@planesnet.com,isabel@planesnet.com
+GCP_BILLING_EXPORT_TABLE=proyecto.dataset.tabla # o proyecto.dataset (aplica comodín gcp_billing_export_v1_*)
+GCP_BILLING_QUERY_PROJECT=                     # Opcional (por defecto, el proyecto de la tabla)
+GCP_BILLING_LOCATION=                          # Opcional (EU, US, europe-west1...)
+GCP_BILLING_SA_JSON=                           # Contenido JSON de la clave de la cuenta de servicio (o usar GOOGLE_APPLICATION_CREDENTIALS)
+GOOGLE_APPLICATION_CREDENTIALS=                # Ruta al archivo JSON de credenciales de la cuenta de servicio
 ```
 
 ---
