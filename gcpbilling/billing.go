@@ -30,12 +30,15 @@ type TableConfig struct {
 	Location     string
 }
 
+// DefaultBillingExportTable es la tabla o dataset de exportación por defecto
+const DefaultBillingExportTable = "autopyme.gcp_billing_export"
+
 // ResolveTableConfig analiza y resuelve la configuración de tabla y proyecto desde el entorno
 func ResolveTableConfig() (TableConfig, error) {
 	tableEnv := strings.TrimSpace(os.Getenv("GCP_BILLING_EXPORT_TABLE"))
 	tableEnv = strings.Trim(tableEnv, "`")
 	if tableEnv == "" {
-		return TableConfig{}, fmt.Errorf("falta la variable de entorno GCP_BILLING_EXPORT_TABLE: especifique 'proyecto.dataset.tabla' o 'proyecto.dataset'")
+		tableEnv = DefaultBillingExportTable
 	}
 
 	parts := strings.Split(tableEnv, ".")
