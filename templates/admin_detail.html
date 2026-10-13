@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalle de Facturación Google Cloud - PlanesGo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="min-h-full flex flex-col text-slate-800 bg-[#F8FAFC] antialiased">
+    <!-- Navbar Corporativo Planes -->
+    <header class="bg-[#0B0F19] border-b border-slate-800 sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo y Branding -->
+                <div class="flex items-center space-x-3 sm:space-x-4">
+                    <a href="/" class="flex items-center space-x-3 group">
+                        <img src="/static/img/logo.png" alt="Planes Soluciones Informáticas" class="h-9 w-auto object-contain">
+                        <div class="hidden sm:block border-l border-slate-700 pl-3">
+                            <div class="flex items-center space-x-1.5">
+                                <span class="text-sm font-bold text-white tracking-tight">PlanesGo</span>
+                                <span class="text-[10px] font-semibold text-sky-400 bg-sky-950 px-2 py-0.5 rounded-full border border-sky-800/60">v{{.Version}}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 font-light">Panel de Administración</p>
+                        </div>
+                    </a>
+                </div>
+
+                <!-- Acciones Rápidas -->
+                <div class="flex items-center space-x-2 sm:space-x-3">
+                    <a href="/admin" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-xl transition border border-slate-700/60 shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        <span>Volver a Facturación</span>
+                    </a>
+
+                    {{if and .Session.Password (ne .Session.Password "")}}
+                    <a href="/logout" title="Cerrar sesión" class="p-2 text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/60 rounded-xl transition border border-red-900/50">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                    </a>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenedor Principal -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Migas de pan y botón atrás -->
+        <div class="mb-6 flex items-center justify-between">
+            <a href="/admin" class="inline-flex items-center space-x-2 text-sm font-medium text-slate-500 hover:text-sky-600 transition group">
+                <svg class="w-4 h-4 transform group-hover:-translate-x-1 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>Volver a Facturación</span>
+            </a>
+            
+            <button onclick="loadDetail(true)" class="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 rounded-xl border border-slate-200 shadow-xs transition">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Actualizar Datos</span>
+            </button>
+        </div>
+
+        <!-- Cabecera de Página -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+                <div class="flex items-center space-x-3">
+                    <span class="p-2.5 rounded-2xl bg-sky-50 text-sky-600 border border-sky-100 shadow-xs">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                    </span>
+                    <div>
+                        <div class="flex items-center space-x-2.5">
+                            <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight" id="header-title">Detalle de Facturación</h1>
+                            <span id="badge-month" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-200">{{.Month}}</span>
+                        </div>
+                        <p class="text-sm text-slate-500 mt-0.5" id="header-desc">Desglose de consumos de Google Cloud por servicio, proyecto y recursos.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPIs del Mes -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs">
+                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Coste Bruto</span>
+                <div class="text-2xl font-bold text-slate-900 font-mono mt-1" id="kpi-cost">-</div>
+                <span class="text-[11px] text-slate-500">Consumo total sin descuentos</span>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs">
+                <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wider">Créditos / Ahorros</span>
+                <div class="text-2xl font-bold text-emerald-600 font-mono mt-1" id="kpi-credits">-</div>
+                <span class="text-[11px] text-slate-500">Descuentos y créditos aplicados</span>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs bg-gradient-to-br from-white to-sky-50/40">
+                <span class="text-xs font-semibold text-sky-700 uppercase tracking-wider">Total Neto</span>
+                <div class="text-2xl font-bold text-sky-900 font-mono mt-1" id="kpi-net">-</div>
+                <span class="text-[11px] text-slate-500">Importe real liquidado</span>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs">
+                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Partidas Facturadas</span>
+                <div class="text-2xl font-bold text-slate-800 font-mono mt-1" id="kpi-count">-</div>
+                <span class="text-[11px] text-slate-500">Líneas de recursos detectadas</span>
+            </div>
+        </div>
+
+        <!-- Tarjeta de Contenido Principal -->
+        <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+            
+            <!-- Barra de Filtros y Búsqueda -->
+            <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/50">
+                <div class="flex flex-wrap items-center gap-3 flex-1">
+                    <!-- Buscador en tiempo real -->
+                    <div class="relative flex-1 min-w-[240px] max-w-md">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </span>
+                        <input type="text" id="filter-search" oninput="applyFilters()" placeholder="Buscar por servicio, proyecto, SKU, modelo, usuario..." class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-2xs">
+                    </div>
+
+                    <!-- Filtro Selector de Servicio -->
+                    <div class="flex items-center space-x-2">
+                        <label for="filter-service" class="text-xs font-semibold text-slate-600 hidden sm:inline">Servicio:</label>
+                        <select id="filter-service" onchange="applyFilters()" class="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs">
+                            <option value="">Todos los servicios</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Contador visible -->
+                <div class="flex items-center space-x-2 text-xs">
+                    <span class="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-600 font-medium shadow-2xs">
+                        Mostrando <strong id="filter-count" class="text-slate-900">0</strong> de <strong id="filter-total" class="text-slate-900">0</strong> partidas
+                    </span>
+                </div>
+            </div>
+
+            <!-- Estado de Carga -->
+            <div id="state-loading" class="py-16 text-center text-slate-500">
+                <svg class="animate-spin w-8 h-8 text-sky-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <p class="text-sm font-medium text-slate-700">Cargando desglose de BigQuery...</p>
+                <p class="text-xs text-slate-400 mt-1">Consultando partidas agrupadas por servicio, proyecto, SKU y modelo</p>
+            </div>
+
+            <!-- Estado de Error -->
+            <div id="state-error" class="hidden p-8 text-center">
+                <div class="inline-flex p-3 rounded-full bg-red-100 text-red-600 mb-3">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <h3 class="text-base font-bold text-slate-900" id="error-title">Error al consultar datos</h3>
+                <p class="text-xs text-slate-600 max-w-md mx-auto mt-1" id="error-desc"></p>
+                <button onclick="loadDetail(true)" class="mt-4 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-semibold transition">
+                    Reintentar
+                </button>
+            </div>
+
+            <!-- Tabla de Detalle -->
+            <div id="state-table" class="hidden overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold">
+                            <th class="px-5 py-3.5">Servicio</th>
+                            <th class="px-5 py-3.5">Organización / Proyecto</th>
+                            <th class="px-5 py-3.5 min-w-[220px]">SKU</th>
+                            <th class="px-5 py-3.5 text-center">Modelo</th>
+                            <th class="px-5 py-3.5 text-center">Usuario</th>
+                            <th class="px-5 py-3.5 text-right">Coste Bruto</th>
+                            <th class="px-5 py-3.5 text-right">Créditos</th>
+                            <th class="px-5 py-3.5 text-right font-bold text-slate-700">Coste Neto</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail-tbody" class="divide-y divide-slate-100">
+                        <!-- Filas inyectadas por JS -->
+                    </tbody>
+                    <tfoot id="detail-tfoot" class="bg-slate-50/80 border-t-2 border-slate-200 font-semibold text-slate-800">
+                        <tr>
+                            <td colspan="5" class="px-5 py-3.5 text-right uppercase text-[11px] tracking-wider text-slate-500">
+                                Total Filtrado:
+                            </td>
+                            <td class="px-5 py-3.5 text-right font-mono text-slate-700" id="tfoot-cost">0,00 €</td>
+                            <td class="px-5 py-3.5 text-right font-mono text-emerald-600" id="tfoot-credits">0,00 €</td>
+                            <td class="px-5 py-3.5 text-right font-mono font-bold text-slate-900" id="tfoot-net">0,00 €</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- Estado Vacío por Filtros -->
+            <div id="state-empty-filter" class="hidden py-16 text-center text-slate-500">
+                <svg class="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                <p class="text-sm font-semibold text-slate-700">No se encontraron partidas</p>
+                <p class="text-xs text-slate-400 mt-1">Ninguna línea coincide con los criterios de búsqueda o servicio seleccionados.</p>
+                <button onclick="resetFilters()" class="mt-3 px-3.5 py-1.5 text-xs font-semibold text-sky-600 hover:text-sky-700 bg-sky-50 rounded-xl border border-sky-200 transition">
+                    Limpiar Filtros
+                </button>
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="mt-auto py-6 border-t border-slate-200 text-center text-xs text-slate-400">
+        <p>PlanesGo &copy; Planes Soluciones Informáticas &bull; Google Cloud BigQuery Analytics</p>
+    </footer>
+
+    <script>
+        const monthParam = "{{.Month}}";
+        let detailData = null;
+
+        function formatCurrency(amount, currency) {
+            const sym = currency === 'EUR' ? '€' : (currency === 'USD' ? '$' : currency);
+            const formatted = new Intl.NumberFormat('es-ES', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(amount);
+            return `${formatted} ${sym}`;
+        }
+
+        async function loadDetail(forceRefresh = false) {
+            const loading = document.getElementById('state-loading');
+            const table = document.getElementById('state-table');
+            const error = document.getElementById('state-error');
+            const emptyFilter = document.getElementById('state-empty-filter');
+
+            loading.classList.remove('hidden');
+            table.classList.add('hidden');
+            error.classList.add('hidden');
+            emptyFilter.classList.add('hidden');
+
+            try {
+                let url = `/api/admin/gcp-invoices/detail?month=${encodeURIComponent(monthParam)}`;
+                if (forceRefresh) {
+                    url += '&refresh=true';
+                }
+                url += `&_t=${Date.now()}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!data.success) {
+                    loading.classList.add('hidden');
+                    error.classList.remove('hidden');
+                    document.getElementById('error-desc').textContent = data.error || 'Error al obtener desglose de BigQuery';
+                    return;
+                }
+
+                detailData = data;
+                renderDetailHeader(data);
+                populateServiceFilter(data.items || []);
+                applyFilters();
+
+                loading.classList.add('hidden');
+                table.classList.remove('hidden');
+
+            } catch (err) {
+                loading.classList.add('hidden');
+                error.classList.remove('hidden');
+                document.getElementById('error-desc').textContent = `Error de red o comunicación: ${err.message}`;
+            }
+        }
+
+        function renderDetailHeader(data) {
+            if (data.label) {
+                document.getElementById('header-title').textContent = `Detalle de Facturación - ${data.label}`;
+                document.getElementById('badge-month').textContent = data.label;
+            }
+            const curr = data.currency || 'USD';
+            document.getElementById('kpi-cost').textContent = formatCurrency(data.total_cost || 0, curr);
+            document.getElementById('kpi-credits').textContent = formatCurrency(data.total_credits || 0, curr);
+            document.getElementById('kpi-net').textContent = formatCurrency(data.total_net || 0, curr);
+            document.getElementById('kpi-count').textContent = (data.items || []).length;
+        }
+
+        function populateServiceFilter(items) {
+            const serviceSelect = document.getElementById('filter-service');
+            const currentVal = serviceSelect.value;
+            const services = Array.from(new Set(items.map(it => it.service_description).filter(Boolean))).sort();
+
+            let opts = '<option value="">Todos los servicios</option>';
+            services.forEach(s => {
+                const count = items.filter(it => it.service_description === s).length;
+                opts += `<option value="${s}">${s} (${count})</option>`;
+            });
+            serviceSelect.innerHTML = opts;
+            if (services.includes(currentVal)) {
+                serviceSelect.value = currentVal;
+            }
+        }
+
+        function applyFilters() {
+            if (!detailData || !detailData.items) return;
+
+            const searchVal = (document.getElementById('filter-search')?.value || '').toLowerCase().trim();
+            const serviceVal = document.getElementById('filter-service')?.value || '';
+
+            const items = detailData.items;
+            const filtered = items.filter(it => {
+                if (serviceVal && it.service_description !== serviceVal) {
+                    return false;
+                }
+                if (searchVal) {
+                    const matchServ = (it.service_description || '').toLowerCase().includes(searchVal);
+                    const matchOrg = (it.organization || '').toLowerCase().includes(searchVal);
+                    const matchProj = (it.project_name || '').toLowerCase().includes(searchVal) || (it.project_id || '').toLowerCase().includes(searchVal);
+                    const matchSku = (it.sku_description || '').toLowerCase().includes(searchVal);
+                    const matchModel = (it.model || '').toLowerCase().includes(searchVal);
+                    const matchUser = (it.user || '').toLowerCase().includes(searchVal);
+                    if (!matchServ && !matchOrg && !matchProj && !matchSku && !matchModel && !matchUser) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            document.getElementById('filter-count').textContent = filtered.length;
+            document.getElementById('filter-total').textContent = items.length;
+
+            const table = document.getElementById('state-table');
+            const emptyFilter = document.getElementById('state-empty-filter');
+
+            if (filtered.length === 0) {
+                table.classList.add('hidden');
+                emptyFilter.classList.remove('hidden');
+            } else {
+                table.classList.remove('hidden');
+                emptyFilter.classList.add('hidden');
+                renderRows(filtered, detailData.currency || 'USD');
+            }
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-search').value = '';
+            document.getElementById('filter-service').value = '';
+            applyFilters();
+        }
+
+        function renderRows(items, currency) {
+            const tbody = document.getElementById('detail-tbody');
+            tbody.innerHTML = '';
+
+            let sumCost = 0;
+            let sumCredits = 0;
+            let sumNet = 0;
+
+            items.forEach(it => {
+                sumCost += it.cost || 0;
+                sumCredits += it.credits || 0;
+                sumNet += it.net_cost || 0;
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50/70 transition';
+
+                // 1. Servicio
+                const servBadge = getServiceBadge(it.service_description);
+
+                // 2. Organización / Proyecto (en la misma línea)
+                const orgBadge = it.organization === 'maderasplanes.com'
+                    ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">maderasplanes.com</span>'
+                    : '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">planesnet.com</span>';
+
+                const projHtml = `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200" title="ID: ${it.project_id}">
+                    <span>${it.project_name || it.project_id}</span>
+                </span>`;
+
+                // 3. SKU
+                const skuHtml = `<div class="font-medium text-slate-800 leading-snug" title="${it.sku_description}">${it.sku_description}</div>`;
+
+                // 4. Modelo [modelo]
+                const modelHtml = it.model
+                    ? `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs whitespace-nowrap">
+                        <span class="text-purple-500">✦</span>
+                        <span>${it.model}</span>
+                    </span>`
+                    : '<span class="text-slate-300 font-mono text-center block">-</span>';
+
+                // 5. Usuario [usuario]
+                const userHtml = it.user
+                    ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">${it.user}</span>`
+                    : '<span class="text-slate-300 font-mono text-center block">-</span>';
+
+                // 6. Coste Bruto
+                const costHtml = `<span class="font-mono text-slate-600">${formatCurrency(it.cost, currency)}</span>`;
+
+                // 7. Créditos
+                const creditsHtml = it.credits < 0
+                    ? `<span class="font-mono text-emerald-600 font-medium">${formatCurrency(it.credits, currency)}</span>`
+                    : `<span class="font-mono text-slate-400">0,00 ${currency === 'EUR' ? '€' : '$'}</span>`;
+
+                // 8. Coste Neto
+                const netHtml = `<span class="font-mono font-bold text-slate-900">${formatCurrency(it.net_cost, currency)}</span>`;
+
+                tr.innerHTML = `
+                    <td class="px-5 py-3 whitespace-nowrap">${servBadge}</td>
+                    <td class="px-5 py-3 whitespace-nowrap">
+                        <div class="inline-flex items-center space-x-1.5">
+                            ${orgBadge}
+                            ${projHtml}
+                        </div>
+                    </td>
+                    <td class="px-5 py-3 max-w-md">${skuHtml}</td>
+                    <td class="px-5 py-3 text-center whitespace-nowrap">${modelHtml}</td>
+                    <td class="px-5 py-3 text-center whitespace-nowrap">${userHtml}</td>
+                    <td class="px-5 py-3 text-right whitespace-nowrap">${costHtml}</td>
+                    <td class="px-5 py-3 text-right whitespace-nowrap">${creditsHtml}</td>
+                    <td class="px-5 py-3 text-right whitespace-nowrap">${netHtml}</td>
+                `;
+
+                tbody.appendChild(tr);
+            });
+
+            // Actualizar fila de totales filtrados en el pie de tabla
+            document.getElementById('tfoot-cost').textContent = formatCurrency(sumCost, currency);
+            document.getElementById('tfoot-credits').textContent = formatCurrency(sumCredits, currency);
+            document.getElementById('tfoot-net').textContent = formatCurrency(sumNet, currency);
+        }
+
+        function getServiceBadge(serv) {
+            const s = (serv || 'Otro').trim();
+            if (s.toLowerCase().includes('vertex ai') || s.toLowerCase().includes('gemini') || s.toLowerCase().includes('generative')) {
+                return `<span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-violet-500 mr-1.5"></span>${s}
+                </span>`;
+            }
+            if (s.toLowerCase().includes('compute engine')) {
+                return `<span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-sky-500 mr-1.5"></span>${s}
+                </span>`;
+            }
+            if (s.toLowerCase().includes('cloud storage')) {
+                return `<span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>${s}
+                </span>`;
+            }
+            if (s.toLowerCase().includes('networking') || s.toLowerCase().includes('ip')) {
+                return `<span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-teal-50 text-teal-700 border border-teal-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-teal-500 mr-1.5"></span>${s}
+                </span>`;
+            }
+            return `<span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>${s}
+            </span>`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDetail(false);
+        });
+    </script>
+</body>
+</html>

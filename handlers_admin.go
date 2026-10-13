@@ -61,6 +61,66 @@ func (state *AppState) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleAdminInvoiceDetail gestiona la página dedicada al desglose de una factura mensual
+func (state *AppState) handleAdminInvoiceDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session := state.getSession(r)
+	if session == nil {
+		http.Redirect(w, r, "/login?next="+r.URL.RequestURI(), http.StatusFound)
+		return
+	}
+
+	// Seguridad crítica: solo administradores autenticados mediante Google OAuth
+	if session.IsAdmin() && session.AuthMethod != "google" {
+		state.mu.RLock()
+		googleAuthEnabled := state.cfg != nil && state.cfg.GoogleAuth.Enabled
+		state.mu.RUnlock()
+
+		if googleAuthEnabled {
+			http.Redirect(w, r, "/auth/google?next="+r.URL.RequestURI(), http.StatusFound)
+			return
+		}
+		http.Error(w, "Acceso restringido: requiere autenticación con Google", http.StatusForbidden)
+		return
+	}
+
+	if !session.IsAdmin() || session.AuthMethod != "google" {
+		http.Error(w, "Acceso no autorizado", http.StatusForbidden)
+		return
+	}
+
+	monthParam := strings.TrimSpace(r.URL.Query().Get("month"))
+	if monthParam == "" {
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
+	}
+
+	tmpl, err := template.ParseFiles("templates/admin_detail.html")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error cargando plantilla admin_detail.html: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		Version string
+		Session *SessionData
+		Month   string
+	}{
+		Version: Version,
+		Session: session,
+		Month:   monthParam,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("[ADMIN] Error ejecutando plantilla admin_detail.html: %v", err)
+	}
+}
+
 // handleAPIAdminGCPInvoices devuelve las facturas mensuales de BigQuery en formato JSON
 func (state *AppState) handleAPIAdminGCPInvoices(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

@@ -278,12 +278,13 @@ ORDER BY invoice_month DESC, billing_account_id`, fullTable)
 
 // InvoiceDetailItem representa una línea de desglose de facturación
 type InvoiceDetailItem struct {
+	ServiceDescription string  `json:"service_description"`
 	Organization       string  `json:"organization"`
 	ProjectID          string  `json:"project_id"`
 	ProjectName        string  `json:"project_name"`
-	ServiceDescription string  `json:"service_description"`
 	SKUDescription     string  `json:"sku_description"`
 	Model              string  `json:"model,omitempty"`
+	User               string  `json:"user,omitempty"`
 	Cost               float64 `json:"cost"`
 	Credits            float64 `json:"credits"`
 	NetCost            float64 `json:"net_cost"`
@@ -374,17 +375,17 @@ func ResolveOrganization(projectID, projectName string) string {
 // BuildDetailQuerySQL genera la consulta SQL para extraer el detalle desglosado de un mes
 func BuildDetailQuerySQL(fullTable, invoiceMonthClean string) string {
 	return fmt.Sprintf(`SELECT
+  service.description AS service_description,
   project.id AS project_id,
   IFNULL(project.name, '') AS project_name,
-  service.description AS service_description,
   sku.description AS sku_description,
   SUM(cost) AS cost,
   SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS credits,
   currency
 FROM `+"`%s`"+`
 WHERE REPLACE(invoice.month, '-', '') = '%s'
-GROUP BY project_id, project_name, service_description, sku_description, currency
-ORDER BY cost DESC`, fullTable, invoiceMonthClean)
+GROUP BY service_description, project_id, project_name, sku_description, currency
+ORDER BY service_description ASC, cost DESC`, fullTable, invoiceMonthClean)
 }
 
 // BillingService administra las consultas a BigQuery y la caché en memoria de 15 minutos
@@ -526,9 +527,9 @@ func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth stri
 		if len(r.F) < 7 {
 			continue
 		}
-		projID := getStringVal(r.F[0].V)
-		projName := getStringVal(r.F[1].V)
-		servDesc := getStringVal(r.F[2].V)
+		servDesc := getStringVal(r.F[0].V)
+		projID := getStringVal(r.F[1].V)
+		projName := getStringVal(r.F[2].V)
 		skuDesc := getStringVal(r.F[3].V)
 		cost := round2(parseFloat(getStringVal(r.F[4].V)))
 		credits := round2(parseFloat(getStringVal(r.F[5].V)))
@@ -542,12 +543,13 @@ func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth stri
 		model := ExtractModel(skuDesc)
 
 		items = append(items, InvoiceDetailItem{
+			ServiceDescription: servDesc,
 			Organization:       org,
 			ProjectID:          projID,
 			ProjectName:        projName,
-			ServiceDescription: servDesc,
 			SKUDescription:     skuDesc,
 			Model:              model,
+			User:               "",
 			Cost:               cost,
 			Credits:            credits,
 			NetCost:            netCost,
@@ -558,7 +560,10 @@ func (s *BillingService) GetInvoiceDetail(ctx context.Context, invoiceMonth stri
 		totalCredits = round2(totalCredits + credits)
 	}
 
-	sort.Slice(items, func(i, j int) bool {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].ServiceDescription != items[j].ServiceDescription {
+			return items[i].ServiceDescription < items[j].ServiceDescription
+		}
 		return items[i].NetCost > items[j].NetCost
 	})
 

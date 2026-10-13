@@ -511,9 +511,9 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 			Rows: []BQRow{
 				{
 					F: []BQField{
+						{V: "Vertex AI"},
 						{V: "planes-dev"},
 						{V: "Planes Dev"},
-						{V: "Vertex AI"},
 						{V: "Generative AI - Gemini 3.8 Flash GA input"},
 						{V: "120.50"},
 						{V: "-20.50"},
@@ -522,9 +522,9 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 				},
 				{
 					F: []BQField{
+						{V: "Compute Engine"},
 						{V: "maderasplanes-odoo-erp"},
 						{V: "Maderas Odoo"},
-						{V: "Compute Engine"},
 						{V: "N2 Instance Core"},
 						{V: "80.00"},
 						{V: "0.00"},
@@ -550,28 +550,33 @@ func TestGetInvoiceDetailMock(t *testing.T) {
 		t.Fatalf("se esperaban 2 items, obtenidos %d", len(detail.Items))
 	}
 
-	// Comprobar primer item (Vertex AI con Gemini)
+	// Ordenado por ServiceDescription ASC: primero Compute Engine, luego Vertex AI
 	item0 := detail.Items[0]
-	if item0.Organization != "planesnet.com" {
-		t.Errorf("organizacion esperada planesnet.com, obtenida %s", item0.Organization)
+	if item0.ServiceDescription != "Compute Engine" {
+		t.Errorf("servicio esperado Compute Engine, obtenido %s", item0.ServiceDescription)
 	}
-	if item0.Model != "Gemini 3.8 Flash" {
-		t.Errorf("modelo esperado 'Gemini 3.8 Flash', obtenido %s", item0.Model)
+	if item0.Organization != "maderasplanes.com" {
+		t.Errorf("organizacion esperada maderasplanes.com, obtenida %s", item0.Organization)
 	}
-	if item0.NetCost != 100.00 {
-		t.Errorf("net cost esperado 100.00, obtenido %f", item0.NetCost)
+	if item0.Model != "" {
+		t.Errorf("modelo esperado vacio, obtenido %s", item0.Model)
+	}
+	if item0.NetCost != 80.00 {
+		t.Errorf("net cost esperado 80.00, obtenido %f", item0.NetCost)
 	}
 
-	// Comprobar segundo item (Maderas Planes)
 	item1 := detail.Items[1]
-	if item1.Organization != "maderasplanes.com" {
-		t.Errorf("organizacion esperada maderasplanes.com, obtenida %s", item1.Organization)
+	if item1.ServiceDescription != "Vertex AI" {
+		t.Errorf("servicio esperado Vertex AI, obtenido %s", item1.ServiceDescription)
 	}
-	if item1.Model != "" {
-		t.Errorf("modelo esperado vacio, obtenido %s", item1.Model)
+	if item1.Organization != "planesnet.com" {
+		t.Errorf("organizacion esperada planesnet.com, obtenida %s", item1.Organization)
 	}
-	if item1.NetCost != 80.00 {
-		t.Errorf("net cost esperado 80.00, obtenido %f", item1.NetCost)
+	if item1.Model != "Gemini 3.8 Flash" {
+		t.Errorf("modelo esperado 'Gemini 3.8 Flash', obtenido %s", item1.Model)
+	}
+	if item1.NetCost != 100.00 {
+		t.Errorf("net cost esperado 100.00, obtenido %f", item1.NetCost)
 	}
 
 	if detail.TotalCost != 200.50 {
