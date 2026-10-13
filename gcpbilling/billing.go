@@ -421,11 +421,22 @@ func (s *BillingService) executeQuery(ctx context.Context, cfg TableConfig, toke
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
+		rawMsg := ""
+		code := httpResp.StatusCode
 		if bqResp.Error != nil && bqResp.Error.Message != "" {
-			return nil, fmt.Errorf("error de BigQuery (%d): %s", bqResp.Error.Code, bqResp.Error.Message)
+			rawMsg = bqResp.Error.Message
+			if bqResp.Error.Code > 0 {
+				code = bqResp.Error.Code
+			}
+		} else if len(bqResp.Errors) > 0 {
+			rawMsg = bqResp.Errors[0].Message
 		}
-		if len(bqResp.Errors) > 0 {
-			return nil, fmt.Errorf("error de BigQuery: %s", bqResp.Errors[0].Message)
+
+		if rawMsg != "" {
+			if strings.Contains(strings.ToLower(rawMsg), "insufficient authentication scopes") {
+				return nil, fmt.Errorf("error de BigQuery (%d): %s. Causa: la máquina virtual de Google Cloud donde ejecuta PlanesGo tiene restringidos los ámbitos de acceso (Access Scopes). Solución: configure una clave de cuenta de servicio en la variable GCP_BILLING_SA_JSON (o GOOGLE_APPLICATION_CREDENTIALS), o bien edite la VM en Google Cloud para habilitar el ámbito 'cloud-platform'", code, rawMsg)
+			}
+			return nil, fmt.Errorf("error de BigQuery (%d): %s", code, rawMsg)
 		}
 		return nil, fmt.Errorf("BigQuery devolvió error HTTP %d: %s", httpResp.StatusCode, string(respBytes))
 	}

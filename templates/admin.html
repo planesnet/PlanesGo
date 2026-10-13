@@ -129,14 +129,15 @@
                                 <span class="block mt-0.5 text-amber-700 text-[11px] font-semibold">Importante: La exportación de Google Cloud solo guarda datos a partir del día en que se activa (no contiene datos retroactivos).</span>
                             </li>
                             <li>
-                                <strong>Permisos de la cuenta de servicio:</strong> Otorga a la cuenta de servicio que ejecuta PlanesGo los roles:
-                                <ul class="list-disc list-inside ml-4 mt-1 font-mono text-[11px] text-slate-700">
-                                    <li><code>roles/bigquery.jobUser</code> en el proyecto donde se lanza la consulta.</li>
-                                    <li><code>roles/bigquery.dataViewer</code> en el dataset de BigQuery.</li>
+                                <strong>Permisos y Credenciales de Google Cloud:</strong>
+                                <ul class="list-disc list-inside ml-4 mt-1 space-y-1 text-slate-700">
+                                    <li>Asignar roles <code>roles/bigquery.jobUser</code> (proyecto) y <code>roles/bigquery.dataViewer</code> (dataset).</li>
+                                    <li><strong>Recomendado (evita parada de VM):</strong> Genera una clave JSON de cuenta de servicio y configúrala en la variable de entorno <code>GCP_BILLING_SA_JSON</code> (o la ruta en <code>GOOGLE_APPLICATION_CREDENTIALS</code>).</li>
+                                    <li><strong>Si usas la identidad de la VM de Compute Engine:</strong> Las máquinas virtuales por defecto tienen restringidos los ámbitos de API (Access Scopes). Es necesario editar la VM y cambiar a <em>«Permitir acceso total a todas las APIs de Cloud»</em> (<code>cloud-platform</code>).</li>
                                 </ul>
                             </li>
                             <li>
-                                <strong>Variable de entorno:</strong> Configura la variable <code>GCP_BILLING_EXPORT_TABLE</code> en el despliegue con <code>proyecto.dataset.tabla</code> (o <code>proyecto.dataset</code>).
+                                <strong>Variable de entorno de la tabla:</strong> Opcionalmente define <code>GCP_BILLING_EXPORT_TABLE</code> si el dataset no es el predeterminado (<code>autopyme.gcp_billing_export</code>).
                             </li>
                         </ol>
                     </div>

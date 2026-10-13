@@ -20,7 +20,7 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
-var Version = "1.2.85"
+var Version = "1.2.86"
 
 // BuildStamp identifica de forma única cada arranque del proceso (cada despliegue reinicia
 // el binario). Se usa como cache-buster de los estáticos de /m y para la auto-actualización
