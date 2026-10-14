@@ -142,11 +142,17 @@
                     </div>
                 </div>
 
-                <!-- Contador visible -->
-                <div class="flex items-center space-x-2 text-xs">
+                <!-- Contador visible y Botón Copiar -->
+                <div class="flex flex-wrap items-center gap-2.5 text-xs">
                     <span class="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-600 font-medium shadow-2xs">
                         Mostrando <strong id="filter-count" class="text-slate-900">0</strong> de <strong id="filter-total" class="text-slate-900">0</strong> partidas
                     </span>
+                    <button id="btn-copy" onclick="copyTableToClipboard()" class="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-xl border border-slate-200 shadow-2xs hover:border-slate-300 transition cursor-pointer active:scale-95" title="Copiar el detalle visible tal como se ve en pantalla para pegar en Google Sheets">
+                        <svg id="copy-icon" class="w-3.5 h-3.5 text-slate-500 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                        </svg>
+                        <span id="copy-text">Copiar para Google Sheets</span>
+                    </button>
                 </div>
             </div>
 
@@ -254,6 +260,7 @@
             monthParam = urlParams.get('month') || "";
         }
         let detailData = null;
+        let currentFilteredItems = [];
         let currentSortCol = 'service_description';
         let currentSortDir = 'asc';
 
@@ -436,8 +443,16 @@
                 return currentSortDir === 'asc' ? cmp : -cmp;
             });
 
+            currentFilteredItems = filtered;
             document.getElementById('filter-count').textContent = filtered.length;
             document.getElementById('filter-total').textContent = items.length;
+
+            const btnCopy = document.getElementById('btn-copy');
+            if (btnCopy) {
+                btnCopy.disabled = filtered.length === 0;
+                btnCopy.classList.toggle('opacity-50', filtered.length === 0);
+                btnCopy.classList.toggle('cursor-not-allowed', filtered.length === 0);
+            }
 
             const table = document.getElementById('state-table');
             const emptyFilter = document.getElementById('state-empty-filter');
@@ -540,6 +555,153 @@
             return `<span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10.5px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
                 <span class="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>${s}
             </span>`;
+        }
+
+        async function copyTableToClipboard() {
+            if (!currentFilteredItems || currentFilteredItems.length === 0) {
+                return;
+            }
+
+            const currency = detailData?.currency || 'USD';
+            let sumCost = 0;
+            let sumCredits = 0;
+            let sumNet = 0;
+
+            const headers = ['Servicio', 'Organización / Proyecto', 'Coste Bruto', 'Créditos', 'Coste Neto'];
+            let tsvLines = [headers.join('\t')];
+            let htmlRows = '';
+
+            currentFilteredItems.forEach(it => {
+                sumCost += it.cost || 0;
+                sumCredits += it.credits || 0;
+                sumNet += it.net_cost || 0;
+
+                const serv = it.service_description || 'Otro';
+                const org = it.organization || '';
+                const proj = it.project_name || it.project_id || '';
+                const orgProj = org ? `${org} / ${proj}` : proj;
+
+                const costStr = formatCurrency(it.cost || 0, currency);
+                const creditsStr = (it.credits || 0) < 0 ? formatCurrency(it.credits, currency) : formatCurrency(0, currency);
+                const netStr = formatCurrency(it.net_cost || 0, currency);
+
+                // TSV para Google Sheets (portapapeles plano)
+                tsvLines.push([serv, orgProj, costStr, creditsStr, netStr].join('\t'));
+
+                // HTML para Google Sheets (portapapeles estructurado con estilos y alineaciones)
+                htmlRows += `<tr>
+                    <td style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left;">${escapeHtml(serv)}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left;">${escapeHtml(orgProj)}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: right; font-family: monospace;">${costStr}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: right; font-family: monospace;">${creditsStr}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: right; font-family: monospace; font-weight: bold;">${netStr}</td>
+                </tr>`;
+            });
+
+            const totalCostStr = formatCurrency(sumCost, currency);
+            const totalCreditsStr = formatCurrency(sumCredits, currency);
+            const totalNetStr = formatCurrency(sumNet, currency);
+
+            tsvLines.push(['Total Filtrado:', '', totalCostStr, totalCreditsStr, totalNetStr].join('\t'));
+
+            const tsvContent = tsvLines.join('\n');
+            const htmlContent = `<table style="border-collapse: collapse; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px;">
+                <thead>
+                    <tr style="background-color: #f1f5f9; font-weight: bold;">
+                        <th style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left;">Servicio</th>
+                        <th style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left;">Organización / Proyecto</th>
+                        <th style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right;">Coste Bruto</th>
+                        <th style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right;">Créditos</th>
+                        <th style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right;">Coste Neto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${htmlRows}
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f8fafc; font-weight: bold;">
+                        <td colspan="2" style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right;">Total Filtrado:</td>
+                        <td style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right; font-family: monospace;">${totalCostStr}</td>
+                        <td style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right; font-family: monospace;">${totalCreditsStr}</td>
+                        <td style="border: 1px solid #cbd5e1; padding: 8px 10px; text-align: right; font-family: monospace; font-weight: bold;">${totalNetStr}</td>
+                    </tr>
+                </tfoot>
+            </table>`;
+
+            let success = false;
+            try {
+                if (navigator.clipboard && window.ClipboardItem) {
+                    const item = new ClipboardItem({
+                        'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                        'text/plain': new Blob([tsvContent], { type: 'text/plain' })
+                    });
+                    await navigator.clipboard.write([item]);
+                    success = true;
+                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(tsvContent);
+                    success = true;
+                } else {
+                    success = copyFallback(tsvContent);
+                }
+            } catch (err) {
+                try {
+                    await navigator.clipboard.writeText(tsvContent);
+                    success = true;
+                } catch (err2) {
+                    success = copyFallback(tsvContent);
+                }
+            }
+
+            if (success) {
+                showCopySuccess();
+            }
+        }
+
+        function escapeHtml(text) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text || '').replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function copyFallback(text) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                ta.style.top = '-9999px';
+                ta.setAttribute('readonly', '');
+                document.body.appendChild(ta);
+                ta.select();
+                const res = document.execCommand('copy');
+                document.body.removeChild(ta);
+                return res;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function showCopySuccess() {
+            const btn = document.getElementById('btn-copy');
+            const icon = document.getElementById('copy-icon');
+            const text = document.getElementById('copy-text');
+            if (!btn || !icon || !text) return;
+
+            const origHtml = icon.outerHTML;
+            const origText = text.textContent;
+            const origClasses = btn.className;
+
+            btn.className = 'inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 font-semibold rounded-xl border border-emerald-300 shadow-2xs transition';
+            icon.outerHTML = `<svg id="copy-icon" class="w-3.5 h-3.5 text-emerald-600 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>`;
+            text.textContent = '¡Copiado!';
+
+            setTimeout(() => {
+                btn.className = origClasses;
+                const newIcon = document.getElementById('copy-icon');
+                if (newIcon) {
+                    newIcon.outerHTML = origHtml;
+                }
+                text.textContent = origText;
+            }, 2500);
         }
 
         document.addEventListener('DOMContentLoaded', () => {
