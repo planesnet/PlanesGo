@@ -102,8 +102,36 @@ def git_root(path):
     return None
 
 
-def load_config(root):
-    """.planesgo.json estrictamente en la raíz del proyecto (sin padres ni hijos)."""
+def sanitize_session_id(sid):
+    s = re.sub(r"[^A-Za-z0-9._-]", "_", str(sid or "").strip()).strip(".")
+    return s[:120]
+
+
+def session_config_path(payload):
+    if not isinstance(payload, dict):
+        return None
+    safe = sanitize_session_id(payload.get("session_id"))
+    if not safe:
+        return None
+    sdir = os.environ.get("PLANESGO_SESSIONS_DIR") or "/tmp/planesgo-sessions"
+    return os.path.join(sdir, safe + ".json")
+
+
+def load_config(root, payload=None):
+    """Carga el proyecto vinculado a la sesión actual (Opción 1) o, en su defecto, .planesgo.json en la raíz."""
+    scand = session_config_path(payload)
+    if scand and os.path.isfile(scand):
+        try:
+            with open(scand, "r", encoding="utf-8") as f:
+                scfg = json.load(f)
+            if int(scfg.get("odoo_project_id", 0) or 0) > 0:
+                saved_path = scfg.get("project_path")
+                if not saved_path or not root or os.path.abspath(saved_path) == os.path.abspath(root):
+                    return scfg
+        except Exception:
+            pass
+    if not root:
+        return None
     cand = os.path.join(root, ".planesgo.json")
     try:
         with open(cand, "r", encoding="utf-8") as f:
@@ -115,7 +143,7 @@ def load_config(root):
     return None
 
 
-def project_root_for_dir(d):
+def project_root_for_dir(d, payload=None):
     """Raíz del proyecto para un directorio de trabajo: el propio dir si tiene .planesgo.json, si no la raíz git, si no el dir."""
     if not d or is_exempt(d):
         return None
@@ -129,13 +157,13 @@ def project_root_for_dir(d):
     # de la sesión (/home/user): si solo uno de ellos está vinculado, es ese proyecto
     try:
         linked = [os.path.join(d, n) for n in sorted(os.listdir(d))
-                  if os.path.isdir(os.path.join(d, n, ".git")) and load_config(os.path.join(d, n))]
+                  if os.path.isdir(os.path.join(d, n, ".git")) and load_config(os.path.join(d, n), payload)]
     except OSError:
         linked = []
     return linked[0] if len(linked) == 1 else d
 
 
-def project_root_for_file(path, session_dir):
+def project_root_for_file(path, session_dir, payload=None):
     """Raíz del proyecto al que pertenece un fichero, o None si no pertenece a ninguno."""
     if not path or is_exempt(path):
         return None
@@ -143,7 +171,7 @@ def project_root_for_file(path, session_dir):
     root = git_root(os.path.dirname(p))
     if root:
         return root
-    sd = project_root_for_dir(session_dir)
+    sd = project_root_for_dir(session_dir, payload)
     if sd and (p == sd or p.startswith(sd + os.sep)):
         return sd
     return None
@@ -424,7 +452,7 @@ def on_context(payload, event):
                 cancel_consolidation(state)
         except Exception:
             pass
-    root = project_root_for_dir(session_dir(payload))
+    root = project_root_for_dir(session_dir(payload), payload)
     if not root:
         return
     if not has_token():
@@ -434,12 +462,12 @@ def on_context(payload, event):
             "y guardarlo en ~/.planesgo_auth.json antes de trabajar en este proyecto."
         ))
         return
-    cfg = load_config(root)
+    cfg = load_config(root, payload)
     if not cfg:
         emit_context(event, unlinked_instructions(root))
         return
     if event == "SessionStart":
-        run_bin(["--check", "--path", root], background=True)
+        run_bin(["--check", "--path", root], background=True, payload=payload)
         emit_context(event, (
             f"Imputación horaria activa: proyecto '{cfg.get('odoo_project_name', '')}', "
             f"tarea '{TASK_NAME}', tipo '{TASK_TYPE}'. Los latidos se envían automáticamente."
@@ -470,9 +498,9 @@ def target_root(payload):
         path = args.get("file_path") or args.get("notebook_path") or ""
         if os.path.basename(path) in (".planesgo.json", ".geminiignore"):
             return None
-        return project_root_for_file(path, sdir)
+        return project_root_for_file(path, sdir, payload)
     if name == "Bash":
-        return project_root_for_dir(payload.get("cwd") or sdir)
+        return project_root_for_dir(payload.get("cwd") or sdir, payload)
     return None
 
 
@@ -489,7 +517,7 @@ def record_session_project(payload, root):
 
 def session_project(payload):
     """Proyecto de esta sesión: el directorio de la sesión o, si es el home, el último proyecto tocado."""
-    root = project_root_for_dir(session_dir(payload))
+    root = project_root_for_dir(session_dir(payload), payload)
     if root:
         return root
     try:
@@ -501,17 +529,28 @@ def session_project(payload):
 
 def on_mcp(payload):
     args = dict(payload.get("tool_input") or {})
-    if args.get("project_path"):
+    tool_name = str(payload.get("tool_name") or "")
+    changed = False
+
+    if not args.get("project_path") and not tool_name.endswith("planesgo_search_projects"):
+        root = session_project(payload)
+        if root:
+            args["project_path"] = root
+            changed = True
+
+    sid = str(payload.get("session_id") or "").strip()
+    if sid and not args.get("session_id") and not tool_name.endswith("planesgo_search_projects"):
+        args["session_id"] = sid
+        changed = True
+
+    if not changed:
         return
-    root = session_project(payload)
-    if not root:
-        # Sin proyecto en la sesión el MCP responde que falta project_path y el agente pregunta al usuario
-        return
-    args["project_path"] = root
+
+    reason_root = args.get("project_path") or session_project(payload) or ""
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
-        "permissionDecisionReason": f"Proyecto de la sesión: {root}",
+        "permissionDecisionReason": f"Proyecto de la sesión: {reason_root}",
         "updatedInput": args,
     }}))
 
@@ -520,9 +559,23 @@ def on_guard(payload):
     root = target_root(payload)
     if root:
         record_session_project(payload, root)
-    if payload.get("tool_name") == "Bash" and is_safe_command((payload.get("tool_input") or {}).get("command")):
-        return
-    if not root or load_config(root):
+    if payload.get("tool_name") == "Bash":
+        args = dict(payload.get("tool_input") or {})
+        cmd = (args.get("command") or "").strip()
+        if is_safe_command(cmd):
+            # Si invoca planesgo-mcp o planesgo-track por CLI y hay session_id, inyectarlo para aislamiento por sesión
+            sid = sanitize_session_id(payload.get("session_id"))
+            if sid and cmd and os.path.basename(cmd.split()[0]) in ("planesgo-mcp", "planesgo-track"):
+                if "--session-id" not in cmd and "PLANESGO_SESSION_ID=" not in cmd:
+                    args["command"] = f"{cmd} --session-id {sid}"
+                    print(json.dumps({"hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "permissionDecisionReason": f"Sesión de imputación: {sid}",
+                        "updatedInput": args,
+                    }}))
+            return
+    if not root or load_config(root, payload):
         return
     deny("Bloqueo PSF: proyecto no vinculado a Odoo.\n" + unlinked_instructions(root))
 
@@ -540,10 +593,18 @@ def on_track(payload):
     root = target_root(payload)
     if not root:
         return
-    cfg = load_config(root)
+    cfg = load_config(root, payload)
     if not cfg:
         return
-    state = os.path.join(session_state_dir(payload), str(int(cfg["odoo_project_id"])))
+    sdir = session_state_dir(payload)
+    proj_id_str = str(int(cfg["odoo_project_id"]))
+    state = os.path.join(sdir, proj_id_str)
+    # Si esta misma sesión tenía un parte abierto en otro proyecto de Odoo y acaba de cambiar de proyecto,
+    # cerrar primero el parte del proyecto anterior para no dejar su cronómetro corriendo.
+    for other_state, other_root in active_projects(sdir):
+        if os.path.abspath(other_state) != os.path.abspath(state):
+            cancel_consolidation(other_state)
+            close_part(payload, other_state, other_root)
     os.makedirs(state, exist_ok=True)
     init_project_state(state, root)
     record_file(payload, state, root)
@@ -551,10 +612,11 @@ def on_track(payload):
     last_file = os.path.join(state, "last_beat")
     now = time.time()
     cancel_consolidation(state)
+    beat_args = ["--beat", "--path", root, "--project-id", proj_id_str, "--desc", build_description(payload, root, state)]
     if not os.path.isfile(active):
         # Primer latido en primer plano: solo se marca activo si Odoo confirma el cronómetro,
         # así el stop final nunca queda huérfano
-        if run_bin(["--beat", "--path", root, "--desc", build_description(payload, root, state)], payload=payload):
+        if run_bin(beat_args, payload=payload):
             with open(active, "w", encoding="utf-8") as f:
                 f.write(root)
             with open(last_file, "w", encoding="utf-8") as f:
@@ -568,8 +630,7 @@ def on_track(payload):
     if now - last >= heartbeat_interval(cfg):
         with open(last_file, "w", encoding="utf-8") as f:
             f.write(str(now))
-        run_bin(["--beat", "--path", root, "--desc", build_description(payload, root, state)],
-                background=True, payload=payload)
+        run_bin(beat_args, background=True, payload=payload)
 
 
 def cancel_consolidation(state):
@@ -607,8 +668,11 @@ def session_tokens(payload, state):
 
 def close_part(payload, state, root):
     """Cierra e imputa en Odoo el parte abierto del proyecto y deja la sesión lista para abrir otro."""
-    ok = run_bin(["--stop", "--path", root, "--desc", build_description(payload, root, state)],
-                 payload=payload, tokens=session_tokens(payload, state))
+    proj_id = os.path.basename(state)
+    stop_args = ["--stop", "--path", root, "--desc", build_description(payload, root, state)]
+    if proj_id.isdigit():
+        stop_args += ["--project-id", proj_id]
+    ok = run_bin(stop_args, payload=payload, tokens=session_tokens(payload, state))
     if ok:
         # Lo siguiente que haga el agente es trabajo nuevo: otro parte, con su propia descripción
         for name in ("active", "last_beat", "files", "start_head", "start_time"):

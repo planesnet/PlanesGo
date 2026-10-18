@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -324,3 +326,191 @@ func TestSendTaskActionWithTokens(t *testing.T) {
 		t.Errorf("ai_session_id esperado 'session-abc', obtenido %v", receivedPayload["ai_session_id"])
 	}
 }
+
+func TestMultiSessionOption1AndOption2(t *testing.T) {
+	sessDir := t.TempDir()
+	t.Setenv("PLANESGO_SESSIONS_DIR", sessDir)
+
+	var mu sync.Mutex
+	var recordedPayloads []map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/antigravity/status":
+			pName := strings.ToUpper(r.URL.Query().Get("project_name"))
+			pID := r.URL.Query().Get("project_id")
+			switch {
+			case pName == "PRO1" || pID == "101":
+				_, _ = w.Write([]byte(`{"status":"ok","project_id": 101, "project_name": "PRO1 - CUENTA CARGO 1"}`))
+			case pName == "PRO2" || pID == "202":
+				_, _ = w.Write([]byte(`{"status":"ok","project_id": 202, "project_name": "PRO2 - CUENTA CARGO 2"}`))
+			case pName == "PRO3" || pID == "303":
+				_, _ = w.Write([]byte(`{"status":"ok","project_id": 303, "project_name": "PRO3 - OVERRIDE EXPLICITO"}`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"proyecto no encontrado"}`))
+			}
+		case "/antigravity/update_tasks":
+			var p map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&p)
+			mu.Lock()
+			recordedPayloads = append(recordedPayloads, p)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/antigravity/tasks":
+			projID := r.URL.Query().Get("project_id")
+			_, _ = w.Write([]byte(`[{"id": 1, "name": "Tarea de proyecto ` + projID + `", "stage_name": "En curso"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("PLANESGO_URL", server.URL)
+	t.Setenv("PLANESGO_TOKEN", "test-multi-session-token")
+
+	repoDir := t.TempDir()
+
+	// --- OPCIÓN 1: Dos sesiones concurrentes en el mismo repo ---
+	// Sesión 1 vincula PRO1 (como el repo aún no tiene .planesgo.json, crea tanto el de sesión como el del repo)
+	res1 := executeToolCall("planesgo_set_project", map[string]interface{}{
+		"project_name": "PRO1",
+		"project_path": repoDir,
+		"session_id":   "sess-1",
+	})
+	if res1.IsError {
+		t.Fatalf("planesgo_set_project sess-1 falló: %+v", res1.Content)
+	}
+
+	// Sesión 2 vincula PRO2 en el MISMO repositorio
+	res2 := executeToolCall("planesgo_set_project", map[string]interface{}{
+		"project_name": "PRO2",
+		"project_path": repoDir,
+		"session_id":   "sess-2",
+	})
+	if res2.IsError {
+		t.Fatalf("planesgo_set_project sess-2 falló: %+v", res2.Content)
+	}
+
+	// 1a. Verificar que .planesgo.json en la raíz del repo sigue siendo PRO1 (no fue pisado por sess-2)
+	repoCfg, _, err := findConfig(repoDir)
+	if err != nil {
+		t.Fatalf("findConfig(repoDir) falló: %v", err)
+	}
+	if repoCfg.OdooProjectID != 101 {
+		t.Errorf("el .planesgo.json del repo fue pisado: esperado ID 101 (PRO1), obtenido %d (%s)", repoCfg.OdooProjectID, repoCfg.OdooProjectName)
+	}
+
+	// 1b. Verificar que cada sesión resuelve su propio proyecto independientemente
+	_, cfg1, err := newClientWithSession("sess-1", repoDir)
+	if err != nil {
+		t.Fatalf("newClientWithSession(sess-1) falló: %v", err)
+	}
+	if cfg1.OdooProjectID != 101 {
+		t.Errorf("sess-1 debería resolver proyecto 101, obtuvo %d", cfg1.OdooProjectID)
+	}
+
+	_, cfg2, err := newClientWithSession("sess-2", repoDir)
+	if err != nil {
+		t.Fatalf("newClientWithSession(sess-2) falló: %v", err)
+	}
+	if cfg2.OdooProjectID != 202 {
+		t.Errorf("sess-2 debería resolver proyecto 202, obtuvo %d", cfg2.OdooProjectID)
+	}
+
+	// 1c. Enviar beat desde sess-1 y desde sess-2 simultáneamente sin pasar project_name explícito
+	if out := executeToolCall("planesgo_beat", map[string]interface{}{
+		"task_name":    "Desarrollo feature A",
+		"task_type":    "Desarrollo",
+		"description":  "Avance en sesión 1",
+		"project_path": repoDir,
+		"session_id":   "sess-1",
+	}); out.IsError {
+		t.Fatalf("planesgo_beat sess-1 falló: %+v", out.Content)
+	}
+
+	if out := executeToolCall("planesgo_beat", map[string]interface{}{
+		"task_name":    "Desarrollo feature B",
+		"task_type":    "Desarrollo",
+		"description":  "Avance en sesión 2",
+		"project_path": repoDir,
+		"session_id":   "sess-2",
+	}); out.IsError {
+		t.Fatalf("planesgo_beat sess-2 falló: %+v", out.Content)
+	}
+
+	mu.Lock()
+	if len(recordedPayloads) != 2 {
+		t.Fatalf("esperados 2 payloads registrados, obtenidos %d", len(recordedPayloads))
+	}
+	p1, p2 := recordedPayloads[0], recordedPayloads[1]
+	mu.Unlock()
+
+	if p1["project_id"] != float64(101) || p1["ai_session_id"] != "sess-1" {
+		t.Errorf("payload sess-1 incorrecto: project_id=%v, ai_session_id=%v", p1["project_id"], p1["ai_session_id"])
+	}
+	if p2["project_id"] != float64(202) || p2["ai_session_id"] != "sess-2" {
+		t.Errorf("payload sess-2 incorrecto: project_id=%v, ai_session_id=%v", p2["project_id"], p2["ai_session_id"])
+	}
+
+	// --- OPCIÓN 2: Override explícito por project_name o project_id en las herramientas ---
+	// 2a. Override por project_name ("PRO3") desde sess-1 (cuya sesión es PRO1)
+	if out := executeToolCall("planesgo_stop", map[string]interface{}{
+		"task_name":    "Cierre en PRO3",
+		"task_type":    "Desarrollo",
+		"description":  "Cierre directo con project_name explícito",
+		"project_path": repoDir,
+		"session_id":   "sess-1",
+		"project_name": "PRO3",
+	}); out.IsError {
+		t.Fatalf("planesgo_stop con project_name=PRO3 falló: %+v", out.Content)
+	}
+
+	mu.Lock()
+	p3 := recordedPayloads[len(recordedPayloads)-1]
+	mu.Unlock()
+	if p3["project_id"] != float64(303) || p3["project_name"] != "PRO3 - OVERRIDE EXPLICITO" {
+		t.Errorf("override por project_name falló: project_id=%v, project_name=%v", p3["project_id"], p3["project_name"])
+	}
+
+	// 2b. Override por project_id numérico (404) sin project_name: no debe arrastrar el nombre antiguo
+	if out := executeToolCall("planesgo_add_hours", map[string]interface{}{
+		"hours":        1.5,
+		"description":  "Imputación directa a ID 404",
+		"project_path": repoDir,
+		"session_id":   "sess-1",
+		"project_id":   float64(404),
+	}); out.IsError {
+		t.Fatalf("planesgo_add_hours con project_id=404 falló: %+v", out.Content)
+	}
+
+	mu.Lock()
+	p4 := recordedPayloads[len(recordedPayloads)-1]
+	mu.Unlock()
+	if p4["project_id"] != float64(404) {
+		t.Errorf("override por project_id falló: esperado 404, obtenido %v", p4["project_id"])
+	}
+	if p4["project_name"] != "" && p4["project_name"] != nil {
+		t.Errorf("override por project_id no debía arrastrar project_name antiguo, obtuvo %v", p4["project_name"])
+	}
+
+	// 2c. planesgo_list_tasks respeta sesión (202) y override explícito (303)
+	tasksOut := executeToolCall("planesgo_list_tasks", map[string]interface{}{
+		"project_path": repoDir,
+		"session_id":   "sess-2",
+	})
+	if tasksOut.IsError || len(tasksOut.Content) == 0 || !strings.Contains(tasksOut.Content[0].Text, "Tarea de proyecto 202") {
+		t.Errorf("planesgo_list_tasks para sess-2 debía consultar project_id=202, obtuvo: %+v", tasksOut.Content)
+	}
+
+	tasksOverrideOut := executeToolCall("planesgo_list_tasks", map[string]interface{}{
+		"project_path": repoDir,
+		"session_id":   "sess-2",
+		"project_name": "PRO3",
+	})
+	if tasksOverrideOut.IsError || len(tasksOverrideOut.Content) == 0 || !strings.Contains(tasksOverrideOut.Content[0].Text, "Tarea de proyecto 303") {
+		t.Errorf("planesgo_list_tasks con override PRO3 debía consultar project_id=303, obtuvo: %+v", tasksOverrideOut.Content)
+	}
+}
+

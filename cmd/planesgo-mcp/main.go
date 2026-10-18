@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	Version       = "1.2.75"
+	Version       = "1.2.76"
 	DefaultServer = "https://planesgo.autopyme.com"
 
 	TaskTypeAnalisisDiseno = "Análisis y diseño"
@@ -275,7 +275,7 @@ const mcpInstructions = "Todo texto que se envíe a PlanesGo (nombres de tarea, 
 	"el código o los commits estén en otro idioma. Las descripciones deben resumir el trabajo realizado " +
 	"de forma clara y concreta."
 
-// Config representa el archivo .planesgo.json encontrado en el proyecto
+// Config representa el archivo .planesgo.json encontrado en el proyecto o la vinculación de sesión
 type Config struct {
 	OdooProjectID            int    `json:"odoo_project_id"`
 	OdooProjectName          string `json:"odoo_project_name"`
@@ -283,9 +283,11 @@ type Config struct {
 	OdooTicketRef            string `json:"odoo_ticket_ref,omitempty"`
 	OdooTaskID               int    `json:"odoo_task_id,omitempty"`
 	PlanesGoURL              string `json:"planesgo_url"`
-	AutoCreateTasks          bool   `json:"auto_create_tasks"`
-	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
-	IdleTimeoutMinutes       int    `json:"idle_timeout_minutes"`
+	ProjectPath              string `json:"project_path,omitempty"`
+	SessionID                string `json:"session_id,omitempty"`
+	AutoCreateTasks          bool   `json:"auto_create_tasks,omitempty"`
+	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds,omitempty"`
+	IdleTimeoutMinutes       int    `json:"idle_timeout_minutes,omitempty"`
 }
 
 // AuthConfig representa el archivo ~/.planesgo_auth.json
@@ -416,10 +418,117 @@ func findConfig(customDir ...string) (*Config, string, error) {
 	return nil, "", fmt.Errorf("no se encontró .planesgo.json estrictamente en el directorio principal del proyecto")
 }
 
+const defaultSessionsDir = "/tmp/planesgo-sessions"
+
+func sessionsDir() string {
+	if d := strings.TrimSpace(os.Getenv("PLANESGO_SESSIONS_DIR")); d != "" {
+		return d
+	}
+	return defaultSessionsDir
+}
+
+func sanitizeSessionID(sessionID string) string {
+	s := strings.TrimSpace(sessionID)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	res := strings.Trim(b.String(), ".")
+	if len(res) > 120 {
+		res = res[:120]
+	}
+	return res
+}
+
+func sessionConfigPath(sessionID string) string {
+	safe := sanitizeSessionID(sessionID)
+	if safe == "" {
+		return ""
+	}
+	return filepath.Join(sessionsDir(), safe+".json")
+}
+
+func resolveSessionID(args map[string]interface{}) string {
+	if args != nil {
+		if v, ok := args["session_id"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+		if v, ok := args["ai_session_id"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv("PLANESGO_SESSION_ID")); env != "" {
+		return env
+	}
+	return ""
+}
+
+// loadSessionConfig carga la configuración de proyecto específica de la sesión (Opción 1),
+// permitiendo que múltiples sesiones en el mismo repositorio imputen a proyectos distintos.
+func loadSessionConfig(sessionID string, projectPath string) (*Config, error) {
+	p := sessionConfigPath(sessionID)
+	if p == "" {
+		return nil, fmt.Errorf("session_id vacío")
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	if cfg.OdooProjectID <= 0 && strings.TrimSpace(cfg.OdooProjectName) == "" {
+		return nil, fmt.Errorf("configuración de sesión sin proyecto")
+	}
+	if projectPath != "" && cfg.ProjectPath != "" {
+		absTarget, err1 := filepath.Abs(projectPath)
+		absSaved, err2 := filepath.Abs(cfg.ProjectPath)
+		if err1 == nil && err2 == nil && filepath.Clean(absTarget) != filepath.Clean(absSaved) {
+			return nil, fmt.Errorf("la sesión está vinculada a otro directorio (%s)", cfg.ProjectPath)
+		}
+	}
+	return &cfg, nil
+}
+
+// saveSessionConfig guarda la configuración de proyecto vinculada a una sesión específica (Opción 1).
+func saveSessionConfig(sessionID string, projectPath string, cfg Config) error {
+	p := sessionConfigPath(sessionID)
+	if p == "" {
+		return fmt.Errorf("session_id vacío")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return err
+	}
+	if projectPath != "" {
+		if abs, err := filepath.Abs(projectPath); err == nil {
+			cfg.ProjectPath = abs
+		} else {
+			cfg.ProjectPath = projectPath
+		}
+	}
+	cfg.SessionID = strings.TrimSpace(sessionID)
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(p, data, 0644)
+}
+
 // getAuth obtiene el token y la URL de PlanesGo
 func getAuth(cfg *Config) (token string, apiURL string, err error) {
 	apiURL = DefaultServer
-	if cfg != nil && cfg.PlanesGoURL != "" {
+	if envURL := strings.TrimSpace(os.Getenv("PLANESGO_URL")); envURL != "" {
+		apiURL = envURL
+	} else if cfg != nil && cfg.PlanesGoURL != "" {
 		apiURL = cfg.PlanesGoURL
 	}
 
@@ -562,7 +671,32 @@ type PlanesGoClient struct {
 }
 
 func newClient(customDir ...string) (*PlanesGoClient, *Config, error) {
+	return newClientWithSession("", customDir...)
+}
+
+func newClientWithSession(sessionID string, customDir ...string) (*PlanesGoClient, *Config, error) {
 	cfg, _, findErr := findConfig(customDir...)
+	var targetDir string
+	for _, d := range customDir {
+		if strings.TrimSpace(d) != "" {
+			targetDir = strings.TrimSpace(d)
+			break
+		}
+	}
+	if targetDir == "" {
+		if cwd := sessionCwd(); cwd != "" && !isBackgroundDir(cwd) {
+			targetDir = cwd
+		}
+	}
+	if sessionID != "" && findErr != errMissingProjectPath {
+		if sessCfg, sessErr := loadSessionConfig(sessionID, targetDir); sessErr == nil && sessCfg != nil {
+			if sessCfg.PlanesGoURL == "" && cfg != nil && cfg.PlanesGoURL != "" {
+				sessCfg.PlanesGoURL = cfg.PlanesGoURL
+			}
+			cfg = sessCfg
+			findErr = nil
+		}
+	}
 	token, apiURL, authErr := getAuth(cfg)
 	if authErr != nil {
 		return nil, cfg, authErr
@@ -1002,18 +1136,47 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		customPath = p
 	}
 
-	client, cfg, err := newClient(customPath)
+	sessionID := resolveSessionID(args)
+
+	// Extraer argumentos explícitos de proyecto (Opción 2: prioridad sobre sesión y .planesgo.json)
+	explicitProjID := 0
+	if val, ok := args["project_id"]; ok {
+		switch v := val.(type) {
+		case float64:
+			explicitProjID = int(v)
+		case int:
+			explicitProjID = v
+		case string:
+			if id, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				explicitProjID = id
+			}
+		}
+	}
+	explicitProjName := ""
+	if val, ok := args["project_name"].(string); ok && strings.TrimSpace(val) != "" {
+		explicitProjName = strings.TrimSpace(val)
+	}
+
+	client, cfg, err := newClientWithSession(sessionID, customPath)
 	if err != nil && name != "planesgo_set_project" && name != "planesgo_search_projects" {
-		return ToolCallResult{
-			Content: []ToolContent{{
-				Type: "text",
-				Text: fmt.Sprintf("❌ Proyecto no vinculado (%v)", err),
-			}},
-			IsError: true,
+		// Permitir Opción 2 incluso si aún no existe .planesgo.json en disco, siempre que haya ruta y token válidos
+		hasExplicitProject := explicitProjID > 0 || explicitProjName != ""
+		hasTicketCode := false
+		if tc, ok := args["ticket_code"].(string); ok && strings.TrimSpace(tc) != "" {
+			hasTicketCode = true
+		}
+		if err == errMissingProjectPath || client == nil || (!hasExplicitProject && !hasTicketCode) {
+			return ToolCallResult{
+				Content: []ToolContent{{
+					Type: "text",
+					Text: fmt.Sprintf("❌ Proyecto no vinculado (%v)", err),
+				}},
+				IsError: true,
+			}
 		}
 	}
 
-	// Resolver proyecto por defecto desde .planesgo.json si existe
+	// Resolver proyecto por defecto desde sesión (Opción 1) o .planesgo.json (Opción 3)
 	projID := 0
 	projName := ""
 	if cfg != nil {
@@ -1021,20 +1184,56 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		projName = cfg.OdooProjectName
 	}
 
-	if val, ok := args["project_id"]; ok {
-		switch v := val.(type) {
-		case float64:
-			projID = int(v)
-		case int:
-			projID = v
-		case string:
-			if id, err := strconv.Atoi(v); err == nil {
-				projID = id
+	// Opción 2: Si el llamador pasa explícitamente project_id o project_name en la llamada,
+	// tiene prioridad absoluta sobre la configuración de sesión o .planesgo.json.
+	// Si pasa project_name sin project_id (y es distinto al del cfg), limpiamos projID para que
+	// el servidor no ignore project_name por culpa del projID antiguo de otro proyecto.
+	if explicitProjID > 0 || explicitProjName != "" {
+		if explicitProjID > 0 && explicitProjName != "" {
+			projID = explicitProjID
+			projName = explicitProjName
+		} else if explicitProjName != "" {
+			if !strings.EqualFold(strings.TrimSpace(projName), explicitProjName) {
+				projID = 0
+				if cfg != nil {
+					cfg.OdooTaskID = 0
+					cfg.OdooTicketID = 0
+					cfg.OdooTicketRef = ""
+				}
+			}
+			projName = explicitProjName
+		} else if explicitProjID > 0 {
+			if projID != explicitProjID {
+				projName = ""
+				if cfg != nil {
+					cfg.OdooTaskID = 0
+					cfg.OdooTicketID = 0
+					cfg.OdooTicketRef = ""
+				}
+			}
+			projID = explicitProjID
+		}
+
+		// Si estamos en una herramienta de imputación/consulta y solo se pasó project_name (projID <= 0),
+		// resolverlo mediante CheckStatus contra PlanesGo para obtener el projID y nombre canónico.
+		if name != "planesgo_set_project" && name != "planesgo_search_projects" && name != "planesgo_check" && client != nil && (projID <= 0 || projName == "") {
+			if res, cErr := client.CheckStatus(projID, projName); cErr == nil {
+				if idVal, ok := res["project_id"].(float64); ok && int(idVal) > 0 {
+					projID = int(idVal)
+				}
+				if pName, ok := res["project_name"].(string); ok && pName != "" {
+					projName = pName
+				}
+			} else if projID <= 0 {
+				return ToolCallResult{
+					Content: []ToolContent{{
+						Type: "text",
+						Text: fmt.Sprintf("❌ Error al validar el proyecto explícito '%s' (ID %d): %v", projName, projID, cErr),
+					}},
+					IsError: true,
+				}
 			}
 		}
-	}
-	if val, ok := args["project_name"].(string); ok && val != "" {
-		projName = val
 	}
 
 	switch name {
@@ -1100,7 +1299,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 
 			ticketInfoStr = fmt.Sprintf(" | Ticket: [%s] %s", ticketRefVal, ticketNameVal)
 
-			// Guardar el proyecto y la tarea asociada en .planesgo.json
+			// Guardar el proyecto y la tarea asociada en la sesión (si hay sessionID) o en .planesgo.json
 			if cfg == nil {
 				cfg = &Config{}
 			}
@@ -1111,10 +1310,14 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			if taskIDVal > 0 {
 				cfg.OdooTaskID = taskIDVal
 			}
-			_ = saveConfigFile(*cfg, customPath)
+			if sessionID != "" {
+				_ = saveSessionConfig(sessionID, customPath, *cfg)
+			} else {
+				_ = saveConfigFile(*cfg, customPath)
+			}
 		}
 
-		if (cfg == nil || projID <= 0) && ticketCode == "" {
+		if projID <= 0 && projName == "" && ticketCode == "" {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
@@ -1190,7 +1393,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_add_hours":
-		if cfg == nil || projID <= 0 {
+		if projID <= 0 {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
@@ -1274,7 +1477,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_beat":
-		if cfg == nil || projID <= 0 {
+		if projID <= 0 {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
@@ -1346,8 +1549,8 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				aiCost = f
 			}
 		}
-		aiSessionID := ""
-		if val, ok := args["ai_session_id"].(string); ok {
+		aiSessionID := sessionID
+		if val, ok := args["ai_session_id"].(string); ok && strings.TrimSpace(val) != "" {
 			aiSessionID = strings.TrimSpace(val)
 		}
 
@@ -1395,7 +1598,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_stop":
-		if cfg == nil || projID <= 0 {
+		if projID <= 0 {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
@@ -1460,8 +1663,8 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 				aiCost = f
 			}
 		}
-		aiSessionID := ""
-		if val, ok := args["ai_session_id"].(string); ok {
+		aiSessionID := sessionID
+		if val, ok := args["ai_session_id"].(string); ok && strings.TrimSpace(val) != "" {
 			aiSessionID = strings.TrimSpace(val)
 		}
 
@@ -1562,11 +1765,15 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			}
 		}
 
-		// Si el ticket cerrado estaba en .planesgo.json, limpiarlo para evitar imputaciones posteriores
+		// Si el ticket cerrado estaba en la sesión o en .planesgo.json, limpiarlo para evitar imputaciones posteriores
 		if cfg != nil && (cfg.OdooTicketRef == ticketToClose || strconv.Itoa(cfg.OdooTicketID) == ticketToClose) {
 			cfg.OdooTicketID = 0
 			cfg.OdooTicketRef = ""
-			_ = saveConfigFile(*cfg, customPath)
+			if sessionID != "" {
+				_ = saveSessionConfig(sessionID, customPath, *cfg)
+			} else {
+				_ = saveConfigFile(*cfg, customPath)
+			}
 		}
 
 		return ToolCallResult{
@@ -1578,7 +1785,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_list_tasks":
-		if cfg == nil || projID <= 0 {
+		if projID <= 0 {
 			return ToolCallResult{
 				Content: []ToolContent{{
 					Type: "text",
@@ -1683,7 +1890,7 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			case int:
 				targetProjID = v
 			case string:
-				if id, err := strconv.Atoi(v); err == nil {
+				if id, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 					targetProjID = id
 				}
 			}
@@ -1770,6 +1977,40 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			OdooProjectName: resolvedName,
 			PlanesGoURL:     apiURL,
 		}
+
+		mainFilePath := filepath.Join(targetDir, ".planesgo.json")
+
+		// Opción 1 (Multi-sesión): Si se proporciona session_id, guardar la vinculación
+		// en el archivo de sesión (/tmp/planesgo-sessions/<session_id>.json) para no pisar
+		// a otras sesiones concurrentes que trabajen en el mismo repositorio.
+		// Solo escribimos en .planesgo.json de la raíz si el repositorio aún no estaba vinculado
+		// (o si no se indicó session_id).
+		if sessionID != "" {
+			if err := saveSessionConfig(sessionID, targetDir, newCfg); err != nil {
+				return ToolCallResult{
+					Content: []ToolContent{{
+						Type: "text",
+						Text: fmt.Sprintf("❌ Error al guardar configuración de sesión (%s): %v", sessionID, err),
+					}},
+					IsError: true,
+				}
+			}
+			repoHasValidCfg := false
+			if existingData, rErr := os.ReadFile(mainFilePath); rErr == nil {
+				var existingCfg Config
+				if json.Unmarshal(existingData, &existingCfg) == nil && existingCfg.OdooProjectID > 0 {
+					repoHasValidCfg = true
+				}
+			}
+			if !repoHasValidCfg {
+				_ = saveConfigFile(newCfg, targetDir)
+			}
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("✅ Proyecto: %s (ID: %d) vinculado a la sesión actual (%s)", resolvedName, resolvedID, sessionID)}},
+				IsError: false,
+			}
+		}
+
 		data, mErr := json.MarshalIndent(newCfg, "", "  ")
 		if mErr != nil {
 			return ToolCallResult{
@@ -1780,7 +2021,6 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		data = append(data, '\n')
 
 		// Escribir estrictamente en la raíz del proyecto principal (sin escribir en padres ni hijos)
-		mainFilePath := filepath.Join(targetDir, ".planesgo.json")
 		if err := os.WriteFile(mainFilePath, data, 0644); err != nil {
 			return ToolCallResult{
 				Content: []ToolContent{{
@@ -1808,7 +2048,7 @@ func getToolsDefinition() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "planesgo_check",
-			"description": "Comprueba el estado de conexión con PlanesGo y Odoo para el proyecto actual (Fase 0 mandatoria de PSF). Valida el token, la vinculación del proyecto y la tarea sobre la que se imputará. Permite indicar opcionalmente un ticket de soporte para vincular automáticamente su proyecto y tarea.",
+			"description": "Comprueba el estado de conexión con PlanesGo y Odoo para el proyecto actual (Fase 0 mandatoria de PSF). Valida el token, la vinculación del proyecto y la tarea sobre la que se imputará. Permite indicar opcionalmente un ticket de soporte, un session_id o un project_name/project_id explícito para sesiones concurrentes.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -1827,11 +2067,15 @@ func getToolsDefinition() []map[string]interface{} {
 					},
 					"project_id": map[string]interface{}{
 						"type":        "integer",
-						"description": "ID numérico del proyecto en Odoo (opcional, se autodetecta de .planesgo.json)",
+						"description": "ID numérico del proyecto en Odoo (opcional: si se indica, tiene prioridad sobre la sesión y .planesgo.json)",
 					},
 					"project_name": map[string]interface{}{
 						"type":        "string",
-						"description": "Nombre del proyecto en Odoo (opcional, se autodetecta de .planesgo.json)",
+						"description": "Nombre del proyecto en Odoo (opcional: si se indica, tiene prioridad sobre la sesión y .planesgo.json)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (Conversation ID en Antigravity o session_id en Claude Code) para usar el proyecto vinculado a esta sesión sin afectar a otras sesiones.",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -1842,7 +2086,7 @@ func getToolsDefinition() []map[string]interface{} {
 		},
 		{
 			"name":        "planesgo_add_hours",
-			"description": "Imputa manualmente N horas de hoy en el proyecto ya vinculado (latido retroactivo de un solo golpe): crea el registro de hoy si no existía, o añade esas horas al que ya hubiera. No busca ni vincula ningún proyecto.",
+			"description": "Imputa manualmente N horas de hoy en el proyecto ya vinculado (latido retroactivo de un solo golpe): crea el registro de hoy si no existía, o añade esas horas al que ya hubiera. Permite indicar opcionalmente session_id o project_name/project_id explícito.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -1863,6 +2107,18 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Resumen breve del trabajo para el parte de horas en Odoo (opcional). Redáctalo siempre en español",
 					},
+					"project_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "ID numérico del proyecto en Odoo al que imputar en esta llamada (opcional)",
+					},
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto en Odoo al que imputar en esta llamada (opcional)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa para resolver el proyecto vinculado a esta sesión (opcional)",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
@@ -1873,7 +2129,7 @@ func getToolsDefinition() []map[string]interface{} {
 		},
 		{
 			"name":        "planesgo_beat",
-			"description": "Envía un latido periódico de telemetría e imputación en tiempo real a PlanesGo y Odoo para la tarea en curso.",
+			"description": "Envía un latido periódico de telemetría e imputación en tiempo real a PlanesGo y Odoo para la tarea en curso. Soporta multi-sesión vía session_id o project_name/project_id explícito.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -1914,6 +2170,18 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Nombre del modelo de IA utilizado (opcional, ej: Gemini 3.8 Flash)",
 					},
+					"project_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "ID numérico del proyecto en Odoo al que imputar este latido (opcional: prioridad sobre sesión y .planesgo.json)",
+					},
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto en Odoo al que imputar este latido (opcional: prioridad sobre sesión y .planesgo.json)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (Conversation ID en Antigravity o session_id en Claude Code) para usar el proyecto vinculado a esta sesión.",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
@@ -1924,7 +2192,7 @@ func getToolsDefinition() []map[string]interface{} {
 		},
 		{
 			"name":        "planesgo_stop",
-			"description": "Detiene el seguimiento de la tarea y consolida las horas definitivas en Odoo.",
+			"description": "Detiene el seguimiento de la tarea y consolida las horas definitivas en Odoo. Soporta multi-sesión vía session_id o project_name/project_id explícito.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -1965,6 +2233,18 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Nombre del modelo de IA utilizado (opcional, ej: Gemini 3.8 Flash)",
 					},
+					"project_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "ID numérico del proyecto en Odoo cuyo temporizador se desea detener (opcional: prioridad sobre sesión y .planesgo.json)",
+					},
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto en Odoo cuyo temporizador se desea detener (opcional: prioridad sobre sesión y .planesgo.json)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (Conversation ID en Antigravity o session_id en Claude Code) para usar el proyecto vinculado a esta sesión.",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Ruta al directorio del proyecto donde se ubica .planesgo.json (opcional)",
@@ -1990,6 +2270,10 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "string",
 						"description": "Descripción detallada del cierre y solución aplicada. Redáctalo siempre en español",
 					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (opcional)",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Ruta al directorio del proyecto (opcional)",
@@ -2008,6 +2292,14 @@ func getToolsDefinition() []map[string]interface{} {
 						"type":        "integer",
 						"description": "ID numérico del proyecto (opcional)",
 					},
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto (opcional)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (opcional)",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Raíz del proyecto de la sesión actual (obligatorio si el MCP no se ejecuta dentro del proyecto)",
@@ -2021,6 +2313,18 @@ func getToolsDefinition() []map[string]interface{} {
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
+					"project_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "ID numérico del proyecto (opcional)",
+					},
+					"project_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre del proyecto (opcional)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (opcional)",
+					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
 						"description": "Raíz del proyecto de la sesión actual (obligatorio si el MCP no se ejecuta dentro del proyecto)",
@@ -2043,7 +2347,7 @@ func getToolsDefinition() []map[string]interface{} {
 		},
 		{
 			"name":        "planesgo_set_project",
-			"description": "Vincula o actualiza el proyecto activo de PlanesGo (.planesgo.json) resolviendo automáticamente el ID y nombre oficial desde Odoo en un solo paso rápido.",
+			"description": "Vincula o actualiza el proyecto activo de PlanesGo resolviendo automáticamente el ID y nombre oficial desde Odoo en un solo paso rápido. Si se pasa 'session_id', vincula el proyecto exclusivamente a esa sesión (/tmp/planesgo-sessions/<session_id>.json) sin sobrescribir el .planesgo.json de otras sesiones.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -2054,6 +2358,10 @@ func getToolsDefinition() []map[string]interface{} {
 					"project_id": map[string]interface{}{
 						"type":        "integer",
 						"description": "ID numérico de Odoo si se conoce directamente (opcional)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Identificador de la sesión activa (Conversation ID en Antigravity o session_id en Claude Code). Si se indica, guarda el proyecto para esta sesión sin pisar el proyecto de otras sesiones abiertas en el mismo repositorio.",
 					},
 					"project_path": map[string]interface{}{
 						"type":        "string",
@@ -2177,10 +2485,11 @@ func main() {
 	beatFlag := flag.Bool("beat", false, "Envía un latido para la tarea indicada")
 	stopFlag := flag.Bool("stop", false, "Detiene la tarea indicada")
 	listFlag := flag.Bool("list", false, "Lista tareas de Odoo para el proyecto actual")
-	setProjFlag := flag.String("set-project", "", "Vincula y configura el proyecto indicado en .planesgo.json")
+	setProjFlag := flag.String("set-project", "", "Vincula y configura el proyecto indicado en .planesgo.json (o en la sesión actual si se usa --session-id)")
 	searchProjFlag := flag.String("search-project", "", "Busca proyectos de Odoo por texto parcial (sin vincular), para encontrar el nombre exacto")
 	initFlag := flag.String("init", "", "Alias de --set-project para inicializar/vincular proyecto")
-	projectFlag := flag.String("project", "", "Alias de --set-project")
+	projectFlag := flag.String("project", "", "Nombre del proyecto explícito para esta operación (o alias de --set-project si se usa solo)")
+	projectIDFlag := flag.Int("project-id", 0, "ID numérico del proyecto en Odoo para esta operación (opcional)")
 	taskFlag := flag.String("task", "", "Nombre de la tarea")
 	typeFlag := flag.String("type", "", "Tipo de tarea: Análisis y diseño, Desarrollo, Pruebas (opcional)")
 	descFlag := flag.String("desc", "", "Descripción del trabajo")
@@ -2192,7 +2501,7 @@ func main() {
 	tokensInFlag := flag.Int("tokens-in", 0, "Tokens de entrada / prompt")
 	tokensOutFlag := flag.Int("tokens-out", 0, "Tokens de salida / respuesta")
 	modelFlag := flag.String("model", "", "Modelo de IA utilizado (ej. Gemini 3.8 Flash)")
-	sessionIDFlag := flag.String("session-id", "", "Identificador de la sesión de IA (se guarda como ai_session_id)")
+	sessionIDFlag := flag.String("session-id", "", "Identificador de la sesión de IA (vincula por sesión y se guarda como ai_session_id)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
 	selfUpdateFlag := flag.Bool("self-update", false, "Reconstruye planesgo-mcp (y el hook/comando) con la versión actual de master")
@@ -2212,6 +2521,22 @@ func main() {
 	// Al menos una vez cada selfUpdateCheckInterval, de forma no bloqueante
 	maybeSpawnBackgroundSelfUpdate()
 
+	applyCommonCLIArgs := func(args map[string]interface{}) {
+		if *pathFlag != "" {
+			args["project_path"] = *pathFlag
+		}
+		if *sessionIDFlag != "" {
+			args["session_id"] = *sessionIDFlag
+			args["ai_session_id"] = *sessionIDFlag
+		}
+		if *projectFlag != "" {
+			args["project_name"] = *projectFlag
+		}
+		if *projectIDFlag > 0 {
+			args["project_id"] = *projectIDFlag
+		}
+	}
+
 	// Modo CLI directo
 	if *closeTicketFlag != "" {
 		args := map[string]interface{}{
@@ -2219,9 +2544,7 @@ func main() {
 			"subject":     *subjectFlag,
 			"description": *descFlag,
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_close_ticket", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2246,12 +2569,10 @@ func main() {
 		if *ticketFlag != "" {
 			args["ticket_code"] = *ticketFlag
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
 		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_check", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2277,9 +2598,6 @@ func main() {
 		if *ticketFlag != "" {
 			args["ticket_code"] = *ticketFlag
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
 		if *tokensFlag > 0 {
 			args["tokens_total"] = float64(*tokensFlag)
 		}
@@ -2292,9 +2610,7 @@ func main() {
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
 		}
-		if *sessionIDFlag != "" {
-			args["ai_session_id"] = *sessionIDFlag
-		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_beat", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2316,9 +2632,6 @@ func main() {
 		if *ticketFlag != "" {
 			args["ticket_code"] = *ticketFlag
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
 		if *tokensFlag > 0 {
 			args["tokens_total"] = float64(*tokensFlag)
 		}
@@ -2331,9 +2644,7 @@ func main() {
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
 		}
-		if *sessionIDFlag != "" {
-			args["ai_session_id"] = *sessionIDFlag
-		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_stop", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2346,9 +2657,7 @@ func main() {
 
 	if *listFlag {
 		args := map[string]interface{}{}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_list_tasks", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2370,12 +2679,10 @@ func main() {
 		if *descFlag != "" {
 			args["description"] = *descFlag
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
 		if *modelFlag != "" {
 			args["ai_model"] = *modelFlag
 		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_add_hours", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
@@ -2401,17 +2708,15 @@ func main() {
 	if targetProj == "" && *initFlag != "" {
 		targetProj = *initFlag
 	}
-	if targetProj == "" && *projectFlag != "" && !*checkFlag && !*beatFlag && !*stopFlag && !*listFlag {
+	if targetProj == "" && *projectFlag != "" && !*checkFlag && !*beatFlag && !*stopFlag && !*listFlag && *addHoursFlag <= 0 {
 		targetProj = *projectFlag
 	}
 
-	if targetProj != "" {
+	if targetProj != "" || (*projectIDFlag > 0 && !*checkFlag && !*beatFlag && !*stopFlag && !*listFlag && *addHoursFlag <= 0) {
 		args := map[string]interface{}{
 			"project_name": targetProj,
 		}
-		if *pathFlag != "" {
-			args["project_path"] = *pathFlag
-		}
+		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_set_project", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)

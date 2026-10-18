@@ -41,7 +41,7 @@
             "timeout": 10
           }
         ],
-        "matcher": "mcp__planesgo__.*"
+        "matcher": "mcp__planesgo(-mcp)?__.*"
       }
     ],
     "PostToolUse": [

@@ -81,18 +81,15 @@ if os.path.exists(path):
 
 hooks = data.setdefault("hooks", {})
 
-def has_mode(entries, mode):
+def ensure(event, matcher, mode, timeout):
+    entries = hooks.setdefault(event, [])
     for group in entries:
         for h in group.get("hooks", []):
             cmd = h.get("command", "")
             if "planesgo_claude_hook.py" in cmd and cmd.strip().endswith(mode):
-                return True
-    return False
-
-def ensure(event, matcher, mode, timeout):
-    entries = hooks.setdefault(event, [])
-    if has_mode(entries, mode):
-        return
+                if matcher:
+                    group["matcher"] = matcher
+                return
     entry = {"hooks": [{"type": "command",
                          "command": f'python3 "$HOME/.claude/hooks/planesgo_claude_hook.py" {mode}',
                          "timeout": timeout}]}
@@ -103,7 +100,7 @@ def ensure(event, matcher, mode, timeout):
 ensure("SessionStart", None, "session-start", 10)
 ensure("UserPromptSubmit", None, "prompt", 10)
 ensure("PreToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "guard", 10)
-ensure("PreToolUse", "mcp__planesgo__.*", "mcp", 10)
+ensure("PreToolUse", "mcp__planesgo(-mcp)?__.*", "mcp", 10)
 ensure("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "track", 25)
 ensure("Stop", None, "turn-end", 10)
 ensure("SessionEnd", None, "session-end", 30)
