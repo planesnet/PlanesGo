@@ -112,6 +112,7 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		depuracion.Log(id, "no arranca: %v", err)
 		return err
 	}
+	proceso.Vigila(cmd.Process.Pid)
 	lee := a.Lee
 	if lee == nil {
 		lee = leeTexto

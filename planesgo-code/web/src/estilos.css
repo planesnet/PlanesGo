@@ -452,3 +452,13 @@ button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
   border: 1px solid #1a7f37; border-radius: 6px; padding: 2px 8px; opacity: 0; }
 .gh-fila-caja:hover .gh-resolver, .gh-resolver:focus-visible, .gh-resolver:disabled { opacity: 1; }
 .gh-resolver:hover:not(:disabled) { background: #1a7f37; color: #fff; }
+
+/* Alojamiento del proyecto */
+.tipos-hosting { display: grid; gap: 6px; }
+.tipo-hosting { display: flex; align-items: flex-start; gap: 10px; text-align: left; border: 1px solid var(--linea); border-radius: 10px; padding: 8px 10px; }
+.tipo-hosting[aria-checked="true"] { border-color: var(--texto); background: var(--hover); }
+.tipo-hosting > span:last-child { display: grid; gap: 2px; font-size: 13px; }
+.tipo-icono { width: 22px; display: grid; place-items: center; flex: none; margin-top: 1px; }
+.campos-hosting { display: grid; gap: 8px; border-top: 1px solid var(--linea); padding-top: 10px; }
+.campos-hosting label { display: grid; gap: 3px; font-size: 12px; color: var(--suave); }
+.campos-hosting input { font-size: 13px; color: var(--texto); }

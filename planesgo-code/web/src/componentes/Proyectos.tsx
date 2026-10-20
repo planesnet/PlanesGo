@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
-import { guardaAjustes, leeAjustes, type AjustesProyecto, type Detalle } from '../ajustes';
+import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
 import './config-sesion.css';
@@ -130,7 +130,7 @@ export default function Proyectos(props: Props) {
                   ]} />
                 )}
               </div>
-              {!plegado && <Sesiones {...props} proyecto={p} lista={ss} alCambiarSesion={cambia} alBorrarSesion={borra} />}
+              {!plegado && <Sesiones {...props} hostingDe={id => leeAjustes(usuario.login, id).hosting?.tipo} proyecto={p} lista={ss} alCambiarSesion={cambia} alBorrarSesion={borra} />}
             </section>
           );
         })}
@@ -141,8 +141,40 @@ export default function Proyectos(props: Props) {
   );
 }
 
+// Alojamiento: tipo de hosting y sus datos de despliegue. Sin elegir, vale el que se deduce del repositorio.
+function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Partial<AjustesProyecto>) => void }) {
+  const tipo = a.hosting?.tipo;
+  const def = TIPOS_HOSTING.find(t => t.id === tipo);
+  const pon = (t: TipoHosting | '') => alCambiar({ hosting: t ? { tipo: t, campos: a.hosting?.campos || {} } : undefined });
+  const campo = (id: string, v: string) => a.hosting && alCambiar({ hosting: { ...a.hosting, campos: { ...a.hosting.campos, [id]: v } } });
+  return <>
+    <h3>Alojamiento</h3>
+    <p className="suave pequeno">Dónde se ejecuta el programa del proyecto y cómo se despliega.</p>
+    <div className="tipos-hosting" role="radiogroup" aria-label="Tipo de alojamiento">
+      <button type="button" role="radio" aria-checked={!tipo} className="tipo-hosting" onClick={() => pon('')}>
+        <span className="tipo-icono"><Icono n="recargar" t={16} /></span><span><b>Según el repositorio</b><span className="suave pequeno">Se deduce de .psf/proyecto.yml</span></span>
+      </button>
+      {TIPOS_HOSTING.map(t => (
+        <button type="button" key={t.id} role="radio" aria-checked={tipo === t.id} className="tipo-hosting" onClick={() => pon(t.id)}>
+          <span className="tipo-icono"><Hosting tipo={t.id} t={20} /></span><span><b>{t.nombre}</b><span className="suave pequeno">{t.descripcion}</span></span>
+        </button>
+      ))}
+    </div>
+    {def && def.campos.length > 0 && (
+      <div className="campos-hosting">
+        {def.campos.map(c => (
+          <label key={c.id}>{c.nombre}
+            <input value={a.hosting?.campos[c.id] || ''} placeholder={c.ejemplo} onChange={e => campo(c.id, e.target.value)} />
+            {c.ayuda && <span className="suave pequeno">{c.ayuda}</span>}
+          </label>
+        ))}
+      </div>
+    )}
+  </>;
+}
+
 // Ventana de propiedades del proyecto: secciones a la izquierda y su detalle a la derecha.
-const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }] as const;
+const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
 type Seccion = typeof SECCIONES[number]['id'];
 const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
   { id: 'conciso', nombre: 'Conciso', ayuda: 'Solo la respuesta del agente. Lo que hace (leer, editar, ejecutar…) queda en una línea «N acciones» que se puede desplegar.' },
@@ -178,6 +210,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
             ))}
           </nav>
           <section className="propiedades-detalle">
+            {seccion === 'alojamiento' && <Alojamiento a={a} alCambiar={cambia} />}
             {seccion === 'conversacion' && <>
               <h3>Conversación</h3>
               <fieldset className="opciones-detalle">
@@ -200,7 +233,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
 }
 
 // Sesiones de un proyecto, como en Claude: icono del hosting, título, rama y menú ⋮ (renombrar, borrar, ajustes).
-function Sesiones({ proyecto, lista, actual, repo, proveedores, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion }: Props & { proyecto: Proyecto; lista: Sesion[] }) {
+function Sesiones({ hostingDe, proyecto, lista, actual, repo, proveedores, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion }: Props & { proyecto: Proyecto; lista: Sesion[]; hostingDe: (id: number) => string | undefined }) {
   // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
   const [ajustes, setAjustes] = useState<string | null>(null);
@@ -215,7 +248,7 @@ function Sesiones({ proyecto, lista, actual, repo, proveedores, sesion, alElegir
             <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
           ) : (
             <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
-              <Hosting tipo={s.tipo} t={13} enBlanco />
+              <Hosting tipo={hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
               <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
               {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
             </button>

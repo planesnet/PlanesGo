@@ -8,6 +8,7 @@ import { Agente, Hosting, nombreHosting } from './Marca';
 
 interface Props {
   detalle: Detalle;
+  hosting?: string; // alojamiento elegido en las propiedades del proyecto (si no, el del repositorio)
   // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
   envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
@@ -21,7 +22,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -130,7 +131,7 @@ export default function Chat({ detalle, envioPendiente, alEnviado, proyecto, ses
       <header className="cabecera">
         {proyecto && sesion ? (
           <nav className="miga" aria-label="Ubicación de la sesión">
-            <span className="miga-item" title={nombreHosting(repo?.tipo)}><Hosting tipo={repo?.tipo} t={16} /></span>
+            <span className="miga-item" title={nombreHosting(hosting || repo?.tipo)}><Hosting tipo={hosting || repo?.tipo} t={16} /></span>
             {repo?.repositorio && <><span className="sep">/</span><span className="miga-item" title={repo.remoto}><Icono n="repo" t={14} /> {repo.repositorio}</span></>}
             {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
             {repo && repo.ramas.length > 0 && (

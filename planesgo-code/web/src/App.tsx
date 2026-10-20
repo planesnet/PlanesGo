@@ -72,7 +72,7 @@ export default function App() {
       usado = false;
       post('/api/actividad', {}).catch(() => {});
     };
-    const eventos = ['keydown', 'pointerdown', 'wheel', 'focus'] as const;
+    const eventos = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'focus'] as const;
     eventos.forEach(ev => window.addEventListener(ev, marca, { passive: true }));
     avisa();
     const t = setInterval(avisa, 20000);
@@ -226,7 +226,7 @@ export default function App() {
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
-      <Chat detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+      <Chat hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}

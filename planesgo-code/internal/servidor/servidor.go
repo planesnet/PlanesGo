@@ -32,6 +32,7 @@ import (
 	"planesgo-code/internal/github"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
+	"planesgo-code/internal/proceso"
 	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/qa"
@@ -119,6 +120,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
 	mux.HandleFunc("POST /api/actualizacion/aplicar", s.conSesion(s.aplicaActualizacion))
+	mux.HandleFunc("POST /api/actualizacion/pausa", s.conSesion(s.pausaActualizacion))
 	mux.HandleFunc("POST /api/actividad", s.conSesion(s.marcaActividad))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
@@ -371,7 +373,7 @@ func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *ses
 
 // Ocupado dice si hay algo en curso que una actualización interrumpiría.
 func (s *Servidor) Ocupado() bool {
-	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || s.usandose() || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
+	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || s.usandose() || proceso.GruposVivos() > 0 || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
 }
 
 func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -381,7 +383,7 @@ func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *se
 	}
 	e := s.Actualizador.Estado()
 	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
-		"revisado": e.Revisado, "ocupado": s.Ocupado()})
+		"revisado": e.Revisado, "ocupado": s.Ocupado(), "pausada": e.Pausada})
 }
 
 // sinUsoAntes: tiempo sin que el usuario toque la app (ni tenga nada a medio escribir) antes de actualizar sola.
@@ -397,6 +399,24 @@ func (s *Servidor) usandose() bool {
 func (s *Servidor) marcaActividad(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	s.actividad.Store(time.Now().UnixNano())
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pausaActualizacion: el usuario pausa o reanuda las actualizaciones automáticas.
+func (s *Servidor) pausaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Pausada bool `json:"pausada"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if s.Actualizador == nil {
+		jsonError(w, http.StatusConflict, "sin autoactualización")
+		return
+	}
+	s.Actualizador.Pausa(p.Pausada)
+	log.Printf("%s: actualizaciones automáticas %s", ses.Login, map[bool]string{true: "en pausa", false: "reanudadas"}[p.Pausada])
+	jsonOK(w, map[string]bool{"pausada": p.Pausada})
 }
 
 // aplicaActualizacion: el usuario pulsa el aviso; se instala ya la versión preparada.

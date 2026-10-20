@@ -50,6 +50,7 @@ type Estado struct {
 	Nueva    string    `json:"nueva,omitempty"` // versión preparada o disponible
 	Error    string    `json:"error,omitempty"`
 	Revisado time.Time `json:"revisado,omitempty"`
+	Pausada  bool      `json:"pausada"` // el usuario ha pausado las actualizaciones automáticas
 }
 
 // Actualizador revisa, descarga y aplica las actualizaciones.
@@ -85,6 +86,9 @@ func Nuevo(url, dirApp, dirPreparado, version string) *Actualizador {
 	default:
 		a.estado.Estado = "al-dia"
 	}
+	if _, err := os.Stat(filepath.Join(dirPreparado, "pausada")); err == nil {
+		a.estado.Pausada = true
+	}
 	return a
 }
 
@@ -93,6 +97,19 @@ func (a *Actualizador) Estado() Estado {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.estado
+}
+
+// Pausa activa o quita la pausa de las actualizaciones automáticas (se recuerda en DirPreparado/pausada).
+// Con la pausa se siguen descargando, pero solo se instalan si el usuario lo pide.
+func (a *Actualizador) Pausa(p bool) {
+	f := filepath.Join(a.DirPreparado, "pausada")
+	if p {
+		os.MkdirAll(a.DirPreparado, 0o755)
+		os.WriteFile(f, nil, 0o600)
+	} else {
+		os.Remove(f)
+	}
+	a.pon(func(e *Estado) { e.Pausada = p })
 }
 
 // BuscarYa pide una revisión inmediata.
@@ -152,7 +169,7 @@ func (a *Actualizador) Funciona(ctx context.Context) {
 				quietoDesde = time.Time{}
 				continue
 			}
-			if a.Ocupado != nil && a.Ocupado() {
+			if a.Estado().Pausada || (a.Ocupado != nil && a.Ocupado()) {
 				quietoDesde = time.Time{}
 				continue
 			}

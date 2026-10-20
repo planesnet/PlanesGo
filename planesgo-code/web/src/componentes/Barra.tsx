@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { get, post, type Usuario } from '../api';
 import Icono from './Icono';
 
-interface EstadoAct { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean }
+interface EstadoAct { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; pausada?: boolean }
 
 const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
 
@@ -37,10 +37,16 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
     setAct(a => a && { ...a, estado: 'aplicando' });
     try { await post('/api/actualizacion/aplicar', {}); } catch { carga(); }
   };
+  const pausa = async () => {
+    const p = !act?.pausada;
+    setAct(a => a && { ...a, pausada: p });
+    await post('/api/actualizacion/pausa', { pausada: p }).catch(() => {});
+    carga();
+  };
   const buscar = async () => { await post('/api/actualizacion/buscar', {}).catch(() => {}); setTimeout(carga, 3000); };
 
   const etiqueta = act && ({
-    pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: 'Pulsa para actualizar ahora (si no, se instalará sola cuando lleves un rato sin usar la app)' },
+    pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: act.pausada ? 'Actualizaciones automáticas en pausa: pulsa para actualizar ahora' : 'Pulsa para actualizar ahora (si no, se instalará sola cuando lleves un rato sin usar la app)' },
     descargando: { texto: `Descargando v${act.nueva}…`, titulo: 'Descargando la nueva versión' },
     aplicando: { texto: 'Actualizando…', titulo: 'Se cierra y se vuelve a abrir con la versión nueva' },
     manual: { texto: `v${act.nueva} · reinstalar`, titulo: act.error || '' },
@@ -63,6 +69,11 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
               <div className="recorta"><b className="recorta">{usuario.nombre}</b><span className="suave pequeno recorta">{usuario.login}</span></div>
             </div>
             <button role="menuitem" onClick={buscar}><Icono n="recargar" t={16} /> Buscar actualizaciones</button>
+            {act && act.estado !== 'desactivada' && (
+              <button role="menuitemcheckbox" aria-checked={Boolean(act.pausada)} onClick={pausa}>
+                <Icono n={act.pausada ? 'ejecutar' : 'parar'} t={16} /> {act.pausada ? 'Reanudar actualizaciones automáticas' : 'Pausar actualizaciones automáticas'}
+              </button>
+            )}
             <button role="menuitem" onClick={() => setAcerca(a => !a)} aria-expanded={acerca}><Icono n="info" t={16} /> Acerca de Planes Go Code</button>
             {acerca && (
               <div className="acerca">
