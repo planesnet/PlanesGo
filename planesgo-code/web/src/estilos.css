@@ -117,11 +117,24 @@ textarea { resize: none; }
 .pestanas button { display: inline-flex; align-items: center; gap: 6px; color: var(--suave); padding: 4px 10px; }
 .pestanas button[aria-selected="true"] { color: var(--texto); background: var(--hover); }
 .contenido-artefacto { min-height: 0; overflow: auto; display: grid; }
+.contenido-artefacto > .navegador { overflow: hidden; }
 
-.navegador { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
-.navegador .barra { display: flex; gap: 2px; padding: 8px 10px; align-items: center; }
-.navegador .barra input { flex: 1; }
-.navegador .vista { width: 100%; height: 100%; min-height: 300px; border: none; background: #fff; display: flex; }
+.navegador { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; height: 100%; background: var(--superficie); }
+.pestanas-web { display: flex; align-items: center; gap: 2px; padding: 6px 6px 0; background: var(--panel); overflow-x: auto; }
+.pestana-web { display: flex; align-items: center; max-width: 200px; min-width: 90px; border-radius: 8px 8px 0 0; padding-right: 2px; }
+.pestana-web.activa { background: var(--superficie); }
+.titulo-pestana { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; font-size: 12.5px; padding: 6px 4px 6px 10px; color: var(--suave); }
+.pestana-web.activa .titulo-pestana { color: var(--texto); }
+.titulo-pestana:hover { background: none !important; }
+.cerrar-pestana { padding: 3px; color: var(--tenue); border-radius: 4px; display: grid; place-items: center; }
+.navegador .barra { display: flex; gap: 2px; padding: 6px 8px; align-items: center; border-bottom: 1px solid var(--linea); }
+.navegador .barra input { flex: 1; border-radius: 16px; background: var(--panel); border-color: transparent; padding: 5px 12px; font-size: 13px; }
+.navegador .barra input:focus { background: var(--superficie); border-color: var(--acento); }
+.espejo { display: inline-grid; transform: scaleX(-1); }
+.vistas { position: relative; min-height: 0; overflow: hidden; }
+.vista-pestana { position: absolute; inset: 0; display: flex; }
+.vista-pestana[hidden] { display: none; }
+.navegador .vista { flex: 1; width: 100%; height: 100%; border: none; background: #fff; display: flex; }
 
 /* Studio TV */
 .studio-conectar { display: grid; gap: 10px; align-content: start; }

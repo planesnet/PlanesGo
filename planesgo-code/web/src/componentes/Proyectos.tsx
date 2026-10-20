@@ -22,7 +22,6 @@ export default function Proyectos({ usuario, actual, inicial, alElegir }: Props)
   const [lista, setLista] = useState<Proyecto[] | null>(null);
   const [error, setError] = useState('');
   const [filtro, setFiltro] = useState('');
-  const [soloLocales, setSoloLocales] = useState(false);
   const [recientes, setRecientes] = useState<number[]>(() => leeRecientes(usuario.login));
 
   // Cada proyecto que se abre pasa a ser el más reciente.
@@ -46,14 +45,14 @@ export default function Proyectos({ usuario, actual, inicial, alElegir }: Props)
   // Sin buscar: solo los recientes, en orden de uso. Buscando: todos los proyectos de Odoo.
   const buscando = filtro.trim() !== '';
   const visibles = useMemo(() => {
-    const todos = (lista || []).filter(p => !soloLocales || p.carpetas.length > 0);
+    const todos = lista || [];
     if (!buscando) {
       const porId = new Map(todos.map(p => [p.id, p]));
       return recientes.map(id => porId.get(id)).filter((p): p is Proyecto => Boolean(p));
     }
     const f = sinAcentos(filtro.trim());
     return todos.filter(p => sinAcentos(p.nombre + ' ' + (p.cliente?.nombre || '')).includes(f));
-  }, [lista, filtro, soloLocales, recientes, buscando]);
+  }, [lista, filtro, recientes, buscando]);
 
   return (
     <nav className="proyectos" aria-label="Proyectos">
@@ -61,7 +60,6 @@ export default function Proyectos({ usuario, actual, inicial, alElegir }: Props)
         <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
         <button className="icono" title="Volver a cargar de Odoo" aria-label="Volver a cargar de Odoo" onClick={() => carga(true)}><Icono n="recargar" t={16} /></button>
       </div>
-      <label className="interruptor"><input type="checkbox" checked={soloLocales} onChange={e => setSoloLocales(e.target.checked)} /> Solo locales</label>
       <div className="lista">
         {error && <p className="error">{error}</p>}
         {!lista && !error && <p className="suave">Cargando proyectos de Odoo…</p>}
