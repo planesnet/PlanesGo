@@ -79,7 +79,7 @@ textarea { resize: none; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
 .busca input { flex: 1; background: transparent; }
 .interruptor { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--suave); padding: 8px 14px 2px; }
-.lista { overflow: auto; padding: 6px; display: grid; align-content: start; gap: 1px; }
+.lista { overflow: auto; padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 1px; }
 .lista p { padding: 6px 8px; margin: 0; }
 .proyecto { text-align: left; border-radius: 6px; padding: 6px 8px; display: grid; gap: 0; }
 .proyecto.activo { background: var(--hover); }
@@ -211,14 +211,14 @@ textarea { resize: none; }
 .acerca > div { display: grid; gap: 1px; min-width: 0; }
 
 /* Sesiones bajo el proyecto activo (como en Claude) */
-.sesiones { display: grid; gap: 1px; padding: 2px 0 6px 10px; position: relative; }
+.sesiones { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding: 2px 0 6px 10px; position: relative; }
 .sesion { position: relative; display: flex; align-items: center; border-radius: 6px; }
 .sesion:hover, .sesion.activa { background: var(--hover); }
 .sesion-boton { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 4px 6px; font-size: 12.5px; text-align: left; }
 .sesion-boton:hover { background: none !important; }
 .sesion.activa .sesion-boton { font-weight: 600; }
 .rama-sesion { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--tenue); margin-left: auto; max-width: 45%; }
-.icono.puntos { min-width: 22px; height: 22px; padding: 0; opacity: 0; }
+.icono.puntos { flex: none; min-width: 22px; height: 22px; padding: 0; opacity: 0; }
 .sesion:hover .icono.puntos, .sesion.activa .icono.puntos, .icono.puntos[aria-expanded="true"] { opacity: 1; }
 .sesion-nueva { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--suave); padding: 4px 6px; }
 .config-sesion { position: absolute; left: 8px; right: 0; top: 100%; z-index: 15; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 10px; display: grid; gap: 8px; }
@@ -287,7 +287,7 @@ textarea { resize: none; }
 .nuevo-comentario textarea { flex: 1; }
 
 /* Lista lateral: proyectos como grupos y sus sesiones debajo (como Claude Code) */
-.grupo { display: grid; margin-bottom: 4px; }
+.grupo { display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: 4px; min-width: 0; }
 .grupo-cabecera { display: flex; align-items: center; gap: 2px; padding: 2px 2px 2px 0; border-radius: 6px; }
 .grupo-cabecera:hover { background: var(--hover); }
 .grupo-nombre { flex: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: 600; color: var(--suave); padding: 4px 2px; }

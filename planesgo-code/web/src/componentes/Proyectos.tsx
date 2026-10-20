@@ -123,126 +123,182 @@ export default function Proyectos(props: Props) {
   );
 }
 
-// Sesiones de un proyecto, como en Claude: icono del hosting, título, rama y menú ⋮ con su configuración.
+// Sesiones de un proyecto, como en Claude: icono del hosting, título, rama y menú ⋮ (renombrar, borrar, ajustes).
 function Sesiones({ proyecto, lista, actual, repo, proveedores, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion }: Props & { proyecto: Proyecto; lista: Sesion[] }) {
-  // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el panel flotante a su lado).
+  // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
+  const [ajustes, setAjustes] = useState<string | null>(null);
+  const [renombrando, setRenombrando] = useState<string | null>(null);
+  const enAjustes = lista.find(s => s.id === ajustes);
   return (
     <div className="sesiones">
       {lista.length === 0 && <p className="sin-sesiones">Sin sesiones</p>}
       {lista.map(s => (
         <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '')}>
-          <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
-            <Hosting tipo={s.tipo} t={13} enBlanco />
-            <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
-            {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
-          </button>
+          {renombrando === s.id ? (
+            <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
+          ) : (
+            <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
+              <Hosting tipo={s.tipo} t={13} enBlanco />
+              <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
+              {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
+            </button>
+          )}
           <button className="icono puntos" onClick={e => { const ancla = e.currentTarget; setMenu(m => m?.id === s.id ? null : { id: s.id, ancla }); }}
-            title="Configuración de la sesión" aria-label="Configuración de la sesión" aria-expanded={menu?.id === s.id}>
+            title="Más opciones" aria-label="Más opciones de la sesión" aria-haspopup="menu" aria-expanded={menu?.id === s.id}>
             <Icono n="puntos" t={15} />
           </button>
           {menu?.id === s.id && (
-            <ConfigSesion s={s} ancla={menu.ancla} repo={actual?.id === proyecto.id && repo?.carpeta === s.carpeta ? repo : null}
-              carpetas={proyecto.carpetas} proveedores={proveedores} alCerrar={() => setMenu(null)}
-              alCambiar={alCambiarSesion} alBorrar={x => { setMenu(null); alBorrarSesion(x); }} />
+            <MenuSesion ancla={menu.ancla} alCerrar={() => setMenu(null)} opciones={[
+              { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
+              { icono: 'borrar', texto: 'Borrar', peligro: true, accion: () => { if (confirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`)) alBorrarSesion(s); } },
+              null,
+              { icono: 'ajustes', texto: 'Ajustes', accion: () => setAjustes(s.id) },
+            ]} />
           )}
         </div>
       ))}
+      {enAjustes && (
+        <AjustesSesion s={enAjustes} repo={actual?.id === proyecto.id && repo?.carpeta === enAjustes.carpeta ? repo : null}
+          carpetas={proyecto.carpetas} proveedores={proveedores} alCerrar={() => setAjustes(null)} alCambiar={alCambiarSesion} />
+      )}
     </div>
   );
 }
 
-const ANCHO_CONFIG = 280, MARGEN = 8;
+// Renombrar en la propia fila: Intro guarda, Escape cancela.
+function Renombra({ s, alFin }: { s: Sesion; alFin: (nombre: string | null) => void }) {
+  const [v, setV] = useState(s.nombre);
+  const hecho = useRef(false);
+  const fin = (n: string | null) => { if (!hecho.current) { hecho.current = true; alFin(n); } };
+  return (
+    <input className="renombra" autoFocus value={v} onChange={e => setV(e.target.value)} aria-label="Nombre de la sesión"
+      onFocus={e => e.currentTarget.select()} onBlur={() => fin(v.trim() || null)}
+      onKeyDown={e => { if (e.key === 'Enter') fin(v.trim() || null); if (e.key === 'Escape') fin(null); }} />
+  );
+}
 
-// Panel flotante de configuración de la sesión: va en un portal sobre document.body con position: fixed,
-// para que no lo recorten la lista de sesiones ni la columna lateral.
-function ConfigSesion({ s, ancla, repo, carpetas, proveedores, alCerrar, alCambiar, alBorrar }: {
-  s: Sesion; ancla: HTMLElement; repo: Repo | null; carpetas: string[]; proveedores: Proveedor[]; alCerrar: () => void; alCambiar: (s: Sesion) => void; alBorrar: (s: Sesion) => void;
-}) {
-  const [nombre, setNombre] = useState(s.nombre);
+type Opcion = { icono: string; texto: string; accion: () => void; peligro?: boolean } | null;
+const ANCHO_MENU = 200, MARGEN = 8;
+
+// Menú flotante del ⋮ (portal sobre document.body, position: fixed), como el de las sesiones de Claude.
+function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; opciones: Opcion[]; alCerrar: () => void }) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const cambia = (c: Partial<Sesion>) => alCambiar({ ...s, ...c });
-  const prov = proveedores.find(p => p.id === s.agente);
+  const caja = useRef<HTMLDivElement>(null);
 
-  // Coloca el panel a la derecha del botón ⋮; si no cabe, debajo; y siempre dentro de la ventana.
-  const coloca = () => {
+  // A la derecha del botón; si no cabe, a su izquierda; y siempre dentro de la ventana.
+  useLayoutEffect(() => {
     const r = ancla.getBoundingClientRect();
-    const alto = panel.current?.offsetHeight ?? 0;
-    const an = window.innerWidth, al = window.innerHeight;
-    let left = r.right + 6, top = r.top;
-    if (left + ANCHO_CONFIG > an - MARGEN) { left = r.right - ANCHO_CONFIG; top = r.bottom + 4; }
-    left = Math.max(MARGEN, Math.min(left, an - ANCHO_CONFIG - MARGEN));
-    if (top + alto > al - MARGEN) top = al - alto - MARGEN;
-    top = Math.max(MARGEN, top);
-    setPos(p => p && p.left === left && p.top === top ? p : { left, top });
-  };
-  // Se recoloca si cambia el contenido (p. ej. aparece «Permisos» al cambiar de agente).
-  useLayoutEffect(coloca);
+    const alto = caja.current?.offsetHeight ?? 0;
+    let left = r.right + 4, top = r.top;
+    if (left + ANCHO_MENU > window.innerWidth - MARGEN) left = r.left - ANCHO_MENU - 4;
+    left = Math.max(MARGEN, left);
+    if (top + alto > window.innerHeight - MARGEN) top = window.innerHeight - alto - MARGEN;
+    setPos({ left, top: Math.max(MARGEN, top) });
+  }, [ancla]);
 
-  // Se cierra al pulsar fuera, con Escape, al hacer scroll fuera del panel o al redimensionar la ventana.
   useEffect(() => {
-    const fuera = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!panel.current?.contains(t) && !ancla.contains(t)) alCerrar();
-    };
+    const fuera = (e: MouseEvent) => { const t = e.target as Node; if (!caja.current?.contains(t) && !ancla.contains(t)) alCerrar(); };
     const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
-    const scroll = (e: Event) => { if (!panel.current?.contains(e.target as Node)) alCerrar(); };
     document.addEventListener('mousedown', fuera);
     document.addEventListener('keydown', tecla);
-    window.addEventListener('scroll', scroll, true);
     window.addEventListener('resize', alCerrar);
+    window.addEventListener('scroll', alCerrar, true);
     return () => {
       document.removeEventListener('mousedown', fuera);
       document.removeEventListener('keydown', tecla);
-      window.removeEventListener('scroll', scroll, true);
       window.removeEventListener('resize', alCerrar);
+      window.removeEventListener('scroll', alCerrar, true);
     };
   }, [ancla, alCerrar]);
 
   return createPortal(
-    <div ref={panel} className="config-sesion config-sesion-flotante" role="dialog" aria-label="Configuración de la sesión"
-      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width: ANCHO_CONFIG, visibility: pos ? 'visible' : 'hidden' }}>
-      <label>Nombre
-        <input value={nombre} onChange={e => setNombre(e.target.value)} onBlur={() => nombre.trim() && cambia({ nombre: nombre.trim() })}
-          onKeyDown={e => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }} />
-      </label>
-      <label>Agente por defecto
-        <span className="con-icono"><Agente id={s.agente} t={15} />
-          <select value={s.agente} onChange={e => cambia({ agente: e.target.value, sesionAgente: undefined })}>
-            {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
-          </select>
-        </span>
-      </label>
-      {prov?.tipo === 'agente' && (
-        <label>Permisos del agente
-          <select value={s.permisos || 'lectura'} onChange={e => cambia({ permisos: e.target.value as Sesion['permisos'] })}>
-            <option value="lectura">Solo lectura</option>
-            <option value="editar">Editar ficheros</option>
-            <option value="auto">Auto: ejecuta comandos (pruebas)</option>
-          </select>
+    <div ref={caja} className="menu-flotante" role="menu"
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width: ANCHO_MENU, visibility: pos ? 'visible' : 'hidden' }}>
+      {opciones.map((o, i) => o === null
+        ? <div key={i} className="separador" role="separator" />
+        : <button key={i} role="menuitem" className={o.peligro ? 'peligro' : ''} onClick={() => { alCerrar(); o.accion(); }}>
+            <Icono n={o.icono} t={15} /> {o.texto}
+          </button>)}
+    </div>,
+    document.body,
+  );
+}
+
+// Ventana de preferencias de la sesión (diálogo modal).
+function AjustesSesion({ s, repo, carpetas, proveedores, alCerrar, alCambiar }: {
+  s: Sesion; repo: Repo | null; carpetas: string[]; proveedores: Proveedor[]; alCerrar: () => void; alCambiar: (s: Sesion) => void;
+}) {
+  const [nombre, setNombre] = useState(s.nombre);
+  const cambia = (c: Partial<Sesion>) => alCambiar({ ...s, ...c });
+  const prov = proveedores.find(p => p.id === s.agente);
+  const modelos = prov?.modelos || [];
+
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
+    document.addEventListener('keydown', tecla);
+    return () => document.removeEventListener('keydown', tecla);
+  }, [alCerrar]);
+
+  return createPortal(
+    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
+      <div className="modal ajustes-sesion" role="dialog" aria-modal="true" aria-label="Ajustes de la sesión">
+        <div className="modal-cabecera">
+          <h2>Ajustes de la sesión</h2>
+          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
+        </div>
+        <label>Nombre
+          <input value={nombre} placeholder="Se toma del primer mensaje" onChange={e => setNombre(e.target.value)}
+            onBlur={() => nombre.trim() !== s.nombre && cambia({ nombre: nombre.trim() })}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
         </label>
-      )}
-      {carpetas.length > 0 && (
-        <label>Carpeta
-          <select value={s.carpeta} onChange={e => cambia({ carpeta: e.target.value, sesionAgente: undefined })}
-            disabled={carpetas.length < 2 && carpetas[0] === s.carpeta} title={s.carpeta}>
-            {!carpetas.includes(s.carpeta) && s.carpeta && <option value={s.carpeta}>{s.carpeta}</option>}
-            {carpetas.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+        {carpetas.length > 0 && (
+          <label>Carpeta
+            <select value={s.carpeta} onChange={e => cambia({ carpeta: e.target.value, sesionAgente: undefined })} disabled={carpetas.length < 2 && carpetas[0] === s.carpeta}>
+              {!carpetas.includes(s.carpeta) && s.carpeta && <option value={s.carpeta}>{s.carpeta}</option>}
+              {carpetas.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+        )}
+        {repo && repo.ramas.length > 0 && (
+          <label>Rama
+            <select value={s.rama} onChange={e => cambia({ rama: e.target.value, sesionAgente: undefined })}>
+              {repo.ramas.map(r => <option key={r}>{r}</option>)}
+            </select>
+          </label>
+        )}
+        <label>Agente
+          <span className="con-icono"><Agente id={s.agente} t={15} />
+            <select value={s.agente} onChange={e => cambia({ agente: e.target.value, modelo: undefined, esfuerzo: undefined, sesionAgente: undefined })}>
+              {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
+            </select>
+          </span>
         </label>
-      )}
-      {repo && repo.ramas.length > 0 && (
-        <label>Rama
-          <select value={s.rama} onChange={e => cambia({ rama: e.target.value, sesionAgente: undefined })}>
-            {repo.ramas.map(r => <option key={r}>{r}</option>)}
-          </select>
-        </label>
-      )}
-      <div className="fila-config">
-        <button className="enlace peligro" onClick={() => alBorrar(s)}><Icono n="borrar" t={14} /> Borrar</button>
-        <span className="hueco" />
-        <button className="enlace" onClick={alCerrar}>Cerrar</button>
+        {prov?.modos && (
+          <label>Modo
+            <select value={s.permisos || 'lectura'} onChange={e => cambia({ permisos: e.target.value as Sesion['permisos'] })}>
+              <option value="lectura">Solo lectura</option>
+              <option value="editar">Editar ficheros</option>
+              <option value="auto">Auto: ejecuta comandos</option>
+            </select>
+          </label>
+        )}
+        {modelos.length > 1 && (
+          <label>Modelo
+            <select value={s.modelo || prov?.por_defecto} onChange={e => cambia({ modelo: e.target.value })}>
+              {modelos.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+        )}
+        {prov?.esfuerzos?.length ? (
+          <label>Esfuerzo
+            <select value={s.esfuerzo || ''} onChange={e => cambia({ esfuerzo: e.target.value || undefined })}>
+              <option value="">Por defecto</option>
+              {prov.esfuerzos.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </label>
+        ) : null}
+        <p className="suave pequeno">Cambiar la carpeta, la rama o el agente empieza una conversación nueva con el agente.</p>
       </div>
     </div>,
     document.body,
