@@ -86,6 +86,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/studio/conexion", s.conSesion(s.studioConexion))
 	mux.HandleFunc("POST /api/studio/conexion", s.conSesion(s.studioConecta))
 	mux.HandleFunc("GET /api/studio/{recurso}", s.conSesion(s.studioProxy))
+	mux.HandleFunc("POST /api/studio/grabar", s.conSesion(s.studioProxy))
 	if s.Web != nil {
 		mux.Handle("GET /", s.estaticos())
 	}
@@ -541,6 +542,10 @@ var recursosStudio = map[string]struct{ ruta, tipo string }{
 	"snapshot": {"/snapshot", "image/jpeg"},
 	"stream":   {"/stream", "multipart/x-mixed-replace"},
 	"events":   {"/events", "text/event-stream"},
+	// grabación: la controla quien mira (por defecto, solo directo)
+	"grabar":      {"/api/grabar", "application/json"},
+	"grabaciones": {"/api/grabaciones", "application/json"},
+	"grabacion":   {"/grabacion", "video/mp4"},
 }
 
 func (s *Servidor) studioProxy(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -565,8 +570,10 @@ func (s *Servidor) studioProxy(w http.ResponseWriter, r *http.Request, ses *sesi
 		return
 	}
 	q := url.Values{}
-	if canal := r.URL.Query().Get("canal"); canal != "" {
-		q.Set("canal", canal)
+	for _, k := range []string{"canal", "id"} {
+		if v := r.URL.Query().Get(k); v != "" {
+			q.Set(k, v)
+		}
 	}
 	px := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

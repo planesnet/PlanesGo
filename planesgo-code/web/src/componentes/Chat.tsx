@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, get, type Mensaje, type Proveedor, type Proyecto } from '../api';
+import Icono from './Icono';
 
 interface Conversacion { mensajes: Mensaje[]; sesionAgente: string }
 
@@ -134,7 +135,11 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
         <div className="titulo">
           {proyecto ? <><b>{proyecto.nombre}</b><span className="suave"> · Odoo #{proyecto.id}</span></> : <span className="suave">Elige un proyecto de Odoo</span>}
         </div>
-        <button className="icono" onClick={alPanel} title={panelAbierto ? 'Ocultar artefactos' : 'Mostrar artefactos'} aria-pressed={panelAbierto}>▤</button>
+        <span className="hueco" />
+        {proyecto && conv.mensajes.length > 0 && !enCurso && (
+          <button className="icono" onClick={nueva} title="Nueva conversación" aria-label="Nueva conversación"><Icono n="nuevo" /></button>
+        )}
+        <button className="icono" onClick={alPanel} title={panelAbierto ? 'Ocultar artefactos' : 'Mostrar artefactos'} aria-label="Artefactos" aria-pressed={panelAbierto}><Icono n="panel" /></button>
       </header>
 
       {!proyecto ? (
@@ -173,14 +178,13 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
                   ? <select value={carpeta} onChange={e => setCarpeta(e.target.value)} aria-label="Carpeta">{proyecto.carpetas.map(c => <option key={c}>{c}</option>)}</select>
                   : <span className="error pequeno">Sin carpeta local (.planesgo.json)</span>
               )}
-              {conv.mensajes.length > 0 && !enCurso && <button className="enlace" onClick={nueva}>Nueva conversación</button>}
             </div>
             <div className="entrada">
               <textarea rows={3} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
-                placeholder={prov?.disponible ? 'Escribe… (Intro envía, Mayús+Intro salto de línea)' : 'Este proveedor no está disponible'} disabled={!prov?.disponible} />
+                placeholder={prov?.disponible ? 'Escribe…' : 'Este proveedor no está disponible'} disabled={!prov?.disponible} />
               {enCurso
-                ? <button onClick={() => enCurso.abort()}>Parar</button>
-                : <button className="primario" onClick={envia} disabled={!texto.trim() || !prov?.disponible}>Enviar</button>}
+                ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
+                : <button className="redondo primario" onClick={envia} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
           </div>
         </>

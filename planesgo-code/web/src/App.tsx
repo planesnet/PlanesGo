@@ -5,18 +5,22 @@ import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
 
-// El proyecto elegido se guarda en la URL (?proyecto=ID) y en el navegador: F5 no lo pierde.
-function proyectoGuardado(): number {
+// El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
+// tras F5, cerrar la app o pulsar «Salir», se abre directamente.
+const claveProyecto = (login: string) => 'pgo:proyecto:' + login.toLowerCase();
+
+function proyectoGuardado(login: string): number {
   const deUrl = Number(new URLSearchParams(location.search).get('proyecto'));
   if (deUrl > 0) return deUrl;
-  try { return Number(localStorage.getItem('pgo:proyecto')) || 0; } catch { return 0; }
+  try { return Number(localStorage.getItem(claveProyecto(login))) || 0; } catch { return 0; }
 }
 
-function recuerdaProyecto(id: number) {
+function recuerdaProyecto(login: string, id: number) {
   const u = new URL(location.href);
   if (id) u.searchParams.set('proyecto', String(id)); else u.searchParams.delete('proyecto');
   history.replaceState(null, '', u);
-  try { if (id) localStorage.setItem('pgo:proyecto', String(id)); else localStorage.removeItem('pgo:proyecto'); } catch { /* sin almacenamiento */ }
+  if (!id) return; // al salir se quita de la URL, pero el último proyecto del usuario se conserva
+  try { localStorage.setItem(claveProyecto(login), String(id)); } catch { /* sin almacenamiento */ }
 }
 
 export default function App() {
@@ -37,17 +41,17 @@ export default function App() {
   }, []);
 
   const salir = useCallback(async () => {
-    try { await post('/api/logout', {}); } finally { setUsuario(null); setProyecto(null); recuerdaProyecto(0); }
+    try { await post('/api/logout', {}); } finally { setUsuario(null); setProyecto(null); recuerdaProyecto('', 0); }
   }, []);
 
-  const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(p.id); }, []);
+  const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(usuario?.login || '', p.id); }, [usuario]);
 
   if (usuario === undefined) return <div className="cargando">Cargando…</div>;
   if (!usuario) return <Acceso aviso={aviso} alEntrar={u => { setAviso(''); setUsuario(u); }} />;
 
   return (
     <div className={'arnes' + (panel ? '' : ' sin-panel')}>
-      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado()} alElegir={elige} alSalir={salir} />
+      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige} alSalir={salir} />
       <Chat proyecto={proyecto} panelAbierto={panel} alPanel={() => setPanel(p => !p)} />
       {panel && <Artefactos proyecto={proyecto} />}
     </div>

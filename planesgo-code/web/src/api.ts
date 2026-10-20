@@ -16,7 +16,10 @@ export class ErrorAPI extends Error {
 async function respuesta<T>(r: Response): Promise<T> {
   if (r.ok) return r.json() as Promise<T>;
   let msg = r.statusText;
-  try { msg = (await r.json()).error || msg; } catch { /* sin cuerpo JSON */ }
+  try {
+    const t = (await r.text()).trim();
+    try { msg = JSON.parse(t).error || msg; } catch { if (t) msg = t; } // errores de texto (p. ej. del estudio)
+  } catch { /* sin cuerpo */ }
   if (r.status === 401) window.dispatchEvent(new CustomEvent('pgo:sin-sesion', { detail: msg }));
   throw new ErrorAPI(r.status, msg);
 }

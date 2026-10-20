@@ -40,6 +40,8 @@ var (
 	nombreValido    = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	errDemasiados   = errors.New("demasiados canales abiertos")
 	errNoEncontrado = errors.New("canal sin señal")
+	errNoGraba      = errors.New("este estudio no graba vídeo (solo directo)")
+	errNoGrabando   = errors.New("el canal no se está grabando")
 )
 
 type canal struct {
@@ -48,6 +50,7 @@ type canal struct {
 	ultima  time.Time
 	frames  map[chan []byte]struct{}
 	estados map[chan []byte]struct{}
+	rec     *grabadora // grabación en curso (nil: solo directo)
 }
 
 // Studio guarda los canales y atiende a emisores y espectadores. Se crea con Nuevo y se sirve con Handler.
@@ -57,6 +60,7 @@ type Studio struct {
 
 	mu      sync.Mutex
 	canales map[string]*canal
+	dirGrab string // dónde se guardan las grabaciones ("": grabación desactivada)
 }
 
 // Nuevo crea un estudio con el token de emitir y el de ver (deben ser distintos y largos).
@@ -99,7 +103,7 @@ func (s *Studio) canalLocked(nombre string) (*canal, error) {
 // purgaLocked borra los canales caducados. Se llama con s.mu tomado.
 func (s *Studio) purgaLocked() {
 	for n, c := range s.canales {
-		if len(c.frames)+len(c.estados) == 0 && s.ahora().Sub(c.ultima) > caducidad {
+		if len(c.frames)+len(c.estados) == 0 && c.rec == nil && s.ahora().Sub(c.ultima) > caducidad {
 			delete(s.canales, n)
 		}
 	}
@@ -117,10 +121,16 @@ func (s *Studio) publica(nombre string, frame, estado []byte) error {
 	if frame != nil {
 		c.frame = frame
 		emitir(c.frames, frame)
+		if c.rec != nil {
+			c.rec.frame(frame)
+		}
 	}
 	if estado != nil {
 		c.estado = estado
 		emitir(c.estados, estado)
+		if c.rec != nil {
+			c.rec.estado(estado, s.ahora())
+		}
 	}
 	return nil
 }
@@ -168,6 +178,8 @@ type InfoCanal struct {
 	Ultima       time.Time       `json:"ultima"`
 	Espectadores int             `json:"espectadores"`
 	ConImagen    bool            `json:"con_imagen"`
+	Grabando     bool            `json:"grabando"`
+	GrabaDesde   *time.Time      `json:"graba_desde,omitempty"`
 	Estado       json.RawMessage `json:"estado"`
 }
 
@@ -180,6 +192,10 @@ func (s *Studio) Canales() []InfoCanal {
 	for n, c := range s.canales {
 		l = append(l, InfoCanal{Canal: n, EnDirecto: s.ahora().Sub(c.ultima) < enDirecto, Ultima: c.ultima,
 			Espectadores: len(c.frames), ConImagen: c.frame != nil, Estado: c.estado})
+		if c.rec != nil {
+			desde := c.rec.g.Inicio
+			l[len(l)-1].Grabando, l[len(l)-1].GrabaDesde = true, &desde
+		}
 	}
 	sort.Slice(l, func(i, j int) bool { return l[i].Canal < l[j].Canal })
 	return l
@@ -219,6 +235,10 @@ func errorCanal(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	case errors.Is(err, errNoEncontrado):
 		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, errNoGraba):
+		http.Error(w, err.Error(), http.StatusNotImplemented)
+	case errors.Is(err, errNoGrabando):
+		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -372,6 +392,58 @@ func (s *Studio) Handler() http.Handler {
 				fl.Flush()
 			}
 		}
+	}))
+	// Grabación: la decide quien mira (token de ver). Por defecto no se graba.
+	//   POST /api/grabar  {"grabar": true|false}   GET /api/grabaciones   GET /grabacion?id=
+	mux.HandleFunc("POST /api/grabar", s.protege(s.viewTok, func(w http.ResponseWriter, r *http.Request, n string) {
+		var p struct {
+			Grabar bool `json:"grabar"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&p); err != nil {
+			http.Error(w, "se espera JSON {\"grabar\": true|false}", http.StatusBadRequest)
+			return
+		}
+		sinCache(w, "application/json")
+		if p.Grabar {
+			s.mu.Lock()
+			rec, err := s.empiezaGrabacionLocked(n)
+			var desde time.Time
+			if err == nil {
+				desde = rec.g.Inicio
+			}
+			s.mu.Unlock()
+			if err != nil {
+				errorCanal(w, err)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"grabando": true, "graba_desde": desde})
+			return
+		}
+		g, err := s.paraGrabacion(n)
+		if err != nil {
+			errorCanal(w, err)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"grabando": false, "grabacion": g})
+	}))
+	mux.HandleFunc("GET /api/grabaciones", s.protege(s.viewTok, func(w http.ResponseWriter, r *http.Request, n string) {
+		l, err := s.grabaciones(n)
+		if err != nil {
+			errorCanal(w, err)
+			return
+		}
+		sinCache(w, "application/json")
+		json.NewEncoder(w).Encode(l)
+	}))
+	mux.HandleFunc("GET /grabacion", s.protege(s.viewTok, func(w http.ResponseWriter, r *http.Request, n string) {
+		ruta, err := s.rutaGrabacion(n, r.URL.Query().Get("id"))
+		if err != nil {
+			errorCanal(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, ruta) // admite Range: se puede saltar a un marcador
 	}))
 	mux.HandleFunc("GET /{$}", s.protege(s.viewTok, func(w http.ResponseWriter, r *http.Request, _ string) {
 		sinCache(w, "text/html; charset=utf-8")

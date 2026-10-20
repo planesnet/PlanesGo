@@ -1,5 +1,6 @@
 import { createElement, useState, type FormEvent } from 'react';
 import { enEscritorio, post, type Proyecto } from '../api';
+import Icono from './Icono';
 
 // Navegador del arnés: dentro de Electron usa <webview> (carga cualquier web); en el navegador normal, un iframe
 // (muchas webs no se dejan incrustar: para esas está «Abrir en el navegador del sistema»).
@@ -36,15 +37,15 @@ export default function Navegador({ proyecto }: { proyecto: Proyecto }) {
     <div className="navegador">
       <form className="barra" onSubmit={ir}>
         <input value={entrada} onChange={e => setEntrada(e.target.value)} placeholder="https://…" aria-label="Dirección" />
-        <button>Ir</button>
-        <button type="button" onClick={fuera} title="Abrir en el navegador del sistema">↗</button>
+        <button className="icono" title="Ir" aria-label="Ir"><Icono n="ir" t={16} /></button>
+        <button type="button" className="icono" onClick={fuera} title="Abrir en el navegador del sistema" aria-label="Abrir en el navegador del sistema"><Icono n="externo" t={16} /></button>
       </form>
       {error && <p className="error relleno">{error}</p>}
       {url
         ? (enEscritorio()
           ? createElement('webview', { src: url, className: 'vista', partition: 'persist:navegador-' + proyecto.id })
           : <iframe className="vista" src={url} title="Navegador" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />)
-        : <p className="suave relleno">Escribe una dirección. {enEscritorio() ? '' : 'En el navegador web algunas páginas no se dejan mostrar aquí; en la app de escritorio sí.'}</p>}
+        : <p className="suave relleno">Escribe una dirección.{enEscritorio() ? '' : ' Algunas webs solo se ven en la app de escritorio.'}</p>}
     </div>
   );
 }

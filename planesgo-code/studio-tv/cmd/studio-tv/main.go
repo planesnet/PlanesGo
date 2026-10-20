@@ -46,6 +46,7 @@ func main() {
 	key := flag.String("key", "", "clave TLS (PEM)")
 	selfsigned := flag.Bool("selfsigned", false, "HTTPS con un certificado propio generado al arrancar")
 	hosts := flag.String("hosts", "localhost,127.0.0.1", "nombres e IP del certificado propio, separados por comas")
+	grabaciones := flag.String("grabaciones", os.Getenv("STUDIO_TV_GRABACIONES"), "carpeta donde guardar las grabaciones (vacío: solo directo)")
 	verVersion := flag.Bool("version", false, "muestra la versión y sale")
 	flag.Parse()
 	if *verVersion {
@@ -61,7 +62,14 @@ func main() {
 		log.Fatal("el token de emitir y el de ver deben ser distintos")
 	}
 
-	srv := &http.Server{Addr: *addr, Handler: studiotv.Nuevo(*emitTok, *viewTok).Handler(), ReadHeaderTimeout: 10 * time.Second}
+	estudio := studiotv.Nuevo(*emitTok, *viewTok)
+	if *grabaciones != "" {
+		if err := estudio.GrabarEn(*grabaciones); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Grabaciones en %s (se activan desde el estudio, canal a canal)", *grabaciones)
+	}
+	srv := &http.Server{Addr: *addr, Handler: estudio.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	esquema := "http"
 	if *cert != "" || *selfsigned {
 		esquema = "https"
@@ -80,6 +88,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		log.Print("cerrando el estudio…")
+		estudio.Cierra()
 		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if srv.Shutdown(c) != nil {
