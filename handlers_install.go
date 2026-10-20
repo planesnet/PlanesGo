@@ -18,7 +18,7 @@ import (
 //     el instalador necesita en el «Setup script» de la nube, donde no hay variables de entorno).
 //   - /install/psf.tar.gz: Planes Software Factory (carpeta PSF/). Solo con token de empleado.
 
-//go:embed scripts/install-claude-hook.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/planesgo.md .claude/commands/pgo.md go.mod go.sum cmd/planesgo-mcp/main.go
+//go:embed scripts/install-claude-hook.sh scripts/install-opencode-plugin.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/planesgo.md .claude/commands/pgo.md .opencode/plugins/planesgo.ts go.mod go.sum cmd/planesgo-mcp/main.go
 var planesgoBundleFS embed.FS
 
 //go:embed all:PSF
@@ -26,6 +26,7 @@ var psfBundleFS embed.FS
 
 func setupInstallRoutes(mux *http.ServeMux, state *AppState) {
 	mux.HandleFunc("/install/claude-hook.sh", handleInstallScript)
+	mux.HandleFunc("/install/opencode-plugin.sh", handleInstallOpenCodeScript)
 	mux.HandleFunc("/install/planesgo.tar.gz", func(w http.ResponseWriter, r *http.Request) {
 		serveTarGz(w, planesgoBundleFS, ".", "planesgo.tar.gz")
 	})
@@ -34,6 +35,17 @@ func setupInstallRoutes(mux *http.ServeMux, state *AppState) {
 
 func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	data, err := planesgoBundleFS.ReadFile("scripts/install-claude-hook.sh")
+	if err != nil {
+		http.Error(w, "instalador no disponible", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(data)
+}
+
+func handleInstallOpenCodeScript(w http.ResponseWriter, r *http.Request) {
+	data, err := planesgoBundleFS.ReadFile("scripts/install-opencode-plugin.sh")
 	if err != nil {
 		http.Error(w, "instalador no disponible", http.StatusInternalServerError)
 		return

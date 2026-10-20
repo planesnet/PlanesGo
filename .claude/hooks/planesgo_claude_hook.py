@@ -32,9 +32,10 @@ import subprocess
 import time
 
 HOME = os.path.expanduser("~")
-TASK_NAME = "Claude Code - Sesión IA"
+AI_MODEL_LABEL = os.environ.get("PLANESGO_AI_MODEL") or "Claude Code"
+TASK_NAME = os.environ.get("PLANESGO_TASK_NAME") or f"{AI_MODEL_LABEL} - Sesión IA"
 TASK_TYPE = "Desarrollo"
-DESC = "Trabajo de codificación asistido con Claude Code"
+DESC = os.environ.get("PLANESGO_TASK_DESC") or f"Trabajo de codificación asistido con {AI_MODEL_LABEL}"
 DESC_MAX = 480
 MAX_FILES_LISTED = 5
 MAX_COMMITS_LISTED = 6
@@ -62,8 +63,6 @@ ES_WORDS = {
     "al", "y", "añade", "corrige", "actualiza", "elimina", "usa", "ya", "cuando", "sin", "su", "es",
     "mejora", "nuevo", "nueva", "muestra", "quita", "cambia", "crea", "como", "qué", "cómo",
 }
-# El backend distingue Claude de Antigravity por este valor
-AI_MODEL_LABEL = "Claude Code"
 STATE_ROOT = "/tmp/planesgo-claude"
 # Espera tras terminar un turno antes de consolidar (PLANESGO_CONSOLIDATE_SECONDS lo cambia, p. ej. en pruebas)
 CONSOLIDATE_AFTER = 300
@@ -71,6 +70,8 @@ CONSOLIDATE_AFTER = 300
 EXEMPT_PREFIXES = (
     os.path.join(HOME, ".claude"),
     os.path.join(HOME, ".gemini"),
+    os.path.join(HOME, ".config/opencode"),
+    os.path.join(HOME, ".local/share/opencode"),
     "/tmp",
     "/var/tmp",
 )
@@ -343,7 +344,7 @@ def init_project_state(state, root):
 
 def record_file(payload, state, root):
     args = payload.get("tool_input") or {}
-    path = args.get("file_path") or args.get("notebook_path") or ""
+    path = args.get("file_path") or args.get("path") or args.get("filePath") or args.get("notebook_path") or ""
     if not path:
         return
     rel = os.path.relpath(os.path.abspath(path), root)
@@ -439,7 +440,7 @@ def build_description(payload, root, state):
         return DESC
     if branch and branch != "HEAD":
         parts.append(f"rama {branch}")
-    desc = "[Claude Code] " + " · ".join(parts)
+    desc = f"[{AI_MODEL_LABEL}] " + " · ".join(parts)
     return desc if len(desc) <= DESC_MAX else desc[:DESC_MAX - 1] + "…"
 
 
@@ -494,12 +495,12 @@ def target_root(payload):
     name = payload.get("tool_name", "")
     args = payload.get("tool_input") or {}
     sdir = session_dir(payload)
-    if name in ("Edit", "Write", "NotebookEdit", "MultiEdit"):
-        path = args.get("file_path") or args.get("notebook_path") or ""
+    if name in ("Edit", "Write", "NotebookEdit", "MultiEdit", "edit", "write", "patch", "multiedit", "notebookedit"):
+        path = args.get("file_path") or args.get("path") or args.get("filePath") or args.get("notebook_path") or ""
         if os.path.basename(path) in (".planesgo.json", ".geminiignore"):
             return None
         return project_root_for_file(path, sdir, payload)
-    if name == "Bash":
+    if name in ("Bash", "bash", "shell"):
         return project_root_for_dir(payload.get("cwd") or sdir, payload)
     return None
 
@@ -559,7 +560,7 @@ def on_guard(payload):
     root = target_root(payload)
     if root:
         record_session_project(payload, root)
-    if payload.get("tool_name") == "Bash":
+    if payload.get("tool_name") in ("Bash", "bash", "shell"):
         args = dict(payload.get("tool_input") or {})
         cmd = (args.get("command") or "").strip()
         if is_safe_command(cmd):

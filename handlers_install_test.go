@@ -33,7 +33,7 @@ func TestInstallBundleContainsHookAndSource(t *testing.T) {
 		}
 		found[h.Name] = h.Mode
 	}
-	for _, f := range []string{".claude/hooks/planesgo_claude_hook.py", ".claude/commands/planesgo.md", ".claude/commands/pgo.md", "cmd/planesgo-mcp/main.go", "go.mod", "scripts/install-claude-hook.sh"} {
+	for _, f := range []string{".claude/hooks/planesgo_claude_hook.py", ".claude/commands/planesgo.md", ".claude/commands/pgo.md", ".opencode/plugins/planesgo.ts", "cmd/planesgo-mcp/main.go", "go.mod", "scripts/install-claude-hook.sh", "scripts/install-opencode-plugin.sh"} {
 		if _, ok := found[f]; !ok {
 			t.Errorf("falta %s en el paquete", f)
 		}
@@ -56,9 +56,11 @@ func TestInstallPSFRequiresToken(t *testing.T) {
 func TestInstallScriptIsServed(t *testing.T) {
 	mux := http.NewServeMux()
 	setupInstallRoutes(mux, &AppState{})
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/install/claude-hook.sh", nil))
-	if rec.Code != http.StatusOK || rec.Body.Len() < 100 {
-		t.Fatalf("instalador no servido: %d", rec.Code)
+	for _, route := range []string{"/install/claude-hook.sh", "/install/opencode-plugin.sh"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", route, nil))
+		if rec.Code != http.StatusOK || rec.Body.Len() < 100 {
+			t.Fatalf("instalador %s no servido: %d", route, rec.Code)
+		}
 	}
 }
