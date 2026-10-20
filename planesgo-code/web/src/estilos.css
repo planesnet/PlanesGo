@@ -333,3 +333,47 @@ textarea { resize: none; }
 .casilla { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--suave); }
 .casilla input { width: auto; }
 .capa-navegador > .navegador { height: 100%; overflow: hidden; }
+
+/* Flujo del repositorio (GitHub) */
+.flujo { display: grid; align-content: start; gap: 10px; padding: 10px 12px 18px; min-width: 0; }
+.flujo-cabecera { display: flex; align-items: center; gap: 8px; }
+.gh-repo { font-weight: 600; font-size: 14px; color: var(--texto); }
+.gh-tarjeta { display: grid; gap: 6px; border: 1px solid var(--linea); border-radius: 10px; padding: 10px; background: var(--superficie); }
+.gh-titulo { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.gh-rama { font: 12px ui-monospace, monospace; background: #ddf4ff; color: #0969da; padding: 1px 7px; border-radius: 6px; }
+.gh-pr { display: grid; gap: 6px; }
+.gh-chips { display: flex; flex-wrap: wrap; gap: 5px; padding-left: 26px; }
+.gh-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; border: 1px solid var(--linea); border-radius: 999px; padding: 1px 8px; background: var(--superficie); white-space: nowrap; }
+.gh-diffbarra { margin-left: 26px; height: 5px; border-radius: 3px; background: #d1242f; overflow: hidden; }
+.gh-diffbarra span { display: block; height: 100%; background: #1a7f37; }
+.gh-cierra { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 26px; font-size: 12px; color: var(--suave); }
+.gh-resumen { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--suave); }
+.gh-resumen span { display: inline-flex; align-items: center; gap: 5px; }
+.gh-resumen b { color: var(--texto); }
+.gh-barra { display: flex; height: 18px; border-radius: 6px; overflow: hidden; gap: 2px; }
+.gh-tramo { display: grid; place-items: center; font: 600 10.5px ui-monospace, monospace; color: #fff; min-width: 18px; }
+.gh-tramo.por-empezar, .gh-marca.por-empezar { background: #8c959f; }
+.gh-tramo.desarrollo, .gh-marca.desarrollo { background: #bf8700; }
+.gh-tramo.revision, .gh-marca.revision { background: #0969da; }
+.gh-tramo.test, .gh-marca.test { background: #8250df; }
+.gh-marca.cerrada { background: #6e7781; }
+.gh-marca { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.gh-fase { border-top: 1px solid var(--linea); padding-top: 6px; }
+.gh-fase > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px; font-weight: 600; list-style: none; padding: 2px 0 4px; }
+.gh-fase > summary::-webkit-details-marker { display: none; }
+.gh-cuenta { font: 600 11px ui-monospace, monospace; background: var(--hover); border-radius: 999px; padding: 0 7px; }
+.gh-fila { display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left; padding: 6px 4px; border-radius: 6px; min-width: 0; }
+.gh-fila > svg { margin-top: 2px; }
+.gh-cuerpo { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.gh-texto { font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+.gh-meta { font-size: 11.5px; color: var(--suave); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gh-meta code { font-size: 11px; }
+.gh-mini { display: inline-flex; align-items: center; gap: 2px; }
+.gh-etiqueta { display: inline-block; font-size: 10.5px; font-weight: 600; line-height: 16px; padding: 0 7px; border-radius: 999px; margin-left: 3px; vertical-align: 1px; }
+.gh-tipo { font-size: 10.5px; border: 1px solid var(--linea); border-radius: 999px; padding: 0 6px; color: var(--suave); vertical-align: 1px; }
+.gh-tipo.feature { color: #0969da; border-color: #54aeff; }
+.gh-tipo.bug { color: #d1242f; border-color: #ff8182; }
+.gh-asignados { display: flex; }
+.gh-avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--hover); font: 600 9px system-ui; display: grid; place-items: center; margin-left: -4px; border: 1px solid var(--superficie); }
+.gh-coment { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--suave); white-space: nowrap; }
+.gh-diff { font: 11px ui-monospace, monospace; white-space: nowrap; }

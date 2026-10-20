@@ -1,0 +1,250 @@
+import { useEffect, useMemo, useState } from 'react';
+import { get, type Proyecto } from '../api';
+import Icono from './Icono';
+
+// Flujo del repositorio (GitHub): la rama de la sesión y su pull request, las issues por fase (por empezar →
+// en desarrollo → en revisión → en test → cerradas) y por clase (peticiones nuevas / mantenimiento), y las PR.
+// Con la simbología de GitHub: issue abierta (verde), cerrada (morado); PR abierta, borrador, fusionada, cerrada.
+
+interface Etiqueta { nombre: string; color: string }
+interface PRCorta { numero: number; estado: string; borrador: boolean }
+interface Issue {
+  numero: number; titulo: string; url: string; estado: 'OPEN' | 'CLOSED'; tipo: string;
+  clase: 'peticion' | 'mantenimiento' | 'sin-clasificar'; fase: Fase; etiquetas: Etiqueta[]; autor: string; asignados: string[];
+  comentarios: number; hito?: string; prs: PRCorta[]; creada: string; actualizada: string; cerrada?: string;
+}
+interface PR {
+  numero: number; titulo: string; url: string; estado: 'OPEN' | 'CLOSED' | 'MERGED'; borrador: boolean; rama: string; base: string;
+  autor: string; revision: string; fusionable: string; checks: string; mas: number; menos: number; ficheros: number; commits: number;
+  comentarios: number; issues: number[]; etiquetas: Etiqueta[]; creada: string; actualizada: string; fusionada?: string;
+}
+interface Estado { repo: string; url: string; defecto: string; issues: Issue[]; prs: PR[]; abiertas: number; cerradas: number; prs_abiertas: number; leido: string }
+type Fase = 'por-empezar' | 'desarrollo' | 'revision' | 'test' | 'cerrada';
+type Clase = Issue['clase'] | 'todas';
+
+const FASES: { id: Fase; nombre: string; ayuda: string }[] = [
+  { id: 'por-empezar', nombre: 'Por empezar', ayuda: 'Abiertas, sin PR ni etiqueta de trabajo' },
+  { id: 'desarrollo', nombre: 'En desarrollo', ayuda: 'Etiqueta «en-desarrollo» o PR en borrador' },
+  { id: 'revision', nombre: 'En revisión', ayuda: 'Con una pull request abierta que la cierra' },
+  { id: 'test', nombre: 'En test', ayuda: 'Etiqueta «en-test» o «en-dev-alfa»' },
+  { id: 'cerrada', nombre: 'Cerradas', ayuda: 'Cerradas hace poco' },
+];
+const CLASES: { id: Clase; nombre: string }[] = [
+  { id: 'todas', nombre: 'Todas' }, { id: 'peticion', nombre: 'Peticiones nuevas' },
+  { id: 'mantenimiento', nombre: 'Mantenimiento' }, { id: 'sin-clasificar', nombre: 'Sin clasificar' },
+];
+
+// Colores de GitHub (Primer).
+const VERDE = '#1a7f37', MORADO = '#8250df', ROJO = '#d1242f', GRIS = '#59636e', AMBAR = '#9a6700';
+
+// Iconos al estilo de los Octicons (16×16, relleno).
+function Oct({ n, color, t = 16 }: { n: 'issue' | 'issue-cerrada' | 'pr' | 'pr-borrador' | 'pr-fusionada' | 'pr-cerrada' | 'check' | 'x' | 'punto' | 'rama' | 'comentario' | 'github'; color?: string; t?: number }) {
+  const p: Record<string, JSX.Element> = {
+    issue: <><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="8" cy="8" r="1.5" /></>,
+    'issue-cerrada': <><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M5.3 8.2l1.8 1.8 3.6-3.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></>,
+    pr: <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4" cy="3.5" r="1.6" /><circle cx="4" cy="12.5" r="1.6" /><circle cx="12" cy="12.5" r="1.6" /><path d="M4 5.1v5.8M12 10.9V6.5a2 2 0 0 0-2-2H7.5" /><path d="M9 3l-1.6 1.5L9 6" /></g>,
+    'pr-borrador': <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4" cy="3.5" r="1.6" /><circle cx="4" cy="12.5" r="1.6" /><circle cx="12" cy="12.5" r="1.6" /><path d="M4 5.1v5.8M12 4v1M12 7.5v1" /></g>,
+    'pr-fusionada': <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4.5" cy="3.5" r="1.6" /><circle cx="4.5" cy="12.5" r="1.6" /><circle cx="12" cy="9" r="1.6" /><path d="M4.5 5.1v5.8M4.5 5.5c0 2.5 2.5 3.5 5.9 3.5" /></g>,
+    'pr-cerrada': <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4" cy="3.5" r="1.6" /><circle cx="4" cy="12.5" r="1.6" /><circle cx="12" cy="12.5" r="1.6" /><path d="M4 5.1v5.8M10.3 3.3l3.4 3.4M13.7 3.3l-3.4 3.4" /></g>,
+    check: <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />,
+    x: <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />,
+    punto: <circle cx="8" cy="8" r="3.5" />,
+    rama: <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path d="M4.5 5v6M11.5 6.5c0 3-7 2.5-7 4.5" /></g>,
+    comentario: <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />,
+    github: <path d="M8 .7a7.3 7.3 0 0 0-2.3 14.2c.4.1.5-.2.5-.4v-1.3c-2 .4-2.5-.9-2.5-.9-.3-.9-.8-1.1-.8-1.1-.7-.5 0-.5 0-.5.7.1 1.1.8 1.1.8.7 1.1 1.7.8 2.1.6.1-.5.3-.8.5-1-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.4.8-1.9-.1-.2-.3-.9.1-1.9 0 0 .6-.2 2 .7a6.9 6.9 0 0 1 3.7 0c1.4-.9 2-.7 2-.7.4 1 .2 1.7.1 1.9.5.5.8 1.1.8 1.9 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.3v2c0 .2.1.5.6.4A7.3 7.3 0 0 0 8 .7z" />,
+  };
+  return <svg width={t} height={t} viewBox="0 0 16 16" fill="currentColor" style={{ color, flex: 'none' }} aria-hidden="true">{p[n]}</svg>;
+}
+
+const hace = (iso?: string) => {
+  if (!iso) return '';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 3600) return `hace ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  const d = Math.round(s / 86400);
+  return d < 60 ? `hace ${d} d` : `hace ${Math.round(d / 30)} meses`;
+};
+
+// Texto legible sobre el color de fondo de una etiqueta de GitHub.
+const sobre = (hex: string) => {
+  const n = parseInt(hex || 'cccccc', 16);
+  return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 > 150 ? '#1f2328' : '#fff';
+};
+
+const iconoPR = (p: { estado: string; borrador: boolean }) =>
+  p.estado === 'MERGED' ? <Oct n="pr-fusionada" color={MORADO} /> : p.estado === 'CLOSED' ? <Oct n="pr-cerrada" color={ROJO} />
+    : p.borrador ? <Oct n="pr-borrador" color={GRIS} /> : <Oct n="pr" color={VERDE} />;
+
+function Checks({ estado }: { estado: string }) {
+  if (!estado) return null;
+  const [n, c, t] = estado === 'SUCCESS' ? ['check', VERDE, 'Checks correctos'] as const
+    : estado === 'FAILURE' || estado === 'ERROR' ? ['x', ROJO, 'Checks fallidos'] as const : ['punto', AMBAR, 'Checks en curso'] as const;
+  return <span className="gh-chip" title={t}><Oct n={n} color={c} t={13} /> {t.replace('Checks ', '')}</span>;
+}
+
+function Revision({ r }: { r: string }) {
+  if (r === 'APPROVED') return <span className="gh-chip" style={{ color: VERDE }}><Oct n="check" t={13} /> Aprobada</span>;
+  if (r === 'CHANGES_REQUESTED') return <span className="gh-chip" style={{ color: ROJO }}><Oct n="x" t={13} /> Cambios pedidos</span>;
+  if (r === 'REVIEW_REQUIRED') return <span className="gh-chip" style={{ color: AMBAR }}><Oct n="punto" t={13} /> Revisión pendiente</span>;
+  return <span className="gh-chip suave">Sin revisión</span>;
+}
+
+const Etiquetas = ({ l }: { l: Etiqueta[] }) => <>{l.map(e => (
+  <span key={e.nombre} className="gh-etiqueta" style={{ background: '#' + e.color, color: sobre(e.color) }}>{e.nombre}</span>
+))}</>;
+
+export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: Proyecto; carpeta: string; rama: string; alAbrir: (url: string) => void }) {
+  const [e, setE] = useState<Estado | null>(null);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [clase, setClase] = useState<Clase>('todas');
+
+  const carga = (recargar = false) => {
+    if (!carpeta) return;
+    setCargando(true);
+    setError('');
+    get<Estado>(`/api/github?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}${recargar ? '&recargar=1' : ''}`)
+      .then(setE).catch(x => setError(x.message)).finally(() => setCargando(false));
+  };
+  useEffect(() => { setE(null); carga(); }, [proyecto.id, carpeta]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const abiertas = useMemo(() => (e?.issues || []).filter(i => i.estado === 'OPEN'), [e]);
+  const cuenta = (c: Clase) => c === 'todas' ? abiertas.length : abiertas.filter(i => i.clase === c).length;
+  const visibles = (e?.issues || []).filter(i => clase === 'todas' || i.clase === clase);
+  const deRama = (e?.prs || []).filter(p => p.rama === rama && p.estado === 'OPEN');
+  const aRama = (e?.prs || []).filter(p => p.base === rama && p.estado === 'OPEN');
+  const prsAbiertas = (e?.prs || []).filter(p => p.estado === 'OPEN' && p.rama !== rama);
+  const prsHechas = (e?.prs || []).filter(p => p.estado !== 'OPEN');
+  const porNumero = new Map((e?.issues || []).map(i => [i.numero, i]));
+
+  if (!carpeta) return <p className="suave relleno">La sesión no tiene carpeta local con repositorio.</p>;
+
+  return (
+    <div className="flujo">
+      <div className="flujo-cabecera">
+        <Oct n="github" t={18} />
+        {e ? <button className="enlace gh-repo" onClick={() => alAbrir(e.url)} title="Abrir en GitHub">{e.repo}</button> : <span className="suave">GitHub</span>}
+        <span className="hueco" />
+        {e && <span className="t suave" title={new Date(e.leido).toLocaleString()}>{hace(e.leido)}</span>}
+        <button className="icono" onClick={() => carga(true)} disabled={cargando} title="Volver a leer de GitHub" aria-label="Recargar"><Icono n="recargar" t={15} /></button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {!e && !error && <p className="suave">Leyendo GitHub…</p>}
+      {e && <>
+        {/* La rama de la sesión y su pull request */}
+        <section className="gh-tarjeta">
+          <div className="gh-titulo"><Oct n="rama" color={GRIS} /> <code className="gh-rama">{rama || '—'}</code>
+            {rama === e.defecto && <span className="gh-chip suave">rama por defecto</span>}</div>
+          {deRama.length === 0 && aRama.length === 0 && <p className="suave pequeno">Ninguna pull request abierta desde esta rama ni hacia ella.</p>}
+          {deRama.map(p => <TarjetaPR key={p.numero} p={p} porNumero={porNumero} alAbrir={alAbrir} />)}
+          {aRama.length > 0 && <>
+            <p className="titulo-lista">Entran en esta rama</p>
+            {aRama.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+          </>}
+        </section>
+
+        {/* Resumen y barra del flujo */}
+        <div className="gh-resumen">
+          <span><Oct n="issue" color={VERDE} t={14} /> <b>{e.abiertas}</b> abiertas</span>
+          <span><Oct n="issue-cerrada" color={MORADO} t={14} /> <b>{e.cerradas}</b> cerradas</span>
+          <span><Oct n="pr" color={VERDE} t={14} /> <b>{e.prs_abiertas}</b> PR abiertas</span>
+        </div>
+        <div className="gh-barra" role="img" aria-label="Issues abiertas por fase">
+          {FASES.filter(f => f.id !== 'cerrada').map(f => {
+            const n = abiertas.filter(i => i.fase === f.id).length;
+            return n ? <span key={f.id} className={'gh-tramo ' + f.id} style={{ flexGrow: n }} title={`${f.nombre}: ${n}`}>{n}</span> : null;
+          })}
+        </div>
+        <div className="filtros" role="tablist" aria-label="Clase de issue">
+          {CLASES.map(c => (
+            <button key={c.id} role="tab" aria-selected={clase === c.id} className="filtro" onClick={() => setClase(c.id)}>{c.nombre} <b>{cuenta(c.id)}</b></button>
+          ))}
+        </div>
+        {clase !== 'todas' || cuenta('sin-clasificar') === 0 ? null : (
+          <p className="suave pequeno">«Sin clasificar»: issues sin tipo (Feature, Bug, Task) ni etiqueta de petición o mantenimiento.</p>
+        )}
+
+        {/* Issues por fase */}
+        {FASES.map(f => {
+          const l = visibles.filter(i => i.fase === f.id);
+          if (!l.length) return null;
+          return (
+            <details key={f.id} className="gh-fase" open={f.id !== 'cerrada'}>
+              <summary><span className={'gh-marca ' + f.id} /> {f.nombre} <span className="gh-cuenta">{l.length}</span><span className="suave pequeno"> · {f.ayuda}</span></summary>
+              {l.map(i => <FilaIssue key={i.numero} i={i} alAbrir={alAbrir} />)}
+            </details>
+          );
+        })}
+
+        {/* Pull requests */}
+        {prsAbiertas.length > 0 && <details className="gh-fase" open>
+          <summary><Oct n="pr" color={VERDE} t={14} /> Pull requests abiertas <span className="gh-cuenta">{prsAbiertas.length}</span></summary>
+          {prsAbiertas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+        </details>}
+        {prsHechas.length > 0 && <details className="gh-fase">
+          <summary><Oct n="pr-fusionada" color={MORADO} t={14} /> Pull requests recientes <span className="gh-cuenta">{prsHechas.length}</span></summary>
+          {prsHechas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+        </details>}
+      </>}
+    </div>
+  );
+}
+
+function FilaIssue({ i, alAbrir }: { i: Issue; alAbrir: (u: string) => void }) {
+  return (
+    <button className="gh-fila" onClick={() => alAbrir(i.url)} title={i.titulo}>
+      {i.estado === 'OPEN' ? <Oct n="issue" color={VERDE} /> : <Oct n="issue-cerrada" color={MORADO} />}
+      <span className="gh-cuerpo">
+        <span className="gh-texto">{i.titulo} {i.tipo && <span className={'gh-tipo ' + i.tipo.toLowerCase()}>{i.tipo}</span>} <Etiquetas l={i.etiquetas} /></span>
+        <span className="gh-meta">
+          #{i.numero} · {i.estado === 'OPEN' ? 'abierta ' + hace(i.creada) : 'cerrada ' + hace(i.cerrada)} por {i.autor}
+          {i.hito && <> · {i.hito}</>}
+          {i.prs.map(p => <span key={p.numero} className="gh-mini">{iconoPR(p)}#{p.numero}</span>)}
+        </span>
+      </span>
+      {i.asignados.length > 0 && <span className="gh-asignados">{i.asignados.map(a => <span key={a} className="gh-avatar" title={a}>{a.slice(0, 2).toUpperCase()}</span>)}</span>}
+      {i.comentarios > 0 && <span className="gh-coment" title={`${i.comentarios} comentarios`}><Oct n="comentario" t={13} /> {i.comentarios}</span>}
+    </button>
+  );
+}
+
+function FilaPR({ p, alAbrir }: { p: PR; alAbrir: (u: string) => void }) {
+  return (
+    <button className="gh-fila" onClick={() => alAbrir(p.url)} title={p.titulo}>
+      {iconoPR(p)}
+      <span className="gh-cuerpo">
+        <span className="gh-texto">{p.titulo} <Etiquetas l={p.etiquetas} /></span>
+        <span className="gh-meta">#{p.numero} · <code>{p.rama}</code> → <code>{p.base}</code> · {p.estado === 'MERGED' ? 'fusionada ' + hace(p.fusionada) : hace(p.actualizada)} · {p.autor}</span>
+      </span>
+      {p.estado === 'OPEN' && p.checks && <Checks estado={p.checks} />}
+      <span className="gh-diff"><b style={{ color: VERDE }}>+{p.mas}</b> <b style={{ color: ROJO }}>−{p.menos}</b></span>
+    </button>
+  );
+}
+
+function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Issue>; alAbrir: (u: string) => void }) {
+  const total = p.mas + p.menos || 1;
+  return (
+    <div className="gh-pr">
+      <button className="gh-fila" onClick={() => alAbrir(p.url)}>
+        {iconoPR(p)}
+        <span className="gh-cuerpo">
+          <span className="gh-texto"><b>{p.titulo}</b> <span className="suave">#{p.numero}</span></span>
+          <span className="gh-meta">{p.borrador ? 'Borrador' : 'Abierta'} · quiere fusionar {p.commits} commits en <code>{p.base}</code> desde <code>{p.rama}</code></span>
+        </span>
+      </button>
+      <div className="gh-chips">
+        <Checks estado={p.checks} />
+        <Revision r={p.revision} />
+        {p.fusionable === 'CONFLICTING' ? <span className="gh-chip" style={{ color: ROJO }}><Oct n="x" t={13} /> Conflictos</span>
+          : p.fusionable === 'MERGEABLE' ? <span className="gh-chip" style={{ color: VERDE }}><Oct n="check" t={13} /> Sin conflictos</span> : null}
+        <span className="gh-chip"><b style={{ color: VERDE }}>+{p.mas.toLocaleString()}</b>&nbsp;<b style={{ color: ROJO }}>−{p.menos.toLocaleString()}</b>&nbsp;· {p.ficheros} ficheros</span>
+      </div>
+      <div className="gh-diffbarra" title={`+${p.mas} −${p.menos}`}><span style={{ width: `${(p.mas / total) * 100}%` }} /></div>
+      {p.issues.length > 0 && <div className="gh-cierra">Cierra: {p.issues.map(n => {
+        const i = porNumero.get(n);
+        return <span key={n} className="gh-mini">{i?.estado === 'CLOSED' ? <Oct n="issue-cerrada" color={MORADO} t={13} /> : <Oct n="issue" color={VERDE} t={13} />}#{n}{i ? ' ' + i.titulo : ''}</span>;
+      })}</div>}
+    </div>
+  );
+}

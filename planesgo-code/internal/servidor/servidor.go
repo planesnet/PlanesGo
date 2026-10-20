@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/github"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/procesos"
@@ -77,6 +78,8 @@ type Servidor struct {
 	// Procesos: programas del proyecto en marcha (Odoo, servicios…); Eventos: avisos a la interfaz (SSE).
 	Procesos *procesos.Gestor
 	Eventos  Eventos
+	// GitHub: issues y pull requests del repositorio (con la sesión de «gh» del usuario).
+	GitHub github.Lector
 	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
 	TokenAgente string
 	DirBin      string
@@ -118,6 +121,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
+	mux.HandleFunc("GET /api/github", s.conSesion(s.githubEstado))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
