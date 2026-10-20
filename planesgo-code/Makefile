@@ -8,11 +8,14 @@ PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 all: vet test web psfcode studio-tv
 
+# studio-tv es un módulo propio (también lo usa planesgo-server): se prueba aparte
 vet:
 	go vet ./...
+	cd studio-tv && go vet ./...
 
 test:
 	go test -race ./...
+	cd studio-tv && go test -race ./...
 
 # Interfaz web (React + Vite) que se incluye en el binario psfcode
 web:
@@ -28,15 +31,15 @@ escritorio: web psfcode
 
 # Binario para este equipo, en dist/studio-tv
 studio-tv:
-	go build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/studio-tv ./studio-tv/cmd/studio-tv
+	go -C studio-tv build -trimpath -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DIST)/studio-tv ./cmd/studio-tv
 
 # Binarios para todas las plataformas, en dist/studio-tv-<so>-<arq>[.exe]
 dist:
 	@for p in $(PLATAFORMAS); do \
 		so=$${p%/*}; arq=$${p#*/}; ext=; [ $$so = windows ] && ext=.exe; \
 		echo "studio-tv $$so/$$arq"; \
-		CGO_ENABLED=0 GOOS=$$so GOARCH=$$arq go build -trimpath -ldflags '$(LDFLAGS)' \
-			-o $(DIST)/studio-tv-$$so-$$arq$$ext ./studio-tv/cmd/studio-tv || exit 1; \
+		CGO_ENABLED=0 GOOS=$$so GOARCH=$$arq go -C studio-tv build -trimpath -ldflags '$(LDFLAGS)' \
+			-o $(CURDIR)/$(DIST)/studio-tv-$$so-$$arq$$ext ./cmd/studio-tv || exit 1; \
 	done
 
 clean:

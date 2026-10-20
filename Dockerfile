@@ -9,6 +9,9 @@ WORKDIR /app
 # Instalar certificados CA y herramientas básicas
 RUN apk add --no-cache ca-certificates git
 
+# Módulo compartido Studio TV (go.mod: replace planesgo-code/studio-tv => ../planesgo-code/studio-tv)
+COPY planesgo-code/studio-tv /planesgo-code/studio-tv
+
 # Descargar dependencias
 COPY planesgo-server/go.mod planesgo-server/go.sum ./
 RUN go mod download

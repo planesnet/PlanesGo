@@ -25,6 +25,6 @@ cd planesgo-code && make               # arnés: vet, tests, web y binarios en d
 cd planesgo-code && make escritorio    # arnés en Electron
 ```
 
-## Pendiente de unificar
+## Módulos compartidos
 
-`planesgo-server/studiotv/` es una copia de `planesgo-code/studio-tv/`. Hay que mantenerlas iguales hasta que el servidor use el módulo compartido.
+`planesgo-code/studio-tv/` es un módulo Go propio, sin dependencias, que usan el arnés (PSFCode) y el servidor (`/studio-tv/`). Los dos lo enlazan con un `replace` en su `go.mod`, y el `Dockerfile` lo copia junto al servidor.

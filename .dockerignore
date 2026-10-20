@@ -7,8 +7,10 @@ planesgo-server/planesgo-mcp
 planesgo-server/bin
 planesgo-server/data
 planesgo-server/.env
-# Solo se compila el servidor
-planesgo-code
+# Solo se compila el servidor; del arnés solo hace falta el módulo compartido studio-tv
+planesgo-code/*
+!planesgo-code/studio-tv
+planesgo-code/studio-tv/cmd
 *.exe
 *.test
 *.out

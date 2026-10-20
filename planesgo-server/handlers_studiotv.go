@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"pasigo/studiotv"
+	studiotv "planesgo-code/studio-tv"
 )
 
 // Studio TV (PSFCode): estudio para ver en directo las pruebas automáticas, servido en /studio-tv/.

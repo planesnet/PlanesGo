@@ -15,4 +15,7 @@ require (
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
+	planesgo-code/studio-tv v0.0.0
 )
+
+replace planesgo-code/studio-tv => ../planesgo-code/studio-tv
