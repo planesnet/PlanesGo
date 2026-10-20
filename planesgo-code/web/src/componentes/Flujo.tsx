@@ -167,7 +167,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: 
           ))}
         </div>
         {clase !== 'todas' || cuenta('sin-clasificar') === 0 ? null : (
-          <p className="suave pequeno">«Sin clasificar»: issues sin tipo (Feature, Bug, Task) ni etiqueta de petición o mantenimiento.</p>
+          <p className="suave pequeno">«Sin clasificar»: issues sin etiqueta de petición («mejora») ni de mantenimiento («corrección»).</p>
         )}
 
         {/* Issues por fase */}
@@ -201,7 +201,7 @@ function FilaIssue({ i, alAbrir }: { i: Issue; alAbrir: (u: string) => void }) {
     <button className="gh-fila" onClick={() => alAbrir(i.url)} title={i.titulo}>
       {i.estado === 'OPEN' ? <Oct n="issue" color={VERDE} /> : <Oct n="issue-cerrada" color={MORADO} />}
       <span className="gh-cuerpo">
-        <span className="gh-texto">{i.titulo} {i.tipo && <span className={'gh-tipo ' + i.tipo.toLowerCase()}>{i.tipo}</span>} <Etiquetas l={i.etiquetas} /></span>
+        <span className="gh-texto">{i.titulo} <Etiquetas l={i.etiquetas} /></span>
         <span className="gh-meta">
           #{i.numero} · {i.estado === 'OPEN' ? 'abierta ' + hace(i.creada) : 'cerrada ' + hace(i.cerrada)} por {i.autor}
           {i.hito && <> · {i.hito}</>}
@@ -255,24 +255,22 @@ function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Is
   );
 }
 
-// Nueva issue: título, descripción (Markdown), clase (petición nueva o mantenimiento, con el tipo de GitHub) y etiquetas.
+// Nueva issue: título, descripción (Markdown) y etiquetas del repositorio (que dicen si es petición o mantenimiento).
 function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar }: {
   estado: Estado; proyecto: number; carpeta: string; alCrear: (r: { numero: number; url: string }) => void; alCancelar: () => void;
 }) {
   const [titulo, setTitulo] = useState('');
   const [cuerpo, setCuerpo] = useState('');
-  const [tipo, setTipo] = useState('');
   const [etiquetas, setEtiquetas] = useState<string[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
-  const AYUDA_TIPO: Record<string, string> = { Feature: 'Petición nueva', Bug: 'Mantenimiento: error', Task: 'Mantenimiento: tarea' };
   const alterna = (n: string) => setEtiquetas(l => l.includes(n) ? l.filter(x => x !== n) : [...l, n]);
   const envia = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!titulo.trim() || enviando) return;
     setEnviando(true);
     setError('');
-    try { alCrear(await post<{ numero: number; url: string }>('/api/github/issue', { proyecto, carpeta, titulo, cuerpo, tipo, etiquetas })); }
+    try { alCrear(await post<{ numero: number; url: string }>('/api/github/issue', { proyecto, carpeta, titulo, cuerpo, etiquetas })); }
     catch (x) { setError((x as Error).message); setEnviando(false); }
   };
   return (
@@ -280,16 +278,6 @@ function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar }: {
       <div className="gh-titulo"><Oct n="issue" color={VERDE} /> Nueva issue en <b>{estado.repo}</b></div>
       <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Título" autoFocus required maxLength={256} />
       <textarea value={cuerpo} onChange={e => setCuerpo(e.target.value)} placeholder="Descripción (Markdown): qué se pide, por qué, cómo comprobarlo…" rows={6} />
-      {estado.tipos.length > 0 && (
-        <div className="gh-opciones" role="radiogroup" aria-label="Tipo">
-          <span className="suave pequeno">Tipo</span>
-          {['', ...estado.tipos].map(t => (
-            <button type="button" key={t || 'ninguno'} role="radio" aria-checked={tipo === t} className={'gh-opcion' + (t ? ' ' + t.toLowerCase() : '')} onClick={() => setTipo(t)}>
-              {t ? `${t} · ${AYUDA_TIPO[t] || t}` : 'Sin tipo'}
-            </button>
-          ))}
-        </div>
-      )}
       {estado.etiquetas.length > 0 && (
         <div className="gh-opciones" aria-label="Etiquetas">
           <span className="suave pequeno">Etiquetas</span>

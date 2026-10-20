@@ -185,14 +185,8 @@ type prGQL struct {
 	}
 }
 
-// Clasifica: el tipo de issue de GitHub manda; si no hay, las etiquetas (en inglés o en español).
+// Clasifica por las etiquetas (en español o en inglés); el tipo de issue de GitHub solo si no hay etiqueta.
 func clase(tipo string, et []Etiqueta) string {
-	switch strings.ToLower(tipo) {
-	case "feature":
-		return "peticion"
-	case "bug", "task":
-		return "mantenimiento"
-	}
 	for _, e := range et {
 		switch strings.ToLower(e.Nombre) {
 		case "enhancement", "mejora", "feature", "petición", "peticion", "nueva funcionalidad":
@@ -200,6 +194,12 @@ func clase(tipo string, et []Etiqueta) string {
 		case "bug", "corrección", "correccion", "mantenimiento", "maintenance", "fix", "error":
 			return "mantenimiento"
 		}
+	}
+	switch strings.ToLower(tipo) {
+	case "feature":
+		return "peticion"
+	case "bug", "task":
+		return "mantenimiento"
 	}
 	return "sin-clasificar"
 }
