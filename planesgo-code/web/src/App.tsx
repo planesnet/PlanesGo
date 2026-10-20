@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { get, post, type Proyecto, type Usuario } from './api';
+import { get, post, type Proveedor, type Proyecto, type Usuario } from './api';
+import * as S from './sesiones';
 import Acceso from './componentes/Acceso';
 import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
@@ -29,6 +30,63 @@ export default function App() {
   const [aviso, setAviso] = useState('');
   const [proyecto, setProyecto] = useState<Proyecto | null>(null);
   const [panel, setPanel] = useState(true);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [repo, setRepo] = useState<S.Repo | null>(null);
+  const [sesiones, setSesiones] = useState<S.Sesion[]>([]);
+  const [sesion, setSesion] = useState<S.Sesion | null>(null);
+
+  // Título de la ventana con la versión.
+  useEffect(() => {
+    get<{ version: string }>('/api/version').then(v => { document.title = 'Planes Go Code ' + v.version; }).catch(() => {});
+  }, []);
+
+  useEffect(() => { if (usuario) get<Proveedor[]>('/api/proveedores').then(setProveedores).catch(() => {}); }, [usuario]);
+
+  // Agente por defecto de una sesión nueva: el último elegido, si está disponible; si no, el primero disponible.
+  const agentePorDefecto = useCallback(() => {
+    let pref = '';
+    try { pref = localStorage.getItem('pgo:proveedor') || ''; } catch { /* sin almacenamiento */ }
+    return (proveedores.find(p => p.id === pref && p.disponible) || proveedores.find(p => p.disponible) || proveedores[0])?.id || '';
+  }, [proveedores]);
+
+  // Al elegir proyecto: su repositorio (si tiene carpeta local) y sus sesiones; si no hay ninguna, se crea una.
+  useEffect(() => {
+    if (!usuario || !proyecto) { setRepo(null); setSesiones([]); setSesion(null); return; }
+    const carpeta = proyecto.carpetas[0] || '';
+    const sigue = (r: S.Repo | null) => {
+      setRepo(r);
+      let l = S.lista(usuario.login, proyecto.id);
+      if (!l.length && proveedores.length) {
+        l = S.guarda(usuario.login, S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()));
+      }
+      setSesiones(l);
+      setSesion(l[0] || null);
+    };
+    if (carpeta) get<S.Repo>(`/api/proyecto/repo?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}`).then(sigue).catch(() => sigue(null));
+    else sigue(null);
+  }, [usuario, proyecto, proveedores.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cambiaSesion = useCallback((s: S.Sesion) => {
+    if (!usuario) return;
+    setSesiones(S.guarda(usuario.login, s));
+    setSesion(x => (x?.id === s.id ? s : x));
+  }, [usuario]);
+
+  // Nueva sesión (cambiar de rama abre una sesión nueva en esa rama).
+  const nuevaSesion = useCallback((rama?: string) => {
+    if (!usuario || !proyecto) return;
+    const s = S.nueva(proyecto.id, proyecto.carpetas[0] || '', rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto());
+    s.permisos = sesion?.permisos;
+    setSesiones(S.guarda(usuario.login, s));
+    setSesion(s);
+  }, [usuario, proyecto, repo, sesion, agentePorDefecto]);
+
+  const borraSesion = useCallback((s: S.Sesion) => {
+    if (!usuario) return;
+    const l = S.borra(usuario.login, s);
+    setSesiones(l);
+    setSesion(x => (x?.id === s.id ? l[0] || null : x));
+  }, [usuario]);
 
   useEffect(() => {
     get<Usuario>('/api/yo').then(setUsuario).catch(() => setUsuario(null));
@@ -54,8 +112,11 @@ export default function App() {
     <div className="aplicacion">
     <Barra usuario={usuario} alSalir={salir} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}>
-      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige} />
-      <Chat proyecto={proyecto} panelAbierto={panel} alPanel={() => setPanel(p => !p)} />
+      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
+        repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
+        alElegirSesion={setSesion} alNuevaSesion={() => nuevaSesion()} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
+      <Chat proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+        alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
       {panel && <Artefactos proyecto={proyecto} />}
     </div>
     </div>

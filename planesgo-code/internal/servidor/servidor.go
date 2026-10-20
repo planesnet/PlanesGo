@@ -32,6 +32,7 @@ import (
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proyectos"
+	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
 )
 
@@ -67,6 +68,8 @@ type Servidor struct {
 	TokenEscritorio string
 	// Actualizador: autoactualización desde PlanesGo (nil: sin actualizaciones).
 	Actualizador *actualizacion.Actualizador
+	// DirRamas: dónde se crean las copias de trabajo de otras ramas (git worktree) de las sesiones.
+	DirRamas string
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
 	EstudioOcupado func() bool
 	activos        atomic.Int64 // chats y agentes en curso
@@ -86,6 +89,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.conSesion(s.logout))
 	mux.HandleFunc("GET /api/yo", s.conSesion(s.yo))
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) { jsonOK(w, map[string]string{"version": s.Version}) })
+	mux.HandleFunc("GET /api/proyecto/repo", s.conSesion(s.repoProyecto))
 	mux.HandleFunc("GET /api/avatar", s.conSesion(s.avatar))
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
@@ -313,6 +318,20 @@ func (s *Servidor) logout(w http.ResponseWriter, r *http.Request, ses *sesiones.
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
+// repoProyecto da el tipo de hosting, el repositorio y las ramas de una carpeta del proyecto.
+func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	id := idProyecto(r)
+	if _, ok := s.proyecto(w, r, ses, id); !ok {
+		return
+	}
+	carpeta := r.URL.Query().Get("carpeta")
+	if carpeta == "" || !s.Indice.Pertenece(id, carpeta) {
+		jsonError(w, http.StatusBadRequest, "esa carpeta no pertenece al proyecto")
+		return
+	}
+	jsonOK(w, repo.Lee(r.Context(), carpeta))
+}
+
 // Ocupado dice si hay algo en curso que una actualización interrumpiría.
 func (s *Servidor) Ocupado() bool {
 	return s.activos.Load() > 0 || (s.EstudioOcupado != nil && s.EstudioOcupado())
@@ -392,6 +411,8 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Modelo       string        `json:"modelo"`
 		Carpeta      string        `json:"carpeta"`
 		SesionAgente string        `json:"sesion_agente"`
+		Rama         string        `json:"rama"`
+		Permisos     string        `json:"permisos"`
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
 	if err := lee(r, &p); err != nil {
@@ -435,6 +456,15 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			p.Carpeta = cs[0]
 		}
 	}
+	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).
+	if info.NecesitaDir && p.Carpeta != "" && p.Rama != "" {
+		dir, err := repo.CarpetaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		p.Carpeta = dir
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -454,8 +484,11 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Carpeta != "" {
 		sistema += " Carpeta local del proyecto: " + p.Carpeta + "."
 	}
+	if p.Permisos != "" && p.Permisos != "lectura" && p.Permisos != "editar" && p.Permisos != "auto" {
+		p.Permisos = "lectura"
+	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente}, func(e llm.Evento) { envia(e) })
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos}, func(e llm.Evento) { envia(e) })
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
 	}

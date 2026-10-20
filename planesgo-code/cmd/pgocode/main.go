@@ -216,6 +216,7 @@ func main() {
 		stop() // cierre limpio; al terminar se sale con actualizacion.SalidaActualizar
 	}
 	s.Actualizador = act
+	s.DirRamas = filepath.Join(datos, "ramas")
 	if e := act.Estado(); e.Estado == "desactivada" {
 		log.Printf("autoactualización desactivada: %s", e.Error)
 	} else {

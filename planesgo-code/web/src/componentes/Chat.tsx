@@ -1,143 +1,109 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, get, type Mensaje, type Proveedor, type Proyecto } from '../api';
+import { chat, type Mensaje, type Proveedor, type Proyecto } from '../api';
+import { conversacion, guardaConversacion, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
+import { Agente, Hosting, nombreHosting } from './Marca';
 
-interface Conversacion { mensajes: Mensaje[]; sesionAgente: string }
-
-interface Props { proyecto: Proyecto | null; panelAbierto: boolean; alPanel: () => void }
-
-const VACIA: Conversacion = { mensajes: [], sesionAgente: '' };
-
-// Conversaciones por proyecto y proveedor: en memoria y en sessionStorage, para que F5 no las pierda.
-const conversaciones = new Map<string, Conversacion>();
-const claveAlmacen = (k: string) => 'pgo:conv:' + k;
-
-function leeConversacion(k: string): Conversacion {
-  const c = conversaciones.get(k);
-  if (c) return c;
-  try {
-    const v = sessionStorage.getItem(claveAlmacen(k));
-    if (v) {
-      const c2 = JSON.parse(v) as Conversacion;
-      conversaciones.set(k, c2);
-      return c2;
-    }
-  } catch { /* sin almacenamiento: solo memoria */ }
-  return VACIA;
+interface Props {
+  proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
+  panelAbierto: boolean; alPanel: () => void;
+  alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void;
 }
 
-function persiste(k: string, c: Conversacion) {
-  try {
-    if (c.mensajes.length) sessionStorage.setItem(claveAlmacen(k), JSON.stringify(c));
-    else sessionStorage.removeItem(claveAlmacen(k));
-  } catch { /* lleno o no disponible: se queda en memoria */ }
-}
+const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
 
-export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
-  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [provId, setProvId] = useState('');
-  const [modelo, setModelo] = useState('');
-  const [carpeta, setCarpeta] = useState('');
+export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
-  const [conv, setConv] = useState<Conversacion>(VACIA);
+  const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
+  const [verAgentes, setVerAgentes] = useState(false);
   const fin = useRef<HTMLDivElement>(null);
   const lista = useRef<HTMLDivElement>(null);
+  const idActual = useRef(sesion?.id);
 
+  const prov = proveedores.find(p => p.id === sesion?.agente);
+  const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
+
+  // Al cambiar de sesión: su conversación; y se corta la respuesta en curso (no se escribe en otra sesión).
   useEffect(() => {
-    get<Proveedor[]>('/api/proveedores').then(l => {
-      setProveedores(l);
-      let preferido = '';
-      try { preferido = localStorage.getItem('pgo:proveedor') || ''; } catch { /* sin almacenamiento */ }
-      const p = l.find(x => x.id === preferido && x.disponible) || l.find(x => x.disponible) || l[0];
-      if (p) { setProvId(p.id); setModelo(p.por_defecto); }
-    }).catch(() => {});
-  }, []);
-
-  const prov = proveedores.find(p => p.id === provId);
-  const clave = proyecto ? proyecto.id + '|' + provId : '';
-  const claveActual = useRef(clave);
-
-  // Al cambiar de proyecto o proveedor se corta la respuesta en curso: así no se escribe en otra conversación.
-  useEffect(() => {
-    claveActual.current = clave;
-    setConv(clave ? leeConversacion(clave) : VACIA);
-    setCarpeta(proyecto?.carpetas[0] || '');
+    idActual.current = sesion?.id;
+    setMensajes(sesion ? conversacion(sesion.id) : []);
     return () => { setEnCurso(ac => { ac?.abort(); return null; }); };
-  }, [clave, proyecto]);
+  }, [sesion?.id]);
 
-  // Solo se baja al final si el usuario ya estaba abajo (si está leyendo arriba, no se le mueve).
+  // Solo se baja al final si el usuario ya estaba abajo.
   useEffect(() => {
     const l = lista.current;
     if (!l || l.scrollHeight - l.scrollTop - l.clientHeight < 120) fin.current?.scrollIntoView({ block: 'end' });
-  }, [conv]);
-
-  const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
+  }, [mensajes]);
 
   async function envia() {
     const t = texto.trim();
-    if (!t || !proyecto || !prov || enCurso) return;
-    const k = clave;
-    const guarda = (c: Conversacion, final = false) => {
-      conversaciones.set(k, c);
-      if (claveActual.current === k) setConv(c);
-      if (final) persiste(k, c);
+    if (!t || !proyecto || !sesion || !prov || enCurso) return;
+    const id = sesion.id;
+    const pon = (m: Mensaje[], final = false) => {
+      if (idActual.current === id) setMensajes(m);
+      if (final) guardaConversacion(id, m);
     };
-    const base: Mensaje[] = [...conv.mensajes.filter(m => !m.error), { rol: 'user', texto: t }];
-    let actual: Conversacion = { mensajes: [...base, { rol: 'assistant', texto: '' }], sesionAgente: conv.sesionAgente };
-    guarda(actual, true);
+    const base: Mensaje[] = [...mensajes.filter(m => !m.error), { rol: 'user', texto: t }];
+    let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
+    pon(actual, true);
     setTexto('');
     const ac = new AbortController();
     setEnCurso(ac);
-    const pon = (f: (m: Mensaje) => Mensaje, sesion?: string) => {
-      const ms = actual.mensajes.slice();
-      ms[ms.length - 1] = f(ms[ms.length - 1]);
-      actual = { mensajes: ms, sesionAgente: sesion ?? actual.sesionAgente };
-      guarda(actual);
-    };
-    // Los agentes llevan su propio historial: solo se les manda el último mensaje.
-    const mensajes = prov.tipo === 'agente' ? base.slice(-1) : base;
+    let sesionAgente = sesion.sesionAgente;
+    const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     try {
-      await chat({ proyecto: proyecto.id, proveedor: prov.id, modelo, carpeta, sesion_agente: conv.sesionAgente, mensajes },
-        e => {
-          if (e.texto) pon(m => ({ ...m, texto: m.texto + e.texto }));
-          if (e.sesion_agente) pon(m => m, e.sesion_agente);
-          if (e.error) pon(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
-        }, ac.signal);
+      await chat({
+        proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
+        permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente,
+        mensajes: prov.tipo === 'agente' ? base.slice(-1) : base, // los agentes llevan su propio historial
+      }, e => {
+        if (e.texto) ultimo(m => ({ ...m, texto: m.texto + e.texto }));
+        if (e.sesion_agente) sesionAgente = e.sesion_agente;
+        if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
+      }, ac.signal);
     } catch (err) {
-      if (!ac.signal.aborted) pon(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
+      if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
-      guarda(actual, true);
+      pon(actual, true);
       setEnCurso(c => (c === ac ? null : c));
+      alCambiarSesion({ ...sesion, sesionAgente, ultima: Date.now() });
     }
   }
-
-  const eligeProveedor = (id: string) => {
-    const p = proveedores.find(x => x.id === id);
-    setProvId(id);
-    setModelo(p?.por_defecto || '');
-    try { localStorage.setItem('pgo:proveedor', id); } catch { /* sin almacenamiento */ }
-  };
-
-  const nueva = () => {
-    conversaciones.set(clave, VACIA);
-    persiste(clave, VACIA);
-    setConv(VACIA);
-  };
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); envia(); }
   };
 
+  const eligeAgente = (p: Proveedor) => {
+    setVerAgentes(false);
+    if (sesion && p.id !== sesion.agente) alCambiarSesion({ ...sesion, agente: p.id, modelo: undefined, sesionAgente: undefined });
+    try { localStorage.setItem('pgo:proveedor', p.id); } catch { /* sin almacenamiento */ }
+  };
+
   return (
     <main className="chat">
       <header className="cabecera">
-        <div className="titulo">
-          {proyecto ? <><b>{proyecto.nombre}</b><span className="suave"> · Odoo #{proyecto.id}</span></> : <span className="suave">Elige un proyecto de Odoo</span>}
-        </div>
+        {proyecto && sesion ? (
+          <nav className="miga" aria-label="Ubicación de la sesión">
+            <span className="miga-item" title={nombreHosting(repo?.tipo)}><Hosting tipo={repo?.tipo} t={16} /></span>
+            {repo?.repositorio && <><span className="sep">/</span><span className="miga-item" title={repo.remoto}><Icono n="repo" t={14} /> {repo.repositorio}</span></>}
+            {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
+            {repo && repo.ramas.length > 0 && (
+              <><span className="sep">/</span>
+                <label className="miga-item rama" title="Cambiar de rama abre una sesión nueva">
+                  <Icono n="rama" t={14} />
+                  <select value={sesion.rama} onChange={e => alNuevaSesion(e.target.value)} disabled={Boolean(enCurso)}>
+                    {repo.ramas.map(r => <option key={r}>{r}</option>)}
+                  </select>
+                </label></>
+            )}
+          </nav>
+        ) : <span className="suave titulo">{proyecto ? proyecto.nombre : 'Elige un proyecto de Odoo'}</span>}
         <span className="hueco" />
-        {proyecto && conv.mensajes.length > 0 && !enCurso && (
-          <button className="icono" onClick={nueva} title="Nueva conversación" aria-label="Nueva conversación"><Icono n="nuevo" /></button>
+        {sesion && mensajes.length > 0 && !enCurso && (
+          <button className="icono" onClick={() => alNuevaSesion(sesion.rama)} title="Nueva sesión" aria-label="Nueva sesión"><Icono n="nuevo" /></button>
         )}
         <button className="icono" onClick={alPanel} title={panelAbierto ? 'Ocultar artefactos' : 'Mostrar artefactos'} aria-label="Artefactos" aria-pressed={panelAbierto}><Icono n="panel" /></button>
       </header>
@@ -145,43 +111,52 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
       {!proyecto ? (
         <div className="vacio">
           <h2>Sin proyecto, no hay trabajo</h2>
-          <p>Todo en Planes Go Code va ligado a un proyecto de Odoo. Elige uno a la izquierda para hablar con un modelo o un agente, abrir enlaces o ver las pruebas en directo.</p>
+          <p>Todo en Planes Go Code va ligado a un proyecto de Odoo. Elige uno a la izquierda.</p>
         </div>
+      ) : !sesion ? (
+        <div className="vacio"><p>Preparando la sesión…</p></div>
       ) : (
         <>
           <div className="mensajes" aria-live="polite" ref={lista}>
-            {conv.mensajes.length === 0 && (
+            {mensajes.length === 0 && (
               <div className="vacio pequeno">
-                <p>Habla con {prov?.nombre || 'un modelo'} sobre <b>{proyecto.nombre}</b>.</p>
-                {prov?.tipo === 'agente' && <p className="suave">El agente trabaja en la carpeta del proyecto y lleva su propio historial.</p>}
+                <p><b>{sesion.nombre}</b></p>
+                <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos' }[sesion.permisos || 'lectura']}` : ''}</p>
               </div>
             )}
-            {conv.mensajes.map((m, i) => (
+            {mensajes.map((m, i) => (
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
-                {m.texto || (enCurso && i === conv.mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
+                {m.texto || (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
               </div>
             ))}
             <div ref={fin} />
           </div>
           <div className="redactor">
-            <div className="opciones">
-              <select value={provId} onChange={e => eligeProveedor(e.target.value)} aria-label="Proveedor">
-                {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
-              </select>
-              {prov?.tipo === 'api' && (
-                <select value={modelo} onChange={e => setModelo(e.target.value)} aria-label="Modelo">
+            <div className="entrada">
+              <div className="selector-agente">
+                <button className="agente-actual" onClick={() => setVerAgentes(v => !v)} title={prov ? prov.nombre : 'Elegir agente'} aria-label="Agente" aria-haspopup="listbox" aria-expanded={verAgentes}>
+                  <Agente id={sesion.agente} t={18} /><Icono n="bajar" t={12} />
+                </button>
+                {verAgentes && (
+                  <ul className="lista-agentes" role="listbox" aria-label="Agentes">
+                    {proveedores.map(p => (
+                      <li key={p.id}>
+                        <button role="option" aria-selected={p.id === sesion.agente} disabled={!p.disponible} onClick={() => eligeAgente(p)} title={p.disponible ? '' : p.motivo}>
+                          <Agente id={p.id} t={16} /> <span className="recorta">{p.nombre}</span>
+                          {p.id === sesion.agente && <Icono n="hecho" t={14} />}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <textarea rows={2} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
+                placeholder={prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'} disabled={!prov?.disponible} />
+              {prov?.tipo === 'api' && modelos.length > 1 && (
+                <select className="modelo" value={sesion.modelo || prov.por_defecto} onChange={e => alCambiarSesion({ ...sesion, modelo: e.target.value })} aria-label="Modelo">
                   {modelos.map(m => <option key={m}>{m}</option>)}
                 </select>
               )}
-              {prov?.necesita_carpeta && (
-                proyecto.carpetas.length
-                  ? <select value={carpeta} onChange={e => setCarpeta(e.target.value)} aria-label="Carpeta">{proyecto.carpetas.map(c => <option key={c}>{c}</option>)}</select>
-                  : <span className="error pequeno">Sin carpeta local (.planesgo.json)</span>
-              )}
-            </div>
-            <div className="entrada">
-              <textarea rows={3} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
-                placeholder={prov?.disponible ? 'Escribe…' : 'Este proveedor no está disponible'} disabled={!prov?.disponible} />
               {enCurso
                 ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
                 : <button className="redondo primario" onClick={envia} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}

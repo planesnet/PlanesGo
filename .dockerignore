@@ -7,11 +7,11 @@ planesgo-server/planesgo-mcp
 planesgo-server/bin
 planesgo-server/data
 planesgo-server/.env
-# Planes Go Code: se compila su paquete (sin dependencias ni compilados locales)
-planesgo-code/web/node_modules
-planesgo-code/web/dist
-planesgo-code/electron/node_modules
-planesgo-code/dist
+# Del arnés (planesgo-code) solo hacen falta el módulo compartido studio-tv y el instalador
+planesgo-code/*
+!planesgo-code/studio-tv
+!planesgo-code/linux
+planesgo-code/studio-tv/cmd
 *.exe
 *.test
 *.out

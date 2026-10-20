@@ -22,8 +22,8 @@ var sesionValida = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 // retransmite su respuesta. Solo se le pasa el último mensaje: el agente lleva su propio historial.
 type Agente struct {
 	Clave, Nombre, Programa string
-	// Args construye los argumentos a partir del mensaje y la sesión anterior del agente.
-	Args func(msg, sesion string) []string
+	// Args construye los argumentos a partir del mensaje, la sesión anterior del agente y los permisos.
+	Args func(msg, sesion, permisos string) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
 }
@@ -51,7 +51,7 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		return errors.New("identificador de sesión del agente no válido")
 	}
 	msg := p.Mensajes[len(p.Mensajes)-1].Texto
-	cmd := exec.CommandContext(ctx, a.Programa, a.Args(msg, p.SesionAgente)...)
+	cmd := exec.CommandContext(ctx, a.Programa, a.Args(msg, p.SesionAgente, p.Permisos)...)
 	cmd.Dir = p.Carpeta
 	// El agente va en su propio grupo de procesos: al cancelar se matan también sus hijos (servidores MCP,
 	// shells…), y WaitDelay evita quedarse esperando a un nieto que conserve la salida abierta.
@@ -176,8 +176,15 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 func Agentes() []Proveedor {
 	return []Proveedor{
 		&Agente{Clave: "claude-code", Nombre: "Claude Code (agente)", Programa: "claude", Lee: leeClaudeCode,
-			Args: func(msg, sesion string) []string {
+			Args: func(msg, sesion, permisos string) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
+				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
+				switch permisos {
+				case "editar":
+					a = append(a, "--permission-mode", "acceptEdits")
+				case "auto":
+					a = append(a, "--permission-mode", "auto")
+				}
 				if sesion != "" {
 					a = append(a, "--resume", sesion)
 				}
@@ -185,8 +192,8 @@ func Agentes() []Proveedor {
 				return append(a, "--", msg)
 			}},
 		&Agente{Clave: "opencode", Nombre: "OpenCode (agente)", Programa: "opencode",
-			Args: func(msg, sesion string) []string { return []string{"run", "--", msg} }},
+			Args: func(msg, sesion, permisos string) []string { return []string{"run", "--", msg} }},
 		&Agente{Clave: "gemini-cli", Nombre: "Gemini CLI (agente)", Programa: "gemini",
-			Args: func(msg, sesion string) []string { return []string{"--prompt=" + msg} }},
+			Args: func(msg, sesion, permisos string) []string { return []string{"--prompt=" + msg} }},
 	}
 }

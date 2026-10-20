@@ -9,7 +9,7 @@ import (
 
 // A1: el id de sesión llega del navegador y va como argumento: no puede ser una opción del programa.
 func TestSesionAgenteValidada(t *testing.T) {
-	a := &Agente{Clave: "x", Programa: "true", Args: func(m, s string) []string { return nil }}
+	a := &Agente{Clave: "x", Programa: "true", Args: func(m, s, p string) []string { return nil }}
 	for _, mala := range []string{"--dangerously-skip-permissions", "-p", "a b", "../x", strings.Repeat("a", 200)} {
 		err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), SesionAgente: mala, Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}}, func(Evento) {})
 		if err == nil || !strings.Contains(err.Error(), "sesión") {
@@ -25,7 +25,7 @@ func TestSesionAgenteValidada(t *testing.T) {
 func TestMensajeNoEsOpcion(t *testing.T) {
 	for _, p := range Agentes() {
 		a := p.(*Agente)
-		args := a.Args("- arregla el test", "")
+		args := a.Args("- arregla el test", "", "")
 		ultimo := args[len(args)-1]
 		if ultimo == "- arregla el test" && (len(args) < 2 || args[len(args)-2] != "--") {
 			t.Errorf("%s: el mensaje va sin «--» delante: %q", a.Clave, args)
@@ -51,6 +51,17 @@ func TestRegistroSinRed(t *testing.T) {
 	for _, id := range []string{"claude", "openai", "gemini"} {
 		if _, ok := r.Busca(id); !ok {
 			t.Errorf("falta %s", id)
+		}
+	}
+}
+
+// Los permisos de la sesión llegan a Claude Code como --permission-mode.
+func TestPermisosClaudeCode(t *testing.T) {
+	a := Agentes()[0].(*Agente)
+	for permisos, quiero := range map[string]string{"": "", "lectura": "", "editar": "acceptEdits", "auto": "auto"} {
+		args := strings.Join(a.Args("hola", "", permisos), " ")
+		if quiero == "" && strings.Contains(args, "--permission-mode") || quiero != "" && !strings.Contains(args, "--permission-mode "+quiero) {
+			t.Errorf("permisos %q: %s", permisos, args)
 		}
 	}
 }

@@ -23,6 +23,9 @@ type Peticion struct {
 	Carpeta string
 	// SesionAgente permite a un agente continuar su propia conversación (p. ej. claude --resume).
 	SesionAgente string
+	// Permisos del agente en la sesión: "lectura" (por defecto), "editar" o "auto" (ejecuta comandos con el
+	// control de seguridad del agente).
+	Permisos string
 }
 
 // Evento es un trozo de la respuesta: texto, o la sesión del agente para continuarla después.

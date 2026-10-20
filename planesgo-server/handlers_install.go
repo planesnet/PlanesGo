@@ -3,10 +3,17 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"io"
 	"io/fs"
+	"log"
 	"net/http"
+	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -32,6 +39,7 @@ func setupInstallRoutes(mux *http.ServeMux, state *AppState) {
 	})
 	mux.HandleFunc("/install/psf.tar.gz", state.handleInstallPSF)
 	mux.HandleFunc("/install/pgocode/", handleInstallPgocode)
+	mux.HandleFunc("/admin/pgocode/publicar", state.handlePublicarPgocode)
 }
 
 func handleInstallScript(w http.ResponseWriter, r *http.Request) {
@@ -109,14 +117,23 @@ func serveTarGz(w http.ResponseWriter, fsys embed.FS, root, name string) {
 	gz.Close()
 }
 
-// Planes Go Code (planesgo-code): paquete para la instalación y la autoactualización. Lo genera el Dockerfile
-// en /app/pgocode (version.json, pgocode-linux-amd64.tar.gz, instalar.sh, apparmor-pgocode). Público: el
-// paquete no lleva secretos y la app pide usuario de Odoo para todo.
+// Planes Go Code (planesgo-code): paquete para la instalación y la autoactualización.
+// El paquete y su version.json se publican sin reconstruir PlanesGo (POST /admin/pgocode/publicar, solo
+// administradores) y se guardan en el volumen persistente data/pgocode/. El instalador y el perfil de AppArmor
+// van en la imagen (pgocode/). Todo es público para descargar: el paquete no lleva secretos y la app pide
+// usuario de Odoo para todo.
+const (
+	dirPgocodeImagen    = "pgocode"
+	dirPgocodePublicado = "data/pgocode"
+	paquetePgocode      = "pgocode-linux-amd64.tar.gz"
+	maxPaquetePgocode   = 200 << 20
+)
+
 var archivosPgocode = map[string]string{
-	"version.json":               "application/json",
-	"pgocode-linux-amd64.tar.gz": "application/gzip",
-	"instalar.sh":                "text/x-shellscript; charset=utf-8",
-	"apparmor-pgocode":           "text/plain; charset=utf-8",
+	"version.json":     "application/json",
+	paquetePgocode:     "application/gzip",
+	"instalar.sh":      "text/x-shellscript; charset=utf-8",
+	"apparmor-pgocode": "text/plain; charset=utf-8",
 }
 
 func handleInstallPgocode(w http.ResponseWriter, r *http.Request) {
@@ -126,9 +143,92 @@ func handleInstallPgocode(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	dir := dirPgocodeImagen
+	if nombre == "version.json" || nombre == paquetePgocode {
+		dir = dirPgocodePublicado
+	}
 	w.Header().Set("Content-Type", tipo)
 	if nombre == "version.json" {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
-	http.ServeFile(w, r, path.Join("pgocode", nombre))
+	http.ServeFile(w, r, path.Join(dir, nombre))
+}
+
+// handlePublicarPgocode recibe una versión nueva de Planes Go Code (multipart: version, electron y paquete),
+// calcula su huella y la publica. Solo administradores (token de PlanesGo o sesión de administrador).
+func (state *AppState) handlePublicarPgocode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método no permitido"})
+		return
+	}
+	session, err := state.resolveAntigravitySession(r, "")
+	if err != nil || !session.IsAdmin() {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "solo un administrador puede publicar Planes Go Code"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPaquetePgocode+1<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "se espera multipart con version, electron y paquete: " + err.Error()})
+		return
+	}
+	version, electron := strings.TrimSpace(r.FormValue("version")), strings.TrimSpace(r.FormValue("electron"))
+	valido := regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,40}$`)
+	if !valido.MatchString(version) || !valido.MatchString(electron) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "version o electron no válidos"})
+		return
+	}
+	f, _, err := r.FormFile("paquete")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "falta el paquete"})
+		return
+	}
+	defer f.Close()
+	if err := os.MkdirAll(dirPgocodePublicado, 0o755); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	tmp, err := os.CreateTemp(dirPgocodePublicado, "paquete-*")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(f, maxPaquetePgocode+1))
+	tmp.Close()
+	if err != nil || n > maxPaquetePgocode || n < 18 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "paquete vacío, demasiado grande o incompleto"})
+		return
+	}
+	if cab, err := os.ReadFile(tmp.Name()); err != nil || cab[0] != 0x1f || cab[1] != 0x8b {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "el paquete no es un .tar.gz"})
+		return
+	}
+	pub := map[string]any{"version": version, "sha256": hex.EncodeToString(h.Sum(nil)), "bytes": n,
+		"archivo": paquetePgocode, "electron": electron}
+	b, _ := json.Marshal(pub)
+	// Primero el paquete y después version.json: una app nunca ve una huella sin su paquete.
+	if err := os.Rename(tmp.Name(), path.Join(dirPgocodePublicado, paquetePgocode)); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	vtmp := path.Join(dirPgocodePublicado, "version.json.tmp")
+	if err := os.WriteFile(vtmp, append(b, '\n'), 0o644); err != nil || os.Rename(vtmp, path.Join(dirPgocodePublicado, "version.json")) != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "no se pudo publicar version.json"})
+		return
+	}
+	log.Printf("[Planes Go Code] %s publicó la versión %s (%d bytes)", session.UserEmail, version, n)
+	json.NewEncoder(w).Encode(pub)
 }

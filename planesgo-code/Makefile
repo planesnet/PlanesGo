@@ -4,7 +4,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio paquete instalar apparmor dist clean
+.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar instalar apparmor dist clean
 
 all: vet test web pgocode studio-tv
 
@@ -42,6 +42,15 @@ paquete: web
 	@sha=$$(sha256sum $(DIST)/pgocode-linux-amd64.tar.gz | cut -d' ' -f1); bytes=$$(stat -c %s $(DIST)/pgocode-linux-amd64.tar.gz); \
 	printf '{"version": "%s", "sha256": "%s", "bytes": %s, "archivo": "pgocode-linux-amd64.tar.gz", "electron": "%s"}\n' \
 		"$(VERSION)" "$$sha" "$$bytes" "$(ELECTRON_VER)" > $(DIST)/version.json; cat $(DIST)/version.json
+
+# Publica la versión (VERSION) en PlanesGo sin reconstruirlo: las apps la ven en menos de un minuto y se
+# actualizan solas. Solo administradores: usa el token de PlanesGo ($PLANESGO_TOKEN o ~/.planesgo_auth.json).
+PUBLICAR_EN ?= https://planesgo.autopyme.com/admin/pgocode/publicar
+publicar: paquete
+	@tok="$${PLANESGO_TOKEN:-$$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token",""))' 2>/dev/null)}"; \
+	[ -n "$$tok" ] || { echo "Falta el token de PlanesGo (PLANESGO_TOKEN o ~/.planesgo_auth.json)"; exit 1; }; \
+	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) \
+		-F paquete=@$(DIST)/pgocode-linux-amd64.tar.gz $(PUBLICAR_EN) && echo && echo "Publicada la versión $(VERSION)."
 
 # Instala en ~/.local/share/pgocode lo que hay en este repositorio (versión de desarrollo: sin autoactualización).
 # Para instalar la versión publicada (con autoactualización):
