@@ -33,14 +33,14 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
 
   // Pulsar el aviso de actualización pendiente la instala ya (si hay algo en curso, se avisa antes).
   const aplicar = async () => {
-    if (act?.ocupado && !confirm('Hay trabajo en curso (un agente respondiendo, una prueba o un programa en marcha): se detendrá. ¿Actualizar ahora?')) return;
+    if (act?.ocupado && !confirm('Se cerrará y volverá a abrir pgocode. Si hay un agente respondiendo, una prueba o un programa en marcha, se detendrá. ¿Actualizar ahora?')) return;
     setAct(a => a && { ...a, estado: 'aplicando' });
     try { await post('/api/actualizacion/aplicar', {}); } catch { carga(); }
   };
   const buscar = async () => { await post('/api/actualizacion/buscar', {}).catch(() => {}); setTimeout(carga, 3000); };
 
   const etiqueta = act && ({
-    pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: 'Pulsa para actualizar ahora' + (act.ocupado ? ' (si no, se instalará cuando termine lo que está en curso)' : '') },
+    pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: 'Pulsa para actualizar ahora (si no, se instalará sola cuando lleves un rato sin usar la app)' },
     descargando: { texto: `Descargando v${act.nueva}…`, titulo: 'Descargando la nueva versión' },
     aplicando: { texto: 'Actualizando…', titulo: 'Se cierra y se vuelve a abrir con la versión nueva' },
     manual: { texto: `v${act.nueva} · reinstalar`, titulo: act.error || '' },

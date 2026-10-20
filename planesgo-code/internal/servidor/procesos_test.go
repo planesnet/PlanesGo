@@ -55,3 +55,19 @@ func TestPgoAgente(t *testing.T) {
 		}
 	}
 }
+
+// Con el usuario usando la app (actividad reciente) no se actualiza sola; pasado el plazo, sí.
+func TestOcupadoPorUso(t *testing.T) {
+	s := &Servidor{}
+	if s.Ocupado() {
+		t.Fatal("sin actividad no está ocupado")
+	}
+	s.actividad.Store(time.Now().UnixNano())
+	if !s.Ocupado() {
+		t.Fatal("con actividad reciente está ocupado")
+	}
+	s.actividad.Store(time.Now().Add(-sinUsoAntes - time.Second).UnixNano())
+	if s.Ocupado() {
+		t.Fatal("tras el plazo ya no")
+	}
+}

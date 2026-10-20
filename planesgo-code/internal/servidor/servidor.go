@@ -86,6 +86,8 @@ type Servidor struct {
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
 	EstudioOcupado func() bool
 	activos        atomic.Int64 // chats y agentes en curso
+	// actividad: última vez que el usuario usó la app o tenía algo a medio escribir (UnixNano).
+	actividad atomic.Int64
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
 	// no se atiende ninguna petición.
 	PermitirNavegador bool
@@ -117,6 +119,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
 	mux.HandleFunc("POST /api/actualizacion/aplicar", s.conSesion(s.aplicaActualizacion))
+	mux.HandleFunc("POST /api/actividad", s.conSesion(s.marcaActividad))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
@@ -367,7 +370,7 @@ func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *ses
 
 // Ocupado dice si hay algo en curso que una actualización interrumpiría.
 func (s *Servidor) Ocupado() bool {
-	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
+	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || s.usandose() || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
 }
 
 func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -378,6 +381,21 @@ func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *se
 	e := s.Actualizador.Estado()
 	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
 		"revisado": e.Revisado, "ocupado": s.Ocupado()})
+}
+
+// sinUsoAntes: tiempo sin que el usuario toque la app (ni tenga nada a medio escribir) antes de actualizar sola.
+const sinUsoAntes = 15 * time.Minute
+
+// usandose dice si el usuario está trabajando con la app (aunque ningún agente esté respondiendo ahora).
+func (s *Servidor) usandose() bool {
+	t := s.actividad.Load()
+	return t != 0 && time.Since(time.Unix(0, t)) < sinUsoAntes
+}
+
+// marcaActividad: la interfaz avisa de que el usuario está usando la app o tiene un borrador.
+func (s *Servidor) marcaActividad(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	s.actividad.Store(time.Now().UnixNano())
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // aplicaActualizacion: el usuario pulsa el aviso; se instala ya la versión preparada.

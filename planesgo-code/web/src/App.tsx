@@ -56,6 +56,26 @@ export default function App() {
     });
   }, [usuario, abreWeb]);
 
+  // Uso de la app: mientras el usuario teclea, mueve el ratón o tiene algo a medio escribir (un mensaje, una
+  // issue…), el backend no se actualiza solo. Se avisa como mucho cada 20 s.
+  useEffect(() => {
+    if (!usuario) return;
+    let usado = true;
+    const marca = () => { usado = true; };
+    const borrador = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, .gh-nueva input, .nuevo-programa input'))
+      .some(e => e.value.trim() !== '');
+    const avisa = () => {
+      if (!usado && !borrador()) return;
+      usado = false;
+      post('/api/actividad', {}).catch(() => {});
+    };
+    const eventos = ['keydown', 'pointerdown', 'wheel', 'focus'] as const;
+    eventos.forEach(ev => window.addEventListener(ev, marca, { passive: true }));
+    avisa();
+    const t = setInterval(avisa, 20000);
+    return () => { clearInterval(t); eventos.forEach(ev => window.removeEventListener(ev, marca)); };
+  }, [usuario]);
+
   // Título de la ventana con la versión.
   useEffect(() => {
     get<{ version: string }>('/api/version').then(v => { document.title = 'Planes Go Code ' + v.version; }).catch(() => {});
