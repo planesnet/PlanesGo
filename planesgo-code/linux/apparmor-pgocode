@@ -1,0 +1,12 @@
+# Perfil de AppArmor de Planes Go Code (como los de Chrome, VS Code o Claude en /etc/apparmor.d/).
+# Ubuntu 24.04+ restringe los «user namespaces» a los programas sin perfil, y el aislamiento (sandbox) de
+# Electron/Chromium los necesita: sin este perfil, lanzado desde el menú, Electron se cierra al arrancar.
+# Solo permite crear user namespaces; no quita ninguna otra protección ni el sandbox de la app.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile pgocode @ELECTRON@ flags=(unconfined) {
+  userns,
+
+  include if exists <local/pgocode>
+}

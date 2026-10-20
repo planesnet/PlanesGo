@@ -4,7 +4,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio instalar dist clean
+.PHONY: all test vet web pgocode studio-tv escritorio instalar apparmor dist clean
 
 all: vet test web pgocode studio-tv
 
@@ -41,6 +41,15 @@ instalar: web pgocode
 	sed 's#@BIN@#$(BIN_USUARIO)/pgocode#' pgocode.desktop > $(HOME)/.local/share/applications/pgocode.desktop
 	-gtk-update-icon-cache -q $(HOME)/.local/share/icons/hicolor 2>/dev/null; -update-desktop-database -q $(HOME)/.local/share/applications 2>/dev/null
 	@echo "Instalado: escribe «pgocode» o búscalo en el menú de aplicaciones."
+
+# Ubuntu 24.04+: perfil de AppArmor para que Electron pueda usar su sandbox al abrirse desde el menú.
+# Genera dist/apparmor-pgocode y muestra los dos comandos (con sudo) para instalarlo.
+apparmor:
+	@mkdir -p $(DIST)
+	@sed 's#@ELECTRON@#$(CURDIR)/electron/node_modules/electron/dist/electron#' linux/apparmor-pgocode > $(DIST)/apparmor-pgocode
+	@echo "Instálalo con:"
+	@echo "  sudo cp $(CURDIR)/$(DIST)/apparmor-pgocode /etc/apparmor.d/pgocode"
+	@echo "  sudo apparmor_parser -r /etc/apparmor.d/pgocode"
 
 # Binario para este equipo, en dist/studio-tv
 studio-tv:
