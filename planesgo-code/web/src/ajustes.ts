@@ -37,9 +37,13 @@ export const TIPOS_HOSTING: { id: TipoHosting; nombre: string; descripcion: stri
     { id: 'notas', nombre: 'Notas' }] },
 ];
 
-export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting }
+// Cómo se elige la skill de cada petición: el agente solo (como siempre), pgocode la sugiere (sin tocar lo que se
+// envía) o pgocode la elige con embeddings y se la indica al agente.
+export type SeleccionSkills = 'agente' | 'sugerir' | 'elegir';
 
-export const AJUSTES_DEFECTO: AjustesProyecto = { detalle: 'normal' };
+export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills }
+
+export const AJUSTES_DEFECTO: AjustesProyecto = { detalle: 'normal', skills: 'sugerir' };
 
 const clave = (login: string, proyecto: number) => `pgo:ajustes:${login.toLowerCase()}:${proyecto}`;
 

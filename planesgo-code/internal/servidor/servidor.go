@@ -37,6 +37,7 @@ import (
 	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/qa"
 	"planesgo-code/internal/repo"
+	"planesgo-code/internal/selector"
 	"planesgo-code/internal/sesiones"
 )
 
@@ -79,6 +80,8 @@ type Servidor struct {
 	// Procesos: programas del proyecto en marcha (Odoo, servicios…); Eventos: avisos a la interfaz (SSE).
 	Procesos *procesos.Gestor
 	Eventos  Eventos
+	// Selector: elige la skill de cada petición con embeddings (vectores guardados en disco).
+	Selector *selector.Selector
 	// GitHub: issues y pull requests del repositorio (con la sesión de «gh» del usuario).
 	GitHub github.Lector
 	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
@@ -129,6 +132,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
 	mux.HandleFunc("GET /api/skills", s.conSesion(s.skillsInventario))
 	mux.HandleFunc("GET /api/skills/texto", s.conSesion(s.skillsTexto))
+	mux.HandleFunc("POST /api/skills/elegir", s.conSesion(s.skillsElegir))
 	mux.HandleFunc("GET /api/github", s.conSesion(s.githubEstado))
 	mux.HandleFunc("POST /api/github/issue", s.conSesion(s.githubCrea))
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))

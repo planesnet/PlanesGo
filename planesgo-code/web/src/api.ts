@@ -12,7 +12,11 @@ export interface Proveedor {
 export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string }
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number }
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso }
+export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo }
+
+export interface Candidato { nombre: string; ruta: string; puntuacion: number }
+export interface Eleccion { candidatos: Candidato[]; elegida?: Candidato; umbral: number; ms: number }
 
 export class ErrorAPI extends Error {
   constructor(public estado: number, mensaje: string) { super(mensaje); }

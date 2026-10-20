@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { get, type Proyecto } from '../api';
+import { get, post, type Eleccion, type Proyecto } from '../api';
 import { conversacion, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente } from './Marca';
@@ -21,8 +21,9 @@ const k = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 // Cuántas veces se ha usado cada skill en las conversaciones de las sesiones del proyecto.
 export function usosDeSkills(sesiones: Sesion[]): Record<string, number> {
   const u: Record<string, number> = {};
-  for (const s of sesiones) for (const m of conversacion(s.id)) for (const p of m.partes || []) {
-    if (p.tipo === 'herramienta' && p.h.skill) u[p.h.skill] = (u[p.h.skill] || 0) + 1;
+  for (const s of sesiones) for (const m of conversacion(s.id)) {
+    if (m.skill?.modo === 'elegida') u[m.skill.nombre] = (u[m.skill.nombre] || 0) + 1;
+    for (const p of m.partes || []) if (p.tipo === 'herramienta' && p.h.skill) u[p.h.skill] = (u[p.h.skill] || 0) + 1;
   }
   return u;
 }
@@ -73,6 +74,8 @@ export default function Skills({ proyecto, carpeta, agente, sesiones }: { proyec
         </ol>
         <p>Por eso una buena descripción dice <b>qué hace y cuándo usarla</b> («Úsala cuando…»), y las skills que no se usan cuestan igual en cada conversación. Cuando el agente usa una skill, en el chat aparece <span className="sk-marca">✦ nombre</span>.</p>
       </details>
+
+      <Probador proyecto={proyecto.id} carpeta={carpeta} agente={filtroAgente === 'todos' ? '' : filtroAgente} />
 
       <div className="sk-cabecera">
         {nombreAgente ? <><Agente id={filtroAgente} t={18} /> <b>Skills de {nombreAgente}</b></> : <b>Skills de todos los agentes</b>}
@@ -132,5 +135,40 @@ export default function Skills({ proyecto, carpeta, agente, sesiones }: { proyec
         </section>
       ))}
     </div>
+  );
+}
+
+// Probar la elección: escribe una petición y mira qué skill elegiría pgocode (y con qué parecido).
+function Probador({ proyecto, carpeta, agente }: { proyecto: number; carpeta: string; agente: string }) {
+  const [texto, setTexto] = useState('');
+  const [r, setR] = useState<Eleccion | null>(null);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const prueba = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!texto.trim()) return;
+    setCargando(true); setError('');
+    try { setR(await post<Eleccion>('/api/skills/elegir', { proyecto, carpeta, agente, texto })); }
+    catch (x) { setError((x as Error).message); } finally { setCargando(false); }
+  };
+  return (
+    <form className="sk-probador" onSubmit={prueba}>
+      <div className="sk-probar">
+        <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Prueba una petición: ¿qué skill se usaría?" />
+        <button className="primario" disabled={cargando || !texto.trim()}>{cargando ? '…' : 'Probar'}</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {r && <div className="sk-ranking">
+        <p className="suave pequeno">{r.elegida ? <>Se usaría <b>✦ {r.elegida.nombre}</b></> : 'Ninguna skill encaja con claridad'} · {r.ms} ms · umbral {r.umbral.toFixed(2)}</p>
+        {r.candidatos.map(c => (
+          <div key={c.ruta} className={'sk-barra' + (c.puntuacion >= r.umbral ? ' pasa' : '')}>
+            <span className="recorta">{c.nombre}</span>
+            <span className="sk-barra-fondo"><span style={{ width: `${Math.max(0, Math.min(1, (c.puntuacion - 0.5) / 0.4)) * 100}%` }} />
+              <i style={{ left: `${((r.umbral - 0.5) / 0.4) * 100}%` }} /></span>
+            <span className="sk-tokens">{c.puntuacion.toFixed(3)}</span>
+          </div>
+        ))}
+      </div>}
+    </form>
   );
 }

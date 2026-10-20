@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
-import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type TipoHosting } from '../ajustes';
+import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
 import './config-sesion.css';
@@ -174,8 +174,14 @@ function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Part
 }
 
 // Ventana de propiedades del proyecto: secciones a la izquierda y su detalle a la derecha.
-const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
+const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'skills', nombre: 'Skills', icono: 'skill' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
 type Seccion = typeof SECCIONES[number]['id'];
+const SELECCION: { id: SeleccionSkills; nombre: string; ayuda: string }[] = [
+  { id: 'agente', nombre: 'Decide el agente', ayuda: 'Como siempre: el modelo lee las descripciones de las skills y decide él. pgocode no interviene.' },
+  { id: 'sugerir', nombre: 'pgocode sugiere', ayuda: 'pgocode calcula qué skill encaja y lo muestra junto al mensaje, sin cambiar lo que se envía al agente. Sirve para ver si el agente acierta.' },
+  { id: 'elegir', nombre: 'pgocode elige', ayuda: 'Si una skill encaja con claridad (parecido ≥ 0,74), pgocode se la indica al agente al enviar (en Claude Code, invocándola directamente con /skill). El agente no tiene que adivinar.' },
+];
+
 const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
   { id: 'conciso', nombre: 'Conciso', ayuda: 'Solo la respuesta del agente. Lo que hace (leer, editar, ejecutar…) queda en una línea «N acciones» que se puede desplegar.' },
   { id: 'normal', nombre: 'Normal', ayuda: 'La respuesta y cada acción en una línea (nombre y fichero u orden), plegada.' },
@@ -211,6 +217,19 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
           </nav>
           <section className="propiedades-detalle">
             {seccion === 'alojamiento' && <Alojamiento a={a} alCambiar={cambia} />}
+            {seccion === 'skills' && <>
+              <h3>Skills</h3>
+              <fieldset className="opciones-detalle">
+                <legend>Cómo se elige la skill de cada petición</legend>
+                <p className="suave pequeno">pgocode compara cada petición con las skills del agente de la sesión mediante embeddings (Vertex AI): unos 120 ms y sin gastar tokens del agente.</p>
+                {SELECCION.map(d => (
+                  <label key={d.id} className={'opcion-detalle' + (a.skills === d.id ? ' elegida' : '')}>
+                    <input type="radio" name="skills" checked={a.skills === d.id} onChange={() => cambia({ skills: d.id })} />
+                    <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
+                  </label>
+                ))}
+              </fieldset>
+            </>}
             {seccion === 'conversacion' && <>
               <h3>Conversación</h3>
               <fieldset className="opciones-detalle">

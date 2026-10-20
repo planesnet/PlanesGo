@@ -31,6 +31,7 @@ import (
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
+	"planesgo-code/internal/selector"
 	"planesgo-code/internal/servidor"
 	"planesgo-code/internal/sesiones"
 	studiotv "planesgo-code/studio-tv"
@@ -277,6 +278,7 @@ func main() {
 
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
 	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.
+	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

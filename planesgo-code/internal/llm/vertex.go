@@ -1,15 +1,12 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
-	"sync"
-	"time"
 
 	"planesgo-code/internal/depuracion"
+	"planesgo-code/internal/google"
 )
 
 // DeepSeek en Vertex AI (Model Garden, «MaaS»): usa el punto de acceso compatible con OpenAI, que el proveedor
@@ -20,39 +17,13 @@ const (
 	modeloDeepSeekVertex    = proveedorDeepSeekVertex + "/deepseek-ai/deepseek-v3.2-maas"
 )
 
-var (
-	muToken     sync.Mutex
-	tokenGoogle string
-	tokenHasta  time.Time
-)
-
-// tokenVertex devuelve un token de acceso de Google (se renueva a los 45 minutos).
-func tokenVertex() (string, error) {
-	muToken.Lock()
-	defer muToken.Unlock()
-	if tokenGoogle != "" && time.Now().Before(tokenHasta) {
-		return tokenGoogle, nil
-	}
-	ctx, cancela := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancela()
-	b, err := exec.CommandContext(ctx, "gcloud", "auth", "application-default", "print-access-token").Output()
-	if err != nil {
-		return "", err
-	}
-	tokenGoogle, tokenHasta = strings.TrimSpace(string(b)), time.Now().Add(45*time.Minute)
-	return tokenGoogle, nil
-}
-
 // configDeepSeekVertex: la configuración de OpenCode con el proveedor de DeepSeek en Vertex AI.
 func configDeepSeekVertex() (string, error) {
-	t, err := tokenVertex()
+	t, err := google.Token()
 	if err != nil {
 		return "", err
 	}
-	proyecto := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	if proyecto == "" {
-		proyecto = "planes-dev"
-	}
+	proyecto := google.Proyecto()
 	c := map[string]any{"provider": map[string]any{proveedorDeepSeekVertex: map[string]any{
 		"npm":  "@ai-sdk/openai-compatible",
 		"name": "DeepSeek (Vertex AI)",

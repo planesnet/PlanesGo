@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto } from '../api';
-import type { Detalle } from '../ajustes';
+import { chat, post, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo } from '../api';
+import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import Texto from './Texto';
@@ -8,6 +8,7 @@ import { Agente, Hosting, nombreHosting } from './Marca';
 
 interface Props {
   detalle: Detalle;
+  seleccionSkills: SeleccionSkills;
   hosting?: string; // alojamiento elegido en las propiedades del proyecto (si no, el del repositorio)
   // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
   envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
@@ -22,7 +23,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -45,7 +46,10 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
   // Skills usadas en la sesión (en orden) y la que se está usando ahora (la última del turno en curso).
   const skillsSesion = useMemo(() => {
     const l: string[] = [];
-    for (const m of mensajes) for (const p of m.partes || []) if (p.tipo === 'herramienta' && p.h.skill && !l.includes(p.h.skill)) l.push(p.h.skill);
+    for (const m of mensajes) {
+      if (m.skill?.modo === 'elegida' && !l.includes(m.skill.nombre)) l.push(m.skill.nombre);
+      for (const p of m.partes || []) if (p.tipo === 'herramienta' && p.h.skill && !l.includes(p.h.skill)) l.push(p.h.skill);
+    }
     return l;
   }, [mensajes]);
   const skillActiva = useMemo(() => {
@@ -94,6 +98,26 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
     const ac = new AbortController();
     setEnCurso(ac);
     let sesionAgente = sesion.sesionAgente;
+    // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
+    // «sugerir» va en paralelo y solo se muestra.
+    let aEnviar = t;
+    const marcaSkill = (k: SkillPgo) => {
+      actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k } : m);
+      pon(actual, true);
+    };
+    if (seleccionSkills !== 'agente' && prov.tipo === 'agente') {
+      const pide = post<Eleccion>('/api/skills/elegir', { proyecto: proyecto.id, carpeta: sesion.carpeta, agente: sesion.agente, texto: t });
+      if (seleccionSkills === 'elegir') {
+        const r = await Promise.race([pide.catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 1500))]);
+        if (r?.elegida) {
+          const n = r.elegida.nombre;
+          aEnviar = sesion.agente === 'claude-code' ? `/${n} ${t}` : `Usa la skill «${n}».\n\n${t}`;
+          marcaSkill({ nombre: n, puntuacion: r.elegida.puntuacion, modo: 'elegida' });
+        }
+      } else {
+        pide.then(r => { if (r.elegida && idActual.current === id) marcaSkill({ nombre: r.elegida.nombre, puntuacion: r.elegida.puntuacion, modo: 'sugerida' }); }).catch(() => {});
+      }
+    }
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     // Añade un trozo a las partes del mensaje: el texto seguido se junta; la herramienta se actualiza por su id.
     const parte = (p: Parte) => ultimo(m => {
@@ -111,7 +135,8 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
         permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
-        mensajes: prov.tipo === 'agente' ? base.slice(-1) : base, // los agentes llevan su propio historial
+        // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
+        mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
         if (e.texto) parte({ tipo: 'texto', texto: e.texto });
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
@@ -198,6 +223,11 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
                 {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
+                {m.skill && (
+                  <span className={'sk-marca sk-pgo ' + m.skill.modo} title={m.skill.modo === 'elegida' ? 'pgocode eligió esta skill (embeddings) y se la indicó al agente' : 'pgocode cree que encaja esta skill (embeddings); el agente decide'}>
+                    ✦ {m.skill.modo === 'elegida' ? 'elegida' : 'sugerida'}: {m.skill.nombre} · {m.skill.puntuacion.toFixed(2)}
+                  </span>
+                )}
               </div>
             ))}
             <div ref={fin} />
