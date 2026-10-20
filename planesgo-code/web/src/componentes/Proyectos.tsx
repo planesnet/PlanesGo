@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
+import { guardaAjustes, leeAjustes, type AjustesProyecto, type Detalle } from '../ajustes';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
 import './config-sesion.css';
@@ -10,6 +11,7 @@ interface Props {
   usuario: Usuario; actual: Proyecto | null; inicial: number; alElegir: (p: Proyecto) => void;
   repo: Repo | null; proveedores: Proveedor[];
   sesiones: Sesion[]; sesion: Sesion | null;
+  alAjustes: (p: Proyecto, a: AjustesProyecto) => void;
   alElegirSesion: (p: Proyecto, s: Sesion) => void; alNuevaSesion: (p: Proyecto) => void; alCambiarSesion: (s: Sesion) => void; alBorrarSesion: (s: Sesion) => void;
 }
 
@@ -46,6 +48,9 @@ export default function Proyectos(props: Props) {
   // Al cambiar o borrar una sesión de otro proyecto, se vuelve a leer su lista.
   const [, setCambios] = useState(0);
   const cambia = (s: Sesion) => { props.alCambiarSesion(s); setCambios(c => c + 1); };
+  // Menú ⋮ de un proyecto y ventana de propiedades.
+  const [menuP, setMenuP] = useState<{ id: number; ancla: HTMLElement } | null>(null);
+  const [propiedades, setPropiedades] = useState<Proyecto | null>(null);
   const borra = (s: Sesion) => { props.alBorrarSesion(s); setCambios(c => c + 1); };
 
   // Cada proyecto que se abre pasa a ser el más reciente.
@@ -113,13 +118,84 @@ export default function Proyectos(props: Props) {
                 <button className="icono grupo-nueva" onClick={() => props.alNuevaSesion(p)} title="Nueva sesión" aria-label={'Nueva sesión en ' + p.nombre}>
                   <Icono n="nuevo" t={14} />
                 </button>
+                <button className="icono puntos grupo-puntos" onClick={e => { const ancla = e.currentTarget; setMenuP(m => m?.id === p.id ? null : { id: p.id, ancla }); }}
+                  title="Más opciones" aria-label={'Más opciones de ' + p.nombre} aria-haspopup="menu" aria-expanded={menuP?.id === p.id}>
+                  <Icono n="puntos" t={15} />
+                </button>
+                {menuP?.id === p.id && (
+                  <MenuSesion ancla={menuP.ancla} alCerrar={() => setMenuP(null)} opciones={[
+                    { icono: 'nuevo', texto: 'Nueva sesión', accion: () => props.alNuevaSesion(p) },
+                    null,
+                    { icono: 'ajustes', texto: 'Propiedades', accion: () => setPropiedades(p) },
+                  ]} />
+                )}
               </div>
               {!plegado && <Sesiones {...props} proyecto={p} lista={ss} alCambiarSesion={cambia} alBorrarSesion={borra} />}
             </section>
           );
         })}
       </div>
+      {propiedades && <PropiedadesProyecto p={propiedades} login={usuario.login} alCerrar={() => setPropiedades(null)}
+        alGuardar={a => props.alAjustes(propiedades, a)} />}
     </nav>
+  );
+}
+
+// Ventana de propiedades del proyecto: secciones a la izquierda y su detalle a la derecha.
+const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }] as const;
+type Seccion = typeof SECCIONES[number]['id'];
+const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
+  { id: 'conciso', nombre: 'Conciso', ayuda: 'Solo la respuesta del agente. Lo que hace (leer, editar, ejecutar…) queda en una línea «N acciones» que se puede desplegar.' },
+  { id: 'normal', nombre: 'Normal', ayuda: 'La respuesta y cada acción en una línea (nombre y fichero u orden), plegada.' },
+  { id: 'detallado', nombre: 'Detallado', ayuda: 'Todo desplegado: entrada y salida de cada acción y el razonamiento del agente.' },
+];
+
+function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; login: string; alCerrar: () => void; alGuardar: (a: AjustesProyecto) => void }) {
+  const [seccion, setSeccion] = useState<Seccion>('conversacion');
+  const [a, setA] = useState<AjustesProyecto>(() => leeAjustes(login, p.id));
+  const cambia = (c: Partial<AjustesProyecto>) => {
+    const n = { ...a, ...c };
+    setA(n);
+    guardaAjustes(login, p.id, n);
+    alGuardar(n);
+  };
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
+    document.addEventListener('keydown', tecla);
+    return () => document.removeEventListener('keydown', tecla);
+  }, [alCerrar]);
+  return createPortal(
+    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
+      <div className="modal propiedades" role="dialog" aria-modal="true" aria-label={'Propiedades de ' + p.nombre}>
+        <div className="modal-cabecera">
+          <h2><span className="suave">Propiedades ·</span> {p.nombre}</h2>
+          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
+        </div>
+        <div className="propiedades-cuerpo">
+          <nav className="propiedades-secciones" aria-label="Secciones">
+            {SECCIONES.map(s => (
+              <button key={s.id} aria-current={seccion === s.id} onClick={() => setSeccion(s.id)}><Icono n={s.icono} t={15} /> {s.nombre}</button>
+            ))}
+          </nav>
+          <section className="propiedades-detalle">
+            {seccion === 'conversacion' && <>
+              <h3>Conversación</h3>
+              <fieldset className="opciones-detalle">
+                <legend>Nivel de detalle de la conversación</legend>
+                <p className="suave pequeno">Cuánto se muestra en el chat de lo que hace el agente. No cambia lo que se le pide: no gasta tokens.</p>
+                {DETALLES.map(d => (
+                  <label key={d.id} className={'opcion-detalle' + (a.detalle === d.id ? ' elegida' : '')}>
+                    <input type="radio" name="detalle" checked={a.detalle === d.id} onChange={() => cambia({ detalle: d.id })} />
+                    <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
+                  </label>
+                ))}
+              </fieldset>
+            </>}
+          </section>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

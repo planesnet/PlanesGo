@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { escuchaAvisos, get, post, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
+import { leeAjustes, AJUSTES_DEFECTO, type AjustesProyecto } from './ajustes';
 import Acceso from './componentes/Acceso';
 import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
@@ -37,6 +38,8 @@ export default function App() {
   const [repo, setRepo] = useState<S.Repo | null>(null);
   const [sesiones, setSesiones] = useState<S.Sesion[]>([]);
   const [sesion, setSesion] = useState<S.Sesion | null>(null);
+  const [ajustes, setAjustes] = useState<AjustesProyecto>(AJUSTES_DEFECTO);
+  useEffect(() => { setAjustes(usuario && proyecto ? leeAjustes(usuario.login, proyecto.id) : AJUSTES_DEFECTO); }, [usuario, proyecto?.id]);
   // Sesión pedida al cambiar de proyecto desde la lista (su id, o 'nueva' para abrir una sesión nueva).
   const pedida = useRef('');
   // Carpeta cuyo repositorio está cargado (para recargarlo si la sesión cambia de carpeta).
@@ -213,8 +216,9 @@ export default function App() {
       style={panel && anchoPanel ? { gridTemplateColumns: `248px minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
+        alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
-      <Chat proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+      <Chat detalle={ajustes.detalle} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} />}

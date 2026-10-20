@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto } from '../api';
+import type { Detalle } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting, nombreHosting } from './Marca';
 
 interface Props {
+  detalle: Detalle;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
   panelAbierto: boolean; alPanel: () => void;
   alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void;
@@ -16,7 +18,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ detalle, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -156,11 +158,11 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
             {mensajes.map((m, i) => (
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
                 {m.partes?.length
-                  ? m.partes.map((p, j) => <ParteMensaje key={j} p={p} />)
+                  ? <Partes partes={m.partes} detalle={detalle} />
                   : m.texto || (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
-                {m.uso && <div className="uso">{usoTexto(m.uso)}</div>}
+                {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
               </div>
             ))}
             <div ref={fin} />
@@ -226,12 +228,29 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
   [`${miles(u.entrada)} ↑ · ${miles(u.salida)} ↓ tokens`, u.coste ? `$${u.coste.toFixed(3)}` : '', u.segundos ? `${u.segundos.toFixed(1)} s` : ''].filter(Boolean).join(' · ');
 
 // Una parte de la respuesta: texto, razonamiento (plegado) o una herramienta (una línea que se despliega), como en Claude Code.
-function ParteMensaje({ p }: { p: Parte }) {
+// Las partes según el nivel de detalle del proyecto: conciso (solo texto y una línea con las acciones), normal
+// (cada acción plegada) o detallado (todo desplegado).
+function Partes({ partes, detalle }: { partes: Parte[]; detalle: Detalle }) {
+  if (detalle !== 'conciso') return <>{partes.map((p, j) => <ParteMensaje key={j} p={p} abierta={detalle === 'detallado'} />)}</>;
+  const acciones = partes.filter(p => p.tipo === 'herramienta');
+  const enCurso = acciones.some(p => p.tipo === 'herramienta' && p.h.estado === 'curso');
+  return <>
+    {acciones.length > 0 && (
+      <details className="acciones">
+        <summary><span className={'punto-h' + (enCurso ? ' curso' : '')} /> {acciones.length} {acciones.length === 1 ? 'acción' : 'acciones'}</summary>
+        {acciones.map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
+      </details>
+    )}
+    {partes.filter(p => p.tipo === 'texto').map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
+  </>;
+}
+
+function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
   if (p.tipo === 'texto') return <div className="parte-texto">{p.texto}</div>;
-  if (p.tipo === 'pensamiento') return <details className="pensamiento"><summary>Razonamiento</summary><div>{p.texto}</div></details>;
+  if (p.tipo === 'pensamiento') return <details className="pensamiento" open={abierta}><summary>Razonamiento</summary><div>{p.texto}</div></details>;
   const h = p.h;
   return (
-    <details className={'herramienta ' + h.estado}>
+    <details className={'herramienta ' + h.estado} open={abierta}>
       <summary>
         <span className="punto-h" aria-label={h.estado} />
         <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}

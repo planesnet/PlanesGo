@@ -397,3 +397,26 @@ textarea { resize: none; }
 .gh-creada { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin: 0; }
 button.chip { cursor: pointer; }
 button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
+
+/* Propiedades del proyecto */
+.grupo-puntos { opacity: 0; }
+.grupo-cabecera:hover .grupo-puntos, .grupo-puntos[aria-expanded="true"] { opacity: 1; }
+.modal.propiedades { width: min(760px, 100%); height: min(520px, calc(100vh - 32px)); grid-template-rows: auto minmax(0, 1fr); padding: 14px 16px 16px; }
+.propiedades-cuerpo { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 16px; min-height: 0; }
+.propiedades-secciones { display: grid; align-content: start; gap: 2px; border-right: 1px solid var(--linea); padding-right: 10px; }
+.propiedades-secciones button { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px; font-size: 13px; text-align: left; color: var(--suave); }
+.propiedades-secciones button[aria-current="true"] { background: var(--hover); color: var(--texto); font-weight: 600; }
+.propiedades-detalle { overflow-y: auto; scrollbar-width: none; display: grid; align-content: start; gap: 10px; }
+.propiedades-detalle h3 { margin: 0; font-size: 15px; }
+.opciones-detalle { border: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.opciones-detalle legend { font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 2px; }
+.opciones-detalle > p { margin: 0 0 4px; }
+.opcion-detalle { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--linea); border-radius: 10px; padding: 9px 11px; cursor: pointer; }
+.opcion-detalle.elegida { border-color: var(--texto); background: var(--hover); }
+.opcion-detalle input { margin-top: 3px; width: auto; }
+.opcion-detalle > span { display: grid; gap: 2px; font-size: 13px; }
+.acciones { font-size: 12.5px; }
+.acciones > summary { display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; color: var(--suave); }
+.acciones > summary::-webkit-details-marker { display: none; }
+.punto-h.curso { background: #d98a00; animation: latido 1s infinite alternate; }
+@media (max-width: 640px) { .propiedades-cuerpo { grid-template-columns: 1fr; } .propiedades-secciones { border-right: none; display: flex; } }
