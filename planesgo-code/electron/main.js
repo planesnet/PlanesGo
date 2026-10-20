@@ -14,8 +14,12 @@ let backend = null;
 // Linux: sin ibus. Si ibus no conecta, GTK le pasa igualmente las pulsaciones y las descarta («Events queue
 // growing too big»): no se podía escribir nada. El método de entrada sencillo de GTK sí admite tildes, ñ y
 // teclas muertas. (Para que GTK lo lea, el lanzador también lo pone en el entorno: Makefile «escritorio».)
+// Nombre interno «pgocode»: en Linux la ventana se anuncia con el nombre de la app (app_id en Wayland,
+// WM_CLASS en X11) y el escritorio la enlaza con pgocode.desktop y su icono. El título visible sigue siendo
+// «Planes Go Code». Va antes de que la app arranque.
+app.setName('pgocode');
 if (process.platform === 'linux') {
-  app.setDesktopName('pgocode.desktop'); // id de la app en Wayland/X11: enlaza la ventana con su icono
+  app.setDesktopName('pgocode.desktop');
   process.env.GTK_IM_MODULE = 'gtk-im-context-simple';
   process.env.XMODIFIERS = '@im=none';
   process.env.QT_IM_MODULE = '';
