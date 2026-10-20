@@ -26,12 +26,18 @@ type Agente struct {
 	Args func(msg, sesion, permisos string) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
+	// NoDisponible: el agente existe pero no se puede usar desde aquí (y por qué).
+	NoDisponible string
 }
 
 func (a *Agente) ID() string { return a.Clave }
 
 func (a *Agente) Info(ctx context.Context) Info {
 	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: []string{"por defecto"}, PorDefecto: "por defecto", NecesitaDir: true}
+	if a.NoDisponible != "" {
+		i.Motivo = a.NoDisponible
+		return i
+	}
 	if _, err := exec.LookPath(a.Programa); err != nil {
 		i.Motivo = "no está instalado («" + a.Programa + "» no está en el PATH)"
 		return i
@@ -175,7 +181,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 // Agentes devuelve los agentes conocidos.
 func Agentes() []Proveedor {
 	return []Proveedor{
-		&Agente{Clave: "claude-code", Nombre: "Claude Code (agente)", Programa: "claude", Lee: leeClaudeCode,
+		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode,
 			Args: func(msg, sesion, permisos string) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
 				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
@@ -191,9 +197,12 @@ func Agentes() []Proveedor {
 				// «--» antes del mensaje: un texto que empiece por «-» no se toma como opción.
 				return append(a, "--", msg)
 			}},
-		&Agente{Clave: "opencode", Nombre: "OpenCode (agente)", Programa: "opencode",
+		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode",
 			Args: func(msg, sesion, permisos string) []string { return []string{"run", "--", msg} }},
-		&Agente{Clave: "gemini-cli", Nombre: "Gemini CLI (agente)", Programa: "gemini",
+		&Agente{Clave: "antigravity", Nombre: "Antigravity", Programa: "antigravity",
+			NoDisponible: "aún no tiene modo agente por línea de comandos",
+			Args:         func(msg, sesion, permisos string) []string { return nil }},
+		&Agente{Clave: "gemini-cli", Nombre: "Gemini CLI", Programa: "gemini",
 			Args: func(msg, sesion, permisos string) []string { return []string{"--prompt=" + msg} }},
 	}
 }

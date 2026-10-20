@@ -46,7 +46,8 @@ export default function App() {
   const agentePorDefecto = useCallback(() => {
     let pref = '';
     try { pref = localStorage.getItem('pgo:proveedor') || ''; } catch { /* sin almacenamiento */ }
-    return (proveedores.find(p => p.id === pref && p.disponible) || proveedores.find(p => p.disponible) || proveedores[0])?.id || '';
+    return (proveedores.find(p => p.id === pref && p.disponible) || proveedores.find(p => p.id === 'claude-code' && p.disponible)
+      || proveedores.find(p => p.disponible) || proveedores[0])?.id || '';
   }, [proveedores]);
 
   // Al elegir proyecto: su repositorio (si tiene carpeta local) y sus sesiones; si no hay ninguna, se crea una.
@@ -56,6 +57,13 @@ export default function App() {
     const sigue = (r: S.Repo | null) => {
       setRepo(r);
       let l = S.lista(usuario.login, proyecto.id);
+      // Sesiones con un agente que ya no está (p. ej. las antiguas por API): al agente por defecto.
+      const disponibles = new Set(proveedores.filter(p => p.disponible).map(p => p.id));
+      if (proveedores.length) {
+        for (const s of l.filter(x => !disponibles.has(x.agente))) {
+          l = S.guarda(usuario.login, { ...s, agente: agentePorDefecto(), modelo: undefined, sesionAgente: undefined });
+        }
+      }
       if (!l.length && proveedores.length) {
         l = S.guarda(usuario.login, S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()));
       }

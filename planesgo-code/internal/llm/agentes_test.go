@@ -25,6 +25,9 @@ func TestSesionAgenteValidada(t *testing.T) {
 func TestMensajeNoEsOpcion(t *testing.T) {
 	for _, p := range Agentes() {
 		a := p.(*Agente)
+		if a.NoDisponible != "" {
+			continue
+		}
 		args := a.Args("- arregla el test", "", "")
 		ultimo := args[len(args)-1]
 		if ultimo == "- arregla el test" && (len(args) < 2 || args[len(args)-2] != "--") {
@@ -45,13 +48,19 @@ func TestLeeTextoUTF8(t *testing.T) {
 	}
 }
 
-// A5: crear el registro no llama a Info (que puede ir a la red).
-func TestRegistroSinRed(t *testing.T) {
-	r := NuevoRegistro(&Claude{}, &ChatGPT{}, &Gemini{})
-	for _, id := range []string{"claude", "openai", "gemini"} {
-		if _, ok := r.Busca(id); !ok {
-			t.Errorf("falta %s", id)
+// Solo hay agentes: Claude Code el primero; Antigravity aparece, pero no se puede usar todavía.
+func TestSoloAgentes(t *testing.T) {
+	l := NuevoRegistro(Agentes()...).Lista(context.Background())
+	for _, i := range l {
+		if i.Tipo != "agente" {
+			t.Errorf("%s no es un agente", i.ID)
 		}
+		if i.ID == "antigravity" && i.Disponible {
+			t.Error("Antigravity no debería estar disponible")
+		}
+	}
+	if a, ok := NuevoRegistro(Agentes()...).Busca("claude-code"); !ok || a.ID() != "claude-code" {
+		t.Error("falta Claude Code")
 	}
 }
 

@@ -1,6 +1,5 @@
-// Package llm reúne los proveedores con los que se puede hablar desde el chat: APIs de modelos (Claude, ChatGPT,
-// Gemini y, más adelante, modelos propios) y agentes que se lanzan como programa en la carpeta del proyecto
-// (Claude Code, OpenCode, Gemini CLI…). El chat no sabe con cuál habla: todos cumplen Proveedor.
+// Package llm reúne los agentes con los que se trabaja desde el chat: programas que se lanzan en la carpeta del
+// proyecto (Claude Code, OpenCode, Gemini CLI…). El chat no sabe con cuál habla: todos cumplen Proveedor.
 package llm
 
 import (

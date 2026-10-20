@@ -3,8 +3,7 @@
 //	pgocode                         # http://127.0.0.1:7801
 //	pgocode -addr 127.0.0.1:7801 -raices ~/cowork,~/proyectos
 //
-// Se entra con el usuario de Odoo (ODOO_URL, ODOO_DB). Proveedores: ANTHROPIC_API_KEY, OPENAI_API_KEY (y
-// OPENAI_BASE_URL para servidores compatibles), GEMINI_API_KEY; agentes: claude, opencode, gemini en el PATH.
+// Se entra con el usuario de Odoo (ODOO_URL, ODOO_DB). Agentes: claude, opencode y gemini en el PATH.
 package main
 
 import (
@@ -170,8 +169,7 @@ func main() {
 		Odoo:     odoo.Nuevo(*odooURL, *odooDB),
 		Sesiones: sesiones.NuevoAlmacen(),
 		Indice:   proyectos.NuevoIndice(rs),
-		Proveedores: llm.NuevoRegistro(append([]llm.Proveedor{&llm.Claude{}, &llm.ChatGPT{}, &llm.Gemini{}},
-			llm.Agentes()...)...),
+		Proveedores: llm.NuevoRegistro(llm.Agentes()...),
 		Web:     web.Archivos(),
 		Studio:  studio,
 		Version: version,
