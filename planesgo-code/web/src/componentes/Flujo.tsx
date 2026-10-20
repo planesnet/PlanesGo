@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { get, type Proyecto } from '../api';
+import { get, post, type Proyecto } from '../api';
 import Icono from './Icono';
 
 // Flujo del repositorio (GitHub): la rama de la sesión y su pull request, las issues por fase (por empezar →
@@ -18,7 +18,7 @@ interface PR {
   autor: string; revision: string; fusionable: string; checks: string; mas: number; menos: number; ficheros: number; commits: number;
   comentarios: number; issues: number[]; etiquetas: Etiqueta[]; creada: string; actualizada: string; fusionada?: string;
 }
-interface Estado { repo: string; url: string; defecto: string; issues: Issue[]; prs: PR[]; abiertas: number; cerradas: number; prs_abiertas: number; leido: string }
+interface Estado { repo: string; url: string; defecto: string; tipos: string[]; etiquetas: Etiqueta[]; issues: Issue[]; prs: PR[]; abiertas: number; cerradas: number; prs_abiertas: number; leido: string }
 type Fase = 'por-empezar' | 'desarrollo' | 'revision' | 'test' | 'cerrada';
 type Clase = Issue['clase'] | 'todas';
 
@@ -98,6 +98,8 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: 
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
   const [clase, setClase] = useState<Clase>('todas');
+  const [creando, setCreando] = useState(false);
+  const [creada, setCreada] = useState<{ numero: number; url: string } | null>(null);
 
   const carga = (recargar = false) => {
     if (!carpeta) return;
@@ -126,10 +128,14 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: 
         {e ? <button className="enlace gh-repo" onClick={() => alAbrir(e.url)} title="Abrir en GitHub">{e.repo}</button> : <span className="suave">GitHub</span>}
         <span className="hueco" />
         {e && <span className="t suave" title={new Date(e.leido).toLocaleString()}>{hace(e.leido)}</span>}
+        {e && <button className="boton-nueva" onClick={() => { setCreando(c => !c); setCreada(null); }} aria-expanded={creando}><Oct n="issue" color={VERDE} t={14} /> Nueva issue</button>}
         <button className="icono" onClick={() => carga(true)} disabled={cargando} title="Volver a leer de GitHub" aria-label="Recargar"><Icono n="recargar" t={15} /></button>
       </div>
       {error && <p className="error">{error}</p>}
       {!e && !error && <p className="suave">Leyendo GitHub…</p>}
+      {creada && <p className="gh-creada"><Oct n="issue" color={VERDE} t={14} /> Creada la issue <button className="enlace" onClick={() => alAbrir(creada.url)}>#{creada.numero}</button></p>}
+      {e && creando && <NuevaIssue estado={e} proyecto={proyecto.id} carpeta={carpeta} alCancelar={() => setCreando(false)}
+        alCrear={r => { setCreando(false); setCreada(r); carga(true); }} />}
       {e && <>
         {/* La rama de la sesión y su pull request */}
         <section className="gh-tarjeta">
@@ -246,5 +252,56 @@ function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Is
         return <span key={n} className="gh-mini">{i?.estado === 'CLOSED' ? <Oct n="issue-cerrada" color={MORADO} t={13} /> : <Oct n="issue" color={VERDE} t={13} />}#{n}{i ? ' ' + i.titulo : ''}</span>;
       })}</div>}
     </div>
+  );
+}
+
+// Nueva issue: título, descripción (Markdown), clase (petición nueva o mantenimiento, con el tipo de GitHub) y etiquetas.
+function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar }: {
+  estado: Estado; proyecto: number; carpeta: string; alCrear: (r: { numero: number; url: string }) => void; alCancelar: () => void;
+}) {
+  const [titulo, setTitulo] = useState('');
+  const [cuerpo, setCuerpo] = useState('');
+  const [tipo, setTipo] = useState('');
+  const [etiquetas, setEtiquetas] = useState<string[]>([]);
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState('');
+  const AYUDA_TIPO: Record<string, string> = { Feature: 'Petición nueva', Bug: 'Mantenimiento: error', Task: 'Mantenimiento: tarea' };
+  const alterna = (n: string) => setEtiquetas(l => l.includes(n) ? l.filter(x => x !== n) : [...l, n]);
+  const envia = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!titulo.trim() || enviando) return;
+    setEnviando(true);
+    setError('');
+    try { alCrear(await post<{ numero: number; url: string }>('/api/github/issue', { proyecto, carpeta, titulo, cuerpo, tipo, etiquetas })); }
+    catch (x) { setError((x as Error).message); setEnviando(false); }
+  };
+  return (
+    <form className="gh-nueva" onSubmit={envia}>
+      <div className="gh-titulo"><Oct n="issue" color={VERDE} /> Nueva issue en <b>{estado.repo}</b></div>
+      <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Título" autoFocus required maxLength={256} />
+      <textarea value={cuerpo} onChange={e => setCuerpo(e.target.value)} placeholder="Descripción (Markdown): qué se pide, por qué, cómo comprobarlo…" rows={6} />
+      {estado.tipos.length > 0 && (
+        <div className="gh-opciones" role="radiogroup" aria-label="Tipo">
+          <span className="suave pequeno">Tipo</span>
+          {['', ...estado.tipos].map(t => (
+            <button type="button" key={t || 'ninguno'} role="radio" aria-checked={tipo === t} className={'gh-opcion' + (t ? ' ' + t.toLowerCase() : '')} onClick={() => setTipo(t)}>
+              {t ? `${t} · ${AYUDA_TIPO[t] || t}` : 'Sin tipo'}
+            </button>
+          ))}
+        </div>
+      )}
+      {estado.etiquetas.length > 0 && (
+        <div className="gh-opciones" aria-label="Etiquetas">
+          <span className="suave pequeno">Etiquetas</span>
+          {estado.etiquetas.map(et => (
+            <button type="button" key={et.nombre} aria-pressed={etiquetas.includes(et.nombre)} className="gh-etiqueta gh-etiqueta-boton" onClick={() => alterna(et.nombre)}
+              style={etiquetas.includes(et.nombre) ? { background: '#' + et.color, color: sobre(et.color) } : { borderColor: '#' + et.color }}>{et.nombre}</button>
+          ))}
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
+      <div className="fila-config"><span className="hueco" /><button type="button" className="enlace" onClick={alCancelar}>Cancelar</button>
+        <button className="primario" disabled={!titulo.trim() || enviando}>{enviando ? 'Creando…' : 'Crear issue'}</button></div>
+    </form>
   );
 }

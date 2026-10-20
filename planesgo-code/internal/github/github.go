@@ -94,10 +94,17 @@ type Estado struct {
 	Cerradas  int       `json:"cerradas"`
 	PRsAbiert int       `json:"prs_abiertas"`
 	Leido     time.Time `json:"leido"`
+	// Para crear issues: tipos y etiquetas del repositorio (los id solo los usa el backend).
+	Tipos      []string   `json:"tipos"`
+	EtiquetasR []Etiqueta `json:"etiquetas"`
+	idRepo     string
+	idTipos    map[string]string
+	idEtiq     map[string]string
 }
 
 const consulta = `query($o:String!,$n:String!){repository(owner:$o,name:$n){
- url defaultBranchRef{name}
+ id url defaultBranchRef{name}
+ issueTypes(first:20){nodes{id name isEnabled}} labels(first:100,orderBy:{field:NAME,direction:ASC}){nodes{id name color}}
  abiertas:issues(states:OPEN){totalCount} cerradas:issues(states:CLOSED){totalCount}
  prsAbiertas:pullRequests(states:OPEN){totalCount}
  issuesAbiertas:issues(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{...I}}
@@ -271,7 +278,17 @@ func interpreta(repo string, b []byte) (*Estado, error) {
 	var r struct {
 		Data struct {
 			Repository *struct {
-				URL                             string                 `json:"url"`
+				ID    string `json:"id"`
+				URL   string `json:"url"`
+				Tipos struct {
+					Nodes []struct {
+						ID, Name  string
+						IsEnabled bool
+					}
+				} `json:"issueTypes"`
+				Etiquetas struct {
+					Nodes []struct{ ID, Name, Color string }
+				} `json:"labels"`
 				Defecto                         *struct{ Name string } `json:"defaultBranchRef"`
 				Abiertas, Cerradas, PrsAbiertas struct{ TotalCount int }
 				IssuesAbiertas, IssuesCerradas  struct{ Nodes []issueGQL }
@@ -291,7 +308,18 @@ func interpreta(repo string, b []byte) (*Estado, error) {
 		return nil, fmt.Errorf("no se encuentra el repositorio %s en GitHub", repo)
 	}
 	e := &Estado{Repo: repo, URL: x.URL, Abiertas: x.Abiertas.TotalCount, Cerradas: x.Cerradas.TotalCount,
-		PRsAbiert: x.PrsAbiertas.TotalCount, Issues: []Issue{}, PRs: []PR{}, Leido: time.Now()}
+		PRsAbiert: x.PrsAbiertas.TotalCount, Issues: []Issue{}, PRs: []PR{}, Leido: time.Now(),
+		Tipos: []string{}, EtiquetasR: []Etiqueta{}, idRepo: x.ID, idTipos: map[string]string{}, idEtiq: map[string]string{}}
+	for _, t := range x.Tipos.Nodes {
+		if t.IsEnabled {
+			e.Tipos = append(e.Tipos, t.Name)
+			e.idTipos[t.Name] = t.ID
+		}
+	}
+	for _, l := range x.Etiquetas.Nodes {
+		e.EtiquetasR = append(e.EtiquetasR, Etiqueta{l.Name, l.Color})
+		e.idEtiq[l.Name] = l.ID
+	}
 	if x.Defecto != nil {
 		e.Defecto = x.Defecto.Name
 	}
@@ -345,4 +373,72 @@ func (l *Lector) Lee(ctx context.Context, repo string, recargar bool) (*Estado, 
 	l.cache[repo] = e
 	l.mu.Unlock()
 	return e, nil
+}
+
+// Nueva es una issue que se crea desde pgocode.
+type Nueva struct {
+	Titulo    string   `json:"titulo"`
+	Cuerpo    string   `json:"cuerpo"`
+	Tipo      string   `json:"tipo"`
+	Etiquetas []string `json:"etiquetas"`
+}
+
+const mutacionCrear = `mutation($r:ID!,$t:String!,$b:String,$tipo:ID,$et:[ID!]){createIssue(input:{repositoryId:$r,title:$t,body:$b,issueTypeId:$tipo,labelIds:$et}){issue{number url}}}`
+
+// Crea una issue en repo con su tipo y etiquetas; devuelve su número y URL.
+func (l *Lector) Crea(ctx context.Context, repo string, n Nueva) (int, string, error) {
+	n.Titulo = strings.TrimSpace(n.Titulo)
+	if n.Titulo == "" || len(n.Titulo) > 256 || len(n.Cuerpo) > 60000 {
+		return 0, "", errors.New("falta el título (o es demasiado largo)")
+	}
+	e, err := l.Lee(ctx, repo, false)
+	if err != nil {
+		return 0, "", err
+	}
+	vars := map[string]any{"r": e.idRepo, "t": n.Titulo, "b": n.Cuerpo}
+	if n.Tipo != "" {
+		id, ok := e.idTipos[n.Tipo]
+		if !ok {
+			return 0, "", fmt.Errorf("el tipo «%s» no existe en el repositorio", n.Tipo)
+		}
+		vars["tipo"] = id
+	}
+	ids := []string{}
+	for _, et := range n.Etiquetas {
+		id, ok := e.idEtiq[et]
+		if !ok {
+			return 0, "", fmt.Errorf("la etiqueta «%s» no existe en el repositorio", et)
+		}
+		ids = append(ids, id)
+	}
+	vars["et"] = ids
+	cuerpo, _ := json.Marshal(map[string]any{"query": mutacionCrear, "variables": vars})
+	ctx, cancela := context.WithTimeout(ctx, 30*time.Second)
+	defer cancela()
+	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "--input", "-")
+	cmd.Stdin = strings.NewReader(string(cuerpo))
+	var errSalida strings.Builder
+	cmd.Stderr = &errSalida
+	b, err := cmd.Output()
+	var r struct {
+		Data struct {
+			CreateIssue *struct {
+				Issue struct {
+					Number int
+					URL    string
+				}
+			}
+		}
+		Errors []struct{ Message string }
+	}
+	if json.Unmarshal(b, &r) == nil && len(r.Errors) > 0 {
+		return 0, "", errors.New("GitHub: " + r.Errors[0].Message)
+	}
+	if err != nil || r.Data.CreateIssue == nil {
+		return 0, "", fmt.Errorf("GitHub: %s", strings.TrimSpace(errSalida.String()+" "+fmt.Sprint(err)))
+	}
+	l.mu.Lock()
+	delete(l.cache, repo) // la próxima lectura ya la incluye
+	l.mu.Unlock()
+	return r.Data.CreateIssue.Issue.Number, r.Data.CreateIssue.Issue.URL, nil
 }
