@@ -1,8 +1,14 @@
 .git
 .gitignore
 .dockerignore
-planesgo
-pasigo
+planesgo-server/planesgo
+planesgo-server/pasigo
+planesgo-server/planesgo-mcp
+planesgo-server/bin
+planesgo-server/data
+planesgo-server/.env
+# Solo se compila el servidor
+planesgo-code
 *.exe
 *.test
 *.out

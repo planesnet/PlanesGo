@@ -1,3 +1,6 @@
+# Monorepo PlanesGo: el servidor está en planesgo-server/. Este Dockerfile sigue en la raíz para que el
+# despliegue automático no cambie (contexto de compilación = raíz del repositorio).
+
 # --- Etapa 1: Compilación (Builder) ---
 FROM golang:1.22-alpine AS builder
 
@@ -7,11 +10,11 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates git
 
 # Descargar dependencias
-COPY go.mod go.sum ./
+COPY planesgo-server/go.mod planesgo-server/go.sum ./
 RUN go mod download
 
 # Copiar código fuente
-COPY . .
+COPY planesgo-server/ .
 
 # Compilar binario estático optimizado inyectando la versión desde VERSION
 RUN VERSION_STR=$(tr -d '\r\n' < VERSION) && \
@@ -33,7 +36,7 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY planesgo-server/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Crear directorio de datos persistentes y asignar permisos

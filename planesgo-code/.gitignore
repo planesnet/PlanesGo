@@ -1,0 +1,18 @@
+# Binarios compilados
+/dist/
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Configuración local de PlanesGo (imputación horaria de cada equipo)
+.planesgo.json
+
+# Datos de pruebas: no van en este repositorio (van en <proyecto>/.psf/qa/, sin versionar).
+
+# Node
+node_modules/
+/web/dist/*
+!/web/dist/.gitkeep

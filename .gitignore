@@ -1,8 +1,8 @@
 # Binaries
-/pasigo
-/planesgo
-/planesgo-mcp
-/Migrar1
+/planesgo-server/pasigo
+/planesgo-server/planesgo
+/planesgo-server/planesgo-mcp
+/planesgo-server/Migrar1
 bin/
 *.exe
 *.exe~

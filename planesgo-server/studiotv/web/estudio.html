@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio TV</title>
+<style>
+/* Dos vistas: parrilla de canales (sin ?canal=) y un canal (pantalla grande con rótulo y escaleta de pasos). */
+:root { --bg: #0e1110; --panel: #171b19; --fg: #e8ece9; --muted: #8f9993; --line: #2a302d; --accent: #7fbfa9; --live: #ff4d3a; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display: grid; grid-template-rows: auto 1fr; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.marca { font-weight: 800; letter-spacing: .02em; color: var(--fg); text-decoration: none; }
+.marca span { color: var(--accent); }
+.onair { font: 700 .75rem ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.onair::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.onair.on { color: var(--live); }
+.onair.on::before { animation: lat 1.2s infinite; }
+@keyframes lat { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .onair.on::before { animation: none; } }
+header .esp { flex: 1; }
+.t { font: .78rem ui-monospace, monospace; color: var(--muted); }
+button, .boton { font: 600 .85rem system-ui, sans-serif; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; text-decoration: none; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* Un canal */
+main.uno { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+@media (max-width: 900px) { main.uno { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; } }
+.pantalla { display: grid; place-items: center; background: #000; min-height: 0; overflow: hidden; }
+.pantalla img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.espera { color: var(--muted); padding: 40px; text-align: center; }
+aside { border-left: 1px solid var(--line); padding: 14px 16px; overflow: auto; display: grid; align-content: start; gap: 10px; }
+.caso { font: 600 .85rem ui-monospace, monospace; color: var(--accent); }
+h1 { font-size: 1.15rem; margin: 0; text-wrap: balance; }
+.paso { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.paso b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+ol { margin: 0; padding-left: 20px; display: grid; gap: 3px; font-size: .9rem; }
+ol li:last-child { color: var(--accent); font-weight: 600; }
+
+/* Parrilla */
+main.parrilla { padding: 16px; overflow: auto; align-content: start; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.tarjeta { display: grid; grid-template-rows: auto auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; color: inherit; text-decoration: none; }
+.tarjeta:hover { border-color: var(--accent); }
+.mini { aspect-ratio: 16 / 10; background: #000; display: grid; place-items: center; overflow: hidden; }
+.mini img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mini .espera { padding: 0; font-size: .85rem; }
+.pie { padding: 8px 10px; display: grid; gap: 2px; }
+.pie .fila { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.pie .titulo { font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vacio { color: var(--muted); grid-column: 1 / -1; text-align: center; padding: 60px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <a class="marca" id="inicio" href="#">Studio <span>TV</span></a>
+  <span class="onair" id="air">Sin señal</span>
+  <span class="t" id="act"></span>
+  <span class="esp"></span>
+  <a class="boton" id="todos" href="#" hidden>Todos los canales</a>
+  <button id="full">Pantalla completa</button>
+</header>
+
+<main class="uno" id="vistaUno" hidden>
+  <section class="pantalla"><div class="espera" id="espera">Esperando la señal del navegador de pruebas…</div><img id="vid" alt="Directo del navegador de pruebas" hidden></section>
+  <aside>
+    <div class="caso" id="caso">—</div>
+    <h1 id="tit">Sin caso en emisión</h1>
+    <div class="paso"><b>Paso actual</b><span id="paso">—</span></div>
+    <ol id="pasos"></ol>
+  </aside>
+</main>
+
+<main class="parrilla" id="vistaParrilla" hidden></main>
+
+<script>
+const q = new URLSearchParams(location.search);
+const t = q.get('t') || '';
+const canal = q.get('canal');
+const $ = id => document.getElementById(id);
+const enc = encodeURIComponent;
+const ruta = (r, c, extra = '') => `${r}?t=${enc(t)}${c ? '&canal=' + enc(c) : ''}${extra}`;
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+let ultimo = 0;
+
+$('inicio').href = ruta('./');
+$('full').onclick = () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); };
+setInterval(() => { $('act').textContent = ultimo ? 'Última señal hace ' + Math.max(0, Math.round((Date.now() - ultimo) / 1000)) + ' s' : ''; }, 1000);
+
+function ponAire(estado, enDirecto) {
+  const on = estado === 'curso' && enDirecto !== false;
+  $('air').className = 'onair' + (on ? ' on' : '');
+  $('air').textContent = on ? 'En directo' : (estado === 'fin' ? 'Caso terminado' : 'Sin señal');
+}
+
+if (canal) {
+  // Un canal: vídeo MJPEG y estados por SSE.
+  $('vistaUno').hidden = false;
+  $('todos').hidden = false;
+  $('todos').href = ruta('./');
+  document.title = canal + ' · Studio TV';
+  const vid = $('vid');
+  vid.onload = () => { vid.hidden = false; $('espera').hidden = true; };
+  const conectar = () => { vid.src = ruta('stream', canal, '&n=' + Date.now()); };
+  vid.onerror = () => setTimeout(conectar, 2000);
+  conectar();
+  const es = new EventSource(ruta('events', canal));
+  es.onmessage = ev => {
+    let e; try { e = JSON.parse(ev.data); } catch (_) { return; }
+    if (!e || !Object.keys(e).length) return;
+    ultimo = Date.now();
+    $('caso').textContent = e.caso || canal;
+    $('tit').textContent = e.titulo || (e.caso ? 'Caso ' + e.caso : 'Sin caso en emisión');
+    $('paso').textContent = e.paso || '—';
+    $('pasos').replaceChildren(...(e.marcadores || []).map(m => {
+      const li = document.createElement('li'); li.textContent = m.txt + ' ';
+      const s = document.createElement('span'); s.className = 't'; s.textContent = mmss(m.t || 0);
+      li.append(s); return li;
+    }));
+    ponAire(e.estado);
+  };
+} else {
+  // Parrilla: lista de canales y miniaturas que se refrescan cada 2 s.
+  $('vistaParrilla').hidden = false;
+  const tarjetas = new Map();
+  function tarjeta(c) {
+    let x = tarjetas.get(c.canal);
+    if (!x) {
+      const a = document.createElement('a'); a.className = 'tarjeta'; a.href = ruta('./', c.canal);
+      const mini = document.createElement('div'); mini.className = 'mini';
+      const img = document.createElement('img'); img.alt = 'Canal ' + c.canal; img.hidden = true;
+      const esp = document.createElement('div'); esp.className = 'espera'; esp.textContent = 'Sin imagen';
+      img.onload = () => { img.hidden = false; esp.hidden = true; };
+      mini.append(esp, img);
+      const pie = document.createElement('div'); pie.className = 'pie';
+      const fila = document.createElement('div'); fila.className = 'fila';
+      const nom = document.createElement('span'); nom.className = 'caso';
+      const air = document.createElement('span'); air.className = 'onair';
+      fila.append(nom, air);
+      const tit = document.createElement('div'); tit.className = 'titulo';
+      const paso = document.createElement('div'); paso.className = 't';
+      pie.append(fila, tit, paso);
+      a.append(mini, pie);
+      x = { a, img, nom, air, tit, paso };
+      tarjetas.set(c.canal, x);
+    }
+    const e = c.estado || {};
+    const on = c.en_directo && e.estado !== 'fin';
+    x.nom.textContent = c.canal + (e.caso ? ' · ' + e.caso : '');
+    x.air.className = 'onair' + (on ? ' on' : '');
+    x.air.textContent = on ? 'En directo' : (e.estado === 'fin' ? 'Terminado' : 'Sin señal');
+    x.tit.textContent = e.titulo || 'Sin caso en emisión';
+    x.paso.textContent = e.paso || '';
+    if (c.con_imagen) x.img.src = ruta('snapshot', c.canal, '&n=' + Date.now());
+    return x.a;
+  }
+  async function refresca() {
+    try {
+      const r = await fetch(ruta('api/canales'), { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      const lista = await r.json();
+      const vivos = new Set(lista.map(c => c.canal));
+      for (const k of tarjetas.keys()) if (!vivos.has(k)) tarjetas.delete(k);
+      const enDirecto = lista.filter(c => c.en_directo);
+      ultimo = lista.reduce((m, c) => Math.max(m, Date.parse(c.ultima) || 0), 0);
+      $('air').className = 'onair' + (enDirecto.length ? ' on' : '');
+      $('air').textContent = enDirecto.length ? enDirecto.length + ' en directo' : 'Sin señal';
+      if (!lista.length) {
+        const v = document.createElement('div'); v.className = 'vacio';
+        v.textContent = 'Ningún canal todavía. Los emisores aparecen aquí en cuanto envían la primera imagen.';
+        $('vistaParrilla').replaceChildren(v);
+      } else {
+        $('vistaParrilla').replaceChildren(...lista.map(tarjeta));
+      }
+    } catch (_) {
+      $('air').className = 'onair'; $('air').textContent = 'Sin conexión con el estudio';
+    }
+  }
+  refresca();
+  setInterval(refresca, 2000);
+}
+</script>
+</body>
+</html>
