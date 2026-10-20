@@ -31,6 +31,7 @@ import (
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
+	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/qa"
 	"planesgo-code/internal/repo"
@@ -73,6 +74,12 @@ type Servidor struct {
 	QA qa.Ejecutor
 	// DirRamas: dónde se crean las copias de trabajo de otras ramas (git worktree) de las sesiones.
 	DirRamas string
+	// Procesos: programas del proyecto en marcha (Odoo, servicios…); Eventos: avisos a la interfaz (SSE).
+	Procesos *procesos.Gestor
+	Eventos  Eventos
+	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
+	TokenAgente string
+	DirBin      string
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
 	EstudioOcupado func() bool
 	activos        atomic.Int64 // chats y agentes en curso
@@ -110,6 +117,13 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
+	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
+	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
+	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
+	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
+	mux.HandleFunc("GET /api/procesos/salida", s.conSesion(s.procesosSalida))
+	mux.HandleFunc("GET /api/pgo/{orden}", s.pgo)
+	mux.HandleFunc("POST /api/pgo/{orden}", s.pgo)
 	mux.HandleFunc("GET /api/studio/conexion", s.conSesion(s.studioConexion))
 	mux.HandleFunc("POST /api/studio/conexion", s.conSesion(s.studioConecta))
 	mux.HandleFunc("GET /api/studio/{recurso}", s.conSesion(s.studioProxy))
@@ -156,7 +170,8 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 			jsonError(w, http.StatusMisdirectedRequest, "host no permitido")
 			return
 		}
-		if r.URL.Path != "/healthz" && !s.desdeEscritorio(r) {
+		agente := esRutaAgente(r.URL.Path) && s.esAgente(r)
+		if r.URL.Path != "/healthz" && !agente && !s.desdeEscritorio(r) {
 			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusForbidden)
@@ -346,7 +361,7 @@ func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *ses
 
 // Ocupado dice si hay algo en curso que una actualización interrumpiría.
 func (s *Servidor) Ocupado() bool {
-	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || (s.EstudioOcupado != nil && s.EstudioOcupado())
+	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
 }
 
 func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -511,7 +526,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		p.Permisos = "lectura"
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo}, func(e llm.Evento) { envia(e) })
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) { envia(e) })
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
 	}

@@ -1,18 +1,24 @@
-import { useState, type PointerEvent as EventoPuntero } from 'react';
+import { useEffect, useState, type PointerEvent as EventoPuntero } from 'react';
 import type { Proyecto } from '../api';
 import Navegador from './Navegador';
 import StudioTV from './StudioTV';
 import Pruebas from './Pruebas';
+import Programas from './Programas';
 import Icono from './Icono';
 
-type Pestana = 'studio' | 'navegador';
+type Pestana = 'studio' | 'programas' | 'navegador';
 type VistaTV = 'pruebas' | 'directo';
 
 const ANCHO_MIN = 320;
 
 // Panel derecho: TV (pruebas de la campaña y directo) y navegador. Se redimensiona arrastrando su borde izquierdo.
-export default function Artefactos({ proyecto, alAncho }: { proyecto: Proyecto | null; alAncho: (px: number) => void }) {
+export default function Artefactos({ proyecto, carpeta, alAncho, pedidoWeb, versionProcesos, alAbrir }: {
+  proyecto: Proyecto | null; carpeta: string; alAncho: (px: number) => void;
+  pedidoWeb: { url: string; n: number } | null; versionProcesos: number; alAbrir: (url: string) => void;
+}) {
   const [pestana, setPestana] = useState<Pestana>('studio');
+  // Al pedir abrir una URL (programa que arranca, «pgo abrir»), se pasa al navegador.
+  useEffect(() => { if (pedidoWeb) setPestana('navegador'); }, [pedidoWeb?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [vista, setVista] = useState<VistaTV>(() => {
     try { return (localStorage.getItem('pgo:vista-tv') as VistaTV) || 'pruebas'; } catch { return 'pruebas'; }
   });
@@ -45,6 +51,7 @@ export default function Artefactos({ proyecto, alAncho }: { proyecto: Proyecto |
       {arrastrando && <div className="capa-arrastre" />}
       <div className="pestanas" role="tablist">
         <button role="tab" aria-selected={pestana === 'studio'} onClick={() => setPestana('studio')} title="Studio TV"><Icono n="tv" t={16} /> TV</button>
+        <button role="tab" aria-selected={pestana === 'programas'} onClick={() => setPestana('programas')} title="Programas en local"><Icono n="terminal" t={16} /> Programas</button>
         <button role="tab" aria-selected={pestana === 'navegador'} onClick={() => setPestana('navegador')} title="Navegador"><Icono n="web" t={16} /> Web</button>
         {pestana === 'studio' && proyecto && (
           <span className="subpestanas">
@@ -56,11 +63,16 @@ export default function Artefactos({ proyecto, alAncho }: { proyecto: Proyecto |
       <div className="contenido-artefacto">
         {!proyecto
           ? <p className="suave relleno">Elige un proyecto.</p>
-          : pestana === 'studio'
-            ? (vista === 'pruebas'
+          : <>
+            {pestana === 'studio' && (vista === 'pruebas'
               ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
-              : <StudioTV key={proyecto.id} proyecto={proyecto} />)
-            : <Navegador key={proyecto.id} proyecto={proyecto} />}
+              : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
+            {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}
+            {/* El navegador sigue montado al cambiar de pestaña: no se pierden sus pestañas ni lo que cargaban. */}
+            <div className="capa-navegador" hidden={pestana !== 'navegador'}>
+              <Navegador key={proyecto.id} proyecto={proyecto} pedido={pedidoWeb} />
+            </div>
+          </>}
       </div>
     </aside>
   );

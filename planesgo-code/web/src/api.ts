@@ -8,7 +8,11 @@ export interface Proveedor {
   modelos: string[] | null; por_defecto: string; necesita_carpeta: boolean;
   esfuerzos?: string[]; modos?: boolean;
 }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean }
+// Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
+export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error' }
+export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number }
+export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso }
 
 export class ErrorAPI extends Error {
   constructor(public estado: number, mensaje: string) { super(mensaje); }
@@ -34,7 +38,21 @@ export const post = <T,>(ruta: string, cuerpo: unknown) =>
     body: JSON.stringify(cuerpo),
   }).then(r => respuesta<T>(r));
 
-export interface EventoChat { texto?: string; sesion_agente?: string; error?: string; fin?: boolean }
+export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; uso?: Uso; sesion_agente?: string; error?: string; fin?: boolean }
+
+// Avisos del backend: cambios en los programas y URL que abrir en el navegador integrado.
+export type Aviso = { tipo: 'procesos' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
+export function escuchaAvisos(cada: (a: Aviso) => void): () => void {
+  const es = new EventSource('/api/eventos');
+  es.onmessage = e => { try { cada(JSON.parse(e.data)); } catch { /* aviso incompleto */ } };
+  return () => es.close();
+}
+
+export interface Proceso {
+  nombre: string; proyecto: number; carpeta: string; orden: string; url?: string;
+  estado: 'curso' | 'terminado' | 'error' | 'parado'; codigo: number; inicio: string; fin?: string; lanzado: 'usuario' | 'agente';
+}
+export interface ConfigPrograma { nombre: string; orden: string; url?: string }
 
 // chat envía la conversación y va llamando a cada con los eventos SSE de la respuesta.
 export async function chat(cuerpo: unknown, cada: (e: EventoChat) => void, señal: AbortSignal) {

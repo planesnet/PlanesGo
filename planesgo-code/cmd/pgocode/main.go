@@ -27,6 +27,7 @@ import (
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
+	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/servidor"
 	"planesgo-code/internal/sesiones"
@@ -134,6 +135,10 @@ func ampliaPath() {
 }
 
 func main() {
+	// Enlazado como «pgo»: la orden de los agentes para ejecutar programas del proyecto.
+	if filepath.Base(os.Args[0]) == "pgo" {
+		os.Exit(pgo(os.Args[1:]))
+	}
 	ampliaPath()
 	addr := flag.String("addr", entorno("PGO_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
 	odooURL := flag.String("odoo", entorno("ODOO_URL", "https://planesnet.autopyme.com"), "URL de Odoo")
@@ -212,6 +217,24 @@ func main() {
 	s.TokenEscritorio = os.Getenv("PGO_TOKEN_ESCRITORIO")
 	s.PermitirNavegador = *navegador
 
+	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
+	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.
+	s.Procesos = procesos.Nuevo()
+	s.AvisaProcesos()
+	s.TokenAgente = aleatorio()
+	if exe, err := os.Executable(); err == nil {
+		bin := filepath.Join(filepath.Dir(*dirGrab), "bin")
+		enlace := filepath.Join(bin, "pgo")
+		if os.MkdirAll(bin, 0o755) == nil {
+			os.Remove(enlace)
+			if err := os.Symlink(exe, enlace); err == nil {
+				s.DirBin = bin
+			} else {
+				log.Printf("orden pgo: %v", err)
+			}
+		}
+	}
+
 	// Autoactualización: la app instalada (paquete) vive junto al ejecutable; las versiones nuevas se preparan en
 	// ~/.local/share/pgocode/actualizacion y se aplican cuando no hay nada en curso.
 	datos := filepath.Dir(*dirGrab) // ~/.local/share/pgocode
@@ -264,6 +287,7 @@ func main() {
 		<-ctx.Done()
 		log.Print("cerrando Planes Go Code…")
 		cancelaBase()
+		s.Procesos.ParaTodos() // los programas lanzados se cierran con la app
 		if estudio != nil {
 			estudio.Cierra() // cierra bien los vídeos que se estén grabando
 		}

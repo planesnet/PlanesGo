@@ -27,12 +27,37 @@ type Peticion struct {
 	Permisos string
 	// Esfuerzo de razonamiento del agente (uno de los de su Info.Esfuerzos; vacío: el suyo por defecto).
 	Esfuerzo string
+	// Entorno: variables que se añaden al del agente (PGO_API, PGO_TOKEN… para la orden «pgo»).
+	Entorno []string
 }
 
-// Evento es un trozo de la respuesta: texto, o la sesión del agente para continuarla después.
+// Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
+// razonamiento, una herramienta (al empezar y al terminar, con el mismo id), el consumo del turno o la sesión
+// del agente para continuarla después.
 type Evento struct {
-	Texto        string `json:"texto,omitempty"`
-	SesionAgente string `json:"sesion_agente,omitempty"`
+	Texto        string       `json:"texto,omitempty"`
+	Pensamiento  string       `json:"pensamiento,omitempty"`
+	Herramienta  *Herramienta `json:"herramienta,omitempty"`
+	Uso          *Uso         `json:"uso,omitempty"`
+	SesionAgente string       `json:"sesion_agente,omitempty"`
+}
+
+// Herramienta es una llamada del agente a una herramienta (leer, editar, ejecutar…).
+type Herramienta struct {
+	ID      string `json:"id"`
+	Nombre  string `json:"nombre"`
+	Resumen string `json:"resumen,omitempty"` // lo principal de la entrada: fichero, orden, patrón…
+	Entrada string `json:"entrada,omitempty"` // la entrada completa (JSON), recortada
+	Salida  string `json:"salida,omitempty"`  // el resultado, recortado
+	Estado  string `json:"estado"`            // curso | ok | error
+}
+
+// Uso es el consumo de un turno.
+type Uso struct {
+	Entrada  int     `json:"entrada"` // tokens de entrada (incluida la caché)
+	Salida   int     `json:"salida"`  // tokens de salida
+	Coste    float64 `json:"coste,omitempty"`
+	Segundos float64 `json:"segundos,omitempty"`
 }
 
 // Info describe un proveedor para el selector del chat.

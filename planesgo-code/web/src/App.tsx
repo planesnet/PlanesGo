@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { get, post, type Proveedor, type Proyecto, type Usuario } from './api';
+import { escuchaAvisos, get, post, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
 import Acceso from './componentes/Acceso';
 import Proyectos from './componentes/Proyectos';
@@ -41,6 +41,20 @@ export default function App() {
   const pedida = useRef('');
   // Carpeta cuyo repositorio está cargado (para recargarlo si la sesión cambia de carpeta).
   const carpetaRepo = useRef('');
+
+  // Avisos del backend: programas que cambian y URL que abrir en el navegador integrado.
+  const [pedidoWeb, setPedidoWeb] = useState<{ url: string; n: number } | null>(null);
+  const [versionProcesos, setVersionProcesos] = useState(0);
+  const proyectoId = useRef(0);
+  proyectoId.current = proyecto?.id || 0;
+  const abreWeb = useCallback((url: string) => { setPanel(true); setPedidoWeb({ url, n: Date.now() }); }, []);
+  useEffect(() => {
+    if (!usuario) return;
+    return escuchaAvisos(a => {
+      if (a.tipo === 'procesos') setVersionProcesos(v => v + 1);
+      else if (a.tipo === 'abrir' && (!a.proyecto || a.proyecto === proyectoId.current)) abreWeb(a.url);
+    });
+  }, [usuario, abreWeb]);
 
   // Título de la ventana con la versión.
   useEffect(() => {
@@ -182,7 +196,8 @@ export default function App() {
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
       <Chat proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
-      {panel && <Artefactos proyecto={proyecto} alAncho={cambiaAncho} />}
+      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} alAncho={cambiaAncho}
+        pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} />}
     </div>
     </div>
   );

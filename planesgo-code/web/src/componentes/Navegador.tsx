@@ -31,7 +31,7 @@ const normaliza = (s: string) => {
 let siguiente = 1;
 const pestanaNueva = (): Pestana => ({ id: siguiente++, url: '', titulo: 'Nueva pestaña' });
 
-export default function Navegador({ proyecto }: { proyecto: Proyecto }) {
+export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pedido?: { url: string; n: number } | null }) {
   const [pestanas, setPestanas] = useState<Pestana[]>(() => [pestanaNueva()]);
   const [activa, setActiva] = useState(pestanas[0].id);
   const [entrada, setEntrada] = useState('');
@@ -93,6 +93,27 @@ export default function Navegador({ proyecto }: { proyecto: Proyecto }) {
   };
 
   const nueva = () => { const p = pestanaNueva(); setPestanas(l => [...l, p]); setActiva(p.id); };
+
+  // URL pedida desde fuera (un programa que arranca, el agente con «pgo abrir»): si ya está abierta en una
+  // pestaña, se recarga; si la activa está vacía, se usa; si no, pestaña nueva.
+  useEffect(() => {
+    if (!pedido) return;
+    const u = normaliza(pedido.url);
+    if (!u) return;
+    const ya = pestanas.find(p => p.url && new URL(p.url).origin === new URL(u).origin);
+    if (ya) {
+      setActiva(ya.id);
+      const v = vistas.current.get(ya.id);
+      if (v && escritorio) v.src = u;
+      pon(ya.id, { url: u });
+      return;
+    }
+    const vacia = pestanas.find(p => p.id === activaRef.current && !p.url);
+    if (vacia) { pon(vacia.id, { url: u, titulo: u.replace(/^https?:\/\//, '') }); setEntrada(u); const v = vistas.current.get(vacia.id); if (v && escritorio) v.src = u; return; }
+    const p = { ...pestanaNueva(), url: u, titulo: u.replace(/^https?:\/\//, '') };
+    setPestanas(l => [...l, p]);
+    setActiva(p.id);
+  }, [pedido?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const cierra = (id: number) => {
     vistas.current.delete(id);
     setPestanas(l => {

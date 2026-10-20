@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, type Mensaje, type Proveedor, type Proyecto } from '../api';
+import { chat, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto } from '../api';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting, nombreHosting } from './Marca';
@@ -67,13 +67,28 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
     setEnCurso(ac);
     let sesionAgente = sesion.sesionAgente;
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
+    // Añade un trozo a las partes del mensaje: el texto seguido se junta; la herramienta se actualiza por su id.
+    const parte = (p: Parte) => ultimo(m => {
+      const ps = [...(m.partes || [])];
+      const u = ps[ps.length - 1];
+      if (p.tipo !== 'herramienta' && u && u.tipo === p.tipo) ps[ps.length - 1] = { ...u, texto: u.texto + p.texto };
+      else if (p.tipo === 'herramienta') {
+        const i = ps.findIndex(x => x.tipo === 'herramienta' && x.h.id === p.h.id);
+        if (i >= 0) { const v = (ps[i] as { h: Herramienta }).h; ps[i] = { tipo: 'herramienta', h: { ...v, ...p.h, nombre: p.h.nombre || v.nombre, resumen: v.resumen || p.h.resumen, entrada: v.entrada || p.h.entrada } }; }
+        else ps.push(p);
+      } else ps.push(p);
+      return { ...m, partes: ps, texto: p.tipo === 'texto' ? m.texto + p.texto : m.texto };
+    });
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
         permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
         mensajes: prov.tipo === 'agente' ? base.slice(-1) : base, // los agentes llevan su propio historial
       }, e => {
-        if (e.texto) ultimo(m => ({ ...m, texto: m.texto + e.texto }));
+        if (e.texto) parte({ tipo: 'texto', texto: e.texto });
+        if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
+        if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta });
+        if (e.uso) ultimo(m => ({ ...m, uso: e.uso }));
         if (e.sesion_agente) sesionAgente = e.sesion_agente;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
@@ -140,7 +155,12 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
             )}
             {mensajes.map((m, i) => (
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
-                {m.texto || (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
+                {m.partes?.length
+                  ? m.partes.map((p, j) => <ParteMensaje key={j} p={p} />)
+                  : m.texto || (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
+                {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
+                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
+                {m.uso && <div className="uso">{usoTexto(m.uso)}</div>}
               </div>
             ))}
             <div ref={fin} />
@@ -198,5 +218,26 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
         </>
       )}
     </main>
+  );
+}
+
+const miles = (n: number) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
+const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos?: number }) =>
+  [`${miles(u.entrada)} ↑ · ${miles(u.salida)} ↓ tokens`, u.coste ? `$${u.coste.toFixed(3)}` : '', u.segundos ? `${u.segundos.toFixed(1)} s` : ''].filter(Boolean).join(' · ');
+
+// Una parte de la respuesta: texto, razonamiento (plegado) o una herramienta (una línea que se despliega), como en Claude Code.
+function ParteMensaje({ p }: { p: Parte }) {
+  if (p.tipo === 'texto') return <div className="parte-texto">{p.texto}</div>;
+  if (p.tipo === 'pensamiento') return <details className="pensamiento"><summary>Razonamiento</summary><div>{p.texto}</div></details>;
+  const h = p.h;
+  return (
+    <details className={'herramienta ' + h.estado}>
+      <summary>
+        <span className="punto-h" aria-label={h.estado} />
+        <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}
+      </summary>
+      {h.entrada && <pre className="entrada-h">{h.entrada}</pre>}
+      {h.salida && <pre className="salida-h">{h.salida}</pre>}
+    </details>
   );
 }
