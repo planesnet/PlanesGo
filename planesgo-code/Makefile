@@ -50,7 +50,7 @@ instalar: paquete
 	cd electron && npm ci --no-fund --no-audit
 	PGO_LOCAL=$(CURDIR)/$(DIST) PGO_ELECTRON_LOCAL=$(CURDIR)/electron/node_modules/electron/dist PGO_DESARROLLO=1 sh linux/instalar.sh
 
-# Ubuntu 24.04+: perfil de AppArmor para que Electron (instalado en ~/.local/share/pgocode) pueda usar su sandbox.
+# Ubuntu 24.04+: perfil de AppArmor para que el motor (~/.local/share/pgocode/motor/pgocode) pueda usar su sandbox.
 apparmor:
 	@echo "Instálalo con:"
 	@echo "  sudo cp $(CURDIR)/linux/apparmor-pgocode /etc/apparmor.d/pgocode && sudo apparmor_parser -r /etc/apparmor.d/pgocode"

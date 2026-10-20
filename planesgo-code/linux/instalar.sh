@@ -1,7 +1,8 @@
 #!/bin/sh
 # Instalador de Planes Go Code (Linux x64), para el usuario actual (sin sudo):
 #   curl -fsSL https://planesgo.autopyme.com/install/pgocode/instalar.sh | sh
-# Deja Electron en ~/.local/share/pgocode/electron, la app en ~/.local/share/pgocode/app, el comando «pgocode»
+# Deja el motor (Electron, con su ejecutable renombrado a «pgocode») en ~/.local/share/pgocode/motor, la app en
+# ~/.local/share/pgocode/app, el comando «pgocode»
 # en ~/.local/bin y la entrada en el menú de aplicaciones. Después la app se mantiene al día sola.
 # Uso interno («make instalar»): PGO_LOCAL=<dir con version.json y el paquete>, PGO_ELECTRON_LOCAL=<dist de Electron>,
 # PGO_DESARROLLO=1 (sin autoactualización).
@@ -25,20 +26,22 @@ VER=$(campo version); SHA=$(campo sha256); ARCHIVO=$(campo archivo); ELECTRON=$(
 echo "Planes Go Code $VER (Electron $ELECTRON)"
 mkdir -p "$D" "$BIN"
 
-# Electron (solo si cambia de versión)
-if [ "$(cat "$D/electron/.version" 2>/dev/null)" != "$ELECTRON" ]; then
-  rm -rf "$D/electron.nuevo"
+# Motor (Electron) solo si cambia de versión. Su ejecutable se renombra a «pgocode».
+if [ "$(cat "$D/motor/.version" 2>/dev/null)" != "$ELECTRON" ]; then
+  rm -rf "$D/motor.nuevo"
   if [ -n "${PGO_ELECTRON_LOCAL:-}" ]; then
-    cp -r "$PGO_ELECTRON_LOCAL" "$D/electron.nuevo"
+    cp -r "$PGO_ELECTRON_LOCAL" "$D/motor.nuevo"
   else
     falta curl; falta unzip
-    echo "Descargando Electron $ELECTRON…"
+    echo "Descargando el motor (Electron $ELECTRON)…"
     curl -fL# "https://github.com/electron/electron/releases/download/v$ELECTRON/electron-v$ELECTRON-linux-x64.zip" -o "$TMP/electron.zip"
-    mkdir -p "$D/electron.nuevo" && unzip -q "$TMP/electron.zip" -d "$D/electron.nuevo"
+    mkdir -p "$D/motor.nuevo" && unzip -q "$TMP/electron.zip" -d "$D/motor.nuevo"
   fi
-  echo "$ELECTRON" > "$D/electron.nuevo/.version"
-  rm -rf "$D/electron" && mv "$D/electron.nuevo" "$D/electron"
+  mv "$D/motor.nuevo/electron" "$D/motor.nuevo/pgocode"
+  echo "$ELECTRON" > "$D/motor.nuevo/.version"
+  rm -rf "$D/motor" && mv "$D/motor.nuevo" "$D/motor"
 fi
+rm -rf "$D/electron" # ubicación antigua
 
 # App (paquete con huella comprobada)
 trae "$ARCHIVO" "$TMP/app.tar.gz"
@@ -56,7 +59,7 @@ cat > "$BIN/pgocode" <<LANZADOR
 # Planes Go Code: abre la app de escritorio (instalada en $D).
 # Linux: sin ibus (si no conecta, GTK descarta las pulsaciones) y enlace de la ventana con su icono.
 export GTK_IM_MODULE=gtk-im-context-simple XMODIFIERS=@im=none QT_IM_MODULE= CHROME_DESKTOP=pgocode.desktop
-exec "$D/electron/electron" "$D/app" "\$@"
+exec "$D/motor/pgocode" "$D/app" "\$@"
 LANZADOR
 chmod 755 "$BIN/pgocode"
 for t in 16 32 48 64 128 256 512; do
@@ -79,7 +82,7 @@ ESCRITORIO
 gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 echo "Instalado. Ábrelo desde el menú de aplicaciones o con «pgocode»."
-if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ] && ! grep -qs "share/pgocode/electron" /etc/apparmor.d/pgocode; then
+if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ] && ! grep -qs "share/pgocode/motor/pgocode" /etc/apparmor.d/pgocode; then
   echo
   echo "Ubuntu restringe el sandbox de Electron: una sola vez, instala su perfil de AppArmor con:"
   echo "  curl -fsSL $URL/apparmor-pgocode | sudo tee /etc/apparmor.d/pgocode >/dev/null && sudo apparmor_parser -r /etc/apparmor.d/pgocode"
