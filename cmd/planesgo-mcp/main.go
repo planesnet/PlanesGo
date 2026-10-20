@@ -988,6 +988,27 @@ func (c *PlanesGoClient) SendHeartbeatWithElapsed(action, taskName string, taskI
 }
 
 // GetTicket consulta los datos de un ticket por referencia o ID
+// GetStudioEmisor pide a PlanesGo los datos para emitir en directo a Studio TV (PCO_URL, PCO_TOKEN e instrucciones).
+func (c *PlanesGoClient) GetStudioEmisor() (map[string]interface{}, error) {
+	headers := map[string]string{"X-Antigravity-Token": c.Token, "Accept": "application/json"}
+	body, statusCode, err := c.doWithRetry(http.MethodGet, c.BaseURL+"/api/studio-tv/emisor", nil, headers)
+	if err != nil {
+		return nil, err
+	}
+	var res map[string]interface{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
+	}
+	if statusCode != http.StatusOK {
+		errMsg, _ := res["error"].(string)
+		if statusCode == http.StatusNotFound || errMsg == "" {
+			errMsg = "este servidor de PlanesGo no tiene Studio TV"
+		}
+		return res, fmt.Errorf("PlanesGo HTTP %d: %s", statusCode, errMsg)
+	}
+	return res, nil
+}
+
 func (c *PlanesGoClient) GetTicket(ticketRef string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("%s/api/tickets?ref=%s", c.BaseURL, url.QueryEscape(ticketRef))
 	headers := map[string]string{
@@ -1821,6 +1842,21 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 			IsError: false,
 		}
 
+	case "planesgo_studio_emisor":
+		res, err := client.GetStudioEmisor()
+		if err != nil {
+			return ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Studio TV: %v", err)}},
+				IsError: true,
+			}
+		}
+		pcoURL, _ := res["pco_url"].(string)
+		pcoToken, _ := res["pco_token"].(string)
+		instr, _ := res["instrucciones"].(string)
+		return ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("PCO_URL=%s\nPCO_TOKEN=%s\n\n%s", pcoURL, pcoToken, instr)}},
+		}
+
 	case "planesgo_status":
 		res, err := client.CheckStatus(projID, projName)
 		if err != nil {
@@ -2305,6 +2341,14 @@ func getToolsDefinition() []map[string]interface{} {
 						"description": "Raíz del proyecto de la sesión actual (obligatorio si el MCP no se ejecuta dentro del proyecto)",
 					},
 				},
+			},
+		},
+		{
+			"name":        "planesgo_studio_emisor",
+			"description": "Devuelve PCO_URL y PCO_TOKEN para emitir en directo a Studio TV (PlanesGo) lo que hace el navegador de las pruebas automáticas, con las instrucciones de uso. Úsala antes de lanzar pruebas con navegador para que se puedan ver en directo y quede evidencia.",
+			"inputSchema": map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
 			},
 		},
 		{

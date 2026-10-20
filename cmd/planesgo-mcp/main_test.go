@@ -35,12 +35,13 @@ func TestCleanURL(t *testing.T) {
 
 func TestToolsDefinition(t *testing.T) {
 	tools := getToolsDefinition()
-	if len(tools) != 9 {
-		t.Fatalf("expected 9 tools defined, got %d", len(tools))
+	if len(tools) != 10 {
+		t.Fatalf("expected 10 tools defined, got %d", len(tools))
 	}
 
 	expectedNames := map[string]bool{
 		"planesgo_check":           false,
+		"planesgo_studio_emisor":   false,
 		"planesgo_add_hours":       false,
 		"planesgo_beat":            false,
 		"planesgo_stop":            false,
@@ -513,4 +514,3 @@ func TestMultiSessionOption1AndOption2(t *testing.T) {
 		t.Errorf("planesgo_list_tasks con override PRO3 debía consultar project_id=303, obtuvo: %+v", tasksOverrideOut.Content)
 	}
 }
-

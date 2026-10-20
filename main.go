@@ -102,6 +102,9 @@ func setupRoutes(mux *http.ServeMux, state *AppState) {
 
 	// Instalación del hook de Claude Code y de PSF (handlers_install.go)
 	setupInstallRoutes(mux, state)
+
+	// Studio TV: directo de las pruebas automáticas (handlers_studiotv.go)
+	setupStudioTV(mux, state)
 }
 
 func main() {

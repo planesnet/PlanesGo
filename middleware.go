@@ -111,6 +111,10 @@ func loggingAndRecoveryMiddleware(next http.Handler) http.Handler {
 				log.Printf("[PANIC CRÍTICO] %s %s: %v\nStack:\n%s", r.Method, r.URL.Path, rec, string(stack))
 				http.Error(rw, "500 Internal Server Error", http.StatusInternalServerError)
 			}
+			// Los fotogramas de Studio TV llegan a varios por segundo: no se registran si van bien.
+			if r.URL.Path == "/studio-tv/api/frame" && rw.statusCode < 400 {
+				return
+			}
 			duration := time.Since(start)
 			clientIP := r.Header.Get("X-Forwarded-For")
 			if clientIP == "" {
