@@ -27,6 +27,7 @@ const trazos: Record<string, JSX.Element> = {
   puntos: <><circle cx="12" cy="5" r="1.2" fill="currentColor" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /><circle cx="12" cy="19" r="1.2" fill="currentColor" /></>,
   bajar: <path d="M6 9l6 6 6-6" />,
   ejecutar: <path d="M8 5l11 7-11 7z" />,
+  skill: <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />,
   comentario: <path d="M4 5h16v11H9l-5 4z" />,
   flujo: <><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M6 8v8M18 16v-6a3 3 0 0 0-3-3h-4" /><path d="M13 5l-2 2 2 2" /></>,
   terminal: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></>,

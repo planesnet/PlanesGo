@@ -62,6 +62,31 @@ func primeraLinea(s string) string {
 	return s
 }
 
+// skillDe dice qué skill carga una herramienta: la herramienta Skill de Claude Code ({"skill": …}), la skill
+// de OpenCode ({"name": …}) o cualquier lectura de un …/<skill>/SKILL.md (Antigravity y los demás).
+func skillDe(herramienta string, entrada json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(entrada, &m) != nil {
+		return ""
+	}
+	texto := func(k string) string { v, _ := m[k].(string); return v }
+	switch strings.ToLower(herramienta) {
+	case "skill":
+		for _, k := range []string{"skill", "name", "command"} {
+			if v := strings.TrimPrefix(texto(k), "/"); v != "" {
+				return v
+			}
+		}
+	}
+	for _, k := range []string{"file_path", "filePath", "FilePath", "Path", "path", "AbsolutePath", "TargetFile"} {
+		if p := texto(k); strings.HasSuffix(p, "/SKILL.md") {
+			p = strings.TrimSuffix(p, "/SKILL.md")
+			return p[strings.LastIndex(p, "/")+1:]
+		}
+	}
+	return ""
+}
+
 // textoDe convierte un contenido de tool_result (texto o lista de bloques) en texto.
 func textoDe(c json.RawMessage) string {
 	var s string
@@ -145,7 +170,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				case "tool_use":
 					nombres[c.ID] = c.Name
 					emite(Evento{Herramienta: &Herramienta{ID: c.ID, Nombre: c.Name, Resumen: resumen(c.Input),
-						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso"}})
+						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Skill: skillDe(c.Name, c.Input)}})
 				}
 			}
 		case "user":
@@ -222,7 +247,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				if !empezadas[p.Indice] {
 					empezadas[p.Indice] = true
 					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Resumen: resumen(p.Info.Parametros),
-						Entrada: recorta(string(p.Info.Parametros), maxEntrada), Estado: "curso"}})
+						Entrada: recorta(string(p.Info.Parametros), maxEntrada), Estado: "curso", Skill: skillDe(p.Has, p.Info.Parametros)}})
 				}
 				if p.Estado == "DONE" || p.Estado == "ERROR" || p.Estado == "FAILED" {
 					estado, salida := "ok", p.Info.Salida
@@ -323,7 +348,8 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 				res = primeraLinea(ev.Part.State.Title)
 			}
 			emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: ev.Part.Tool, Resumen: res,
-				Entrada: recorta(string(ev.Part.State.Input), maxEntrada), Salida: recorta(salida, maxSalida), Estado: estado}})
+				Entrada: recorta(string(ev.Part.State.Input), maxEntrada), Salida: recorta(salida, maxSalida), Estado: estado,
+				Skill: skillDe(ev.Part.Tool, ev.Part.State.Input)}})
 		case "step_finish":
 			t := ev.Part.Tokens
 			uso.Entrada += t.Input + t.Cache.Read + t.Cache.Write

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -196,5 +197,19 @@ func TestModelosOpenCode(t *testing.T) {
 	i := Agentes()[2].(*Agente).Info(context.Background())
 	if !slices.Contains(i.Modelos, "vertex-deepseek/deepseek-ai/deepseek-v3.2-maas") || i.PorDefecto != "google-vertex/gemini-4-argon" {
 		t.Errorf("modelos %v, defecto %s", i.Modelos, i.PorDefecto)
+	}
+}
+
+// Se reconoce la skill que carga cada agente.
+func TestSkillDe(t *testing.T) {
+	for _, c := range []struct{ h, e, q string }{
+		{"Skill", `{"skill":"prueba-madera"}`, "prueba-madera"},
+		{"skill", `{"name":"odoo-18"}`, "odoo-18"},
+		{"read_file", `{"Path":"/home/x/.gemini/config/skills/golang-pro/SKILL.md"}`, "golang-pro"},
+		{"Read", `{"file_path":"/p/.claude/skills/a/README.md"}`, ""},
+	} {
+		if g := skillDe(c.h, json.RawMessage(c.e)); g != c.q {
+			t.Errorf("%s %s: %q", c.h, c.e, g)
+		}
 	}
 }

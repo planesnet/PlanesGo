@@ -127,6 +127,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
+	mux.HandleFunc("GET /api/skills", s.conSesion(s.skillsInventario))
+	mux.HandleFunc("GET /api/skills/texto", s.conSesion(s.skillsTexto))
 	mux.HandleFunc("GET /api/github", s.conSesion(s.githubEstado))
 	mux.HandleFunc("POST /api/github/issue", s.conSesion(s.githubCrea))
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))

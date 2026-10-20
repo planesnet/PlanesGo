@@ -42,6 +42,19 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
   }, [texto, sesion?.id]);
 
   const prov = proveedores.find(p => p.id === sesion?.agente);
+  // Skills usadas en la sesión (en orden) y la que se está usando ahora (la última del turno en curso).
+  const skillsSesion = useMemo(() => {
+    const l: string[] = [];
+    for (const m of mensajes) for (const p of m.partes || []) if (p.tipo === 'herramienta' && p.h.skill && !l.includes(p.h.skill)) l.push(p.h.skill);
+    return l;
+  }, [mensajes]);
+  const skillActiva = useMemo(() => {
+    const u = mensajes[mensajes.length - 1];
+    if (!u || u.rol !== 'assistant') return '';
+    const ss = (u.partes || []).filter(p => p.tipo === 'herramienta' && p.h.skill);
+    const x = ss[ss.length - 1];
+    return x && x.tipo === 'herramienta' ? x.h.skill || '' : '';
+  }, [mensajes]);
   const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
 
   // Al cambiar de sesión: su conversación; y se corta la respuesta en curso (no se escribe en otra sesión).
@@ -146,6 +159,11 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
           </nav>
         ) : <span className="suave titulo">{proyecto ? proyecto.nombre : 'Elige un proyecto de Odoo'}</span>}
         <span className="hueco" />
+        {skillsSesion.length > 0 && (
+          <span className="skills-sesion" title="Skills usadas en esta sesión">
+            {skillsSesion.map(n => <span key={n} className={'sk-marca' + (enCurso && n === skillActiva ? ' en-uso' : '')} title={enCurso && n === skillActiva ? 'En uso ahora' : 'Usada en esta sesión'}>✦ {n}</span>)}
+          </span>
+        )}
         {sesion && mensajes.length > 0 && !enCurso && (
           <button className="icono" onClick={() => alNuevaSesion(sesion.rama)} title="Nueva sesión" aria-label="Nueva sesión"><Icono n="nuevo" /></button>
         )}
@@ -158,7 +176,10 @@ export default function Chat({ hosting, detalle, envioPendiente, alEnviado, proy
           <p>Todo en Planes Go Code va ligado a un proyecto de Odoo. Elige uno a la izquierda.</p>
         </div>
       ) : !sesion ? (
-        <div className="vacio"><p>Preparando la sesión…</p></div>
+        <div className="vacio">
+          <p>Elige una sesión a la izquierda o empieza una nueva.</p>
+          <button className="primario boton-nueva-sesion" onClick={() => alNuevaSesion()}><Icono n="nuevo" t={15} /> Nueva sesión</button>
+        </div>
       ) : (
         <>
           <div className="mensajes" aria-live="polite" ref={lista}>
@@ -246,9 +267,11 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
 // (cada acción plegada) o detallado (todo desplegado).
 function Partes({ partes, detalle }: { partes: Parte[]; detalle: Detalle }) {
   if (detalle !== 'conciso') return <>{partes.map((p, j) => <ParteMensaje key={j} p={p} abierta={detalle === 'detallado'} />)}</>;
-  const acciones = partes.filter(p => p.tipo === 'herramienta');
+  const acciones = partes.filter(p => p.tipo === 'herramienta' && !p.h.skill);
+  const skills = partes.filter(p => p.tipo === 'herramienta' && p.h.skill);
   const enCurso = acciones.some(p => p.tipo === 'herramienta' && p.h.estado === 'curso');
   return <>
+    {skills.map((p, j) => <ParteMensaje key={'s' + j} p={p} abierta={false} />)}
     {acciones.length > 0 && (
       <details className="acciones">
         <summary><span className={'punto-h' + (enCurso ? ' curso' : '')} /> {acciones.length} {acciones.length === 1 ? 'acción' : 'acciones'}</summary>
@@ -263,6 +286,12 @@ function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
   if (p.tipo === 'texto') return <Texto md={p.texto} />;
   if (p.tipo === 'pensamiento') return <details className="pensamiento" open={abierta}><summary>Razonamiento</summary><div>{p.texto}</div></details>;
   const h = p.h;
+  if (h.skill) return (
+    <details className={'herramienta skill ' + h.estado} open={abierta}>
+      <summary><span className="sk-marca">✦ Skill · {h.skill}</span>{h.estado === 'curso' && <span className="suave pequeno">cargando…</span>}</summary>
+      {h.salida && <pre className="salida-h">{h.salida}</pre>}
+    </details>
+  );
   return (
     <details className={'herramienta ' + h.estado} open={abierta}>
       <summary>

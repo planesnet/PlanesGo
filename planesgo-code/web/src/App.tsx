@@ -112,8 +112,9 @@ export default function App() {
           l = S.guarda(usuario.login, { ...s, agente: agentePorDefecto(), modelo: undefined, sesionAgente: undefined });
         }
       }
-      let s = l.find(x => x.id === quiere) || l[0] || null;
-      if ((!l.length || quiere === 'nueva') && proveedores.length) {
+      // Sin sesión por defecto: solo la que se pide (o una nueva, si se pide crearla).
+      let s = l.find(x => x.id === quiere) || null;
+      if (quiere === 'nueva' && proveedores.length) {
         s = { ...S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()), tipo: r?.tipo };
         l = S.guarda(usuario.login, s);
       }
@@ -228,7 +229,7 @@ export default function App() {
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
       <Chat hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
-      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} alAncho={cambiaAncho}
+      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
     </div>
     </div>

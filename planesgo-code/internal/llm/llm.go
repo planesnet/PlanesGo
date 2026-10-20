@@ -50,6 +50,7 @@ type Herramienta struct {
 	Entrada string `json:"entrada,omitempty"` // la entrada completa (JSON), recortada
 	Salida  string `json:"salida,omitempty"`  // el resultado, recortado
 	Estado  string `json:"estado"`            // curso | ok | error
+	Skill   string `json:"skill,omitempty"`   // la skill que el agente carga con esta herramienta
 }
 
 // Uso es el consumo de un turno.
