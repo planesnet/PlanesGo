@@ -35,7 +35,7 @@ func resumen(entrada json.RawMessage) string {
 	if json.Unmarshal(entrada, &m) != nil {
 		return ""
 	}
-	for _, k := range []string{"command", "CommandLine", "file_path", "FilePath", "Path", "path", "pattern", "Pattern",
+	for _, k := range []string{"command", "CommandLine", "file_path", "filePath", "FilePath", "Path", "path", "pattern", "Pattern",
 		"url", "Url", "query", "Query", "description", "prompt", "skill", "TargetFile", "AbsolutePath"} {
 		if v, ok := m[k].(string); ok && v != "" {
 			return primeraLinea(v)
@@ -245,6 +245,99 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				return errors.New("Antigravity terminó con estado " + res.Estado)
 			}
 		}
+	}
+	return sc.Err()
+}
+
+// leeOpenCode interpreta «opencode run --format json»: text (al acabar cada bloque), tool_use (herramienta ya
+// terminada, con entrada y salida), step_finish (tokens y coste), error; sessionID para continuar con --session.
+func leeOpenCode(r io.Reader, emite func(Evento)) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 32<<20)
+	sesion := ""
+	uso := &Uso{}
+	hayUso := false
+	var errores []string
+	for sc.Scan() {
+		var ev struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionID"`
+			Part      struct {
+				ID     string `json:"id"`
+				Text   string `json:"text"`
+				Tool   string `json:"tool"`
+				CallID string `json:"callID"`
+				State  struct {
+					Status string          `json:"status"`
+					Input  json.RawMessage `json:"input"`
+					Output string          `json:"output"`
+					Title  string          `json:"title"`
+					Error  string          `json:"error"`
+				} `json:"state"`
+				Cost   float64 `json:"cost"`
+				Tokens struct {
+					Input     int `json:"input"`
+					Output    int `json:"output"`
+					Reasoning int `json:"reasoning"`
+					Cache     struct {
+						Read  int `json:"read"`
+						Write int `json:"write"`
+					} `json:"cache"`
+				} `json:"tokens"`
+			} `json:"part"`
+			Error struct {
+				Name string `json:"name"`
+				Data struct {
+					Message string `json:"message"`
+				} `json:"data"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			continue
+		}
+		if ev.SessionID != "" && ev.SessionID != sesion {
+			sesion = ev.SessionID
+			emite(Evento{SesionAgente: sesion})
+		}
+		switch ev.Type {
+		case "text":
+			if ev.Part.Text != "" {
+				emite(Evento{Texto: ev.Part.Text})
+			}
+		case "tool_use":
+			id := ev.Part.CallID
+			if id == "" {
+				id = ev.Part.ID
+			}
+			estado, salida := "ok", ev.Part.State.Output
+			if ev.Part.State.Status == "error" {
+				estado, salida = "error", ev.Part.State.Error
+			}
+			res := resumen(ev.Part.State.Input)
+			if res == "" {
+				res = primeraLinea(ev.Part.State.Title)
+			}
+			emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: ev.Part.Tool, Resumen: res,
+				Entrada: recorta(string(ev.Part.State.Input), maxEntrada), Salida: recorta(salida, maxSalida), Estado: estado}})
+		case "step_finish":
+			t := ev.Part.Tokens
+			uso.Entrada += t.Input + t.Cache.Read + t.Cache.Write
+			uso.Salida += t.Output + t.Reasoning
+			uso.Coste += ev.Part.Cost
+			hayUso = true
+		case "error":
+			m := ev.Error.Data.Message
+			if m == "" {
+				m = ev.Error.Name
+			}
+			errores = append(errores, m)
+		}
+	}
+	if hayUso {
+		emite(Evento{Uso: uso})
+	}
+	if len(errores) > 0 {
+		return errors.New("OpenCode: " + strings.Join(errores, "; "))
 	}
 	return sc.Err()
 }

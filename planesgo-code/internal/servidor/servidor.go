@@ -481,9 +481,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	if info.Tipo == "agente" {
 		// Modelo y esfuerzo van como argumentos del agente: solo los de su lista.
+		// Un modelo que ya no está en su lista (p. ej. «por defecto» guardado en la sesión): el de por defecto.
 		if p.Modelo != "" && !slices.Contains(info.Modelos, p.Modelo) {
-			jsonError(w, http.StatusBadRequest, "modelo no disponible para "+info.Nombre)
-			return
+			p.Modelo = info.PorDefecto
 		}
 		if p.Esfuerzo != "" && !slices.Contains(info.Esfuerzos, p.Esfuerzo) {
 			p.Esfuerzo = ""

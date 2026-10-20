@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/proceso"
 )
 
@@ -29,6 +30,10 @@ type Agente struct {
 	// Modelos que se pueden elegir además de «por defecto», niveles de esfuerzo y si admite modos de permisos.
 	Modelos, Esfuerzos []string
 	Modos              bool
+	// PorDefecto: el modelo que se usa si no se elige otro (vacío: el del propio agente).
+	PorDefecto string
+	// EntornoDefecto: variables «CLAVE=valor» que se ponen solo si el usuario no las tiene ya.
+	EntornoDefecto []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
 	// NoDisponible: el agente existe pero no se puede usar desde aquí (y por qué).
@@ -38,7 +43,11 @@ type Agente struct {
 func (a *Agente) ID() string { return a.Clave }
 
 func (a *Agente) Info(ctx context.Context) Info {
-	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: append([]string{"por defecto"}, a.Modelos...), PorDefecto: "por defecto",
+	modelos, defecto := append([]string{"por defecto"}, a.Modelos...), "por defecto"
+	if a.PorDefecto != "" {
+		modelos, defecto = a.Modelos, a.PorDefecto
+	}
+	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: modelos, PorDefecto: defecto,
 		NecesitaDir: true, Esfuerzos: a.Esfuerzos, Modos: a.Modos}
 	if a.NoDisponible != "" {
 		i.Motivo = a.NoDisponible
@@ -63,36 +72,107 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		return errors.New("identificador de sesión del agente no válido")
 	}
 	msg := p.Mensajes[len(p.Mensajes)-1].Texto
-	cmd := exec.CommandContext(ctx, a.Programa, a.Args(msg, p)...)
+	args := a.Args(msg, p)
+	cmd := exec.CommandContext(ctx, a.Programa, args...)
+	inicio := time.Now()
+	id := fmt.Sprintf("%s-%d", a.Clave, inicio.UnixNano()%1e6)
+	depuracion.Log(id, "lanza %s %q en %s (entorno añadido: %s)", a.Programa, args, p.Carpeta, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
 	cmd.Dir = p.Carpeta
-	if len(p.Entorno) > 0 {
-		cmd.Env = append(os.Environ(), p.Entorno...)
+	entorno := append([]string(nil), p.Entorno...)
+	for _, kv := range a.EntornoDefecto {
+		if k, _, _ := strings.Cut(kv, "="); os.Getenv(k) == "" {
+			entorno = append(entorno, kv)
+		}
+	}
+	if len(entorno) > 0 {
+		cmd.Env = append(os.Environ(), entorno...)
 	}
 	// El agente va en su propio grupo de procesos: al cancelar se matan también sus hijos (servidores MCP,
 	// shells…), y WaitDelay evita quedarse esperando a un nieto que conserve la salida abierta.
 	proceso.GrupoPropio(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	var errSalida strings.Builder
-	cmd.Stderr = &limitado{b: &errSalida, max: 8 << 10}
+	cmd.Stderr = io.MultiWriter(&limitado{b: &errSalida, max: 8 << 10}, &lineasLog{id: id, flujo: "stderr"})
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	if err := cmd.Start(); err != nil {
+		depuracion.Log(id, "no arranca: %v", err)
 		return err
 	}
 	lee := a.Lee
 	if lee == nil {
 		lee = leeTexto
 	}
-	errLee := lee(out, emite)
-	if err := cmd.Wait(); err != nil {
+	// Se cuenta lo que llega a la interfaz: si el agente acaba sin decir nada, es un fallo (no una respuesta vacía).
+	respuesta := false
+	errLee := lee(io.TeeReader(out, &lineasLog{id: id, flujo: "stdout"}), func(e Evento) {
+		if e.Texto != "" || e.Herramienta != nil {
+			respuesta = true
+		}
+		emite(e)
+	})
+	errWait := cmd.Wait()
+	depuracion.Log(id, "fin en %s: wait=%v lectura=%v respuesta=%v", time.Since(inicio).Round(time.Millisecond), errWait, errLee, respuesta)
+	if errWait != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("%s terminó con error: %v %s", a.Programa, err, strings.TrimSpace(errSalida.String()))
+		return fmt.Errorf("%s terminó con error: %v %s", a.Programa, errWait, strings.TrimSpace(errSalida.String()))
+	}
+	if errLee == nil && !respuesta {
+		detalle := strings.TrimSpace(errSalida.String())
+		if detalle == "" {
+			detalle = "sin mensajes de error"
+		}
+		return fmt.Errorf("%s acabó sin responder (%s)", a.Nombre, ultimas(detalle, 600))
 	}
 	return errLee
+}
+
+// clavesEntorno: los nombres de las variables añadidas (sin sus valores: llevan tokens).
+func clavesEntorno(e []string) string {
+	l := make([]string, 0, len(e))
+	for _, v := range e {
+		k, _, _ := strings.Cut(v, "=")
+		l = append(l, k)
+	}
+	return strings.Join(l, ",")
+}
+
+func ultimas(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
+}
+
+// lineasLog escribe en el registro de depuración cada línea que pasa por él.
+type lineasLog struct {
+	id, flujo string
+	resto     []byte
+}
+
+func (l *lineasLog) Write(p []byte) (int, error) {
+	if !depuracion.Activo() {
+		return len(p), nil
+	}
+	b := append(l.resto, p...)
+	for {
+		i := strings.IndexByte(string(b), '\n')
+		if i < 0 {
+			break
+		}
+		linea := string(b[:i])
+		if len(linea) > 4000 {
+			linea = linea[:4000] + "…"
+		}
+		depuracion.Log(l.id, "%s: %s", l.flujo, linea)
+		b = b[i+1:]
+	}
+	l.resto = append([]byte(nil), b...)
+	return len(p), nil
 }
 
 type limitado struct {
@@ -196,12 +276,20 @@ func Agentes() []Proveedor {
 				// El mensaje va pegado a la opción: así nunca se toma como otra opción.
 				return append(a, "--print="+msg)
 			}},
-		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode",
-			Modelos: []string{"google-vertex/gemini-4-argon"},
+		// OpenCode: «run --format json» (eventos de texto, herramientas, consumo y errores); -s continúa la sesión.
+		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode,
+			PorDefecto: "google-vertex/gemini-4-argon", Modelos: []string{"google-vertex/gemini-4-argon"},
+			// Vertex AI: los modelos Gemini 4 están en la región «global» (en una regional, «Permission denied»).
+			EntornoDefecto: []string{"GOOGLE_CLOUD_LOCATION=global", "VERTEX_LOCATION=global", "GOOGLE_CLOUD_PROJECT=planes-dev"},
 			Args: func(msg string, p Peticion) []string {
-				a := []string{"run"}
-				if p.Modelo != "" && p.Modelo != "por defecto" {
-					a = append(a, "--model", p.Modelo)
+				a := []string{"run", "--format", "json"}
+				modelo := p.Modelo
+				if modelo == "" || modelo == "por defecto" {
+					modelo = "google-vertex/gemini-4-argon"
+				}
+				a = append(a, "--model", modelo)
+				if p.SesionAgente != "" {
+					a = append(a, "--session", p.SesionAgente)
 				}
 				return append(a, "--", msg)
 			}},

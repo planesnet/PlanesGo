@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/procesos"
@@ -134,12 +136,62 @@ func ampliaPath() {
 	}
 }
 
+// entornoShell trae las variables del shell interactivo del usuario (.bashrc: nvm, GOOGLE_CLOUD_PROJECT…), que
+// una app abierta desde el escritorio no hereda; así los agentes se comportan como en su terminal. Solo añade las
+// que faltan (y el PATH, que se une). Si el shell tarda o falla, se sigue sin ellas.
+func entornoShell() []string {
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		sh = "/bin/bash"
+	}
+	ctx, cancela := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancela()
+	cmd := exec.CommandContext(ctx, sh, "-ilc", "env -0")
+	cmd.Stdin = nil
+	b, err := cmd.Output()
+	if err != nil && len(b) == 0 {
+		log.Printf("entorno del shell: %v", err)
+		return nil
+	}
+	var nuevas []string
+	for _, kv := range strings.Split(string(b), "\x00") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || strings.HasPrefix(k, "BASH_FUNC_") {
+			continue
+		}
+		switch k {
+		case "PWD", "OLDPWD", "SHLVL", "_", "PS1", "TERM", "PGO_TOKEN_ESCRITORIO":
+			continue
+		case "PATH":
+			actual := filepath.SplitList(os.Getenv("PATH"))
+			esta := map[string]bool{}
+			for _, d := range actual {
+				esta[d] = true
+			}
+			for _, d := range filepath.SplitList(v) {
+				if d != "" && !esta[d] {
+					esta[d] = true
+					actual = append(actual, d)
+				}
+			}
+			os.Setenv("PATH", strings.Join(actual, string(os.PathListSeparator)))
+			continue
+		}
+		if _, ya := os.LookupEnv(k); !ya {
+			os.Setenv(k, v)
+			nuevas = append(nuevas, k)
+		}
+	}
+	return nuevas
+}
+
 func main() {
 	// Enlazado como «pgo»: la orden de los agentes para ejecutar programas del proyecto.
 	if filepath.Base(os.Args[0]) == "pgo" {
 		os.Exit(pgo(os.Args[1:]))
 	}
 	ampliaPath()
+	nuevasShell := entornoShell()
 	addr := flag.String("addr", entorno("PGO_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
 	odooURL := flag.String("odoo", entorno("ODOO_URL", "https://planesnet.autopyme.com"), "URL de Odoo")
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")
@@ -216,6 +268,12 @@ func main() {
 	// La app de escritorio pasa su secreto por entorno (no por argumento: se vería en la lista de procesos).
 	s.TokenEscritorio = os.Getenv("PGO_TOKEN_ESCRITORIO")
 	s.PermitirNavegador = *navegador
+
+	// Registro de depuración (~/.local/share/pgocode/depuracion.log): agentes, órdenes, salidas y errores.
+	if err := depuracion.Activa(filepath.Join(filepath.Dir(*dirGrab), "depuracion.log")); err != nil {
+		log.Printf("depuración: %v", err)
+	}
+	depuracion.Log("inicio", "pgocode %s; variables del shell añadidas: %s; PATH=%s", version, strings.Join(nuevasShell, ","), os.Getenv("PATH"))
 
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
 	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.

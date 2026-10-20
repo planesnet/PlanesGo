@@ -139,3 +139,23 @@ func TestLeeClaudeCode(t *testing.T) {
 		t.Errorf("eventos: %+v", evs)
 	}
 }
+
+// OpenCode --format json: texto, herramienta terminada, consumo y sesión; un evento error es un fallo.
+func TestLeeOpenCode(t *testing.T) {
+	in := `{"type":"step_start","sessionID":"ses_1","part":{"type":"step-start"}}
+{"type":"tool_use","sessionID":"ses_1","part":{"callID":"c1","tool":"read","state":{"status":"completed","input":{"filePath":"/x/a.txt"},"output":"x","title":"a.txt"}}}
+{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"hola"}}
+{"type":"step_finish","sessionID":"ses_1","part":{"cost":0.03,"tokens":{"input":10,"output":2,"reasoning":1,"cache":{"read":5,"write":0}}}}`
+	var evs []Evento
+	if err := leeOpenCode(strings.NewReader(in), func(e Evento) { evs = append(evs, e) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 4 || evs[0].SesionAgente != "ses_1" || evs[1].Herramienta.Nombre != "read" || evs[1].Herramienta.Resumen != "/x/a.txt" ||
+		evs[2].Texto != "hola" || evs[3].Uso.Entrada != 15 || evs[3].Uso.Salida != 3 {
+		t.Errorf("eventos: %+v", evs)
+	}
+	err := leeOpenCode(strings.NewReader(`{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"API key not valid"}}}`), func(Evento) {})
+	if err == nil || !strings.Contains(err.Error(), "API key not valid") {
+		t.Errorf("error: %v", err)
+	}
+}
