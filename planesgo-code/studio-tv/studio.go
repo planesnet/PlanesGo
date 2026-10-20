@@ -7,6 +7,7 @@
 package studiotv
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -125,12 +126,14 @@ func (s *Studio) publica(nombre string, frame, estado []byte) error {
 }
 
 // suscribe da de alta a un espectador (vídeo o estados) y le entrega el último valor. Devuelve la función de baja.
+// Solo en canales que ya existen: los crea el emisor, nunca quien mira (si no, el token de ver bastaría para
+// llenar el estudio de canales y dejar fuera a los emisores).
 func (s *Studio) suscribe(nombre string, video bool) (chan []byte, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.canalLocked(nombre)
-	if err != nil {
-		return nil, nil, err
+	c, ok := s.canales[nombre]
+	if !ok {
+		return nil, nil, errNoEncontrado
 	}
 	m, ult := c.estados, c.estado
 	if video {
@@ -200,6 +203,16 @@ func sinCache(w http.ResponseWriter, tipo string) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
+// demasiadoGrande responde 413 si el cuerpo pasó del límite (en vez de publicar un fotograma cortado).
+func demasiadoGrande(w http.ResponseWriter, err error) bool {
+	var e *http.MaxBytesError
+	if errors.As(err, &e) {
+		http.Error(w, "demasiado grande", http.StatusRequestEntityTooLarge)
+		return true
+	}
+	return false
+}
+
 func errorCanal(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errDemasiados):
@@ -247,7 +260,10 @@ func (s *Studio) Handler() http.Handler {
 		io.WriteString(w, "ok\n")
 	})
 	mux.HandleFunc("POST /api/frame", s.protege(s.emitTok, func(w http.ResponseWriter, r *http.Request, n string) {
-		b, err := io.ReadAll(io.LimitReader(r.Body, maxFrame))
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxFrame))
+		if demasiadoGrande(w, err) {
+			return
+		}
 		if err != nil || len(b) < 4 || b[0] != 0xFF || b[1] != 0xD8 {
 			http.Error(w, "se espera un JPEG", http.StatusBadRequest)
 			return
@@ -259,11 +275,17 @@ func (s *Studio) Handler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("POST /api/estado", s.protege(s.emitTok, func(w http.ResponseWriter, r *http.Request, n string) {
-		b, err := io.ReadAll(io.LimitReader(r.Body, maxEstado))
-		if err != nil || !json.Valid(b) {
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxEstado))
+		if demasiadoGrande(w, err) {
+			return
+		}
+		// Compactado: un JSON con saltos de línea partiría el evento SSE («data: …» es de una línea).
+		var compacto bytes.Buffer
+		if err != nil || json.Compact(&compacto, b) != nil {
 			http.Error(w, "se espera JSON", http.StatusBadRequest)
 			return
 		}
+		b = compacto.Bytes()
 		if err := s.publica(n, nil, b); err != nil {
 			errorCanal(w, err)
 			return

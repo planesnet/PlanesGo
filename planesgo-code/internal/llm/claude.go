@@ -3,27 +3,22 @@ package llm
 import (
 	"context"
 	"os"
-	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 // Claude usa la API de Anthropic con el SDK oficial. Necesita ANTHROPIC_API_KEY.
-type Claude struct {
-	mu      sync.Mutex
-	modelos []string
-	hasta   time.Time
-}
+type Claude struct{ cache cacheModelos }
 
 const claudePorDefecto = "claude-opus-5-5"
 
 func (c *Claude) cliente() anthropic.Client {
 	return anthropic.NewClient(option.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
 }
+
+func (c *Claude) ID() string { return "claude" }
 
 func (c *Claude) Info(ctx context.Context) Info {
 	i := Info{ID: "claude", Nombre: "Claude (API)", Tipo: "api", PorDefecto: claudePorDefecto,
@@ -33,34 +28,26 @@ func (c *Claude) Info(ctx context.Context) Info {
 		return i
 	}
 	i.Disponible = true
-	if m := c.lista(ctx); len(m) > 0 {
-		i.Modelos = m
+	m := c.cache.get(func(ctx context.Context) ([]string, error) {
+		cl := c.cliente()
+		var l []string
+		it := cl.Models.ListAutoPaging(ctx, anthropic.ModelListParams{})
+		for it.Next() {
+			l = append(l, it.Current().ID)
+		}
+		return l, it.Err()
+	})
+	if len(m) > 0 {
+		// El modelo por defecto primero, el resto en orden.
+		l := []string{claudePorDefecto}
+		for _, x := range m {
+			if x != claudePorDefecto {
+				l = append(l, x)
+			}
+		}
+		i.Modelos = l
 	}
 	return i
-}
-
-// lista consulta los modelos en la API (con caché de una hora).
-func (c *Claude) lista(ctx context.Context) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if time.Now().Before(c.hasta) {
-		return c.modelos
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cl := c.cliente()
-	var l []string
-	it := cl.Models.ListAutoPaging(ctx, anthropic.ModelListParams{})
-	for it.Next() {
-		l = append(l, it.Current().ID)
-	}
-	if it.Err() != nil || len(l) == 0 {
-		c.hasta = time.Now().Add(time.Minute)
-		return c.modelos
-	}
-	sort.SliceStable(l, func(i, j int) bool { return l[i] == claudePorDefecto && l[j] != claudePorDefecto })
-	c.modelos, c.hasta = l, time.Now().Add(time.Hour)
-	return l
 }
 
 func (c *Claude) Chat(ctx context.Context, p Peticion, emite func(Evento)) error {

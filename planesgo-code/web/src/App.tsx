@@ -5,6 +5,20 @@ import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
 
+// El proyecto elegido se guarda en la URL (?proyecto=ID) y en el navegador: F5 no lo pierde.
+function proyectoGuardado(): number {
+  const deUrl = Number(new URLSearchParams(location.search).get('proyecto'));
+  if (deUrl > 0) return deUrl;
+  try { return Number(localStorage.getItem('psf:proyecto')) || 0; } catch { return 0; }
+}
+
+function recuerdaProyecto(id: number) {
+  const u = new URL(location.href);
+  if (id) u.searchParams.set('proyecto', String(id)); else u.searchParams.delete('proyecto');
+  history.replaceState(null, '', u);
+  try { if (id) localStorage.setItem('psf:proyecto', String(id)); else localStorage.removeItem('psf:proyecto'); } catch { /* sin almacenamiento */ }
+}
+
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
   const [aviso, setAviso] = useState('');
@@ -23,15 +37,17 @@ export default function App() {
   }, []);
 
   const salir = useCallback(async () => {
-    try { await post('/api/logout', {}); } finally { setUsuario(null); setProyecto(null); }
+    try { await post('/api/logout', {}); } finally { setUsuario(null); setProyecto(null); recuerdaProyecto(0); }
   }, []);
+
+  const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(p.id); }, []);
 
   if (usuario === undefined) return <div className="cargando">Cargando…</div>;
   if (!usuario) return <Acceso aviso={aviso} alEntrar={u => { setAviso(''); setUsuario(u); }} />;
 
   return (
     <div className={'arnes' + (panel ? '' : ' sin-panel')}>
-      <Proyectos usuario={usuario} actual={proyecto} alElegir={setProyecto} alSalir={salir} />
+      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado()} alElegir={elige} alSalir={salir} />
       <Chat proyecto={proyecto} panelAbierto={panel} alPanel={() => setPanel(p => !p)} />
       {panel && <Artefactos proyecto={proyecto} />}
     </div>

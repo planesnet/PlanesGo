@@ -106,10 +106,24 @@ func main() {
 		Studio:  studio,
 		Version: version,
 	}
-	srv := &http.Server{Addr: *addr, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	_, puerto, err := net.SplitHostPort(*addr)
+	if err != nil {
+		log.Fatalf("dirección no válida %q: %v", *addr, err)
+	}
+	s.Puerto = puerto
+	// Las peticiones heredan base: al apagar se cancelan todas, y con ellas los agentes en marcha
+	// (exec.CommandContext), los chats y los directos. Sin esto, un agente podía seguir editando
+	// ficheros con el arnés ya cerrado.
+	base, cancelaBase := context.WithCancel(context.Background())
+	srv := &http.Server{Addr: *addr, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return base }}
+	apagado := make(chan struct{})
 	go func() {
+		defer close(apagado)
 		<-ctx.Done()
-		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		log.Print("cerrando PSFCode…")
+		cancelaBase()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		for _, x := range []*http.Server{srv, srvStudio} {
 			if x != nil && x.Shutdown(c) != nil {
@@ -121,4 +135,5 @@ func main() {
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+	<-apagado // espera a que los agentes y conexiones hayan terminado
 }

@@ -13,11 +13,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +52,9 @@ type Servidor struct {
 	Web         fs.FS // interfaz compilada (index.html y assets)
 	Studio      *StudioLocal
 	Version     string
+	// Puerto en el que escucha: solo se aceptan peticiones a 127.0.0.1, localhost o [::1] en este puerto
+	// (defensa contra DNS rebinding: una web ajena no puede hablar con la API aunque resuelva a 127.0.0.1).
+	Puerto string
 
 	mu      sync.Mutex
 	nombres map[int]string // nombre de cada proyecto comprobado
@@ -73,13 +78,34 @@ func (s *Servidor) Handler() http.Handler {
 	if s.Web != nil {
 		mux.Handle("GET /", s.estaticos())
 	}
-	return cabeceras(mux)
+	return s.cabeceras(mux)
 }
 
-func cabeceras(h http.Handler) http.Handler {
+// hostLocal dice si host (con puerto) es 127.0.0.1, localhost o [::1] en el puerto del arnés.
+func (s *Servidor) hostLocal(host string) bool {
+	h, p, err := net.SplitHostPort(host)
+	if err != nil || p != s.Puerto {
+		return false
+	}
+	return h == "127.0.0.1" || h == "::1" || strings.EqualFold(h, "localhost")
+}
+
+func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if !s.hostLocal(r.Host) {
+			jsonError(w, http.StatusMisdirectedRequest, "host no permitido")
+			return
+		}
+		// Si el navegador dice de dónde viene la petición, tiene que ser del propio arnés.
+		if o := r.Header.Get("Origin"); o != "" {
+			u, err := url.Parse(o)
+			if err != nil || u.Scheme != "http" || !s.hostLocal(u.Host) {
+				jsonError(w, http.StatusForbidden, "origen no permitido")
+				return
+			}
+		}
 		// Defensa CSRF: además de SameSite=Strict, toda escritura debe llevar la cabecera X-PSF.
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-PSF") != "1" {
 			jsonError(w, http.StatusForbidden, "falta la cabecera X-PSF")
@@ -121,9 +147,22 @@ func jsonError(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// maxPeticion es el tamaño máximo de una petición JSON (una conversación larga con una API cabe de sobra).
+const maxPeticion = 8 << 20
+
 func lee(r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
+	d := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxPeticion))
 	return d.Decode(v)
+}
+
+// errorLectura responde al fallo de lee: 413 si la petición es demasiado grande, 400 si no es válida.
+func errorLectura(w http.ResponseWriter, err error) {
+	var grande *http.MaxBytesError
+	if errors.As(err, &grande) {
+		jsonError(w, http.StatusRequestEntityTooLarge, "la conversación es demasiado larga: empieza una nueva")
+		return
+	}
+	jsonError(w, http.StatusBadRequest, "petición no válida")
 }
 
 type manejador func(http.ResponseWriter, *http.Request, *sesiones.Sesion)
@@ -268,8 +307,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		SesionAgente string        `json:"sesion_agente"`
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
-	if err := lee(r, &p); err != nil || len(p.Mensajes) == 0 {
-		jsonError(w, http.StatusBadRequest, "petición no válida")
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if len(p.Mensajes) == 0 {
+		jsonError(w, http.StatusBadRequest, "no hay mensaje")
 		return
 	}
 	nombre, ok := s.proyecto(w, r, ses, p.Proyecto)
@@ -285,6 +328,16 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if !info.Disponible {
 		jsonError(w, http.StatusBadRequest, info.Nombre+": "+info.Motivo)
 		return
+	}
+	if info.Tipo == "api" {
+		// El modelo tiene que ser uno de los que ofrece el proveedor (va en la URL o en el cuerpo de la API).
+		if p.Modelo == "" {
+			p.Modelo = info.PorDefecto
+		}
+		if p.Modelo == "" || (len(info.Modelos) > 0 && !slices.Contains(info.Modelos, p.Modelo)) {
+			jsonError(w, http.StatusBadRequest, "modelo no disponible para "+info.Nombre)
+			return
+		}
 	}
 	if p.Carpeta != "" && !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
 		jsonError(w, http.StatusForbidden, "esa carpeta no pertenece al proyecto")
@@ -434,9 +487,25 @@ func (s *Servidor) studioConecta(w http.ResponseWriter, r *http.Request, ses *se
 }
 
 // studioProxy reenvía canales, snapshot, stream y events al estudio conectado, añadiendo el token de ver.
+// transporteStudio limita la espera de las cabeceras del estudio: uno que acepta la conexión y no responde
+// no puede dejar peticiones colgadas (el navegador solo abre unas pocas por servidor).
+var transporteStudio = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 10 * time.Second
+	return t
+}()
+
+// recursosStudio: ruta en el estudio y tipo de contenido que se acepta de vuelta.
+var recursosStudio = map[string]struct{ ruta, tipo string }{
+	"canales":  {"/api/canales", "application/json"},
+	"snapshot": {"/snapshot", "image/jpeg"},
+	"stream":   {"/stream", "multipart/x-mixed-replace"},
+	"events":   {"/events", "text/event-stream"},
+}
+
 func (s *Servidor) studioProxy(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	rutas := map[string]string{"canales": "/api/canales", "snapshot": "/snapshot", "stream": "/stream", "events": "/events"}
-	ruta, ok := rutas[r.PathValue("recurso")]
+	rec, ok := recursosStudio[r.PathValue("recurso")]
+	ruta := rec.ruta
 	if !ok {
 		jsonError(w, http.StatusNotFound, "recurso desconocido")
 		return
@@ -468,7 +537,22 @@ func (s *Servidor) studioProxy(w http.ResponseWriter, r *http.Request, ses *sesi
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Set("Authorization", "Bearer "+c.Token)
 		},
+		Transport:     transporteStudio,
 		FlushInterval: -1, // vídeo y eventos en directo
+		// Lo que devuelve el estudio llega al navegador en el origen del arnés: solo el tipo esperado,
+		// sin cookies y sin poder ejecutarse como página.
+		ModifyResponse: func(res *http.Response) error {
+			res.Header.Del("Set-Cookie")
+			res.Header.Set("Content-Security-Policy", "sandbox")
+			res.Header.Set("X-Content-Type-Options", "nosniff")
+			if res.StatusCode == http.StatusOK && !strings.HasPrefix(res.Header.Get("Content-Type"), rec.tipo) {
+				return fmt.Errorf("el estudio devolvió %q en lugar de %s", res.Header.Get("Content-Type"), rec.tipo)
+			}
+			if res.StatusCode != http.StatusOK {
+				res.Header.Set("Content-Type", "text/plain; charset=utf-8")
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if r.Context().Err() == nil {
 				jsonError(w, http.StatusBadGateway, "estudio: "+err.Error())

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"sort"
 	"strings"
@@ -57,8 +58,6 @@ func postSSE(ctx context.Context, url string, cab map[string]string, cuerpo any,
 }
 
 func getJSON(ctx context.Context, url string, cab map[string]string, res any) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -77,27 +76,65 @@ func getJSON(ctx context.Context, url string, cab map[string]string, res any) er
 	return json.NewDecoder(r.Body).Decode(res)
 }
 
-// cacheModelos guarda la lista de modelos de una API durante una hora.
+// cacheModelos guarda la lista de modelos de una API durante una hora. Nunca bloquea: devuelve lo que tiene
+// y, si está caducada, la vuelve a cargar en segundo plano (una sola carga a la vez).
 type cacheModelos struct {
-	mu      sync.Mutex
-	modelos []string
-	hasta   time.Time
+	mu       sync.Mutex
+	modelos  []string
+	hasta    time.Time
+	cargando bool
 }
 
-func (c *cacheModelos) get(carga func() ([]string, error)) []string {
+func (c *cacheModelos) get(carga func(context.Context) ([]string, error)) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if time.Now().Before(c.hasta) {
-		return c.modelos
+	if !c.cargando && time.Now().After(c.hasta) {
+		c.cargando = true
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			l, err := carga(ctx)
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.cargando = false
+			if err != nil || len(l) == 0 {
+				c.hasta = time.Now().Add(time.Minute)
+				return
+			}
+			sort.Strings(l)
+			c.modelos, c.hasta = l, time.Now().Add(time.Hour)
+		}()
 	}
-	l, err := carga()
-	if err != nil || len(l) == 0 {
-		c.hasta = time.Now().Add(time.Minute)
-		return c.modelos
+	return c.modelos
+}
+
+// esModeloChat descarta los modelos que no sirven para conversar (audio, imágenes, moderación, embeddings…).
+func esModeloChat(id string) bool {
+	for _, x := range []string{"audio", "realtime", "transcribe", "tts", "image", "moderation", "embedding", "search", "dall-e", "whisper", "aqa", "veo", "imagen"} {
+		if strings.Contains(id, x) {
+			return false
+		}
 	}
-	sort.Strings(l)
-	c.modelos, c.hasta = l, time.Now().Add(time.Hour)
-	return l
+	return true
+}
+
+// elige el modelo por defecto: el preferido por entorno o el primero de la lista que contenga alguna de las
+// pistas, en orden de preferencia; si no, el último de la lista (suele ser el más reciente).
+func elige(modelos []string, entorno string, pistas ...string) string {
+	if entorno != "" {
+		return entorno
+	}
+	for _, p := range pistas {
+		for i := len(modelos) - 1; i >= 0; i-- {
+			if strings.Contains(modelos[i], p) {
+				return modelos[i]
+			}
+		}
+	}
+	if len(modelos) > 0 {
+		return modelos[len(modelos)-1]
+	}
+	return ""
 }
 
 // ChatGPT usa la API de OpenAI (Chat Completions en streaming). Necesita OPENAI_API_KEY.
@@ -111,15 +148,18 @@ func (c *ChatGPT) base() string {
 	return "https://api.openai.com/v1"
 }
 
+func (c *ChatGPT) ID() string { return "openai" }
+
 func (c *ChatGPT) Info(ctx context.Context) Info {
-	i := Info{ID: "openai", Nombre: "ChatGPT (API)", Tipo: "api", PorDefecto: os.Getenv("OPENAI_MODEL")}
+	i := Info{ID: "openai", Nombre: "ChatGPT (API)", Tipo: "api"}
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		i.Motivo = "falta OPENAI_API_KEY"
 		return i
 	}
 	i.Disponible = true
-	i.Modelos = c.cache.get(func() ([]string, error) {
+	propio := os.Getenv("OPENAI_BASE_URL") != "" // servidor compatible (modelos propios): se listan todos
+	i.Modelos = c.cache.get(func(ctx context.Context) ([]string, error) {
 		var r struct {
 			Data []struct {
 				ID string `json:"id"`
@@ -130,15 +170,14 @@ func (c *ChatGPT) Info(ctx context.Context) Info {
 		}
 		var l []string
 		for _, m := range r.Data {
-			if strings.HasPrefix(m.ID, "gpt-") || strings.HasPrefix(m.ID, "o") || os.Getenv("OPENAI_BASE_URL") != "" {
+			chat := strings.HasPrefix(m.ID, "gpt-") || (len(m.ID) > 1 && m.ID[0] == 'o' && m.ID[1] >= '0' && m.ID[1] <= '9')
+			if propio || (chat && esModeloChat(m.ID)) {
 				l = append(l, m.ID)
 			}
 		}
 		return l, nil
 	})
-	if i.PorDefecto == "" && len(i.Modelos) > 0 {
-		i.PorDefecto = i.Modelos[len(i.Modelos)-1]
-	}
+	i.PorDefecto = elige(i.Modelos, os.Getenv("OPENAI_MODEL"), "gpt-5", "gpt-4.1", "gpt-4o")
 	return i
 }
 
@@ -178,15 +217,17 @@ func geminiKey() string {
 
 const geminiBase = "https://generativelanguage.googleapis.com/v1beta"
 
+func (g *Gemini) ID() string { return "gemini" }
+
 func (g *Gemini) Info(ctx context.Context) Info {
-	i := Info{ID: "gemini", Nombre: "Gemini (API)", Tipo: "api", PorDefecto: os.Getenv("GEMINI_MODEL")}
+	i := Info{ID: "gemini", Nombre: "Gemini (API)", Tipo: "api"}
 	key := geminiKey()
 	if key == "" {
 		i.Motivo = "falta GEMINI_API_KEY"
 		return i
 	}
 	i.Disponible = true
-	i.Modelos = g.cache.get(func() ([]string, error) {
+	i.Modelos = g.cache.get(func(ctx context.Context) ([]string, error) {
 		var r struct {
 			Models []struct {
 				Name    string   `json:"name"`
@@ -198,18 +239,20 @@ func (g *Gemini) Info(ctx context.Context) Info {
 		}
 		var l []string
 		for _, m := range r.Models {
+			id := strings.TrimPrefix(m.Name, "models/")
+			if !strings.HasPrefix(id, "gemini-") || !esModeloChat(id) {
+				continue
+			}
 			for _, x := range m.Metodos {
 				if x == "generateContent" {
-					l = append(l, strings.TrimPrefix(m.Name, "models/"))
+					l = append(l, id)
 					break
 				}
 			}
 		}
 		return l, nil
 	})
-	if i.PorDefecto == "" && len(i.Modelos) > 0 {
-		i.PorDefecto = i.Modelos[len(i.Modelos)-1]
-	}
+	i.PorDefecto = elige(i.Modelos, os.Getenv("GEMINI_MODEL"), "pro", "flash")
 	return i
 }
 
@@ -233,7 +276,7 @@ func (g *Gemini) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if p.Sistema != "" {
 		cuerpo["systemInstruction"] = contenido{Parts: []parte{{p.Sistema}}}
 	}
-	url := geminiBase + "/models/" + p.Modelo + ":streamGenerateContent?alt=sse"
+	url := geminiBase + "/models/" + neturl.PathEscape(p.Modelo) + ":streamGenerateContent?alt=sse"
 	return postSSE(ctx, url, map[string]string{"x-goog-api-key": geminiKey()}, cuerpo, func(d []byte) error {
 		var ev struct {
 			Candidates []struct {

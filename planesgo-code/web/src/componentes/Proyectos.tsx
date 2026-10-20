@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, type Proyecto, type Usuario } from '../api';
 
-interface Props { usuario: Usuario; actual: Proyecto | null; alElegir: (p: Proyecto) => void; alSalir: () => void }
+interface Props { usuario: Usuario; actual: Proyecto | null; inicial: number; alElegir: (p: Proyecto) => void; alSalir: () => void }
 
 const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-export default function Proyectos({ usuario, actual, alElegir, alSalir }: Props) {
+export default function Proyectos({ usuario, actual, inicial, alElegir, alSalir }: Props) {
   const [lista, setLista] = useState<Proyecto[] | null>(null);
   const [error, setError] = useState('');
   const [filtro, setFiltro] = useState('');
@@ -17,6 +17,14 @@ export default function Proyectos({ usuario, actual, alElegir, alSalir }: Props)
       .then(setLista).catch(e => setError(e.message));
   };
   useEffect(() => carga(), []);
+
+  // Tras F5: se vuelve a elegir el proyecto guardado si Odoo sigue dándolo.
+  useEffect(() => {
+    if (!actual && lista && inicial) {
+      const p = lista.find(x => x.id === inicial);
+      if (p) alElegir(p);
+    }
+  }, [lista]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibles = useMemo(() => {
     const f = sinAcentos(filtro.trim());

@@ -5,8 +5,32 @@ interface Conversacion { mensajes: Mensaje[]; sesionAgente: string }
 
 interface Props { proyecto: Proyecto | null; panelAbierto: boolean; alPanel: () => void }
 
-// Conversaciones en memoria, una por proyecto y proveedor (se pierden al recargar: v1).
+const VACIA: Conversacion = { mensajes: [], sesionAgente: '' };
+
+// Conversaciones por proyecto y proveedor: en memoria y en sessionStorage, para que F5 no las pierda.
 const conversaciones = new Map<string, Conversacion>();
+const claveAlmacen = (k: string) => 'psf:conv:' + k;
+
+function leeConversacion(k: string): Conversacion {
+  const c = conversaciones.get(k);
+  if (c) return c;
+  try {
+    const v = sessionStorage.getItem(claveAlmacen(k));
+    if (v) {
+      const c2 = JSON.parse(v) as Conversacion;
+      conversaciones.set(k, c2);
+      return c2;
+    }
+  } catch { /* sin almacenamiento: solo memoria */ }
+  return VACIA;
+}
+
+function persiste(k: string, c: Conversacion) {
+  try {
+    if (c.mensajes.length) sessionStorage.setItem(claveAlmacen(k), JSON.stringify(c));
+    else sessionStorage.removeItem(claveAlmacen(k));
+  } catch { /* lleno o no disponible: se queda en memoria */ }
+}
 
 export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
@@ -14,38 +38,53 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
   const [modelo, setModelo] = useState('');
   const [carpeta, setCarpeta] = useState('');
   const [texto, setTexto] = useState('');
-  const [conv, setConv] = useState<Conversacion>({ mensajes: [], sesionAgente: '' });
+  const [conv, setConv] = useState<Conversacion>(VACIA);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
   const fin = useRef<HTMLDivElement>(null);
+  const lista = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     get<Proveedor[]>('/api/proveedores').then(l => {
       setProveedores(l);
-      const p = l.find(x => x.disponible) || l[0];
+      let preferido = '';
+      try { preferido = localStorage.getItem('psf:proveedor') || ''; } catch { /* sin almacenamiento */ }
+      const p = l.find(x => x.id === preferido && x.disponible) || l.find(x => x.disponible) || l[0];
       if (p) { setProvId(p.id); setModelo(p.por_defecto); }
     }).catch(() => {});
   }, []);
 
   const prov = proveedores.find(p => p.id === provId);
   const clave = proyecto ? proyecto.id + '|' + provId : '';
+  const claveActual = useRef(clave);
 
+  // Al cambiar de proyecto o proveedor se corta la respuesta en curso: así no se escribe en otra conversación.
   useEffect(() => {
-    setConv(conversaciones.get(clave) || { mensajes: [], sesionAgente: '' });
+    claveActual.current = clave;
+    setConv(clave ? leeConversacion(clave) : VACIA);
     setCarpeta(proyecto?.carpetas[0] || '');
+    return () => { setEnCurso(ac => { ac?.abort(); return null; }); };
   }, [clave, proyecto]);
 
-  useEffect(() => { fin.current?.scrollIntoView({ block: 'end' }); }, [conv]);
-
-  const guarda = (c: Conversacion) => { conversaciones.set(clave, c); setConv(c); };
+  // Solo se baja al final si el usuario ya estaba abajo (si está leyendo arriba, no se le mueve).
+  useEffect(() => {
+    const l = lista.current;
+    if (!l || l.scrollHeight - l.scrollTop - l.clientHeight < 120) fin.current?.scrollIntoView({ block: 'end' });
+  }, [conv]);
 
   const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
 
   async function envia() {
     const t = texto.trim();
     if (!t || !proyecto || !prov || enCurso) return;
+    const k = clave;
+    const guarda = (c: Conversacion, final = false) => {
+      conversaciones.set(k, c);
+      if (claveActual.current === k) setConv(c);
+      if (final) persiste(k, c);
+    };
     const base: Mensaje[] = [...conv.mensajes.filter(m => !m.error), { rol: 'user', texto: t }];
     let actual: Conversacion = { mensajes: [...base, { rol: 'assistant', texto: '' }], sesionAgente: conv.sesionAgente };
-    guarda(actual);
+    guarda(actual, true);
     setTexto('');
     const ac = new AbortController();
     setEnCurso(ac);
@@ -55,8 +94,10 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
       actual = { mensajes: ms, sesionAgente: sesion ?? actual.sesionAgente };
       guarda(actual);
     };
+    // Los agentes llevan su propio historial: solo se les manda el último mensaje.
+    const mensajes = prov.tipo === 'agente' ? base.slice(-1) : base;
     try {
-      await chat({ proyecto: proyecto.id, proveedor: prov.id, modelo, carpeta, sesion_agente: conv.sesionAgente, mensajes: base },
+      await chat({ proyecto: proyecto.id, proveedor: prov.id, modelo, carpeta, sesion_agente: conv.sesionAgente, mensajes },
         e => {
           if (e.texto) pon(m => ({ ...m, texto: m.texto + e.texto }));
           if (e.sesion_agente) pon(m => m, e.sesion_agente);
@@ -65,9 +106,23 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
     } catch (err) {
       if (!ac.signal.aborted) pon(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
-      setEnCurso(null);
+      guarda(actual, true);
+      setEnCurso(c => (c === ac ? null : c));
     }
   }
+
+  const eligeProveedor = (id: string) => {
+    const p = proveedores.find(x => x.id === id);
+    setProvId(id);
+    setModelo(p?.por_defecto || '');
+    try { localStorage.setItem('psf:proveedor', id); } catch { /* sin almacenamiento */ }
+  };
+
+  const nueva = () => {
+    conversaciones.set(clave, VACIA);
+    persiste(clave, VACIA);
+    setConv(VACIA);
+  };
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); envia(); }
@@ -89,7 +144,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
         </div>
       ) : (
         <>
-          <div className="mensajes" aria-live="polite">
+          <div className="mensajes" aria-live="polite" ref={lista}>
             {conv.mensajes.length === 0 && (
               <div className="vacio pequeno">
                 <p>Habla con {prov?.nombre || 'un modelo'} sobre <b>{proyecto.nombre}</b>.</p>
@@ -105,7 +160,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
           </div>
           <div className="redactor">
             <div className="opciones">
-              <select value={provId} onChange={e => { const p = proveedores.find(x => x.id === e.target.value); setProvId(e.target.value); setModelo(p?.por_defecto || ''); }} aria-label="Proveedor">
+              <select value={provId} onChange={e => eligeProveedor(e.target.value)} aria-label="Proveedor">
                 {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
               </select>
               {prov?.tipo === 'api' && (
@@ -118,7 +173,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
                   ? <select value={carpeta} onChange={e => setCarpeta(e.target.value)} aria-label="Carpeta">{proyecto.carpetas.map(c => <option key={c}>{c}</option>)}</select>
                   : <span className="error pequeno">Sin carpeta local (.planesgo.json)</span>
               )}
-              {conv.mensajes.length > 0 && <button className="enlace" onClick={() => guarda({ mensajes: [], sesionAgente: '' })}>Nueva conversación</button>}
+              {conv.mensajes.length > 0 && !enCurso && <button className="enlace" onClick={nueva}>Nueva conversación</button>}
             </div>
             <div className="entrada">
               <textarea rows={3} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}

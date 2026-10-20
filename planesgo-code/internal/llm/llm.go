@@ -43,8 +43,10 @@ type Info struct {
 	NecesitaDir bool     `json:"necesita_carpeta"`
 }
 
-// Proveedor habla con un modelo o agente.
+// Proveedor habla con un modelo o agente. ID no hace llamadas de red; Info tampoco bloquea (la lista de
+// modelos se carga en segundo plano).
 type Proveedor interface {
+	ID() string
 	Info(ctx context.Context) Info
 	Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 }
@@ -58,7 +60,7 @@ type Registro struct {
 func NuevoRegistro(ps ...Proveedor) *Registro {
 	r := &Registro{prov: map[string]Proveedor{}}
 	for _, p := range ps {
-		r.prov[p.Info(context.Background()).ID] = p
+		r.prov[p.ID()] = p
 	}
 	return r
 }

@@ -8,21 +8,30 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
+
+// sesionValida: los ids de sesión de los agentes son UUID o similares. Se valida porque el valor llega del
+// navegador y va como argumento del programa (un «--opcion» se tomaría como opción).
+var sesionValida = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // Agente lanza un programa de agente (Claude Code, OpenCode, Gemini CLI…) en la carpeta del proyecto y
 // retransmite su respuesta. Solo se le pasa el último mensaje: el agente lleva su propio historial.
 type Agente struct {
-	ID, Nombre, Programa string
+	Clave, Nombre, Programa string
 	// Args construye los argumentos a partir del mensaje y la sesión anterior del agente.
 	Args func(msg, sesion string) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
 }
 
+func (a *Agente) ID() string { return a.Clave }
+
 func (a *Agente) Info(ctx context.Context) Info {
-	i := Info{ID: a.ID, Nombre: a.Nombre, Tipo: "agente", Modelos: []string{"por defecto"}, PorDefecto: "por defecto", NecesitaDir: true}
+	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: []string{"por defecto"}, PorDefecto: "por defecto", NecesitaDir: true}
 	if _, err := exec.LookPath(a.Programa); err != nil {
 		i.Motivo = "no está instalado («" + a.Programa + "» no está en el PATH)"
 		return i
@@ -38,9 +47,16 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if len(p.Mensajes) == 0 {
 		return errors.New("no hay mensaje")
 	}
+	if p.SesionAgente != "" && !sesionValida.MatchString(p.SesionAgente) {
+		return errors.New("identificador de sesión del agente no válido")
+	}
 	msg := p.Mensajes[len(p.Mensajes)-1].Texto
 	cmd := exec.CommandContext(ctx, a.Programa, a.Args(msg, p.SesionAgente)...)
 	cmd.Dir = p.Carpeta
+	// El agente va en su propio grupo de procesos: al cancelar se matan también sus hijos (servidores MCP,
+	// shells…), y WaitDelay evita quedarse esperando a un nieto que conserve la salida abierta.
+	grupoPropio(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	var errSalida strings.Builder
 	cmd.Stderr = &limitado{b: &errSalida, max: 8 << 10}
 	out, err := cmd.StdoutPipe()
@@ -76,12 +92,31 @@ func (l *limitado) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// leeTexto pasa la salida tal cual, sin partir caracteres UTF-8 entre dos lecturas.
 func leeTexto(r io.Reader, emite func(Evento)) error {
 	b := make([]byte, 4096)
+	var resto []byte
 	for {
 		n, err := r.Read(b)
 		if n > 0 {
-			emite(Evento{Texto: string(b[:n])})
+			datos := append(resto, b[:n]...)
+			corte := len(datos)
+			// Si el final es un carácter incompleto, se guarda para la siguiente lectura.
+			for i := len(datos) - 1; i >= 0 && i >= len(datos)-utf8.UTFMax; i-- {
+				if utf8.RuneStart(datos[i]) {
+					if !utf8.FullRune(datos[i:]) {
+						corte = i
+					}
+					break
+				}
+			}
+			if corte > 0 {
+				emite(Evento{Texto: string(datos[:corte])})
+			}
+			resto = append([]byte(nil), datos[corte:]...)
+		}
+		if err == io.EOF && len(resto) > 0 {
+			emite(Evento{Texto: string(resto)})
 		}
 		if err == io.EOF {
 			return nil
@@ -140,17 +175,18 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 // Agentes devuelve los agentes conocidos.
 func Agentes() []Proveedor {
 	return []Proveedor{
-		&Agente{ID: "claude-code", Nombre: "Claude Code (agente)", Programa: "claude", Lee: leeClaudeCode,
+		&Agente{Clave: "claude-code", Nombre: "Claude Code (agente)", Programa: "claude", Lee: leeClaudeCode,
 			Args: func(msg, sesion string) []string {
-				a := []string{"-p", msg, "--output-format", "stream-json", "--verbose"}
+				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
 				if sesion != "" {
 					a = append(a, "--resume", sesion)
 				}
-				return a
+				// «--» antes del mensaje: un texto que empiece por «-» no se toma como opción.
+				return append(a, "--", msg)
 			}},
-		&Agente{ID: "opencode", Nombre: "OpenCode (agente)", Programa: "opencode",
-			Args: func(msg, sesion string) []string { return []string{"run", msg} }},
-		&Agente{ID: "gemini-cli", Nombre: "Gemini CLI (agente)", Programa: "gemini",
-			Args: func(msg, sesion string) []string { return []string{"-p", msg} }},
+		&Agente{Clave: "opencode", Nombre: "OpenCode (agente)", Programa: "opencode",
+			Args: func(msg, sesion string) []string { return []string{"run", "--", msg} }},
+		&Agente{Clave: "gemini-cli", Nombre: "Gemini CLI (agente)", Programa: "gemini",
+			Args: func(msg, sesion string) []string { return []string{"--prompt=" + msg} }},
 	}
 }

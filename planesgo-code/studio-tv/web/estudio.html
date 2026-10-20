@@ -105,8 +105,14 @@ if (canal) {
   const conectar = () => { vid.src = ruta('stream', canal, '&n=' + Date.now()); };
   vid.onerror = () => setTimeout(conectar, 2000);
   conectar();
-  const es = new EventSource(ruta('events', canal));
-  es.onmessage = ev => {
+  // Si el canal aún no existe (404), EventSource no reintenta: se reconecta a mano.
+  let es;
+  const escucha = () => {
+    es = new EventSource(ruta('events', canal));
+    es.onerror = () => { if (es.readyState === EventSource.CLOSED) setTimeout(escucha, 3000); };
+    es.onmessage = alEstado;
+  };
+  const alEstado = ev => {
     let e; try { e = JSON.parse(ev.data); } catch (_) { return; }
     if (!e || !Object.keys(e).length) return;
     ultimo = Date.now();
@@ -120,6 +126,7 @@ if (canal) {
     }));
     ponAire(e.estado);
   };
+  escucha();
 } else {
   // Parrilla: lista de canales y miniaturas que se refrescan cada 2 s.
   $('vistaParrilla').hidden = false;

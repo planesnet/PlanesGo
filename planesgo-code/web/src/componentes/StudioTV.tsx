@@ -77,15 +77,26 @@ function Directo({ q, conexion, local, alDesconectar }: { q: string; conexion: C
   const [canal, setCanal] = useState<string | null>(null);
   const [tic, setTic] = useState(0);
 
+  // Consulta encadenada (la siguiente sale cuando acaba la anterior, con 5 s de límite): un estudio lento no
+  // acumula peticiones. Mientras se ve un canal no se consulta la parrilla.
   useEffect(() => {
+    if (canal) return;
     let vivo = true;
-    const carga = () => get<Canal[]>('/api/studio/canales?' + q)
-      .then(l => { if (vivo) { setCanales(l); setError(''); setTic(t => t + 1); } })
-      .catch(e => vivo && setError(e.message));
+    let espera: ReturnType<typeof setTimeout>;
+    const carga = async () => {
+      try {
+        const r = await fetch('/api/studio/canales?' + q, { credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+        const l = await r.json() as Canal[];
+        if (vivo) { setCanales(l); setError(''); setTic(t => t + 1); }
+      } catch (e) {
+        if (vivo) setError((e as Error).name === 'TimeoutError' ? 'El estudio no responde' : (e as Error).message);
+      }
+      if (vivo) espera = setTimeout(carga, 2000);
+    };
     carga();
-    const id = setInterval(carga, 2000);
-    return () => { vivo = false; clearInterval(id); };
-  }, [q]);
+    return () => { vivo = false; clearTimeout(espera); };
+  }, [q, canal]);
 
   if (canal) return <UnCanal q={q} canal={canal} alVolver={() => setCanal(null)} />;
 
@@ -128,10 +139,17 @@ function UnCanal({ q, canal, alVolver }: { q: string; canal: string; alVolver: (
   const [n, setN] = useState(0);
   const base = `${q}&canal=${encodeURIComponent(canal)}`;
 
+  // Si el canal aún no existe o se corta, EventSource no siempre reintenta: se reconecta a mano.
   useEffect(() => {
-    const es = new EventSource('/api/studio/events?' + base);
-    es.onmessage = ev => { try { const e = JSON.parse(ev.data); if (e && Object.keys(e).length) setEstado(e); } catch { /* ignorar */ } };
-    return () => es.close();
+    let es: EventSource | null = null;
+    let espera: ReturnType<typeof setTimeout>;
+    const escucha = () => {
+      es = new EventSource('/api/studio/events?' + base);
+      es.onmessage = ev => { try { const e = JSON.parse(ev.data); if (e && Object.keys(e).length) setEstado(e); } catch { /* ignorar */ } };
+      es.onerror = () => { if (es?.readyState === EventSource.CLOSED) espera = setTimeout(escucha, 3000); };
+    };
+    escucha();
+    return () => { clearTimeout(espera); es?.close(); };
   }, [base]);
 
   const on = estado.estado === 'curso';

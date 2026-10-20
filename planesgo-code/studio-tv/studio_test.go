@@ -159,6 +159,7 @@ func directo(t *testing.T, url string) *bufio.Reader {
 
 func TestStream(t *testing.T) {
 	_, srv := nuevoServidor(t)
+	peticion(t, "POST", srv.URL+"/api/estado?canal=a", tokEmitir, "", []byte(`{}`)) // el emisor crea el canal
 	rd := directo(t, srv.URL+"/stream?canal=a&t="+tokVer)
 	peticion(t, "POST", srv.URL+"/api/frame?canal=b", tokEmitir, "", []byte{0xFF, 0xD8, 'b'}) // otro canal: no debe llegar
 	peticion(t, "POST", srv.URL+"/api/frame?canal=a", tokEmitir, "", jpeg)
@@ -206,6 +207,7 @@ func TestStreamSobreviveWriteTimeout(t *testing.T) {
 	srv.Config.WriteTimeout = 300 * time.Millisecond
 	srv.Start()
 	t.Cleanup(srv.Close)
+	peticion(t, "POST", srv.URL+"/api/estado?canal=a", tokEmitir, "", []byte(`{}`))
 	rd := directo(t, srv.URL+"/events?canal=a&t="+tokVer)
 	rd.ReadString('\n') // estado inicial
 	rd.ReadString('\n')
@@ -213,5 +215,37 @@ func TestStreamSobreviveWriteTimeout(t *testing.T) {
 	peticion(t, "POST", srv.URL+"/api/estado?canal=a", tokEmitir, "", []byte(`{"paso":"tarde"}`))
 	if l, err := rd.ReadString('\n'); err != nil || strings.TrimSpace(l) != `data: {"paso":"tarde"}` {
 		t.Fatalf("tras el WriteTimeout: %q %v", l, err)
+	}
+}
+
+// Quien solo tiene el token de ver no puede crear canales (no bloquea a los emisores con el límite).
+func TestEspectadorNoCreaCanales(t *testing.T) {
+	s, srv := nuevoServidor(t)
+	for _, ruta := range []string{"/stream", "/events"} {
+		if r := peticion(t, "GET", srv.URL+ruta+"?canal=inventado", tokVer, "", nil); r.StatusCode != 404 {
+			t.Errorf("%s de un canal inexistente: estado %d, quiero 404", ruta, r.StatusCode)
+		}
+	}
+	if l := s.Canales(); len(l) != 0 {
+		t.Errorf("un espectador ha creado canales: %+v", l)
+	}
+}
+
+// Un estado con saltos de línea se compacta: si no, partiría el evento SSE.
+func TestEstadoCompactado(t *testing.T) {
+	_, srv := nuevoServidor(t)
+	peticion(t, "POST", srv.URL+"/api/estado?canal=a", tokEmitir, "", []byte("{\n  \"paso\": \"uno\"\n}"))
+	rd := directo(t, srv.URL+"/events?canal=a&t="+tokVer)
+	if l, _ := rd.ReadString('\n'); strings.TrimSpace(l) != `data: {"paso":"uno"}` {
+		t.Fatalf("evento %q", l)
+	}
+}
+
+// Un fotograma por encima del límite se rechaza con 413 en vez de publicarse cortado.
+func TestFrameDemasiadoGrande(t *testing.T) {
+	_, srv := nuevoServidor(t)
+	grande := append([]byte{0xFF, 0xD8}, make([]byte, maxFrame)...)
+	if r := peticion(t, "POST", srv.URL+"/api/frame?canal=a", tokEmitir, "", grande); r.StatusCode != 413 {
+		t.Errorf("estado %d, quiero 413", r.StatusCode)
 	}
 }
