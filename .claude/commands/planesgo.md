@@ -1,6 +1,6 @@
 ---
-description: Revisa el estado del tracking de PlanesGo, vincula un proyecto por búsqueda, imputa horas manuales (+N), actualiza todo (--update), inicializa el proyecto (init) o activa/desactiva PSF (psf on|off|estado)
-argument-hint: [texto de búsqueda | +N horas | --update | init | psf on|off|estado]
+description: Revisa el estado del tracking de PlanesGo, vincula un proyecto por búsqueda, imputa horas manuales (+N), actualiza todo (--update), inicializa el proyecto (init), activa/desactiva PSF (psf on|off|estado) o emite las pruebas en directo a Studio TV (stream [canal]|off)
+argument-hint: [texto de búsqueda | +N horas | --update | init | psf on|off|estado | stream [canal]|off]
 ---
 
 Argumento recibido tras el comando (puede venir vacío): "$ARGUMENTS"
@@ -20,6 +20,18 @@ Si "$ARGUMENTS" es `psf`, `psf on`, `psf off` o `psf estado` (sin distinguir may
 4. **`psf` o `psf estado`**: sigue el apartado «`estado`» de `<PSF>/commands/psf.md`; si el proyecto no tiene `.psf/proyecto.yml`, dilo y sugiere `/planesgo psf on`.
 
 Nunca hagas commit ni push de los cambios sin que la persona lo pida, y nunca en la rama de producción del proyecto.
+
+## Caso S: argumento empieza por "stream" → emitir las pruebas en directo a Studio TV
+
+Si "$ARGUMENTS" es `stream`, `stream <canal>` o `stream off` (sin distinguir mayúsculas), NO es texto de búsqueda (Caso A). Activa o desactiva la emisión en directo a Studio TV (servido por PlanesGo en `/studio-tv/`) de lo que haga el navegador de las pruebas automáticas. Responde en español y en 1-3 líneas.
+
+1. **Activar** (`stream` o `stream <canal>`): llama a la herramienta MCP `planesgo_studio_emisor` con `{"canal": "<canal>"}` (sin canal, usa el del proyecto vinculado). Alternativa CLI: `planesgo-mcp --stream <canal>` (o `--stream on`). Guarda PCO_URL, PCO_TOKEN y PCO_CANAL en `~/.planesgo/studio_tv.env` (0600).
+   - El emisor `pco_emisor.py` (el del grabador de QA, o `curl -fsSL https://planesgo.autopyme.com/install/pco_emisor.py`) lee ese fichero solo: las pruebas emiten sin exportar nada.
+   - Si la prueba no usa `pco_emisor.py`, carga las variables con `set -a; . ~/.planesgo/studio_tv.env; set +a`.
+   - Nunca muestres ni copies PCO_TOKEN en la conversación, en commits ni en ficheros del repositorio.
+   - Si la sesión corre en la nube y falla la conexión, el entorno debe permitir salir a `planesgo.autopyme.com` (*Network access*).
+2. **Desactivar** (`stream off`): llama a `planesgo_studio_emisor` con `{"apagar": true}` (CLI: `planesgo-mcp --stream off`).
+3. Responde con lo que devuelva la herramienta (canal y URL del estudio, sin token). Quien mira lo ve en PSFCode (artefacto Studio TV) o en `/admin/studio-tv` si es administrador.
 
 ## Caso I: argumento es "init" → inicializar el proyecto (PlanesGo + PSF)
 
@@ -48,7 +60,7 @@ Si "$ARGUMENTS" coincide con el patrón `+<número>` (ej. `+3.5`, `+1`, `+0.5`; 
 
 ## Caso A: con argumento → vincular directamente (por sesión / repositorio)
 
-Si "$ARGUMENTS" NO está vacío (y no es `psf…`, `init`, `--update` ni `+N`, ya cubiertos arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula esta sesión directamente. Soporta **multi-sesión**: varias sesiones abiertas sobre el mismo repositorio pueden vincularse a proyectos de cargo distintos (ej. Sesión 1 `/planesgo PRO1`, Sesión 2 `/planesgo PRO2`) sin pisarse entre sí, ya que el hook inyecta el `session_id` de la conversación actual y guarda el vínculo de la sesión en `/tmp/planesgo-sessions/<session_id>.json` (y solo crea `.planesgo.json` en la raíz si el repositorio aún no tenía proyecto por defecto). Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
+Si "$ARGUMENTS" NO está vacío (y no es `psf…`, `stream…`, `init`, `--update` ni `+N`, ya cubiertos arriba), trátalo como texto de búsqueda (nombre completo o parcial del proyecto de Odoo, sin acentos ni mayúsculas exactas) y vincula esta sesión directamente. Soporta **multi-sesión**: varias sesiones abiertas sobre el mismo repositorio pueden vincularse a proyectos de cargo distintos (ej. Sesión 1 `/planesgo PRO1`, Sesión 2 `/planesgo PRO2`) sin pisarse entre sí, ya que el hook inyecta el `session_id` de la conversación actual y guarda el vínculo de la sesión en `/tmp/planesgo-sessions/<session_id>.json` (y solo crea `.planesgo.json` en la raíz si el repositorio aún no tenía proyecto por defecto). Este caso es SOLO vincular, no diagnosticar: no compruebes ni menciones el token, el hook, el binario ni nada del Caso B, y no expliques el proceso — eso es ruido para el usuario. La respuesta debe ser corta, 1-2 líneas.
 
 1. Determina la raíz del proyecto actual (raíz del repo git, o el directorio de trabajo si no es un repo), en silencio.
 2. Busca con `planesgo-mcp --search-project "$ARGUMENTS"` (o la herramienta MCP `planesgo_search_projects` con `{"query": "$ARGUMENTS"}`), en silencio.

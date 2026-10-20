@@ -988,6 +988,53 @@ func (c *PlanesGoClient) SendHeartbeatWithElapsed(action, taskName string, taskI
 }
 
 // GetTicket consulta los datos de un ticket por referencia o ID
+// studioEnvPath es el fichero con los datos de emisión a Studio TV (PCO_URL, PCO_TOKEN, PCO_CANAL).
+func studioEnvPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".planesgo", "studio_tv.env")
+}
+
+// nombreCanal deja el canal con letras, números, punto, guion y guion bajo (máx. 64); sin canal usa el proyecto.
+func nombreCanal(canal, proyecto string) string {
+	if strings.TrimSpace(canal) == "" {
+		canal = proyecto
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(canal)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+		if b.Len() >= 64 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "prueba"
+	}
+	return b.String()
+}
+
+func escribeStudioEnv(fichero, url, token, canal string) error {
+	if url == "" || token == "" {
+		return fmt.Errorf("PlanesGo no devolvió PCO_URL/PCO_TOKEN")
+	}
+	if err := os.MkdirAll(filepath.Dir(fichero), 0o700); err != nil {
+		return err
+	}
+	datos := fmt.Sprintf("PCO_URL=%s\nPCO_TOKEN=%s\nPCO_CANAL=%s\n", url, token, canal)
+	tmp := fichero + ".tmp"
+	if err := os.WriteFile(tmp, []byte(datos), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, fichero)
+}
+
 // GetStudioEmisor pide a PlanesGo los datos para emitir en directo a Studio TV (PCO_URL, PCO_TOKEN e instrucciones).
 func (c *PlanesGoClient) GetStudioEmisor() (map[string]interface{}, error) {
 	headers := map[string]string{"X-Antigravity-Token": c.Token, "Accept": "application/json"}
@@ -1843,6 +1890,13 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		}
 
 	case "planesgo_studio_emisor":
+		fichero := studioEnvPath()
+		if apagar, _ := args["apagar"].(bool); apagar {
+			if err := os.Remove(fichero); err != nil && !os.IsNotExist(err) {
+				return ToolCallResult{Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Studio TV: %v", err)}}, IsError: true}
+			}
+			return ToolCallResult{Content: []ToolContent{{Type: "text", Text: "⏹ Emisión a Studio TV desactivada (borrado " + fichero + ")."}}}
+		}
 		res, err := client.GetStudioEmisor()
 		if err != nil {
 			return ToolCallResult{
@@ -1853,8 +1907,19 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		pcoURL, _ := res["pco_url"].(string)
 		pcoToken, _ := res["pco_token"].(string)
 		instr, _ := res["instrucciones"].(string)
+		canal, _ := args["canal"].(string)
+		canal = nombreCanal(canal, projName)
+		if err := escribeStudioEnv(fichero, pcoURL, pcoToken, canal); err != nil {
+			return ToolCallResult{Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Studio TV: %v", err)}}, IsError: true}
+		}
+		// El token no se muestra: queda solo en el fichero (0600), que el emisor lee por sí mismo.
 		return ToolCallResult{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("PCO_URL=%s\nPCO_TOKEN=%s\n\n%s", pcoURL, pcoToken, instr)}},
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf(
+				"📡 Emisión a Studio TV activada: canal «%s» → %s\n"+
+					"Datos guardados en %s (0600). El emisor pco_emisor.py los lee solo: las pruebas con el grabador emiten sin exportar nada.\n"+
+					"Si tu prueba no usa pco_emisor.py: set -a; . %s; set +a\n"+
+					"Para dejar de emitir: /planesgo stream off\n\n%s",
+				canal, pcoURL, fichero, fichero, instr)}},
 		}
 
 	case "planesgo_status":
@@ -2345,10 +2410,19 @@ func getToolsDefinition() []map[string]interface{} {
 		},
 		{
 			"name":        "planesgo_studio_emisor",
-			"description": "Devuelve PCO_URL y PCO_TOKEN para emitir en directo a Studio TV (PlanesGo) lo que hace el navegador de las pruebas automáticas, con las instrucciones de uso. Úsala antes de lanzar pruebas con navegador para que se puedan ver en directo y quede evidencia.",
+			"description": "Activa la emisión en directo a Studio TV (PlanesGo) de las pruebas con navegador: pide los datos de emisión y los guarda en ~/.planesgo/studio_tv.env, que el emisor pco_emisor.py lee solo. Úsala antes de lanzar pruebas para que se vean en directo y quede evidencia. Con apagar=true deja de emitir.",
 			"inputSchema": map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+				"type": "object",
+				"properties": map[string]interface{}{
+					"canal": map[string]interface{}{
+						"type":        "string",
+						"description": "Nombre corto del canal (letras, números, . _ -). Por defecto, el nombre del proyecto.",
+					},
+					"apagar": map[string]interface{}{
+						"type":        "boolean",
+						"description": "true para dejar de emitir (borra ~/.planesgo/studio_tv.env)",
+					},
+				},
 			},
 		},
 		{
@@ -2548,6 +2622,7 @@ func main() {
 	sessionIDFlag := flag.String("session-id", "", "Identificador de la sesión de IA (vincula por sesión y se guarda como ai_session_id)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
+	streamFlag := flag.String("stream", "", "Activa la emisión a Studio TV en el canal indicado (o «on» = canal del proyecto); «off» la desactiva")
 	selfUpdateFlag := flag.Bool("self-update", false, "Reconstruye planesgo-mcp (y el hook/comando) con la versión actual de master")
 
 	flag.Parse()
@@ -2728,6 +2803,26 @@ func main() {
 		}
 		applyCommonCLIArgs(args)
 		res := executeToolCall("planesgo_add_hours", args)
+		if len(res.Content) > 0 {
+			fmt.Println(res.Content[0].Text)
+		}
+		if res.IsError {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *streamFlag != "" {
+		args := map[string]interface{}{}
+		switch strings.ToLower(*streamFlag) {
+		case "off", "apagar", "stop":
+			args["apagar"] = true
+		case "on":
+		default:
+			args["canal"] = *streamFlag
+		}
+		applyCommonCLIArgs(args)
+		res := executeToolCall("planesgo_studio_emisor", args)
 		if len(res.Content) > 0 {
 			fmt.Println(res.Content[0].Text)
 		}

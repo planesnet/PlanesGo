@@ -1,6 +1,6 @@
 ---
-description: Alias corto de /planesgo (mismas opciones: búsqueda, +N horas, --update, init, psf on|off|estado)
-argument-hint: [texto de búsqueda | +N horas | --update | init | psf on|off|estado]
+description: Alias corto de /planesgo (mismas opciones: búsqueda, +N horas, --update, init, psf on|off|estado, stream [canal]|off)
+argument-hint: [texto de búsqueda | +N horas | --update | init | psf on|off|estado | stream [canal]|off]
 ---
 
 `/pgo` es solo la forma corta de `/planesgo` (como `-h` junto a `--help`), con exactamente el mismo comportamiento para cualquier combinación de argumentos.
