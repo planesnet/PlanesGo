@@ -46,9 +46,6 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
 
   return (
     <header className="barra">
-      <span className="marca-barra">Planes <b>Go</b> Code</span>
-      <span className="hueco" />
-      {etiqueta && <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>}
       <div className="menu-usuario" ref={menu}>
         <button className="boton-avatar" onClick={() => setAbierto(a => !a)} aria-haspopup="menu" aria-expanded={abierto} title={usuario.nombre}>
           {foto}
@@ -84,6 +81,9 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
           </div>
         )}
       </div>
+      <span className="marca-barra">Planes <b>Go</b> Code</span>
+      <span className="hueco" />
+      {etiqueta && <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>}
     </header>
   );
 }
