@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -169,7 +170,7 @@ func TestOpenCodePermiso(t *testing.T) {
 		t.Errorf("error: %v", err)
 	}
 	a := Agentes()[2].(*Agente)
-	if e := a.EntornoPara(Peticion{Permisos: "auto"}); !strings.Contains(e[0], `"bash":"allow"`) {
+	if e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"}); len(e) != 1 || !strings.Contains(e[0], `"bash":"allow"`) {
 		t.Errorf("auto: %v", e)
 	}
 	if e := a.EntornoPara(Peticion{}); !strings.Contains(e[0], `"edit":"deny"`) || strings.Contains(e[0], "ask") {
@@ -187,5 +188,13 @@ func TestParaSiLecturaFalla(t *testing.T) {
 	err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}}, func(Evento) {})
 	if err == nil || time.Since(inicio) > 10*time.Second {
 		t.Errorf("err=%v en %s", err, time.Since(inicio))
+	}
+}
+
+// OpenCode ofrece DeepSeek en Vertex AI junto a Gemini.
+func TestModelosOpenCode(t *testing.T) {
+	i := Agentes()[2].(*Agente).Info(context.Background())
+	if !slices.Contains(i.Modelos, "vertex-deepseek/deepseek-ai/deepseek-v3.2-maas") || i.PorDefecto != "google-vertex/gemini-4-argon" {
+		t.Errorf("modelos %v, defecto %s", i.Modelos, i.PorDefecto)
 	}
 }

@@ -34,6 +34,8 @@ type Agente struct {
 	PorDefecto string
 	// EntornoDefecto: variables «CLAVE=valor» que se ponen solo si el usuario no las tiene ya.
 	EntornoDefecto []string
+	// ModelosPara: lista de modelos que depende del equipo (p. ej. si hay clave de una API); sustituye a Modelos.
+	ModelosPara func() []string
 	// EntornoPara: variables según la petición (p. ej. los permisos de OpenCode según el modo).
 	EntornoPara func(p Peticion) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
@@ -45,9 +47,13 @@ type Agente struct {
 func (a *Agente) ID() string { return a.Clave }
 
 func (a *Agente) Info(ctx context.Context) Info {
-	modelos, defecto := append([]string{"por defecto"}, a.Modelos...), "por defecto"
+	lista := a.Modelos
+	if a.ModelosPara != nil {
+		lista = a.ModelosPara()
+	}
+	modelos, defecto := append([]string{"por defecto"}, lista...), "por defecto"
 	if a.PorDefecto != "" {
-		modelos, defecto = a.Modelos, a.PorDefecto
+		modelos, defecto = lista, a.PorDefecto
 	}
 	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: modelos, PorDefecto: defecto,
 		NecesitaDir: true, Esfuerzos: a.Esfuerzos, Modos: a.Modos}
@@ -304,8 +310,8 @@ func Agentes() []Proveedor {
 		// OpenCode: «run --format json» (eventos de texto, herramientas, consumo y errores); -s continúa la sesión.
 		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode, Modos: true,
 			// Permisos según el modo, sin «ask»: en «run» la pregunta se queda esperando sin nadie que conteste.
-			EntornoPara: func(p Peticion) []string { return []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos)} },
-			PorDefecto:  "google-vertex/gemini-4-argon", Modelos: []string{"google-vertex/gemini-4-argon"},
+			EntornoPara: entornoOpenCode, ModelosPara: modelosOpenCode,
+			PorDefecto: "google-vertex/gemini-4-argon", Modelos: []string{"google-vertex/gemini-4-argon"},
 			// Vertex AI: los modelos Gemini 4 están en la región «global» (en una regional, «Permission denied»).
 			EntornoDefecto: []string{"GOOGLE_CLOUD_LOCATION=global", "VERTEX_LOCATION=global", "GOOGLE_CLOUD_PROJECT=planes-dev"},
 			Args: func(msg string, p Peticion) []string {

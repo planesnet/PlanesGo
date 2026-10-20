@@ -3,6 +3,7 @@ import { chat, type Herramienta, type Mensaje, type Parte, type Proveedor, type 
 import type { Detalle } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
+import Texto from './Texto';
 import { Agente, Hosting, nombreHosting } from './Marca';
 
 interface Props {
@@ -159,7 +160,8 @@ export default function Chat({ detalle, proyecto, sesion, repo, proveedores, pan
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
                 {m.partes?.length
                   ? <Partes partes={m.partes} detalle={detalle} />
-                  : m.texto || (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
+                  : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
+                    : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
                 {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
@@ -246,7 +248,7 @@ function Partes({ partes, detalle }: { partes: Parte[]; detalle: Detalle }) {
 }
 
 function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
-  if (p.tipo === 'texto') return <div className="parte-texto">{p.texto}</div>;
+  if (p.tipo === 'texto') return <Texto md={p.texto} />;
   if (p.tipo === 'pensamiento') return <details className="pensamiento" open={abierta}><summary>Razonamiento</summary><div>{p.texto}</div></details>;
   const h = p.h;
   return (
