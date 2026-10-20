@@ -48,19 +48,21 @@ func TestLeeTextoUTF8(t *testing.T) {
 	}
 }
 
-// Solo hay agentes: Claude Code el primero; Antigravity aparece, pero no se puede usar todavía.
+// Solo hay agentes: Claude Code el primero, Antigravity y OpenCode.
 func TestSoloAgentes(t *testing.T) {
 	l := NuevoRegistro(Agentes()...).Lista(context.Background())
 	for _, i := range l {
 		if i.Tipo != "agente" {
 			t.Errorf("%s no es un agente", i.ID)
 		}
-		if i.ID == "antigravity" && i.Disponible {
-			t.Error("Antigravity no debería estar disponible")
+	}
+	for _, id := range []string{"claude-code", "antigravity", "opencode"} {
+		if _, ok := NuevoRegistro(Agentes()...).Busca(id); !ok {
+			t.Error("falta " + id)
 		}
 	}
-	if a, ok := NuevoRegistro(Agentes()...).Busca("claude-code"); !ok || a.ID() != "claude-code" {
-		t.Error("falta Claude Code")
+	if _, ok := NuevoRegistro(Agentes()...).Busca("gemini-cli"); ok {
+		t.Error("Gemini CLI ya no es un agente")
 	}
 }
 
@@ -83,5 +85,36 @@ func TestModeloEsfuerzoClaudeCode(t *testing.T) {
 	}
 	if args := strings.Join(a.Args("hola", Peticion{Modelo: "opus", Esfuerzo: "high"}), " "); !strings.Contains(args, "--model opus") || !strings.Contains(args, "--effort high") {
 		t.Errorf("con modelo y esfuerzo: %s", args)
+	}
+}
+
+// Antigravity: el mensaje va pegado a --print=, solo lectura es el modo plan y la conversación se continúa.
+func TestArgsAntigravity(t *testing.T) {
+	a := Agentes()[1].(*Agente)
+	args := a.Args("--hola", Peticion{SesionAgente: "abc", Modelo: "gemini-4-argon-high"})
+	j := strings.Join(args, " ")
+	if args[len(args)-1] != "--print=--hola" || !strings.Contains(j, "--mode plan") || !strings.Contains(j, "--conversation abc") || !strings.Contains(j, "--model gemini-4-argon-high") {
+		t.Errorf("args: %q", args)
+	}
+}
+
+func TestLeeAntigravity(t *testing.T) {
+	in := `{"event":"init","conversation_id":"c1"}
+{"event":"step_update","step_update":{"state":"ACTIVE","step_type":"tool","tool_name":"read_file"}}
+{"event":"step_update","step_update":{"state":"ACTIVE","step_type":"agent_response","text_delta":"ho"}}
+{"event":"step_update","step_update":{"state":"DONE","step_type":"agent_response","text_delta":"la"}}
+{"event":"result","result":{"status":"SUCCESS"}}`
+	var b strings.Builder
+	sesion := ""
+	if err := leeAntigravity(strings.NewReader(in), func(e Evento) {
+		b.WriteString(e.Texto)
+		if e.SesionAgente != "" {
+			sesion = e.SesionAgente
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sesion != "c1" || !strings.Contains(b.String(), "read_file") || !strings.HasSuffix(b.String(), "hola") {
+		t.Errorf("sesión %q, texto %q", sesion, b.String())
 	}
 }

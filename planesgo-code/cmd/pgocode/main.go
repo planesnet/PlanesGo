@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -105,7 +106,35 @@ func configuraEmisor(url, token string) (string, error) {
 	return f, os.Rename(tmp, f)
 }
 
+// ampliaPath añade al PATH las carpetas donde suelen instalarse los agentes y que una app abierta desde el
+// escritorio no hereda (no lee .bashrc): Node de nvm (la versión más nueva primero), ~/.opencode/bin, bun, npm.
+func ampliaPath() {
+	casa, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	actual := filepath.SplitList(os.Getenv("PATH"))
+	esta := map[string]bool{}
+	for _, d := range actual {
+		esta[d] = true
+	}
+	nvm, _ := filepath.Glob(filepath.Join(casa, ".nvm", "versions", "node", "*", "bin"))
+	sort.Sort(sort.Reverse(sort.StringSlice(nvm)))
+	var extra []string
+	for _, d := range append([]string{filepath.Join(casa, ".local", "bin"), filepath.Join(casa, ".opencode", "bin"),
+		filepath.Join(casa, ".bun", "bin"), filepath.Join(casa, ".npm-global", "bin")}, nvm...) {
+		if st, err := os.Stat(d); err == nil && st.IsDir() && !esta[d] {
+			esta[d] = true
+			extra = append(extra, d)
+		}
+	}
+	if len(extra) > 0 {
+		os.Setenv("PATH", strings.Join(append(actual, extra...), string(os.PathListSeparator)))
+	}
+}
+
 func main() {
+	ampliaPath()
 	addr := flag.String("addr", entorno("PGO_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
 	odooURL := flag.String("odoo", entorno("ODOO_URL", "https://planesnet.autopyme.com"), "URL de Odoo")
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")

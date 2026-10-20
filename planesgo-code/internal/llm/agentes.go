@@ -185,7 +185,54 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	return sc.Err()
 }
 
-// Agentes devuelve los agentes conocidos.
+// leeAntigravity interpreta la salida stream-json de `agy`: texto de las respuestas (text_delta), herramientas
+// que usa, el id de conversación para continuar con --conversation y el resultado final.
+func leeAntigravity(r io.Reader, emite func(Evento)) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 32<<20)
+	for sc.Scan() {
+		var ev struct {
+			Event          string `json:"event"`
+			ConversationID string `json:"conversation_id"`
+			Paso           struct {
+				Estado string `json:"state"`
+				Tipo   string `json:"step_type"`
+				Texto  string `json:"text_delta"`
+				Has    string `json:"tool_name"`
+			} `json:"step_update"`
+			Resultado struct {
+				Estado string `json:"status"`
+				Error  string `json:"error"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			continue
+		}
+		switch ev.Event {
+		case "init":
+			if ev.ConversationID != "" {
+				emite(Evento{SesionAgente: ev.ConversationID})
+			}
+		case "step_update":
+			switch {
+			case ev.Paso.Tipo == "agent_response" && ev.Paso.Texto != "":
+				emite(Evento{Texto: ev.Paso.Texto})
+			case ev.Paso.Tipo == "tool" && ev.Paso.Estado == "ACTIVE" && ev.Paso.Has != "":
+				emite(Evento{Texto: "\n> 🔧 " + ev.Paso.Has + "\n\n"})
+			}
+		case "result":
+			if ev.Resultado.Estado != "" && ev.Resultado.Estado != "SUCCESS" {
+				if ev.Resultado.Error != "" {
+					return errors.New(ev.Resultado.Error)
+				}
+				return errors.New("Antigravity terminó con estado " + ev.Resultado.Estado)
+			}
+		}
+	}
+	return sc.Err()
+}
+
+// Agentes devuelve los agentes conocidos: Claude Code, Antigravity y OpenCode.
 func Agentes() []Proveedor {
 	return []Proveedor{
 		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode, Modos: true,
@@ -211,12 +258,42 @@ func Agentes() []Proveedor {
 				// «--» antes del mensaje: un texto que empiece por «-» no se toma como opción.
 				return append(a, "--", msg)
 			}},
+		// Antigravity: su CLI «agy» en modo print con eventos stream-json; --conversation continúa la sesión.
+		&Agente{Clave: "antigravity", Nombre: "Antigravity", Programa: "agy", Lee: leeAntigravity, Modos: true,
+			Modelos: []string{"gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low", "gemini-3.8-flash-high",
+				"gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "gemini-3.1-pro-low"},
+			Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
+			Args: func(msg string, p Peticion) []string {
+				a := []string{"--output-format", "stream-json"}
+				// Solo lectura: modo plan (no cambia ficheros); «editar»: accept-edits; «auto»: auto.
+				switch p.Permisos {
+				case "editar":
+					a = append(a, "--mode", "accept-edits")
+				case "auto":
+					a = append(a, "--mode", "auto")
+				default:
+					a = append(a, "--mode", "plan")
+				}
+				if p.Modelo != "" && p.Modelo != "por defecto" {
+					a = append(a, "--model", p.Modelo)
+				}
+				if p.Esfuerzo != "" {
+					a = append(a, "--effort", p.Esfuerzo)
+				}
+				if p.SesionAgente != "" {
+					a = append(a, "--conversation", p.SesionAgente)
+				}
+				// El mensaje va pegado a la opción: así nunca se toma como otra opción.
+				return append(a, "--print="+msg)
+			}},
 		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode",
-			Args: func(msg string, p Peticion) []string { return []string{"run", "--", msg} }},
-		&Agente{Clave: "antigravity", Nombre: "Antigravity", Programa: "antigravity",
-			NoDisponible: "aún no tiene modo agente por línea de comandos",
-			Args:         func(msg string, p Peticion) []string { return nil }},
-		&Agente{Clave: "gemini-cli", Nombre: "Gemini CLI", Programa: "gemini",
-			Args: func(msg string, p Peticion) []string { return []string{"--prompt=" + msg} }},
+			Modelos: []string{"google-vertex/gemini-4-argon"},
+			Args: func(msg string, p Peticion) []string {
+				a := []string{"run"}
+				if p.Modelo != "" && p.Modelo != "por defecto" {
+					a = append(a, "--model", p.Modelo)
+				}
+				return append(a, "--", msg)
+			}},
 	}
 }

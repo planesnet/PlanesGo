@@ -8,7 +8,7 @@ export interface Sesion {
   proyecto: number;
   carpeta: string;
   rama: string;
-  agente: string;       // id del proveedor (claude-code, opencode, gemini-cli, claude, openai, gemini…)
+  agente: string;       // id del agente (claude-code, antigravity, opencode)
   modelo?: string;
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   sesionAgente?: string; // sesión propia del agente (p. ej. claude --resume)
