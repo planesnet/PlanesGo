@@ -154,7 +154,7 @@ func main() {
 			}
 			srvStudio = &http.Server{Handler: estudio.Handler(), ReadHeaderTimeout: 10 * time.Second}
 			go srvStudio.Serve(ln)
-			log.Printf("Studio TV local en %s  (emitir: PCO_URL=%s PCO_TOKEN=%s)", studio.URL, studio.URL, te)
+			log.Printf("Studio TV local en %s", studio.URL) // el token de emitir no se escribe en el registro
 			if f, err := configuraEmisor(studio.URL, te); err != nil {
 				log.Printf("emisor: %v", err)
 			} else if f != "" {
