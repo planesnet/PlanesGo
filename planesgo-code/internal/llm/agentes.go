@@ -34,6 +34,8 @@ type Agente struct {
 	PorDefecto string
 	// EntornoDefecto: variables «CLAVE=valor» que se ponen solo si el usuario no las tiene ya.
 	EntornoDefecto []string
+	// EntornoPara: variables según la petición (p. ej. los permisos de OpenCode según el modo).
+	EntornoPara func(p Peticion) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
 	// NoDisponible: el agente existe pero no se puede usar desde aquí (y por qué).
@@ -79,6 +81,9 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	depuracion.Log(id, "lanza %s %q en %s (entorno añadido: %s)", a.Programa, args, p.Carpeta, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
 	cmd.Dir = p.Carpeta
 	entorno := append([]string(nil), p.Entorno...)
+	if a.EntornoPara != nil {
+		entorno = append(entorno, a.EntornoPara(p)...)
+	}
 	for _, kv := range a.EntornoDefecto {
 		if k, _, _ := strings.Cut(kv, "="); os.Getenv(k) == "" {
 			entorno = append(entorno, kv)
@@ -113,8 +118,16 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		}
 		emite(e)
 	})
+	// Si la lectura acaba con error (p. ej. el agente se ha quedado esperando una respuesta que no puede
+	// recibir), se para el agente: si no, Wait esperaría para siempre.
+	if errLee != nil && cmd.Cancel != nil {
+		cmd.Cancel()
+	}
 	errWait := cmd.Wait()
 	depuracion.Log(id, "fin en %s: wait=%v lectura=%v respuesta=%v", time.Since(inicio).Round(time.Millisecond), errWait, errLee, respuesta)
+	if errLee != nil && ctx.Err() == nil {
+		return errLee
+	}
 	if errWait != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -129,6 +142,18 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		return fmt.Errorf("%s acabó sin responder (%s)", a.Nombre, ultimas(detalle, 600))
 	}
 	return errLee
+}
+
+// permisosOpenCode: la configuración de permisos de OpenCode para cada modo de pgocode.
+func permisosOpenCode(modo string) string {
+	switch modo {
+	case "auto":
+		return `{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}`
+	case "editar":
+		return `{"edit":"allow","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"}`
+	default:
+		return `{"edit":"deny","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"}`
+	}
 }
 
 // clavesEntorno: los nombres de las variables añadidas (sin sus valores: llevan tokens).
@@ -277,8 +302,10 @@ func Agentes() []Proveedor {
 				return append(a, "--print="+msg)
 			}},
 		// OpenCode: «run --format json» (eventos de texto, herramientas, consumo y errores); -s continúa la sesión.
-		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode,
-			PorDefecto: "google-vertex/gemini-4-argon", Modelos: []string{"google-vertex/gemini-4-argon"},
+		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode, Modos: true,
+			// Permisos según el modo, sin «ask»: en «run» la pregunta se queda esperando sin nadie que conteste.
+			EntornoPara: func(p Peticion) []string { return []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos)} },
+			PorDefecto:  "google-vertex/gemini-4-argon", Modelos: []string{"google-vertex/gemini-4-argon"},
 			// Vertex AI: los modelos Gemini 4 están en la región «global» (en una regional, «Permission denied»).
 			EntornoDefecto: []string{"GOOGLE_CLOUD_LOCATION=global", "VERTEX_LOCATION=global", "GOOGLE_CLOUD_PROJECT=planes-dev"},
 			Args: func(msg string, p Peticion) []string {

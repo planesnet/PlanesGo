@@ -293,6 +293,11 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			} `json:"error"`
 		}
 		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			// Una pregunta interactiva (permiso) no se puede contestar desde aquí: se para y se explica.
+			if l := sc.Text(); strings.Contains(l, "Permission required:") {
+				_, que, _ := strings.Cut(l, "Permission required:")
+				return fmt.Errorf("OpenCode pide permiso para %s y no se le puede contestar desde aquí; cambia el modo de la sesión (Auto lo permite todo)", strings.TrimSpace(que))
+			}
 			continue
 		}
 		if ev.SessionID != "" && ev.SessionID != sesion {

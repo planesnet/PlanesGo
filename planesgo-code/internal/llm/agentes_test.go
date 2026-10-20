@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 // A1: el id de sesión llega del navegador y va como argumento: no puede ser una opción del programa.
@@ -157,5 +158,34 @@ func TestLeeOpenCode(t *testing.T) {
 	err := leeOpenCode(strings.NewReader(`{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"API key not valid"}}}`), func(Evento) {})
 	if err == nil || !strings.Contains(err.Error(), "API key not valid") {
 		t.Errorf("error: %v", err)
+	}
+}
+
+// Si OpenCode pregunta por un permiso, la lectura acaba con un error claro (y Chat lo para).
+func TestOpenCodePermiso(t *testing.T) {
+	in := "{\"type\":\"step_start\",\"sessionID\":\"s\"}\n\x1b[?25l│\n◆  Permission required: external_directory (/tmp/*)\n│  ● Allow once\n"
+	err := leeOpenCode(strings.NewReader(in), func(Evento) {})
+	if err == nil || !strings.Contains(err.Error(), "external_directory (/tmp/*)") {
+		t.Errorf("error: %v", err)
+	}
+	a := Agentes()[2].(*Agente)
+	if e := a.EntornoPara(Peticion{Permisos: "auto"}); !strings.Contains(e[0], `"bash":"allow"`) {
+		t.Errorf("auto: %v", e)
+	}
+	if e := a.EntornoPara(Peticion{}); !strings.Contains(e[0], `"edit":"deny"`) || strings.Contains(e[0], "ask") {
+		t.Errorf("lectura: %v", e)
+	}
+}
+
+// Un agente que se queda bloqueado tras un error de lectura se para (no se espera para siempre).
+func TestParaSiLecturaFalla(t *testing.T) {
+	a := &Agente{Clave: "x", Nombre: "X", Programa: "sh", Args: func(string, Peticion) []string {
+		return []string{"-c", "echo 'Permission required: bash (x)'; sleep 30"}
+	},
+		Lee: leeOpenCode}
+	inicio := time.Now()
+	err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}}, func(Evento) {})
+	if err == nil || time.Since(inicio) > 10*time.Second {
+		t.Errorf("err=%v en %s", err, time.Since(inicio))
 	}
 }
