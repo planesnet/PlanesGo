@@ -104,7 +104,7 @@ textarea { resize: none; }
 .mensaje.con-error { color: var(--error); }
 .pensando { color: var(--suave); }
 .redactor { padding: 6px max(16px, calc((100% - 720px) / 2)) 16px; display: grid; gap: 4px; }
-.entrada { display: flex; gap: 8px; align-items: flex-end; background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 8px 8px 8px 12px; }
+.entrada { display: flex; gap: 6px; align-items: flex-end; background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 8px 8px 8px 12px; }
 .entrada:focus-within { border-color: var(--tenue); }
 .entrada textarea { flex: 1; border: none; background: none; padding: 4px 0; }
 .opciones { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; padding: 0 4px; }
@@ -226,9 +226,9 @@ textarea { resize: none; }
 .miga-item.rama select:hover { background: var(--hover); }
 
 /* Selector de agente a la izquierda del cuadro de texto */
-.selector-agente { position: relative; align-self: flex-end; }
-.agente-actual { display: inline-flex; align-items: center; gap: 2px; padding: 5px 6px; border-radius: 8px; color: var(--suave); }
-.lista-agentes { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 15; list-style: none; margin: 0; padding: 4px; width: 240px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); }
+.selector-agente { position: relative; align-self: flex-start; margin: -4px 0 0 -6px; }
+.agente-actual { display: inline-flex; align-items: center; gap: 2px; padding: 4px 5px; border-radius: 8px; color: var(--suave); }
+.lista-agentes { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 15; list-style: none; margin: 0; padding: 4px; width: 240px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); }
 .lista-agentes button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; }
 .lista-agentes button svg:last-child:not(:first-child) { margin-left: auto; color: var(--acento); }
 .entrada .modelo { align-self: flex-end; border: none; background: transparent; font-size: 11.5px; color: var(--suave); max-width: 150px; }
