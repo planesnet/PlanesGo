@@ -116,6 +116,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/avatar", s.conSesion(s.avatar))
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
+	mux.HandleFunc("POST /api/actualizacion/aplicar", s.conSesion(s.aplicaActualizacion))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
@@ -377,6 +378,16 @@ func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *se
 	e := s.Actualizador.Estado()
 	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
 		"revisado": e.Revisado, "ocupado": s.Ocupado()})
+}
+
+// aplicaActualizacion: el usuario pulsa el aviso; se instala ya la versión preparada.
+func (s *Servidor) aplicaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if s.Actualizador == nil || !s.Actualizador.AplicarYa() {
+		jsonError(w, http.StatusConflict, "no hay ninguna actualización preparada")
+		return
+	}
+	log.Printf("%s pide aplicar la actualización ya", ses.Login)
+	jsonOK(w, map[string]bool{"ok": true})
 }
 
 func (s *Servidor) buscaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {

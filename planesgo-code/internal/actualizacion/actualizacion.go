@@ -67,12 +67,13 @@ type Actualizador struct {
 	estado    Estado
 	instalado string // sha256 del paquete instalado
 	buscar    chan struct{}
+	aplicar   chan struct{}
 }
 
 // Nuevo prepara el actualizador leyendo la versión y la huella instaladas en dirApp.
 func Nuevo(url, dirApp, dirPreparado, version string) *Actualizador {
 	a := &Actualizador{URL: strings.TrimRight(url, "/"), DirApp: dirApp, DirPreparado: dirPreparado,
-		Intervalo: time.Minute, HTTP: &http.Client{Timeout: 5 * time.Minute}, buscar: make(chan struct{}, 1)}
+		Intervalo: time.Minute, HTTP: &http.Client{Timeout: 5 * time.Minute}, buscar: make(chan struct{}, 1), aplicar: make(chan struct{}, 1)}
 	a.estado.Version = version
 	b, err := os.ReadFile(filepath.Join(dirApp, "paquete.sha256"))
 	a.instalado = strings.TrimSpace(string(b))
@@ -95,6 +96,18 @@ func (a *Actualizador) Estado() Estado {
 }
 
 // BuscarYa pide una revisión inmediata.
+// AplicarYa instala ya la versión preparada (si la hay), sin esperar a que la app esté parada.
+func (a *Actualizador) AplicarYa() bool {
+	if a.Estado().Estado != "pendiente" {
+		return false
+	}
+	select {
+	case a.aplicar <- struct{}{}:
+	default:
+	}
+	return true
+}
+
 func (a *Actualizador) BuscarYa() {
 	select {
 	case a.buscar <- struct{}{}:
@@ -124,6 +137,13 @@ func (a *Actualizador) Funciona(ctx context.Context) {
 			return
 		case <-a.buscar:
 			a.revisa(ctx)
+		case <-a.aplicar:
+			// El usuario la pide ya (pulsando el aviso): se aplica aunque haya algo en curso.
+			if a.Estado().Estado == "pendiente" && a.AlAplicar != nil {
+				a.pon(func(e *Estado) { e.Estado = "aplicando" })
+				a.AlAplicar()
+				return
+			}
 		case <-revisa.C:
 			a.revisa(ctx)
 			revisa.Reset(a.Intervalo)

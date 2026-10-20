@@ -31,10 +31,16 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
     return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', tecla); };
   }, [abierto]);
 
+  // Pulsar el aviso de actualización pendiente la instala ya (si hay algo en curso, se avisa antes).
+  const aplicar = async () => {
+    if (act?.ocupado && !confirm('Hay trabajo en curso (un agente respondiendo, una prueba o un programa en marcha): se detendrá. ¿Actualizar ahora?')) return;
+    setAct(a => a && { ...a, estado: 'aplicando' });
+    try { await post('/api/actualizacion/aplicar', {}); } catch { carga(); }
+  };
   const buscar = async () => { await post('/api/actualizacion/buscar', {}).catch(() => {}); setTimeout(carga, 3000); };
 
   const etiqueta = act && ({
-    pendiente: { texto: `Actualización pendiente · v${act.nueva}`, titulo: act.ocupado ? 'Se instalará cuando termine lo que está en curso' : 'Se instalará en unos segundos, en cuanto la app esté parada' },
+    pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: 'Pulsa para actualizar ahora' + (act.ocupado ? ' (si no, se instalará cuando termine lo que está en curso)' : '') },
     descargando: { texto: `Descargando v${act.nueva}…`, titulo: 'Descargando la nueva versión' },
     aplicando: { texto: 'Actualizando…', titulo: 'Se cierra y se vuelve a abrir con la versión nueva' },
     manual: { texto: `v${act.nueva} · reinstalar`, titulo: act.error || '' },
@@ -83,7 +89,9 @@ export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir:
       </div>
       <span className="marca-barra">Planes <b>Go</b> Code</span>
       <span className="hueco" />
-      {etiqueta && <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>}
+      {etiqueta && (act!.estado === 'pendiente'
+        ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
+        : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}
     </header>
   );
 }

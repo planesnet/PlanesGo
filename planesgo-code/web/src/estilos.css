@@ -395,3 +395,5 @@ textarea { resize: none; }
 .gh-opcion.bug[aria-checked="true"] { border-color: #d1242f; color: #d1242f; background: #ffebe9; }
 .gh-etiqueta-boton { border: 1px solid; background: transparent; color: var(--texto); cursor: pointer; margin-left: 0; }
 .gh-creada { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin: 0; }
+button.chip { cursor: pointer; }
+button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
