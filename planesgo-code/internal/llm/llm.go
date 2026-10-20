@@ -25,6 +25,8 @@ type Peticion struct {
 	// Permisos del agente en la sesión: "lectura" (por defecto), "editar" o "auto" (ejecuta comandos con el
 	// control de seguridad del agente).
 	Permisos string
+	// Esfuerzo de razonamiento del agente (uno de los de su Info.Esfuerzos; vacío: el suyo por defecto).
+	Esfuerzo string
 }
 
 // Evento es un trozo de la respuesta: texto, o la sesión del agente para continuarla después.
@@ -43,6 +45,8 @@ type Info struct {
 	Modelos     []string `json:"modelos"`
 	PorDefecto  string   `json:"por_defecto"`
 	NecesitaDir bool     `json:"necesita_carpeta"`
+	Esfuerzos   []string `json:"esfuerzos,omitempty"` // niveles de esfuerzo que admite (vacío: ninguno)
+	Modos       bool     `json:"modos,omitempty"`     // admite los modos de permisos (lectura, editar, auto)
 }
 
 // Proveedor habla con un modelo o agente. ID no hace llamadas de red; Info tampoco bloquea (la lista de

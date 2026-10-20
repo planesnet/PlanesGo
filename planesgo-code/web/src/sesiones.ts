@@ -10,8 +10,10 @@ export interface Sesion {
   rama: string;
   agente: string;       // id del proveedor (claude-code, opencode, gemini-cli, claude, openai, gemini…)
   modelo?: string;
+  esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   sesionAgente?: string; // sesión propia del agente (p. ej. claude --resume)
   permisos?: 'lectura' | 'editar' | 'auto'; // qué puede hacer un agente (Claude Code) en la sesión
+  tipo?: Repo['tipo'];   // hosting de su carpeta (para el icono de la lista)
   creada: number;
   ultima: number;
 }
@@ -42,10 +44,18 @@ export function borra(login: string, s: Sesion): Sesion[] {
   return l;
 }
 
-export function nueva(proyecto: number, carpeta: string, rama: string, agente: string, nombre?: string): Sesion {
+// Una sesión nueva no tiene nombre: lo toma del primer mensaje, como en Claude Code.
+export function nueva(proyecto: number, carpeta: string, rama: string, agente: string, nombre = ''): Sesion {
   const ahora = Date.now();
-  return { id: ahora.toString(36) + Math.random().toString(36).slice(2, 6), nombre: nombre || (rama ? 'Sesión en ' + rama : 'Sesión'),
-    proyecto, carpeta, rama, agente, creada: ahora, ultima: ahora };
+  return { id: ahora.toString(36) + Math.random().toString(36).slice(2, 6), nombre, proyecto, carpeta, rama, agente, creada: ahora, ultima: ahora };
+}
+
+export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
+
+// Nombre a partir del primer mensaje: la primera línea, recortada.
+export function nombreDe(texto: string): string {
+  const l = texto.trim().split('\n')[0].replace(/\s+/g, ' ');
+  return l.length > 60 ? l.slice(0, 57).trimEnd() + '…' : l;
 }
 
 export function conversacion(id: string): Mensaje[] {

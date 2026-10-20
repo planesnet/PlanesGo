@@ -1,8 +1,8 @@
 //go:build windows
 
-package llm
+package proceso
 
 import "os/exec"
 
 // grupoPropio: en Windows se mantiene la cancelación por defecto (mata el proceso directo).
-func grupoPropio(cmd *exec.Cmd) {}
+func GrupoPropio(cmd *exec.Cmd) {}

@@ -166,13 +166,13 @@ func main() {
 	}
 
 	s := &servidor.Servidor{
-		Odoo:     odoo.Nuevo(*odooURL, *odooDB),
-		Sesiones: sesiones.NuevoAlmacen(),
-		Indice:   proyectos.NuevoIndice(rs),
+		Odoo:        odoo.Nuevo(*odooURL, *odooDB),
+		Sesiones:    sesiones.NuevoAlmacen(),
+		Indice:      proyectos.NuevoIndice(rs),
 		Proveedores: llm.NuevoRegistro(llm.Agentes()...),
-		Web:     web.Archivos(),
-		Studio:  studio,
-		Version: version,
+		Web:         web.Archivos(),
+		Studio:      studio,
+		Version:     version,
 	}
 	_, puerto, err := net.SplitHostPort(*addr)
 	if err != nil {

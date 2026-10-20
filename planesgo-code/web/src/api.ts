@@ -6,6 +6,7 @@ export interface Proyecto { id: number; nombre: string; cliente: Many2One; respo
 export interface Proveedor {
   id: string; nombre: string; tipo: 'api' | 'agente'; disponible: boolean; motivo?: string;
   modelos: string[] | null; por_defecto: string; necesita_carpeta: boolean;
+  esfuerzos?: string[]; modos?: boolean;
 }
 export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean }
 

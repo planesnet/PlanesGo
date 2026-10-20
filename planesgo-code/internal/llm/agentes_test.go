@@ -9,7 +9,7 @@ import (
 
 // A1: el id de sesión llega del navegador y va como argumento: no puede ser una opción del programa.
 func TestSesionAgenteValidada(t *testing.T) {
-	a := &Agente{Clave: "x", Programa: "true", Args: func(m, s, p string) []string { return nil }}
+	a := &Agente{Clave: "x", Programa: "true", Args: func(string, Peticion) []string { return nil }}
 	for _, mala := range []string{"--dangerously-skip-permissions", "-p", "a b", "../x", strings.Repeat("a", 200)} {
 		err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), SesionAgente: mala, Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}}, func(Evento) {})
 		if err == nil || !strings.Contains(err.Error(), "sesión") {
@@ -28,7 +28,7 @@ func TestMensajeNoEsOpcion(t *testing.T) {
 		if a.NoDisponible != "" {
 			continue
 		}
-		args := a.Args("- arregla el test", "", "")
+		args := a.Args("- arregla el test", Peticion{})
 		ultimo := args[len(args)-1]
 		if ultimo == "- arregla el test" && (len(args) < 2 || args[len(args)-2] != "--") {
 			t.Errorf("%s: el mensaje va sin «--» delante: %q", a.Clave, args)
@@ -68,9 +68,20 @@ func TestSoloAgentes(t *testing.T) {
 func TestPermisosClaudeCode(t *testing.T) {
 	a := Agentes()[0].(*Agente)
 	for permisos, quiero := range map[string]string{"": "", "lectura": "", "editar": "acceptEdits", "auto": "auto"} {
-		args := strings.Join(a.Args("hola", "", permisos), " ")
+		args := strings.Join(a.Args("hola", Peticion{Permisos: permisos}), " ")
 		if quiero == "" && strings.Contains(args, "--permission-mode") || quiero != "" && !strings.Contains(args, "--permission-mode "+quiero) {
 			t.Errorf("permisos %q: %s", permisos, args)
 		}
+	}
+}
+
+// El modelo y el esfuerzo llegan a Claude Code como --model y --effort («por defecto»: sin opción).
+func TestModeloEsfuerzoClaudeCode(t *testing.T) {
+	a := Agentes()[0].(*Agente)
+	if args := strings.Join(a.Args("hola", Peticion{Modelo: "por defecto"}), " "); strings.Contains(args, "--model") || strings.Contains(args, "--effort") {
+		t.Errorf("sin modelo ni esfuerzo: %s", args)
+	}
+	if args := strings.Join(a.Args("hola", Peticion{Modelo: "opus", Esfuerzo: "high"}), " "); !strings.Contains(args, "--model opus") || !strings.Contains(args, "--effort high") {
+		t.Errorf("con modelo y esfuerzo: %s", args)
 	}
 }

@@ -1,0 +1,8 @@
+/* Panel de configuración de la sesión como menú flotante (portal en document.body, position: fixed).
+   Sobrescribe la colocación absoluta de .config-sesion en estilos.css. */
+.config-sesion.config-sesion-flotante {
+  position: fixed; right: auto; bottom: auto; z-index: 1000;
+  box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 10px; display: grid; gap: 8px;
+}

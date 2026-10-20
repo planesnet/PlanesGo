@@ -106,13 +106,23 @@ textarea { resize: none; }
 .redactor { padding: 6px max(16px, calc((100% - 720px) / 2)) 16px; display: grid; gap: 4px; }
 .entrada { display: flex; gap: 6px; align-items: flex-end; background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 8px 8px 8px 12px; }
 .entrada:focus-within { border-color: var(--tenue); }
-.entrada textarea { flex: 1; border: none; background: none; padding: 4px 0; }
+.entrada textarea { flex: 1; border: none; background: none; padding: 6px 0; resize: none; line-height: 1.45; min-height: 0; overflow-y: hidden; }
+.pie-redactor { display: flex; align-items: center; gap: 4px; padding: 0 4px; min-height: 24px; }
+.pie-select { border: none; background: transparent; font-size: 12px; color: var(--suave); padding: 2px 4px; border-radius: 6px; cursor: pointer; max-width: 50%; }
+.pie-select:hover { background: var(--hover); color: var(--texto); }
+.pie-texto { font-size: 12px; color: var(--tenue); }
 .opciones { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; padding: 0 4px; }
 .opciones select { max-width: 220px; font-size: 12px; border: none; background: transparent; color: var(--suave); padding: 3px 4px; }
 .opciones select:hover { background: var(--hover); }
 
 /* Artefactos */
-.artefactos { border-left: 1px solid var(--linea); background: var(--panel); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.artefactos { position: relative; border-left: 1px solid var(--linea); background: var(--panel); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.asa { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; }
+.asa:hover, .asa:active { background: linear-gradient(to right, transparent 3px, var(--acento) 3px, var(--acento) 5px, transparent 5px); }
+.capa-arrastre { position: fixed; inset: 0; z-index: 2000; cursor: col-resize; }
+.subpestanas { margin-left: auto; display: inline-flex; gap: 2px; background: var(--hover); border-radius: 7px; padding: 2px; }
+.subpestanas button { font-size: 12px; padding: 2px 10px; color: var(--suave); border-radius: 5px; }
+.subpestanas button[aria-pressed="true"] { background: var(--superficie); color: var(--texto); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 .pestanas { display: flex; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--linea); }
 .pestanas button { display: inline-flex; align-items: center; gap: 6px; color: var(--suave); padding: 4px 10px; }
 .pestanas button[aria-selected="true"] { color: var(--texto); background: var(--hover); }
@@ -232,3 +242,59 @@ textarea { resize: none; }
 .lista-agentes button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; }
 .lista-agentes button svg:last-child:not(:first-child) { margin-left: auto; color: var(--acento); }
 .entrada .modelo { align-self: flex-end; border: none; background: transparent; font-size: 11.5px; color: var(--suave); max-width: 150px; }
+
+/* Pruebas de la campaña (visor) */
+.pruebas { display: grid; align-content: start; gap: 8px; padding: 10px 12px 16px; min-width: 0; }
+.pruebas-cabecera { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pruebas-cabecera select { max-width: 60%; font-weight: 600; }
+.lanzar { display: grid; gap: 6px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; padding: 8px; }
+.fila-lanzar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fila-lanzar select { flex: 1; min-width: 0; }
+.lanzar-boton { padding: 5px 12px; white-space: nowrap; }
+.salida { margin: 0; max-height: 180px; overflow: auto; background: #111; color: #d7e3d7; font: 11px/1.45 ui-monospace, monospace; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; }
+.filtros { display: flex; flex-wrap: wrap; gap: 4px; }
+.filtro { font: 11.5px ui-monospace, monospace; border: 1px solid var(--linea); border-radius: 999px; padding: 2px 9px; color: var(--suave); background: var(--superficie); }
+.filtro b { color: var(--texto); }
+.filtro[aria-selected="true"] { border-color: var(--texto); color: var(--texto); }
+.lista-casos { display: grid; gap: 10px; }
+.lista-casos section { display: grid; gap: 1px; }
+.caso-fila { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; border-radius: 6px; min-width: 0; }
+.caso-texto { display: grid; min-width: 0; flex: 1; }
+.punto { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--tenue); }
+.estado-txt { font: 11px ui-monospace, monospace; color: var(--suave); white-space: nowrap; }
+.estado-txt.marco { border: 1px solid currentColor; border-radius: 4px; padding: 0 6px; }
+.punto.ok, .filtro.ok[aria-selected="true"] { background: #2e8b57; } .estado-txt.ok { color: #2e8b57; }
+.punto.fallo { background: var(--error); } .estado-txt.fallo { color: var(--error); }
+.punto.curso { background: #d98a00; } .estado-txt.curso { color: #d98a00; }
+.punto.na { background: var(--tenue); }
+.filtro.ok[aria-selected="true"] { color: #fff; }
+.detalle-caso { display: grid; gap: 8px; }
+.detalle-barra { display: flex; align-items: center; gap: 8px; }
+.caso-id { font: 600 12px ui-monospace, monospace; color: var(--acento); }
+.detalle-caso h3 { font-size: 16px; }
+.ficha { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12.5px; }
+.ficha dt { color: var(--suave); }
+.ficha dd { margin: 0; }
+.linea-tiempo { position: relative; height: 14px; margin: 0 2px; border-bottom: 2px solid var(--linea); }
+.marca-linea { position: absolute; bottom: -2px; width: 3px; height: 12px; padding: 0; border-radius: 2px; background: #b8860b; transform: translateX(-1px); }
+.chips-marcas { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip-marca { font-size: 12px; border: 1px solid var(--linea); border-radius: 999px; padding: 2px 9px; background: var(--superficie); }
+.enlace-descarga { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--enfoque); text-decoration: none; }
+.bloque { display: grid; gap: 4px; }
+.bloque > p { margin: 0; }
+.comentario { margin: 0; font-size: 13px; }
+.nuevo-comentario { display: flex; gap: 6px; align-items: flex-end; }
+.nuevo-comentario textarea { flex: 1; }
+
+/* Lista lateral: proyectos como grupos y sus sesiones debajo (como Claude Code) */
+.grupo { display: grid; margin-bottom: 4px; }
+.grupo-cabecera { display: flex; align-items: center; gap: 2px; padding: 2px 2px 2px 0; border-radius: 6px; }
+.grupo-cabecera:hover { background: var(--hover); }
+.grupo-nombre { flex: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: 600; color: var(--suave); padding: 4px 2px; }
+.grupo-nombre:hover { background: none !important; }
+.grupo.activo .grupo-nombre { color: var(--texto); }
+.icono.plegar { width: 22px; height: 22px; color: var(--tenue); }
+.icono.plegar[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.icono.grupo-nueva { width: 24px; height: 24px; opacity: 0; }
+.grupo-cabecera:hover .grupo-nueva, .grupo-nueva:focus-visible { opacity: 1; }
+.sin-sesiones { margin: 0; padding: 3px 8px; font-size: 12px; color: var(--tenue); }

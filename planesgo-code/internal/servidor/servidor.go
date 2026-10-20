@@ -32,6 +32,7 @@ import (
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proyectos"
+	"planesgo-code/internal/qa"
 	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
 )
@@ -68,6 +69,8 @@ type Servidor struct {
 	TokenEscritorio string
 	// Actualizador: autoactualización desde PlanesGo (nil: sin actualizaciones).
 	Actualizador *actualizacion.Actualizador
+	// QA: pruebas lanzadas desde la app (campañas .psf/qa del proyecto).
+	QA qa.Ejecutor
 	// DirRamas: dónde se crean las copias de trabajo de otras ramas (git worktree) de las sesiones.
 	DirRamas string
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
@@ -91,6 +94,15 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/yo", s.conSesion(s.yo))
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) { jsonOK(w, map[string]string{"version": s.Version}) })
 	mux.HandleFunc("GET /api/proyecto/repo", s.conSesion(s.repoProyecto))
+	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
+	mux.HandleFunc("GET /api/qa/campanas", s.conSesion(s.qaCampanas))
+	mux.HandleFunc("GET /api/qa/casos", s.conSesion(s.qaCasos))
+	mux.HandleFunc("GET /api/qa/media", s.conSesion(s.qaMedia))
+	mux.HandleFunc("GET /api/qa/pruebas", s.conSesion(s.qaPruebas))
+	mux.HandleFunc("POST /api/qa/lanzar", s.conSesion(s.qaLanzar))
+	mux.HandleFunc("POST /api/qa/parar", s.conSesion(s.qaParar))
+	mux.HandleFunc("GET /api/qa/comentarios", s.conSesion(s.qaComentarios))
+	mux.HandleFunc("POST /api/qa/comentario", s.conSesion(s.qaComenta))
 	mux.HandleFunc("GET /api/avatar", s.conSesion(s.avatar))
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
@@ -334,7 +346,7 @@ func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *ses
 
 // Ocupado dice si hay algo en curso que una actualización interrumpiría.
 func (s *Servidor) Ocupado() bool {
-	return s.activos.Load() > 0 || (s.EstudioOcupado != nil && s.EstudioOcupado())
+	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || (s.EstudioOcupado != nil && s.EstudioOcupado())
 }
 
 func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -413,6 +425,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		SesionAgente string        `json:"sesion_agente"`
 		Rama         string        `json:"rama"`
 		Permisos     string        `json:"permisos"`
+		Esfuerzo     string        `json:"esfuerzo"`
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
 	if err := lee(r, &p); err != nil {
@@ -445,6 +458,16 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		if p.Modelo == "" || (len(info.Modelos) > 0 && !slices.Contains(info.Modelos, p.Modelo)) {
 			jsonError(w, http.StatusBadRequest, "modelo no disponible para "+info.Nombre)
 			return
+		}
+	}
+	if info.Tipo == "agente" {
+		// Modelo y esfuerzo van como argumentos del agente: solo los de su lista.
+		if p.Modelo != "" && !slices.Contains(info.Modelos, p.Modelo) {
+			jsonError(w, http.StatusBadRequest, "modelo no disponible para "+info.Nombre)
+			return
+		}
+		if p.Esfuerzo != "" && !slices.Contains(info.Esfuerzos, p.Esfuerzo) {
+			p.Esfuerzo = ""
 		}
 	}
 	if p.Carpeta != "" && !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
@@ -488,7 +511,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		p.Permisos = "lectura"
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos}, func(e llm.Evento) { envia(e) })
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo}, func(e llm.Evento) { envia(e) })
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
 	}
@@ -686,4 +709,135 @@ func (s *Servidor) studioProxy(w http.ResponseWriter, r *http.Request, ses *sesi
 		},
 	}
 	px.ServeHTTP(w, r)
+}
+
+// --- Pruebas (campañas .psf/qa del proyecto) ---
+
+// campana comprueba el proyecto y devuelve la carpeta de la campaña pedida (?campana= o en el cuerpo).
+func (s *Servidor) campana(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion, proyecto int, id string) (string, bool) {
+	if _, ok := s.proyecto(w, r, ses, proyecto); !ok {
+		return "", false
+	}
+	dir, err := qa.Dir(s.Indice.Carpetas(false)[proyecto], id)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, err.Error())
+		return "", false
+	}
+	return dir, true
+}
+
+func (s *Servidor) qaCampanas(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	id := idProyecto(r)
+	if _, ok := s.proyecto(w, r, ses, id); !ok {
+		return
+	}
+	jsonOK(w, qa.Busca(s.Indice.Carpetas(false)[id]))
+}
+
+func (s *Servidor) qaCasos(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	dir, ok := s.campana(w, r, ses, idProyecto(r), r.URL.Query().Get("campana"))
+	if !ok {
+		return
+	}
+	b, err := qa.Casos(dir)
+	if err != nil || !json.Valid(b) {
+		jsonError(w, http.StatusInternalServerError, "casos.json no válido")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(b)
+}
+
+func (s *Servidor) qaMedia(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	dir, ok := s.campana(w, r, ses, idProyecto(r), r.URL.Query().Get("campana"))
+	if !ok {
+		return
+	}
+	ruta, err := qa.Media(dir, r.URL.Query().Get("archivo"))
+	if err != nil {
+		jsonError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	http.ServeFile(w, r, ruta) // admite Range: saltar a un marcador
+}
+
+func (s *Servidor) qaPruebas(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	id := r.URL.Query().Get("campana")
+	dir, ok := s.campana(w, r, ses, idProyecto(r), id)
+	if !ok {
+		return
+	}
+	jsonOK(w, map[string]any{"pruebas": qa.Pruebas(dir), "ejecuciones": s.QA.Lista(id)})
+}
+
+func (s *Servidor) qaLanzar(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Campana  string `json:"campana"`
+		Script   string `json:"script"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	dir, ok := s.campana(w, r, ses, p.Proyecto, p.Campana)
+	if !ok {
+		return
+	}
+	x, err := s.QA.Lanza(p.Campana, dir, p.Script)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Printf("prueba lanzada por %s: %s %s", ses.Login, p.Campana, p.Script)
+	jsonOK(w, x)
+}
+
+func (s *Servidor) qaParar(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Campana  string `json:"campana"`
+		ID       string `json:"id"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if _, ok := s.campana(w, r, ses, p.Proyecto, p.Campana); !ok {
+		return
+	}
+	jsonOK(w, map[string]bool{"parada": s.QA.Para(p.ID)})
+}
+
+func (s *Servidor) qaComentarios(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	dir, ok := s.campana(w, r, ses, idProyecto(r), r.URL.Query().Get("campana"))
+	if !ok {
+		return
+	}
+	jsonOK(w, qa.Comentarios(dir))
+}
+
+func (s *Servidor) qaComenta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int     `json:"proyecto"`
+		Campana  string  `json:"campana"`
+		Caso     string  `json:"caso"`
+		T        float64 `json:"t"`
+		Texto    string  `json:"texto"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	dir, ok := s.campana(w, r, ses, p.Proyecto, p.Campana)
+	if !ok {
+		return
+	}
+	c := qa.Comentario{Caso: p.Caso, T: p.T, Texto: strings.TrimSpace(p.Texto), Autor: ses.Nombre, Fecha: time.Now()}
+	if err := qa.Comenta(dir, c); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonOK(w, c)
 }

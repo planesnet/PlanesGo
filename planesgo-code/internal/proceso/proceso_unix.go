@@ -1,14 +1,14 @@
 //go:build !windows
 
-package llm
+package proceso
 
 import (
 	"os/exec"
 	"syscall"
 )
 
-// grupoPropio lanza el proceso en un grupo nuevo y, al cancelar, mata al grupo entero.
-func grupoPropio(cmd *exec.Cmd) {
+// GrupoPropio lanza el proceso en un grupo nuevo y, al cancelar, mata al grupo entero.
+func GrupoPropio(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, type Mensaje, type Proveedor, type Proyecto } from '../api';
-import { conversacion, guardaConversacion, type Repo, type Sesion } from '../sesiones';
+import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting, nombreHosting } from './Marca';
 
@@ -12,6 +12,10 @@ interface Props {
 
 const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
 
+const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos' } as const;
+const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
+const ALTO_MAX = 240;
+
 export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -20,6 +24,16 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
   const fin = useRef<HTMLDivElement>(null);
   const lista = useRef<HTMLDivElement>(null);
   const idActual = useRef(sesion?.id);
+  const area = useRef<HTMLTextAreaElement>(null);
+
+  // El campo empieza en una línea y crece hacia arriba según lo escrito (hasta un máximo, luego scroll).
+  useLayoutEffect(() => {
+    const a = area.current;
+    if (!a) return;
+    a.style.height = 'auto';
+    a.style.height = Math.min(a.scrollHeight, ALTO_MAX) + 'px';
+    a.style.overflowY = a.scrollHeight > ALTO_MAX ? 'auto' : 'hidden';
+  }, [texto, sesion?.id]);
 
   const prov = proveedores.find(p => p.id === sesion?.agente);
   const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
@@ -56,7 +70,7 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
-        permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente,
+        permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
         mensajes: prov.tipo === 'agente' ? base.slice(-1) : base, // los agentes llevan su propio historial
       }, e => {
         if (e.texto) ultimo(m => ({ ...m, texto: m.texto + e.texto }));
@@ -68,7 +82,7 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
     } finally {
       pon(actual, true);
       setEnCurso(c => (c === ac ? null : c));
-      alCambiarSesion({ ...sesion, sesionAgente, ultima: Date.now() });
+      alCambiarSesion({ ...sesion, nombre: sesion.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
     }
   }
 
@@ -120,7 +134,7 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
           <div className="mensajes" aria-live="polite" ref={lista}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
-                <p><b>{sesion.nombre}</b></p>
+                <p><b>{titulo(sesion)}</b></p>
                 <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos' }[sesion.permisos || 'lectura']}` : ''}</p>
               </div>
             )}
@@ -150,16 +164,35 @@ export default function Chat({ proyecto, sesion, repo, proveedores, panelAbierto
                   </ul>
                 )}
               </div>
-              <textarea rows={2} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
+              <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 placeholder={prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'} disabled={!prov?.disponible} />
-              {prov?.tipo === 'api' && modelos.length > 1 && (
-                <select className="modelo" value={sesion.modelo || prov.por_defecto} onChange={e => alCambiarSesion({ ...sesion, modelo: e.target.value })} aria-label="Modelo">
-                  {modelos.map(m => <option key={m}>{m}</option>)}
-                </select>
-              )}
               {enCurso
                 ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
                 : <button className="redondo primario" onClick={envia} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
+            </div>
+            {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
+            <div className="pie-redactor">
+              {prov?.modos && (
+                <select className="pie-select" value={sesion.permisos || 'lectura'} aria-label="Modo"
+                  onChange={e => alCambiarSesion({ ...sesion, permisos: e.target.value as Sesion['permisos'] })}>
+                  {Object.entries(MODOS).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                </select>
+              )}
+              <span className="hueco" />
+              {modelos.length > 1 && (
+                <select className="pie-select" value={sesion.modelo || prov?.por_defecto} aria-label="Modelo"
+                  onChange={e => alCambiarSesion({ ...sesion, modelo: e.target.value })}>
+                  {modelos.map(m => <option key={m} value={m}>{m === 'por defecto' ? 'Modelo por defecto' : m}</option>)}
+                </select>
+              )}
+              {modelos.length <= 1 && prov && <span className="pie-texto">{prov.nombre}</span>}
+              {prov?.esfuerzos?.length ? (
+                <select className="pie-select" value={sesion.esfuerzo || ''} aria-label="Esfuerzo"
+                  onChange={e => alCambiarSesion({ ...sesion, esfuerzo: e.target.value || undefined })}>
+                  <option value="">Esfuerzo por defecto</option>
+                  {prov.esfuerzos.map(x => <option key={x} value={x}>Esfuerzo {ESFUERZOS[x] || x}</option>)}
+                </select>
+              ) : null}
             </div>
           </div>
         </>

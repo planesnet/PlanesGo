@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { get, post, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
 import Acceso from './componentes/Acceso';
@@ -30,10 +30,17 @@ export default function App() {
   const [aviso, setAviso] = useState('');
   const [proyecto, setProyecto] = useState<Proyecto | null>(null);
   const [panel, setPanel] = useState(true);
+  // Ancho del panel derecho (0: el de por defecto, un 42 % de la ventana), recordado entre sesiones.
+  const [anchoPanel, setAnchoPanel] = useState<number>(() => { try { return Number(localStorage.getItem('pgo:ancho-panel')) || 0; } catch { return 0; } });
+  const cambiaAncho = (px: number) => { setAnchoPanel(px); try { localStorage.setItem('pgo:ancho-panel', String(px)); } catch { /* sin almacenamiento */ } };
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [repo, setRepo] = useState<S.Repo | null>(null);
   const [sesiones, setSesiones] = useState<S.Sesion[]>([]);
   const [sesion, setSesion] = useState<S.Sesion | null>(null);
+  // Sesión pedida al cambiar de proyecto desde la lista (su id, o 'nueva' para abrir una sesión nueva).
+  const pedida = useRef('');
+  // Carpeta cuyo repositorio está cargado (para recargarlo si la sesión cambia de carpeta).
+  const carpetaRepo = useRef('');
 
   // Título de la ventana con la versión.
   useEffect(() => {
@@ -53,10 +60,14 @@ export default function App() {
   // Al elegir proyecto: su repositorio (si tiene carpeta local) y sus sesiones; si no hay ninguna, se crea una.
   useEffect(() => {
     if (!usuario || !proyecto) { setRepo(null); setSesiones([]); setSesion(null); return; }
-    const carpeta = proyecto.carpetas[0] || '';
+    let l = S.lista(usuario.login, proyecto.id);
+    const quiere = pedida.current;
+    pedida.current = '';
+    const elegida = l.find(s => s.id === quiere) || l[0];
+    const carpeta = elegida?.carpeta || proyecto.carpetas[0] || '';
+    carpetaRepo.current = carpeta;
     const sigue = (r: S.Repo | null) => {
       setRepo(r);
-      let l = S.lista(usuario.login, proyecto.id);
       // Sesiones con un agente que ya no está (p. ej. las antiguas por API): al agente por defecto.
       const disponibles = new Set(proveedores.filter(p => p.disponible).map(p => p.id));
       if (proveedores.length) {
@@ -64,27 +75,59 @@ export default function App() {
           l = S.guarda(usuario.login, { ...s, agente: agentePorDefecto(), modelo: undefined, sesionAgente: undefined });
         }
       }
-      if (!l.length && proveedores.length) {
-        l = S.guarda(usuario.login, S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()));
+      let s = l.find(x => x.id === quiere) || l[0] || null;
+      if ((!l.length || quiere === 'nueva') && proveedores.length) {
+        s = { ...S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()), tipo: r?.tipo };
+        l = S.guarda(usuario.login, s);
       }
       setSesiones(l);
-      setSesion(l[0] || null);
+      setSesion(s);
     };
     if (carpeta) get<S.Repo>(`/api/proyecto/repo?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}`).then(sigue).catch(() => sigue(null));
     else sigue(null);
   }, [usuario, proyecto, proveedores.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Si la sesión cambia de carpeta, se carga el repositorio de esa carpeta (y su rama, si la que tenía no está).
+  useEffect(() => {
+    const c = sesion?.carpeta;
+    if (!proyecto || !c || c === carpetaRepo.current) return;
+    carpetaRepo.current = c;
+    get<S.Repo>(`/api/proyecto/repo?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(c)}`).then(r => {
+      setRepo(r);
+      setSesion(x => {
+        if (!x || x.carpeta !== c || !usuario) return x;
+        const rama = r.ramas.includes(x.rama) ? x.rama : (r.rama || '');
+        if (rama === x.rama && x.tipo === r.tipo) return x;
+        const n = { ...x, rama, tipo: r.tipo, sesionAgente: rama === x.rama ? x.sesionAgente : undefined };
+        setSesiones(S.guarda(usuario.login, n));
+        return n;
+      });
+    }).catch(() => setRepo(null));
+  }, [sesion?.carpeta, proyecto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // El icono del hosting se guarda en la sesión para pintarlo en la lista sin consultar el repositorio.
+  useEffect(() => {
+    if (usuario && sesion && repo && repo.carpeta === sesion.carpeta && sesion.tipo !== repo.tipo) {
+      const n = { ...sesion, tipo: repo.tipo };
+      setSesiones(S.guarda(usuario.login, n));
+      setSesion(n);
+    }
+  }, [repo, sesion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const cambiaSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
-    setSesiones(S.guarda(usuario.login, s));
+    const l = S.guarda(usuario.login, s);
+    if (s.proyecto === proyecto?.id) setSesiones(l); // las de otros proyectos solo se guardan
     setSesion(x => (x?.id === s.id ? s : x));
-  }, [usuario]);
+  }, [usuario, proyecto?.id]);
 
   // Nueva sesión (cambiar de rama abre una sesión nueva en esa rama).
   const nuevaSesion = useCallback((rama?: string) => {
     if (!usuario || !proyecto) return;
-    const s = S.nueva(proyecto.id, proyecto.carpetas[0] || '', rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto());
+    const carpeta = sesion?.carpeta || proyecto.carpetas[0] || '';
+    const s = S.nueva(proyecto.id, carpeta, rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto());
     s.permisos = sesion?.permisos;
+    s.tipo = repo?.tipo;
     setSesiones(S.guarda(usuario.login, s));
     setSesion(s);
   }, [usuario, proyecto, repo, sesion, agentePorDefecto]);
@@ -92,9 +135,10 @@ export default function App() {
   const borraSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
     const l = S.borra(usuario.login, s);
+    if (s.proyecto !== proyecto?.id) return;
     setSesiones(l);
     setSesion(x => (x?.id === s.id ? l[0] || null : x));
-  }, [usuario]);
+  }, [usuario, proyecto?.id]);
 
   useEffect(() => {
     get<Usuario>('/api/yo').then(setUsuario).catch(() => setUsuario(null));
@@ -113,19 +157,32 @@ export default function App() {
 
   const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(usuario?.login || '', p.id); }, [usuario]);
 
+  // Desde la lista lateral: una sesión de cualquier proyecto reciente, o una nueva en él.
+  const eligeSesionDe = useCallback((p: Proyecto, s: S.Sesion) => {
+    if (proyecto?.id === p.id) { setSesion(s); return; }
+    pedida.current = s.id;
+    elige(p);
+  }, [proyecto, elige]);
+  const nuevaEn = useCallback((p: Proyecto) => {
+    if (proyecto?.id === p.id) { nuevaSesion(); return; }
+    pedida.current = 'nueva';
+    elige(p);
+  }, [proyecto, elige, nuevaSesion]);
+
   if (usuario === undefined) return <div className="cargando">Cargando…</div>;
   if (!usuario) return <Acceso aviso={aviso} alEntrar={u => { setAviso(''); setUsuario(u); }} />;
 
   return (
     <div className="aplicacion">
     <Barra usuario={usuario} alSalir={salir} />
-    <div className={'arnes' + (panel ? '' : ' sin-panel')}>
+    <div className={'arnes' + (panel ? '' : ' sin-panel')}
+      style={panel && anchoPanel ? { gridTemplateColumns: `248px minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
-        alElegirSesion={setSesion} alNuevaSesion={() => nuevaSesion()} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
+        alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
       <Chat proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
-      {panel && <Artefactos proyecto={proyecto} />}
+      {panel && <Artefactos proyecto={proyecto} alAncho={cambiaAncho} />}
     </div>
     </div>
   );
