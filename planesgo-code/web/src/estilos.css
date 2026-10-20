@@ -443,3 +443,12 @@ button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
 .md th, .md td { border: 1px solid var(--linea); padding: 4px 9px; text-align: left; vertical-align: top; }
 .md th { background: var(--panel); font-weight: 600; }
 .md input[type="checkbox"] { width: auto; margin: 0 .4em 0 0; }
+
+.gh-fila-caja { display: flex; align-items: flex-start; gap: 4px; border-radius: 6px; }
+.gh-fila-caja:hover { background: var(--hover); }
+.gh-fila-caja > .gh-fila { flex: 1; }
+.gh-fila-caja > .gh-fila:hover { background: none; }
+.gh-resolver { flex: none; display: inline-flex; align-items: center; gap: 4px; margin: 5px 4px 0 0; font-size: 11.5px; font-weight: 600; color: #1a7f37;
+  border: 1px solid #1a7f37; border-radius: 6px; padding: 2px 8px; opacity: 0; }
+.gh-fila-caja:hover .gh-resolver, .gh-resolver:focus-visible, .gh-resolver:disabled { opacity: 1; }
+.gh-resolver:hover:not(:disabled) { background: #1a7f37; color: #fff; }

@@ -4,7 +4,7 @@ import Navegador from './Navegador';
 import StudioTV from './StudioTV';
 import Pruebas from './Pruebas';
 import Programas from './Programas';
-import Flujo from './Flujo';
+import Flujo, { type PeticionResolver } from './Flujo';
 import Icono from './Icono';
 
 type Pestana = 'flujo' | 'studio' | 'programas' | 'navegador';
@@ -13,9 +13,9 @@ type VistaTV = 'pruebas' | 'directo';
 const ANCHO_MIN = 320;
 
 // Panel derecho: TV (pruebas de la campaña y directo) y navegador. Se redimensiona arrastrando su borde izquierdo.
-export default function Artefactos({ proyecto, carpeta, rama, alAncho, pedidoWeb, versionProcesos, alAbrir }: {
+export default function Artefactos({ proyecto, carpeta, rama, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
   proyecto: Proyecto | null; carpeta: string; rama: string; alAncho: (px: number) => void;
-  pedidoWeb: { url: string; n: number } | null; versionProcesos: number; alAbrir: (url: string) => void;
+  pedidoWeb: { url: string; n: number } | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
   const [pestana, setPestana] = useState<Pestana>('flujo');
   // Al pedir abrir una URL (programa que arranca, «pgo abrir»), se pasa al navegador.
@@ -69,7 +69,7 @@ export default function Artefactos({ proyecto, carpeta, rama, alAncho, pedidoWeb
             {pestana === 'studio' && (vista === 'pruebas'
               ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
               : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
-            {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} />}
+            {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} alResolver={alResolver} />}
             {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}
             {/* El navegador sigue montado al cambiar de pestaña: no se pierden sus pestañas ni lo que cargaban. */}
             <div className="capa-navegador" hidden={pestana !== 'navegador'}>

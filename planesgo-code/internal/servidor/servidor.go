@@ -127,6 +127,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
 	mux.HandleFunc("GET /api/github", s.conSesion(s.githubEstado))
 	mux.HandleFunc("POST /api/github/issue", s.conSesion(s.githubCrea))
+	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))

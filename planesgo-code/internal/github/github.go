@@ -442,3 +442,20 @@ func (l *Lector) Crea(ctx context.Context, repo string, n Nueva) (int, string, e
 	l.mu.Unlock()
 	return r.Data.CreateIssue.Issue.Number, r.Data.CreateIssue.Issue.URL, nil
 }
+
+// Cuerpo devuelve la descripción de una issue (para pasársela al agente que la resuelve).
+func (l *Lector) Cuerpo(ctx context.Context, repo string, numero int) (string, error) {
+	if !nombreRepo.MatchString(repo) || numero <= 0 {
+		return "", errors.New("issue no válida")
+	}
+	ctx, cancela := context.WithTimeout(ctx, 20*time.Second)
+	defer cancela()
+	var errSalida strings.Builder
+	cmd := exec.CommandContext(ctx, "gh", "issue", "view", fmt.Sprint(numero), "-R", repo, "--json", "body", "-q", ".body")
+	cmd.Stderr = &errSalida
+	b, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("GitHub: %s", strings.TrimSpace(errSalida.String()+" "+err.Error()))
+	}
+	return strings.TrimSpace(string(b)), nil
+}

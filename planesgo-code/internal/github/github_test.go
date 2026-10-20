@@ -50,3 +50,15 @@ func TestLeeReal(t *testing.T) {
 		t.Logf("PR #%d %s→%s %s checks=%s rev=%s +%d-%d", p.Numero, p.Rama, p.Base, p.Estado, p.Checks, p.Revision, p.Mas, p.Menos)
 	}
 }
+
+func TestCuerpoReal(t *testing.T) {
+	repo := os.Getenv("PGO_PRUEBA_GITHUB")
+	if repo == "" {
+		t.Skip("sin PGO_PRUEBA_GITHUB")
+	}
+	c, err := (&Lector{}).Cuerpo(context.Background(), repo, 582)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("cuerpo (%d bytes): %.120s", len(c), c)
+}

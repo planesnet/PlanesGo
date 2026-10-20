@@ -159,15 +159,23 @@ export default function App() {
   }, [usuario, proyecto?.id]);
 
   // Nueva sesión (cambiar de rama abre una sesión nueva en esa rama).
-  const nuevaSesion = useCallback((rama?: string) => {
-    if (!usuario || !proyecto) return;
+  const nuevaSesion = useCallback((rama?: string, nombre?: string) => {
+    if (!usuario || !proyecto) return null;
     const carpeta = sesion?.carpeta || proyecto.carpetas[0] || '';
-    const s = S.nueva(proyecto.id, carpeta, rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto());
+    const s = S.nueva(proyecto.id, carpeta, rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto(), nombre);
     s.permisos = sesion?.permisos;
     s.tipo = repo?.tipo;
     setSesiones(S.guarda(usuario.login, s));
     setSesion(s);
+    return s;
   }, [usuario, proyecto, repo, sesion, agentePorDefecto]);
+
+  // Resolver una issue desde Flujo: sesión nueva (en la misma carpeta y rama) y su petición se envía sola al agente.
+  const [envioPendiente, setEnvioPendiente] = useState<{ sesion: string; texto: string } | null>(null);
+  const resuelve = useCallback((p: { nombre: string; texto: string }) => {
+    const s = nuevaSesion(sesion?.rama, p.nombre.length > 70 ? p.nombre.slice(0, 67) + '…' : p.nombre);
+    if (s) setEnvioPendiente({ sesion: s.id, texto: p.texto });
+  }, [nuevaSesion, sesion?.rama]);
 
   const borraSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
@@ -218,10 +226,10 @@ export default function App() {
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
-      <Chat detalle={ajustes.detalle} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+      <Chat detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} alAncho={cambiaAncho}
-        pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} />}
+        pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
     </div>
     </div>
   );

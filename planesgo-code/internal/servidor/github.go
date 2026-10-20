@@ -51,6 +51,23 @@ func (s *Servidor) githubCrea(w http.ResponseWriter, r *http.Request, ses *sesio
 	jsonOK(w, map[string]any{"numero": n, "url": u})
 }
 
+// githubIssue: la descripción de una issue.
+func (s *Servidor) githubIssue(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	q := r.URL.Query()
+	id, _ := strconv.Atoi(q.Get("proyecto"))
+	numero, _ := strconv.Atoi(q.Get("numero"))
+	nombre, ok := s.repoGitHub(w, r, ses, id, q.Get("carpeta"))
+	if !ok {
+		return
+	}
+	c, err := s.GitHub.Cuerpo(r.Context(), nombre, numero)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	jsonOK(w, map[string]string{"repo": nombre, "cuerpo": c})
+}
+
 // githubEstado: issues y pull requests del repositorio de la carpeta (solo GitHub, de momento).
 func (s *Servidor) githubEstado(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("proyecto"))

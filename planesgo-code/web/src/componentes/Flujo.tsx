@@ -93,13 +93,30 @@ const Etiquetas = ({ l }: { l: Etiqueta[] }) => <>{l.map(e => (
   <span key={e.nombre} className="gh-etiqueta" style={{ background: '#' + e.color, color: sobre(e.color) }}>{e.nombre}</span>
 ))}</>;
 
-export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: Proyecto; carpeta: string; rama: string; alAbrir: (url: string) => void }) {
+// Lo que se le pasa al chat para resolver una issue.
+export interface PeticionResolver { nombre: string; texto: string }
+
+export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: {
+  proyecto: Proyecto; carpeta: string; rama: string; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
+}) {
   const [e, setE] = useState<Estado | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
   const [clase, setClase] = useState<Clase>('todas');
   const [creando, setCreando] = useState(false);
   const [creada, setCreada] = useState<{ numero: number; url: string } | null>(null);
+  const [resolviendo, setResolviendo] = useState<number | null>(null);
+
+  // Resolver una issue: se lee su descripción y se pasa al chat (sesión nueva) para que el agente la resuelva.
+  const resolver = async (i: Issue) => {
+    setResolviendo(i.numero);
+    setError('');
+    try {
+      const r = await get<{ repo: string; cuerpo: string }>(`/api/github/issue?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}&numero=${i.numero}`);
+      const texto = `Resuelve la issue #${i.numero} de ${r.repo}: ${i.titulo}\n\n${r.cuerpo || '(sin descripción)'}\n\n${i.url}`;
+      alResolver({ nombre: `#${i.numero} ${i.titulo}`, texto });
+    } catch (x) { setError((x as Error).message); } finally { setResolviendo(null); }
+  };
 
   const carga = (recargar = false) => {
     if (!carpeta) return;
@@ -177,7 +194,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: 
           return (
             <details key={f.id} className="gh-fase" open={f.id !== 'cerrada'}>
               <summary><span className={'gh-marca ' + f.id} /> {f.nombre} <span className="gh-cuenta">{l.length}</span><span className="suave pequeno"> · {f.ayuda}</span></summary>
-              {l.map(i => <FilaIssue key={i.numero} i={i} alAbrir={alAbrir} />)}
+              {l.map(i => <FilaIssue key={i.numero} i={i} alAbrir={alAbrir} alResolver={i.estado === 'OPEN' ? () => resolver(i) : undefined} resolviendo={resolviendo === i.numero} />)}
             </details>
           );
         })}
@@ -196,8 +213,9 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir }: { proyecto: 
   );
 }
 
-function FilaIssue({ i, alAbrir }: { i: Issue; alAbrir: (u: string) => void }) {
+function FilaIssue({ i, alAbrir, alResolver, resolviendo }: { i: Issue; alAbrir: (u: string) => void; alResolver?: () => void; resolviendo: boolean }) {
   return (
+    <div className="gh-fila-caja">
     <button className="gh-fila" onClick={() => alAbrir(i.url)} title={i.titulo}>
       {i.estado === 'OPEN' ? <Oct n="issue" color={VERDE} /> : <Oct n="issue-cerrada" color={MORADO} />}
       <span className="gh-cuerpo">
@@ -211,6 +229,12 @@ function FilaIssue({ i, alAbrir }: { i: Issue; alAbrir: (u: string) => void }) {
       {i.asignados.length > 0 && <span className="gh-asignados">{i.asignados.map(a => <span key={a} className="gh-avatar" title={a}>{a.slice(0, 2).toUpperCase()}</span>)}</span>}
       {i.comentarios > 0 && <span className="gh-coment" title={`${i.comentarios} comentarios`}><Oct n="comentario" t={13} /> {i.comentarios}</span>}
     </button>
+    {alResolver && (
+      <button className="gh-resolver" onClick={alResolver} disabled={resolviendo} title="Resolver: abre una sesión nueva y se la pide al agente" aria-label={'Resolver la issue #' + i.numero}>
+        <Icono n="ejecutar" t={13} /> {resolviendo ? '…' : 'Resolver'}
+      </button>
+    )}
+    </div>
   );
 }
 

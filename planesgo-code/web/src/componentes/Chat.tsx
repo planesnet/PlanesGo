@@ -8,6 +8,8 @@ import { Agente, Hosting, nombreHosting } from './Marca';
 
 interface Props {
   detalle: Detalle;
+  // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
+  envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
   panelAbierto: boolean; alPanel: () => void;
   alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void;
@@ -19,7 +21,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ detalle, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -54,18 +56,27 @@ export default function Chat({ detalle, proyecto, sesion, repo, proveedores, pan
     if (!l || l.scrollHeight - l.scrollTop - l.clientHeight < 120) fin.current?.scrollIntoView({ block: 'end' });
   }, [mensajes]);
 
-  async function envia() {
-    const t = texto.trim();
+  // Envío automático pedido desde fuera, cuando su sesión ya es la abierta y no hay nada en curso.
+  useEffect(() => {
+    if (!envioPendiente || !sesion || sesion.id !== envioPendiente.sesion || enCurso || !prov?.disponible) return;
+    alEnviado();
+    envia(envioPendiente.texto);
+  }, [envioPendiente, sesion?.id, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function envia(forzado?: string) {
+    const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !prov || enCurso) return;
     const id = sesion.id;
     const pon = (m: Mensaje[], final = false) => {
       if (idActual.current === id) setMensajes(m);
       if (final) guardaConversacion(id, m);
     };
-    const base: Mensaje[] = [...mensajes.filter(m => !m.error), { rol: 'user', texto: t }];
+    // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
+    const previos = forzado !== undefined ? conversacion(id) : mensajes;
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: t }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
-    setTexto('');
+    if (forzado === undefined) setTexto('');
     const ac = new AbortController();
     setEnCurso(ac);
     let sesionAgente = sesion.sesionAgente;
@@ -192,7 +203,7 @@ export default function Chat({ detalle, proyecto, sesion, repo, proveedores, pan
                 placeholder={prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'} disabled={!prov?.disponible} />
               {enCurso
                 ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
-                : <button className="redondo primario" onClick={envia} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
+                : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
             <div className="pie-redactor">
