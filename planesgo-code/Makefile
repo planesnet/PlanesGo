@@ -1,10 +1,10 @@
 # Planes Go Code: compilar, probar y empaquetar los componentes.
-VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION    ?= $(shell cat VERSION)
 LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio instalar apparmor dist clean
+.PHONY: all test vet web pgocode studio-tv escritorio paquete instalar apparmor dist clean
 
 all: vet test web pgocode studio-tv
 
@@ -29,27 +29,31 @@ pgocode:
 escritorio: web pgocode
 	cd electron && npm ci --no-fund --no-audit && GTK_IM_MODULE=gtk-im-context-simple XMODIFIERS=@im=none npm start
 
-# Comando «pgocode» (abre la app de escritorio) en ~/.local/bin y entrada en el menú de aplicaciones
-BIN_USUARIO ?= $(HOME)/.local/bin
-instalar: web pgocode
-	cd electron && npm ci --no-fund --no-audit
-	mkdir -p $(BIN_USUARIO) $(HOME)/.local/share/applications
-	sed 's#@DIR@#$(CURDIR)#' pgocode.sh > $(BIN_USUARIO)/pgocode && chmod 755 $(BIN_USUARIO)/pgocode
-	for t in 16 32 48 64 128 256 512; do mkdir -p $(HOME)/.local/share/icons/hicolor/$${t}x$${t}/apps; \
-		cp electron/icono/pgocode-$$t.png $(HOME)/.local/share/icons/hicolor/$${t}x$${t}/apps/pgocode.png; done
-	mkdir -p $(HOME)/.local/share/icons/hicolor/scalable/apps && cp electron/icono/pgocode.svg $(HOME)/.local/share/icons/hicolor/scalable/apps/pgocode.svg
-	sed 's#@BIN@#$(BIN_USUARIO)/pgocode#' pgocode.desktop > $(HOME)/.local/share/applications/pgocode.desktop
-	-gtk-update-icon-cache -q $(HOME)/.local/share/icons/hicolor 2>/dev/null; -update-desktop-database -q $(HOME)/.local/share/applications 2>/dev/null
-	@echo "Instalado: escribe «pgocode» o búscalo en el menú de aplicaciones."
+# Paquete de la app para la autoactualización (lo publica PlanesGo en /install/pgocode/):
+#   dist/pgocode-linux-amd64.tar.gz  (backend + ventana Electron + iconos + VERSION) y dist/version.json.
+# Reproducible (mismo código, misma huella): así solo hay actualización cuando cambia algo de verdad.
+ELECTRON_VER := $(shell sed -n 's/.*"electron": *"\([0-9.]*\)".*/\1/p' electron/package.json)
+paquete: web
+	rm -rf $(DIST)/paquete && mkdir -p $(DIST)/paquete/icono
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o $(DIST)/paquete/pgocode-backend ./cmd/pgocode
+	cp electron/main.js electron/preload.js electron/package.json VERSION $(DIST)/paquete/
+	cp electron/icono/pgocode*.png electron/icono/pgocode*.svg $(DIST)/paquete/icono/
+	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C $(DIST)/paquete -cf - . | gzip -9n > $(DIST)/pgocode-linux-amd64.tar.gz
+	@sha=$$(sha256sum $(DIST)/pgocode-linux-amd64.tar.gz | cut -d' ' -f1); bytes=$$(stat -c %s $(DIST)/pgocode-linux-amd64.tar.gz); \
+	printf '{"version": "%s", "sha256": "%s", "bytes": %s, "archivo": "pgocode-linux-amd64.tar.gz", "electron": "%s"}\n' \
+		"$(VERSION)" "$$sha" "$$bytes" "$(ELECTRON_VER)" > $(DIST)/version.json; cat $(DIST)/version.json
 
-# Ubuntu 24.04+: perfil de AppArmor para que Electron pueda usar su sandbox al abrirse desde el menú.
-# Genera dist/apparmor-pgocode y muestra los dos comandos (con sudo) para instalarlo.
+# Instala en ~/.local/share/pgocode lo que hay en este repositorio (versión de desarrollo: sin autoactualización).
+# Para instalar la versión publicada (con autoactualización):
+#   curl -fsSL https://planesgo.autopyme.com/install/pgocode/instalar.sh | sh
+instalar: paquete
+	cd electron && npm ci --no-fund --no-audit
+	PGO_LOCAL=$(CURDIR)/$(DIST) PGO_ELECTRON_LOCAL=$(CURDIR)/electron/node_modules/electron/dist PGO_DESARROLLO=1 sh linux/instalar.sh
+
+# Ubuntu 24.04+: perfil de AppArmor para que Electron (instalado en ~/.local/share/pgocode) pueda usar su sandbox.
 apparmor:
-	@mkdir -p $(DIST)
-	@sed 's#@ELECTRON@#$(CURDIR)/electron/node_modules/electron/dist/electron#' linux/apparmor-pgocode > $(DIST)/apparmor-pgocode
 	@echo "Instálalo con:"
-	@echo "  sudo cp $(CURDIR)/$(DIST)/apparmor-pgocode /etc/apparmor.d/pgocode"
-	@echo "  sudo apparmor_parser -r /etc/apparmor.d/pgocode"
+	@echo "  sudo cp $(CURDIR)/linux/apparmor-pgocode /etc/apparmor.d/pgocode && sudo apparmor_parser -r /etc/apparmor.d/pgocode"
 
 # Binario para este equipo, en dist/studio-tv
 studio-tv:

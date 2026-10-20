@@ -202,3 +202,23 @@ func (c *Cliente) Proyectos(ctx context.Context, sesion string, id int) ([]Proye
 	}
 	return l, nil
 }
+
+// Avatar devuelve la imagen del usuario (128 px) con su propia sesión.
+func (c *Cliente) Avatar(ctx context.Context, sesion string, uid int) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/web/image/res.users/%d/image_128", c.URL, uid), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.AddCookie(&http.Cookie{Name: "session_id", Value: sesion})
+	r, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer r.Body.Close()
+	tipo := r.Header.Get("Content-Type")
+	if r.StatusCode != http.StatusOK || !strings.HasPrefix(tipo, "image/") {
+		return nil, "", fmt.Errorf("sin avatar (%s)", r.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	return b, tipo, err
+}

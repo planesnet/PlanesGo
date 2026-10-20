@@ -19,6 +19,7 @@ const trazos: Record<string, JSX.Element> = {
   tv: <><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M8 21h8M12 17v4" /></>,
   web: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
   cerrar: <path d="M6 6l12 12M18 6L6 18" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
 };
 
 export default function Icono({ n, t = 18 }: { n: keyof typeof trazos; t?: number }) {

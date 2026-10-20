@@ -4,6 +4,7 @@ import Acceso from './componentes/Acceso';
 import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
+import Barra from './componentes/Barra';
 
 // El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
 // tras F5, cerrar la app o pulsar «Salir», se abre directamente.
@@ -50,10 +51,13 @@ export default function App() {
   if (!usuario) return <Acceso aviso={aviso} alEntrar={u => { setAviso(''); setUsuario(u); }} />;
 
   return (
+    <div className="aplicacion">
+    <Barra usuario={usuario} alSalir={salir} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}>
-      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige} alSalir={salir} />
+      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige} />
       <Chat proyecto={proyecto} panelAbierto={panel} alPanel={() => setPanel(p => !p)} />
       {panel && <Artefactos proyecto={proyecto} />}
+    </div>
     </div>
   );
 }

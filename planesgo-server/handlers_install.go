@@ -31,6 +31,7 @@ func setupInstallRoutes(mux *http.ServeMux, state *AppState) {
 		serveTarGz(w, planesgoBundleFS, ".", "planesgo.tar.gz")
 	})
 	mux.HandleFunc("/install/psf.tar.gz", state.handleInstallPSF)
+	mux.HandleFunc("/install/pgocode/", handleInstallPgocode)
 }
 
 func handleInstallScript(w http.ResponseWriter, r *http.Request) {
@@ -106,4 +107,28 @@ func serveTarGz(w http.ResponseWriter, fsys embed.FS, root, name string) {
 	})
 	tw.Close()
 	gz.Close()
+}
+
+// Planes Go Code (planesgo-code): paquete para la instalación y la autoactualización. Lo genera el Dockerfile
+// en /app/pgocode (version.json, pgocode-linux-amd64.tar.gz, instalar.sh, apparmor-pgocode). Público: el
+// paquete no lleva secretos y la app pide usuario de Odoo para todo.
+var archivosPgocode = map[string]string{
+	"version.json":               "application/json",
+	"pgocode-linux-amd64.tar.gz": "application/gzip",
+	"instalar.sh":                "text/x-shellscript; charset=utf-8",
+	"apparmor-pgocode":           "text/plain; charset=utf-8",
+}
+
+func handleInstallPgocode(w http.ResponseWriter, r *http.Request) {
+	nombre := strings.TrimPrefix(r.URL.Path, "/install/pgocode/")
+	tipo, ok := archivosPgocode[nombre]
+	if !ok || r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", tipo)
+	if nombre == "version.json" {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	http.ServeFile(w, r, path.Join("pgocode", nombre))
 }

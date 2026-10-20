@@ -64,8 +64,9 @@ textarea { resize: none; }
 .clave input { padding-right: 38px; }
 .clave .ojo { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 4px 6px; color: var(--suave); display: grid; place-items: center; }
 
-/* Estructura */
-.arnes { display: grid; grid-template-columns: 248px minmax(0, 1fr) minmax(360px, 42%); height: 100%; }
+/* Estructura: barra superior + tres columnas */
+.aplicacion { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+.arnes { display: grid; grid-template-columns: 248px minmax(0, 1fr) minmax(360px, 42%); min-height: 0; }
 .arnes.sin-panel { grid-template-columns: 248px minmax(0, 1fr); }
 @media (max-width: 900px) {
   .arnes, .arnes.sin-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; min-height: 100%; }
@@ -73,7 +74,7 @@ textarea { resize: none; }
 }
 
 /* Proyectos */
-.proyectos { background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; min-height: 0; }
+.proyectos { background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
 .marca { font-weight: 700; font-size: 14px; padding: 14px 14px 10px; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
 .busca input { flex: 1; background: transparent; }
@@ -164,3 +165,24 @@ textarea { resize: none; }
 .reproductor { width: 100%; max-height: 50vh; background: #000; border-radius: 6px; margin: 4px 0; }
 .marcas { list-style: none; padding: 0; }
 .marcas button { text-align: left; color: var(--texto); }
+
+/* Barra superior y menú del usuario */
+.barra { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--linea); background: var(--panel); }
+.marca-barra { font-size: 13px; font-weight: 600; color: var(--suave); }
+.marca-barra b { color: var(--acento); }
+.chip { font-size: 11.5px; border-radius: 999px; padding: 2px 10px; background: var(--hover); color: var(--suave); white-space: nowrap; }
+.chip.pendiente, .chip.aplicando { background: color-mix(in srgb, var(--acento) 14%, transparent); color: var(--acento); }
+.chip.manual { background: color-mix(in srgb, var(--error) 12%, transparent); color: var(--error); }
+.menu-usuario { position: relative; }
+.boton-avatar { padding: 2px; border-radius: 50%; display: grid; place-items: center; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; flex: none; }
+.avatar.iniciales { background: var(--acento); color: var(--acento-texto); font-size: 11px; font-weight: 700; }
+.panel-usuario { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 270px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 6px; display: grid; gap: 1px; }
+.panel-usuario > button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 7px 8px; color: var(--texto); }
+.panel-usuario > button svg { color: var(--suave); }
+.panel-usuario .quien { display: flex; align-items: center; gap: 10px; padding: 8px; }
+.panel-usuario .quien .avatar { width: 34px; height: 34px; font-size: 13px; }
+.panel-usuario .quien > div { display: grid; min-width: 0; }
+.panel-usuario .separador { height: 1px; background: var(--linea); margin: 4px 0; }
+.acerca { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px 10px; margin: 0 2px 4px; background: var(--panel); border-radius: 8px; }
+.acerca > div { display: grid; gap: 1px; min-width: 0; }

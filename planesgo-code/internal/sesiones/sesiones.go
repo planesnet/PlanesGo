@@ -7,6 +7,8 @@ package sesiones
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"sync"
 	"time"
 )
@@ -131,4 +133,81 @@ func (a *Almacen) purgaLocked() {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// Persistencia solo para el reinicio de una actualización: se guardan las sesiones abiertas (con la sesión de
+// Odoo y las conexiones de Studio TV) en un fichero 0600, y al volver a arrancar se cargan y se borra el
+// fichero. Así la app se actualiza y vuelve a abrirse sin pedir la contraseña.
+
+type conexionGuardada struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
+	Local bool   `json:"local"`
+}
+
+type sesionGuardada struct {
+	Token      string                   `json:"token"`
+	UID        int                      `json:"uid"`
+	Nombre     string                   `json:"nombre"`
+	Login      string                   `json:"login"`
+	OdooSesion string                   `json:"odoo_sesion"`
+	UltimoUso  time.Time                `json:"ultimo_uso"`
+	Studio     map[int]conexionGuardada `json:"studio,omitempty"`
+}
+
+// Guarda escribe las sesiones vivas en fichero (0600).
+func (a *Almacen) Guarda(fichero string) error {
+	a.mu.Lock()
+	var l []sesionGuardada
+	for _, s := range a.sesiones {
+		s.mu.Lock()
+		g := sesionGuardada{Token: s.Token, UID: s.UID, Nombre: s.Nombre, Login: s.Login, OdooSesion: s.OdooSesion,
+			UltimoUso: s.ultimoUso, Studio: map[int]conexionGuardada{}}
+		for p, c := range s.studio {
+			g.Studio[p] = conexionGuardada{URL: c.URL, Token: c.Token, Local: c.Local}
+		}
+		s.mu.Unlock()
+		l = append(l, g)
+	}
+	a.mu.Unlock()
+	b, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	tmp := fichero + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, fichero)
+}
+
+// Carga recupera las sesiones guardadas si el fichero es reciente (maxEdad) y lo borra siempre.
+func (a *Almacen) Carga(fichero string, maxEdad time.Duration) (int, error) {
+	st, err := os.Stat(fichero)
+	if err != nil {
+		return 0, nil
+	}
+	defer os.Remove(fichero)
+	if time.Since(st.ModTime()) > maxEdad {
+		return 0, nil
+	}
+	b, err := os.ReadFile(fichero)
+	if err != nil {
+		return 0, err
+	}
+	var l []sesionGuardada
+	if err := json.Unmarshal(b, &l); err != nil {
+		return 0, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, g := range l {
+		s := &Sesion{Token: g.Token, UID: g.UID, Nombre: g.Nombre, Login: g.Login, OdooSesion: g.OdooSesion,
+			ultimoUso: g.UltimoUso, proyectos: map[int]time.Time{}, studio: map[int]ConexionStudio{}}
+		for p, c := range g.Studio {
+			s.studio[p] = ConexionStudio{URL: c.URL, Token: c.Token, Local: c.Local}
+		}
+		a.sesiones[s.Token] = s
+	}
+	return len(l), nil
 }

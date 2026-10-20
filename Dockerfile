@@ -1,6 +1,35 @@
 # Monorepo PlanesGo: el servidor está en planesgo-server/. Este Dockerfile sigue en la raíz para que el
 # despliegue automático no cambie (contexto de compilación = raíz del repositorio).
 
+# --- Planes Go Code (planesgo-code): interfaz web ---
+FROM node:20-alpine AS pgocode-web
+WORKDIR /src/web
+COPY planesgo-code/web/package.json planesgo-code/web/package-lock.json ./
+RUN npm ci --no-fund --no-audit
+COPY planesgo-code/web/ ./
+RUN npm run build
+
+# --- Planes Go Code: paquete para la instalación y la autoactualización (/install/pgocode/) ---
+# Mismo contenido que «make paquete» (planesgo-code/Makefile): backend + ventana Electron + iconos + VERSION,
+# en un tar.gz reproducible, y version.json con su huella sha256.
+FROM golang:1.24-alpine AS pgocode
+RUN apk add --no-cache tar gzip
+WORKDIR /src/planesgo-code
+COPY planesgo-code/go.mod planesgo-code/go.sum ./
+COPY planesgo-code/studio-tv ./studio-tv
+RUN go mod download
+COPY planesgo-code/ ./
+COPY --from=pgocode-web /src/web/dist ./web/dist
+RUN VERSION=$(tr -d '\r\n' < VERSION) && ELECTRON=$(sed -n 's/.*"electron": *"\([0-9.]*\)".*/\1/p' electron/package.json) && \
+    mkdir -p /out/paquete/icono /out/publicar && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${VERSION}" -o /out/paquete/pgocode-backend ./cmd/pgocode && \
+    cp electron/main.js electron/preload.js electron/package.json VERSION /out/paquete/ && \
+    cp electron/icono/pgocode*.png electron/icono/pgocode*.svg /out/paquete/icono/ && \
+    tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C /out/paquete -cf - . | gzip -9n > /out/publicar/pgocode-linux-amd64.tar.gz && \
+    SHA=$(sha256sum /out/publicar/pgocode-linux-amd64.tar.gz | cut -d' ' -f1) && BYTES=$(stat -c %s /out/publicar/pgocode-linux-amd64.tar.gz) && \
+    printf '{"version": "%s", "sha256": "%s", "bytes": %s, "archivo": "pgocode-linux-amd64.tar.gz", "electron": "%s"}\n' "$VERSION" "$SHA" "$BYTES" "$ELECTRON" > /out/publicar/version.json && \
+    cp linux/instalar.sh linux/apparmor-pgocode /out/publicar/ && cat /out/publicar/version.json
+
 # --- Etapa 1: Compilación (Builder) ---
 FROM golang:1.22-alpine AS builder
 
@@ -39,6 +68,7 @@ COPY --from=builder /app/planesgo /app/planesgo
 COPY --from=builder /app/VERSION /app/VERSION
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
+COPY --from=pgocode /out/publicar/ /app/pgocode/
 COPY planesgo-server/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 

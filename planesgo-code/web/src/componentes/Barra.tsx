@@ -1,0 +1,89 @@
+import { useEffect, useRef, useState } from 'react';
+import { get, post, type Usuario } from '../api';
+import Icono from './Icono';
+
+interface EstadoAct { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean }
+
+const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
+
+// Barra superior: marca, aviso de actualización pendiente y menú del usuario (avatar).
+export default function Barra({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) {
+  const [act, setAct] = useState<EstadoAct | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  const [acerca, setAcerca] = useState(false);
+  const [sinFoto, setSinFoto] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+
+  const carga = () => get<EstadoAct>('/api/actualizacion').then(setAct).catch(() => {});
+  useEffect(() => {
+    carga();
+    const id = setInterval(carga, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // El panel se cierra al pulsar fuera o con Escape.
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => { if (!menu.current?.contains(e.target as Node)) setAbierto(false); };
+    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') setAbierto(false); };
+    document.addEventListener('mousedown', fuera);
+    document.addEventListener('keydown', tecla);
+    return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', tecla); };
+  }, [abierto]);
+
+  const buscar = async () => { await post('/api/actualizacion/buscar', {}).catch(() => {}); setTimeout(carga, 3000); };
+
+  const etiqueta = act && ({
+    pendiente: { texto: `Actualización pendiente · v${act.nueva}`, titulo: act.ocupado ? 'Se instalará cuando termine lo que está en curso' : 'Se instalará en unos segundos, en cuanto la app esté parada' },
+    descargando: { texto: `Descargando v${act.nueva}…`, titulo: 'Descargando la nueva versión' },
+    aplicando: { texto: 'Actualizando…', titulo: 'Se cierra y se vuelve a abrir con la versión nueva' },
+    manual: { texto: `v${act.nueva} · reinstalar`, titulo: act.error || '' },
+  } as Record<string, { texto: string; titulo: string }>)[act.estado];
+
+  const foto = sinFoto
+    ? <span className="avatar iniciales" aria-hidden="true">{iniciales(usuario.nombre)}</span>
+    : <img className="avatar" src="/api/avatar" alt="" onError={() => setSinFoto(true)} />;
+
+  return (
+    <header className="barra">
+      <span className="marca-barra">Planes <b>Go</b> Code</span>
+      <span className="hueco" />
+      {etiqueta && <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>}
+      <div className="menu-usuario" ref={menu}>
+        <button className="boton-avatar" onClick={() => setAbierto(a => !a)} aria-haspopup="menu" aria-expanded={abierto} title={usuario.nombre}>
+          {foto}
+        </button>
+        {abierto && (
+          <div className="panel-usuario" role="menu">
+            <div className="quien">
+              {foto}
+              <div className="recorta"><b className="recorta">{usuario.nombre}</b><span className="suave pequeno recorta">{usuario.login}</span></div>
+            </div>
+            <button role="menuitem" onClick={buscar}><Icono n="recargar" t={16} /> Buscar actualizaciones</button>
+            <button role="menuitem" onClick={() => setAcerca(a => !a)} aria-expanded={acerca}><Icono n="info" t={16} /> Acerca de Planes Go Code</button>
+            {acerca && (
+              <div className="acerca">
+                <img src="/logo.svg" alt="" width="40" height="40" />
+                <div>
+                  <b>Planes Go Code</b>
+                  <div className="suave pequeno">Versión {act?.version || usuario.version || '—'}</div>
+                  <div className="suave pequeno">
+                    {act?.estado === 'al-dia' && 'Al día'}
+                    {act?.estado === 'desactivada' && 'Sin autoactualización (desarrollo)'}
+                    {act?.estado === 'pendiente' && `v${act.nueva} lista para instalar`}
+                    {act?.estado === 'descargando' && `Descargando v${act.nueva}`}
+                    {act?.estado === 'manual' && act.error}
+                    {act?.estado === 'error' && 'No se pudo actualizar: ' + act.error}
+                  </div>
+                  {usuario.odoo && <div className="suave pequeno recorta">Odoo: {usuario.odoo.replace(/^https?:\/\//, '')}</div>}
+                </div>
+              </div>
+            )}
+            <div className="separador" />
+            <button role="menuitem" onClick={alSalir}><Icono n="salir" t={16} /> Salir</button>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}

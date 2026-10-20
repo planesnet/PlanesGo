@@ -20,9 +20,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proyectos"
@@ -110,6 +112,7 @@ func main() {
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")
 	raices := flag.String("raices", entorno("PGO_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.planesgo.json), separadas por comas")
 	studioAddr := flag.String("studio", entorno("PGO_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
+	urlAct := flag.String("actualizaciones", entorno("PGO_ACTUALIZACIONES", "https://planesgo.autopyme.com/install/pgocode"), "dónde se publican las actualizaciones (vacío: sin autoactualización)")
 	dirGrab := flag.String("grabaciones", entorno("PGO_GRABACIONES", "~/.local/share/pgocode/grabaciones"), "carpeta de las grabaciones del Studio TV local")
 	navegador := flag.Bool("navegador", os.Getenv("PGO_NAVEGADOR") == "1", "permite abrir Planes Go Code también en el navegador (por defecto, solo desde la app de escritorio)")
 	verVersion := flag.Bool("version", false, "muestra la versión y sale")
@@ -181,6 +184,43 @@ func main() {
 	// La app de escritorio pasa su secreto por entorno (no por argumento: se vería en la lista de procesos).
 	s.TokenEscritorio = os.Getenv("PGO_TOKEN_ESCRITORIO")
 	s.PermitirNavegador = *navegador
+
+	// Autoactualización: la app instalada (paquete) vive junto al ejecutable; las versiones nuevas se preparan en
+	// ~/.local/share/pgocode/actualizacion y se aplican cuando no hay nada en curso.
+	datos := filepath.Dir(*dirGrab) // ~/.local/share/pgocode
+	ficheroSesiones := filepath.Join(datos, "sesiones-reinicio.json")
+	if n, err := s.Sesiones.Carga(ficheroSesiones, 5*time.Minute); err != nil {
+		log.Printf("sesiones tras la actualización: %v", err)
+	} else if n > 0 {
+		log.Printf("sesiones recuperadas tras la actualización: %d", n)
+	}
+	exe, _ := os.Executable()
+	if v := s.Version; v == "dev" || v == "" {
+		if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "VERSION")); err == nil {
+			s.Version = strings.TrimSpace(string(b))
+		}
+	}
+	act := actualizacion.Nuevo(*urlAct, filepath.Dir(exe), filepath.Join(datos, "actualizacion"), s.Version)
+	act.Electron = os.Getenv("PGO_ELECTRON")
+	act.Ocupado = s.Ocupado
+	if estudio != nil {
+		s.EstudioOcupado = estudio.Ocupado
+	}
+	var salirParaActualizar atomic.Bool
+	act.AlAplicar = func() {
+		log.Printf("aplicando la actualización %s: se guarda la sesión y se reinicia", act.Estado().Nueva)
+		if err := s.Sesiones.Guarda(ficheroSesiones); err != nil {
+			log.Printf("no se pudo guardar la sesión: %v", err)
+		}
+		salirParaActualizar.Store(true)
+		stop() // cierre limpio; al terminar se sale con actualizacion.SalidaActualizar
+	}
+	s.Actualizador = act
+	if e := act.Estado(); e.Estado == "desactivada" {
+		log.Printf("autoactualización desactivada: %s", e.Error)
+	} else {
+		go act.Funciona(ctx)
+	}
 	if s.TokenEscritorio == "" && !s.PermitirNavegador {
 		log.Print("aviso: sin PGO_TOKEN_ESCRITORIO ni -navegador nadie podrá usar la interfaz; ábrelo con la app de escritorio")
 	}
@@ -212,4 +252,7 @@ func main() {
 		log.Fatal(err)
 	}
 	<-apagado // espera a que los agentes y conexiones hayan terminado
+	if salirParaActualizar.Load() {
+		os.Exit(actualizacion.SalidaActualizar) // la app de escritorio cambia los ficheros y se vuelve a abrir
+	}
 }

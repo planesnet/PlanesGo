@@ -33,10 +33,40 @@ function binario() {
   const nombre = process.platform === 'win32' ? 'pgocode-backend.exe' : 'pgocode-backend';
   const candidatos = [
     process.env.PGO_BACKEND,
+    path.join(__dirname, nombre),                          // app instalada (paquete): junto a main.js
     path.join(process.resourcesPath || '', nombre),        // app empaquetada
     path.join(__dirname, '..', 'dist', nombre),            // desarrollo (make)
   ].filter(Boolean);
   return candidatos.find(p => fs.existsSync(p));
+}
+
+// Autoactualización: el backend prepara la versión nueva en ~/.local/share/pgocode/actualizacion/nuevo y,
+// cuando la app está parada, sale con este código. Aquí se cambia la carpeta de la app por la nueva y se
+// vuelve a abrir (la sesión la recupera el backend). Si algo falla, se vuelve a la versión anterior.
+const SALIDA_ACTUALIZAR = 75;
+function aplicaActualizacion() {
+  const nuevo = path.join(app.getPath('home'), '.local', 'share', 'pgocode', 'actualizacion', 'nuevo');
+  const actual = __dirname;
+  const anterior = actual + '.anterior';
+  if (!fs.existsSync(path.join(actual, 'paquete.sha256')) || !fs.existsSync(path.join(nuevo, 'pgocode-backend'))) {
+    console.error('[pgocode] no hay actualización que aplicar (o la app no está instalada desde un paquete)');
+    return false;
+  }
+  try {
+    fs.rmSync(anterior, { recursive: true, force: true });
+    fs.renameSync(actual, anterior);
+    try {
+      fs.renameSync(nuevo, actual);
+    } catch (e) {
+      fs.renameSync(anterior, actual); // vuelta atrás
+      throw e;
+    }
+    console.error('[pgocode] actualización aplicada; se vuelve a abrir');
+    return true;
+  } catch (e) {
+    console.error('[pgocode] no se pudo aplicar la actualización:', e.message);
+    return false;
+  }
 }
 
 function vivo() {
@@ -52,8 +82,18 @@ async function arrancaBackend() {
   if (await vivo()) throw new Error('Planes Go Code ya está abierto (o hay otro programa en ' + ADDR + '). Ciérralo antes de abrirlo de nuevo.');
   const bin = binario();
   if (!bin) throw new Error('No encuentro el backend pgocode (compílalo con «make» o indica PGO_BACKEND)');
-  backend = spawn(bin, ['-addr', ADDR], { stdio: 'inherit', env: { ...process.env, PGO_TOKEN_ESCRITORIO: TOKEN_ESCRITORIO } });
-  backend.on('exit', c => { backend = null; if (c) console.error('pgocode terminó con código', c); });
+  backend = spawn(bin, ['-addr', ADDR], { stdio: 'inherit',
+    env: { ...process.env, PGO_TOKEN_ESCRITORIO: TOKEN_ESCRITORIO, PGO_ELECTRON: process.versions.electron } });
+  backend.on('exit', c => {
+    backend = null;
+    if (c === SALIDA_ACTUALIZAR) {
+      aplicaActualizacion();
+      app.relaunch(); // con la versión nueva (o con la misma, si no se pudo aplicar)
+      app.exit(0);
+      return;
+    }
+    if (c) console.error('pgocode terminó con código', c);
+  });
   for (let i = 0; i < 100; i++) {
     if (await vivo()) return;
     await new Promise(r => setTimeout(r, 100));

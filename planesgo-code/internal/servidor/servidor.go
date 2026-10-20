@@ -25,8 +25,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proyectos"
@@ -63,6 +65,11 @@ type Servidor struct {
 	// TokenEscritorio: secreto que genera la app de escritorio (Electron) y guarda como cookie en su ventana.
 	// Si está puesto, toda petición tiene que traerlo: un navegador normal no puede usar Planes Go Code.
 	TokenEscritorio string
+	// Actualizador: autoactualización desde PlanesGo (nil: sin actualizaciones).
+	Actualizador *actualizacion.Actualizador
+	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
+	EstudioOcupado func() bool
+	activos        atomic.Int64 // chats y agentes en curso
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
 	// no se atiende ninguna petición.
 	PermitirNavegador bool
@@ -79,6 +86,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.conSesion(s.logout))
 	mux.HandleFunc("GET /api/yo", s.conSesion(s.yo))
+	mux.HandleFunc("GET /api/avatar", s.conSesion(s.avatar))
+	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
+	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
@@ -303,6 +313,40 @@ func (s *Servidor) logout(w http.ResponseWriter, r *http.Request, ses *sesiones.
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
+// Ocupado dice si hay algo en curso que una actualización interrumpiría.
+func (s *Servidor) Ocupado() bool {
+	return s.activos.Load() > 0 || (s.EstudioOcupado != nil && s.EstudioOcupado())
+}
+
+func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if s.Actualizador == nil {
+		jsonOK(w, actualizacion.Estado{Version: s.Version, Estado: "desactivada"})
+		return
+	}
+	e := s.Actualizador.Estado()
+	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
+		"revisado": e.Revisado, "ocupado": s.Ocupado()})
+}
+
+func (s *Servidor) buscaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if s.Actualizador != nil {
+		s.Actualizador.BuscarYa()
+	}
+	jsonOK(w, map[string]bool{"ok": true})
+}
+
+// avatar sirve la foto del usuario de Odoo (con su sesión); sin foto, 404 y la interfaz pone las iniciales.
+func (s *Servidor) avatar(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	b, tipo, err := s.Odoo.Avatar(r.Context(), ses.OdooSesion, ses.UID)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "sin avatar")
+		return
+	}
+	w.Header().Set("Content-Type", tipo)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Write(b)
+}
+
 func (s *Servidor) yo(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	jsonOK(w, map[string]any{"nombre": ses.Nombre, "login": ses.Login, "odoo": s.Odoo.URL, "version": s.Version})
 }
@@ -340,6 +384,8 @@ func (s *Servidor) proveedores(w http.ResponseWriter, r *http.Request, ses *sesi
 
 // chat responde en streaming (SSE): eventos {texto}, {sesion_agente}, {error} y {fin}.
 func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	s.activos.Add(1) // mientras haya un chat o un agente en curso no se actualiza
+	defer s.activos.Add(-1)
 	var p struct {
 		Proyecto     int           `json:"proyecto"`
 		Proveedor    string        `json:"proveedor"`

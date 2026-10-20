@@ -202,6 +202,18 @@ func (s *Studio) paraGrabacion(nombre string) (*Grabacion, error) {
 	return &r.g, nil
 }
 
+// Ocupado dice si el estudio está en uso: algún canal en directo o grabándose.
+func (s *Studio) Ocupado() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.canales {
+		if c.rec != nil || s.ahora().Sub(c.ultima) < enDirecto {
+			return true
+		}
+	}
+	return false
+}
+
 // Cierra detiene todas las grabaciones en curso (al apagar el estudio), para que los vídeos queden bien.
 func (s *Studio) Cierra() {
 	s.mu.Lock()

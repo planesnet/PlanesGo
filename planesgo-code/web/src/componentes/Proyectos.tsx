@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { get, type Proyecto, type Usuario } from '../api';
 import Icono from './Icono';
 
-interface Props { usuario: Usuario; actual: Proyecto | null; inicial: number; alElegir: (p: Proyecto) => void; alSalir: () => void }
+interface Props { usuario: Usuario; actual: Proyecto | null; inicial: number; alElegir: (p: Proyecto) => void }
 
 // Proyectos recientes de cada usuario (los últimos que ha abierto, el más reciente primero).
 const MAX_RECIENTES = 10;
@@ -18,7 +18,7 @@ function guardaReciente(login: string, id: number): number[] {
 
 const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-export default function Proyectos({ usuario, actual, inicial, alElegir, alSalir }: Props) {
+export default function Proyectos({ usuario, actual, inicial, alElegir }: Props) {
   const [lista, setLista] = useState<Proyecto[] | null>(null);
   const [error, setError] = useState('');
   const [filtro, setFiltro] = useState('');
@@ -57,7 +57,6 @@ export default function Proyectos({ usuario, actual, inicial, alElegir, alSalir 
 
   return (
     <nav className="proyectos" aria-label="Proyectos">
-      <div className="marca">Planes <span>Go</span> Code</div>
       <div className="busca">
         <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
         <button className="icono" title="Volver a cargar de Odoo" aria-label="Volver a cargar de Odoo" onClick={() => carga(true)}><Icono n="recargar" t={16} /></button>
@@ -76,10 +75,6 @@ export default function Proyectos({ usuario, actual, inicial, alElegir, alSalir 
             </span>
           </button>
         ))}
-      </div>
-      <div className="usuario">
-        <span title={usuario.login}>{usuario.nombre}</span>
-        <button className="icono" onClick={alSalir} title="Salir" aria-label="Salir"><Icono n="salir" t={16} /></button>
       </div>
     </nav>
   );
