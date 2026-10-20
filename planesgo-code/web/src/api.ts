@@ -16,7 +16,7 @@ export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida'
 export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo }
 
 export interface Candidato { nombre: string; ruta: string; puntuacion: number }
-export interface Eleccion { candidatos: Candidato[]; elegida?: Candidato; umbral: number; ms: number }
+export interface Eleccion { candidatos: Candidato[]; elegida?: Candidato; umbral: number; ms: number; motor: string }
 
 export class ErrorAPI extends Error {
   constructor(public estado: number, mensaje: string) { super(mensaje); }

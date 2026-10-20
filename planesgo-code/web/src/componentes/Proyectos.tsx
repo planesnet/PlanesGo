@@ -179,7 +179,7 @@ type Seccion = typeof SECCIONES[number]['id'];
 const SELECCION: { id: SeleccionSkills; nombre: string; ayuda: string }[] = [
   { id: 'agente', nombre: 'Decide el agente', ayuda: 'Como siempre: el modelo lee las descripciones de las skills y decide él. pgocode no interviene.' },
   { id: 'sugerir', nombre: 'pgocode sugiere', ayuda: 'pgocode calcula qué skill encaja y lo muestra junto al mensaje, sin cambiar lo que se envía al agente. Sirve para ver si el agente acierta.' },
-  { id: 'elegir', nombre: 'pgocode elige', ayuda: 'Si una skill encaja con claridad (parecido ≥ 0,74), pgocode se la indica al agente al enviar (en Claude Code, invocándola directamente con /skill). El agente no tiene que adivinar.' },
+  { id: 'elegir', nombre: 'pgocode elige', ayuda: 'Si una skill encaja con claridad (pasa el umbral), pgocode se la indica al agente al enviar (en Claude Code, invocándola directamente con /skill). El agente no tiene que adivinar.' },
 ];
 
 const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
@@ -221,7 +221,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
               <h3>Skills</h3>
               <fieldset className="opciones-detalle">
                 <legend>Cómo se elige la skill de cada petición</legend>
-                <p className="suave pequeno">pgocode compara cada petición con las skills del agente de la sesión mediante embeddings (Vertex AI): unos 120 ms y sin gastar tokens del agente.</p>
+                <p className="suave pequeno">pgocode compara cada petición con las skills del agente de la sesión mediante embeddings, en local (Ollama, embeddinggemma; si no está, Vertex AI): unos 90 ms y sin gastar tokens del agente.</p>
                 {SELECCION.map(d => (
                   <label key={d.id} className={'opcion-detalle' + (a.skills === d.id ? ' elegida' : '')}>
                     <input type="radio" name="skills" checked={a.skills === d.id} onChange={() => cambia({ skills: d.id })} />

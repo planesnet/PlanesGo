@@ -159,12 +159,13 @@ function Probador({ proyecto, carpeta, agente }: { proyecto: number; carpeta: st
       </div>
       {error && <p className="error">{error}</p>}
       {r && <div className="sk-ranking">
-        <p className="suave pequeno">{r.elegida ? <>Se usaría <b>✦ {r.elegida.nombre}</b></> : 'Ninguna skill encaja con claridad'} · {r.ms} ms · umbral {r.umbral.toFixed(2)}</p>
+        <p className="suave pequeno">{r.elegida ? <>Se usaría <b>✦ {r.elegida.nombre}</b></> : 'Ninguna skill encaja con claridad'} · {r.ms} ms · {r.motor === 'ollama/embeddinggemma' ? 'en local (Ollama)' : 'Vertex AI'} · umbral {r.umbral.toFixed(2)}</p>
         {r.candidatos.map(c => (
           <div key={c.ruta} className={'sk-barra' + (c.puntuacion >= r.umbral ? ' pasa' : '')}>
             <span className="recorta">{c.nombre}</span>
-            <span className="sk-barra-fondo"><span style={{ width: `${Math.max(0, Math.min(1, (c.puntuacion - 0.5) / 0.4)) * 100}%` }} />
-              <i style={{ left: `${((r.umbral - 0.5) / 0.4) * 100}%` }} /></span>
+            {/* Escala relativa al umbral (cada motor tiene la suya): el umbral queda en la mitad de la barra. */}
+            <span className="sk-barra-fondo"><span style={{ width: `${Math.max(0, Math.min(1, c.puntuacion / (2 * r.umbral))) * 100}%` }} />
+              <i style={{ left: '50%' }} /></span>
             <span className="sk-tokens">{c.puntuacion.toFixed(3)}</span>
           </div>
         ))}

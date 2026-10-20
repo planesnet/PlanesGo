@@ -279,6 +279,7 @@ func main() {
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
 	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
+	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

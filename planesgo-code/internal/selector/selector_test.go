@@ -29,7 +29,7 @@ func TestEligeYGuarda(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "v.json")
 	l := []skills.Skill{{Nombre: "saludo", Descripcion: "saludo formal", Ruta: "/a"}, {Nombre: "odoo", Descripcion: "odoo dev", Ruta: "/b"}}
 	s := &Selector{Fichero: f, Embebe: falso}
-	c, err := s.Elige(context.Background(), "un saludo", l)
+	c, _, err := s.Elige(context.Background(), "un saludo", l)
 	if err != nil || c[0].Nombre != "saludo" || llamadas != 3 {
 		t.Fatalf("%v %v %d", c, err, llamadas)
 	}
@@ -52,7 +52,8 @@ func TestRankingReal(t *testing.T) {
 			l = append(l, k)
 		}
 	}
-	s := &Selector{Fichero: filepath.Join(t.TempDir(), "v.json")}
+	s := &Selector{Fichero: filepath.Join(t.TempDir(), "v.json"), SoloVertex: os.Getenv("PGO_PRUEBA_VERTEX") != ""}
+	t.Logf("motor: %s", s.MotorActual(context.Background()).Nombre)
 	ini := time.Now()
 	if err := s.Prepara(context.Background(), l); err != nil {
 		t.Fatal(err)
@@ -66,9 +67,13 @@ func TestRankingReal(t *testing.T) {
 		"hazme un documento de Word con el informe",
 		"¿qué hora es?",
 		"arregla el CSS del botón de la página",
+		"redacta un saludo formal para un cliente",
+		"configura el plan contable de la empresa en Odoo",
+		"cuéntame un chiste",
+		"sube los cambios a git",
 	} {
 		ini := time.Now()
-		r, err := s.Elige(context.Background(), q, l)
+		r, _, err := s.Elige(context.Background(), q, l)
 		if err != nil {
 			t.Fatal(err)
 		}

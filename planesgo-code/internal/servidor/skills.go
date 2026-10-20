@@ -47,10 +47,6 @@ func (s *Servidor) skillsInventario(w http.ResponseWriter, r *http.Request, ses 
 	jsonOK(w, l)
 }
 
-// UmbralSkill: parecido mínimo para dar una skill por buena (calibrado con las skills reales: las peticiones con
-// skill clara pasan de 0,75; las que no tienen ninguna se quedan por debajo de 0,71).
-const UmbralSkill = 0.74
-
 // skillsElegir: qué skill del agente encaja con la petición (embeddings), las cinco mejores y si alguna pasa el umbral.
 func (s *Servidor) skillsElegir(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	var p struct {
@@ -85,16 +81,16 @@ func (s *Servidor) skillsElegir(w http.ResponseWriter, r *http.Request, ses *ses
 		del = append(del, k)
 	}
 	ini := time.Now()
-	c, err := s.Selector.Elige(r.Context(), p.Texto, del)
+	c, motor, err := s.Selector.Elige(r.Context(), p.Texto, del)
 	if err != nil {
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	res := map[string]any{"candidatos": c[:min(5, len(c))], "umbral": UmbralSkill, "ms": time.Since(ini).Milliseconds()}
-	if len(c) > 0 && c[0].Puntuacion >= UmbralSkill {
+	res := map[string]any{"candidatos": c[:min(5, len(c))], "umbral": motor.Umbral, "motor": motor.Nombre, "ms": time.Since(ini).Milliseconds()}
+	if len(c) > 0 && c[0].Puntuacion >= motor.Umbral {
 		res["elegida"] = c[0]
 	}
-	depuracion.Log("skills", "elegir (%s, %d skills) %q → %v en %s", p.Agente, len(del), recortaTexto(p.Texto, 80), res["elegida"], time.Since(ini).Round(time.Millisecond))
+	depuracion.Log("skills", "elegir con %s (%s, %d skills) %q → %v en %s", motor.Nombre, p.Agente, len(del), recortaTexto(p.Texto, 80), res["elegida"], time.Since(ini).Round(time.Millisecond))
 	jsonOK(w, res)
 }
 
