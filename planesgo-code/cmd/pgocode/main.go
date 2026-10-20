@@ -79,7 +79,7 @@ func configuraEmisor(url, token string) (string, error) {
 		return "", err
 	}
 	f := filepath.Join(h, ".planesgo", "studio_tv.env")
-	canal := "local"
+	canal := "auto" // el emisor usa qa-<repositorio>-<rama> de la carpeta de la prueba
 	if b, err := os.ReadFile(f); err == nil {
 		v := map[string]string{}
 		for _, l := range strings.Split(string(b), "\n") {

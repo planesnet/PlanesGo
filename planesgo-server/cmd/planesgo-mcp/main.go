@@ -997,10 +997,45 @@ func studioEnvPath() string {
 	return filepath.Join(home, ".planesgo", "studio_tv.env")
 }
 
-// nombreCanal deja el canal con letras, números, punto, guion y guion bajo (máx. 64); sin canal usa el proyecto.
-func nombreCanal(canal, proyecto string) string {
-	if strings.TrimSpace(canal) == "" {
-		canal = proyecto
+// canalGit es el canal por defecto: qa-<repositorio>-<rama> del git de dir (el repositorio sale del remoto origin,
+// p. ej. planesnet/madpla.git -> madpla). Es la misma regla que aplica el emisor pco_emisor.py.
+func canalGit(dir string) string {
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	raiz := git("rev-parse", "--show-toplevel")
+	if raiz == "" {
+		return ""
+	}
+	repo := filepath.Base(raiz)
+	if o := strings.TrimRight(git("remote", "get-url", "origin"), "/"); o != "" {
+		o = o[strings.LastIndexAny(o, "/:")+1:]
+		repo = strings.TrimSuffix(o, ".git")
+	}
+	rama := git("branch", "--show-current")
+	if rama == "" {
+		rama = git("rev-parse", "--short", "HEAD")
+	}
+	if rama == "" {
+		rama = "sin-rama"
+	}
+	return "qa-" + repo + "-" + rama
+}
+
+// nombreCanal deja el canal con letras, números, punto, guion y guion bajo (máx. 64). Sin canal (o «auto»):
+// qa-<repositorio>-<rama> de la carpeta del proyecto y, si no es un repositorio git, el nombre del proyecto.
+func nombreCanal(canal, proyecto, dir string) string {
+	if c := strings.TrimSpace(canal); c == "" || strings.EqualFold(c, "auto") {
+		canal = canalGit(dir)
+		if canal == "" {
+			canal = proyecto
+		}
 	}
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(canal)) {
@@ -1908,7 +1943,11 @@ func executeToolCall(name string, args map[string]interface{}) ToolCallResult {
 		pcoToken, _ := res["pco_token"].(string)
 		instr, _ := res["instrucciones"].(string)
 		canal, _ := args["canal"].(string)
-		canal = nombreCanal(canal, projName)
+		dirCanal, _ := args["project_path"].(string)
+		if dirCanal == "" {
+			dirCanal, _ = os.Getwd()
+		}
+		canal = nombreCanal(canal, projName, dirCanal)
 		if err := escribeStudioEnv(fichero, pcoURL, pcoToken, canal); err != nil {
 			return ToolCallResult{Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("❌ Studio TV: %v", err)}}, IsError: true}
 		}
@@ -2416,7 +2455,7 @@ func getToolsDefinition() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"canal": map[string]interface{}{
 						"type":        "string",
-						"description": "Nombre corto del canal (letras, números, . _ -). Por defecto, el nombre del proyecto.",
+						"description": "Nombre corto del canal (letras, números, . _ -). Por defecto qa-<repositorio>-<rama> de la carpeta del proyecto.",
 					},
 					"apagar": map[string]interface{}{
 						"type":        "boolean",
@@ -2622,7 +2661,7 @@ func main() {
 	sessionIDFlag := flag.String("session-id", "", "Identificador de la sesión de IA (vincula por sesión y se guarda como ai_session_id)")
 	versionFlag := flag.Bool("version", false, "Muestra versión y sale")
 	vFlag := flag.Bool("v", false, "Muestra versión y sale")
-	streamFlag := flag.String("stream", "", "Activa la emisión a Studio TV en el canal indicado (o «on» = canal del proyecto); «off» la desactiva")
+	streamFlag := flag.String("stream", "", "Activa la emisión a Studio TV en el canal indicado (o «on» = qa-<repositorio>-<rama>); «off» la desactiva")
 	selfUpdateFlag := flag.Bool("self-update", false, "Reconstruye planesgo-mcp (y el hook/comando) con la versión actual de master")
 
 	flag.Parse()

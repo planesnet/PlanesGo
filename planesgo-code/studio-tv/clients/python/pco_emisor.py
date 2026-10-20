@@ -1,8 +1,29 @@
 """Emisor hacia Studio TV (opcional): si existen PCO_URL y PCO_TOKEN, envía los fotogramas JPEG y el estado del
-caso al estudio. PCO_CANAL elige el canal (por defecto «principal»), para emitir varias pruebas a la vez.
+caso al estudio. PCO_CANAL elige el canal; sin él (o con «auto») el canal es qa-<repositorio>-<rama> del git de
+la carpeta donde corre la prueba (p. ej. qa-madpla-dev-lp), para emitir varias pruebas a la vez sin chocar.
 Los datos salen del entorno o, si no están, de ~/.planesgo/studio_tv.env (lo crea «/planesgo stream <canal>»).
 Va en un hilo propio: si el estudio va lento se descartan fotogramas, nunca se frena la prueba."""
-import http.client, json, os, ssl, threading, time, urllib.parse
+import http.client, json, os, re, ssl, subprocess, threading, time, urllib.parse
+
+
+def _git(*args):
+    try:
+        return subprocess.run(['git', *args], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def canal_por_defecto():
+    """qa-<repositorio>-<rama>: el repositorio sale del remoto origin (planesnet/madpla.git -> madpla) o, si no hay,
+    del nombre de la carpeta raíz del repositorio. Solo letras, números, punto, guion y guion bajo (máx. 64)."""
+    raiz = _git('rev-parse', '--show-toplevel')
+    if not raiz:
+        return 'principal'
+    origen = _git('remote', 'get-url', 'origin')
+    repo = re.sub(r'\.git$', '', origen.rstrip('/').split('/')[-1].split(':')[-1]) if origen else os.path.basename(raiz)
+    rama = _git('branch', '--show-current') or _git('rev-parse', '--short', 'HEAD') or 'sin-rama'
+    canal = re.sub(r'[^a-z0-9._-]+', '-', ('qa-%s-%s' % (repo, rama)).lower()).strip('-')
+    return canal[:64] or 'principal'
 
 
 def _config():
@@ -28,7 +49,10 @@ class Emisor:
         self.min_dt, self.ult_envio = 1.0 / fps, 0
         self._frame, self._estado, self._ev = None, None, threading.Event()
         canal = canal or cfg['PCO_CANAL']
-        self._q = '?canal=' + urllib.parse.quote(canal, safe='') if canal else ''
+        if not canal or canal == 'auto':
+            canal = canal_por_defecto()
+        self.canal = canal
+        self._q = '?canal=' + urllib.parse.quote(canal, safe='')
         if self.activo:
             u = urllib.parse.urlparse(self.url)
             self.https, self.host = u.scheme == 'https', u.netloc

@@ -15,6 +15,7 @@ let backend = null;
 // growing too big»): no se podía escribir nada. El método de entrada sencillo de GTK sí admite tildes, ñ y
 // teclas muertas. (Para que GTK lo lea, el lanzador también lo pone en el entorno: Makefile «escritorio».)
 if (process.platform === 'linux') {
+  app.setDesktopName('pgocode.desktop'); // id de la app en Wayland/X11: enlaza la ventana con su icono
   process.env.GTK_IM_MODULE = 'gtk-im-context-simple';
   process.env.XMODIFIERS = '@im=none';
   process.env.QT_IM_MODULE = '';

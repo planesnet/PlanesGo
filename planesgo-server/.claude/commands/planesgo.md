@@ -25,7 +25,7 @@ Nunca hagas commit ni push de los cambios sin que la persona lo pida, y nunca en
 
 Si "$ARGUMENTS" es `stream`, `stream <canal>` o `stream off` (sin distinguir mayúsculas), NO es texto de búsqueda (Caso A). Activa o desactiva la emisión en directo a Studio TV (servido por PlanesGo en `/studio-tv/`) de lo que haga el navegador de las pruebas automáticas. Responde en español y en 1-3 líneas.
 
-1. **Activar** (`stream` o `stream <canal>`): llama a la herramienta MCP `planesgo_studio_emisor` con `{"canal": "<canal>"}` (sin canal, usa el del proyecto vinculado). Alternativa CLI: `planesgo-mcp --stream <canal>` (o `--stream on`). Guarda PCO_URL, PCO_TOKEN y PCO_CANAL en `~/.planesgo/studio_tv.env` (0600).
+1. **Activar** (`stream` o `stream <canal>`): llama a la herramienta MCP `planesgo_studio_emisor` con `{"canal": "<canal>"}` (sin canal, qa-<repositorio>-<rama> de la carpeta del proyecto, p. ej. qa-madpla-dev-lp). Alternativa CLI: `planesgo-mcp --stream <canal>` (o `--stream on`). Guarda PCO_URL, PCO_TOKEN y PCO_CANAL en `~/.planesgo/studio_tv.env` (0600).
    - El emisor `pco_emisor.py` (el del grabador de QA, o `curl -fsSL https://planesgo.autopyme.com/install/pco_emisor.py`) lee ese fichero solo: las pruebas emiten sin exportar nada.
    - Si la prueba no usa `pco_emisor.py`, carga las variables con `set -a; . ~/.planesgo/studio_tv.env; set +a`.
    - Nunca muestres ni copies PCO_TOKEN en la conversación, en commits ni en ficheros del repositorio.
