@@ -40,7 +40,7 @@ function Conectar({ local, error, alConectar }: { local?: Local; error: string; 
       <h3>Conectar con un estudio</h3>
       {local && (
         <section className="caja">
-          <h4>Estudio local de PSFCode</h4>
+          <h4>Estudio local de Planes Go Code</h4>
           <p className="suave">Lo arranca el propio arnés. Las pruebas que se ejecuten en este equipo emiten aquí con:</p>
           <Emisor local={local} />
           <button className="primario" onClick={() => alConectar({ local: true })}>Ver el estudio local</button>

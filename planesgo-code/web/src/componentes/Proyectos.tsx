@@ -35,7 +35,7 @@ export default function Proyectos({ usuario, actual, inicial, alElegir, alSalir 
 
   return (
     <nav className="proyectos" aria-label="Proyectos">
-      <div className="marca">PSF<span>Code</span></div>
+      <div className="marca">Planes <span>Go</span> Code</div>
       <div className="busca">
         <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
         <button className="icono" title="Volver a cargar de Odoo" onClick={() => carga(true)}>↻</button>

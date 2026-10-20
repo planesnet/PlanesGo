@@ -1,4 +1,4 @@
-// studio-tv: estudio de TV de PSFCode para ver en directo las pruebas automáticas.
+// studio-tv: estudio de TV de Planes Go Code para ver en directo las pruebas automáticas.
 //
 //	studio-tv                                     # HTTP en 127.0.0.1:8080 (local o detrás de un proxy HTTPS)
 //	studio-tv -addr :8443 -selfsigned             # HTTPS con certificado propio

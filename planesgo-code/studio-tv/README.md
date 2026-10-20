@@ -1,6 +1,6 @@
 # Studio TV
 
-Estudio de TV de PSFCode para ver en directo lo que hacen los navegadores de las pruebas automáticas: QA de Odoo en backoffice y en móvil, o cualquier otra prueba del pipeline. Funciona sin gastar tokens en la retransmisión y con seguridad (TLS y tokens distintos para emitir y para ver).
+Estudio de TV de Planes Go Code para ver en directo lo que hacen los navegadores de las pruebas automáticas: QA de Odoo en backoffice y en móvil, o cualquier otra prueba del pipeline. Funciona sin gastar tokens en la retransmisión y con seguridad (TLS y tokens distintos para emitir y para ver).
 
 Es un solo ejecutable sin dependencias. Hay varios canales a la vez, uno por sesión o agente, y una parrilla con miniaturas de todos.
 

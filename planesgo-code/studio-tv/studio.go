@@ -1,4 +1,4 @@
-// Package studiotv es el estudio de TV de PSFCode: retransmite en directo lo que hacen los navegadores de las
+// Package studiotv es el estudio de TV de Planes Go Code: retransmite en directo lo que hacen los navegadores de las
 // pruebas automáticas (QA de Odoo en backoffice y en móvil, o cualquier otra prueba del pipeline).
 //
 // Cada emisor envía fotogramas JPEG y el estado del caso a un canal; el estudio los reparte a los espectadores

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Planes Go Code
+Comment=Arnés de desarrollo de Planes Software Factory
+Exec=@BIN@
+Icon=pgocode
+StartupWMClass=pgocode
+Terminal=false
+Categories=Development;

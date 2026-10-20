@@ -9,14 +9,14 @@ import Artefactos from './componentes/Artefactos';
 function proyectoGuardado(): number {
   const deUrl = Number(new URLSearchParams(location.search).get('proyecto'));
   if (deUrl > 0) return deUrl;
-  try { return Number(localStorage.getItem('psf:proyecto')) || 0; } catch { return 0; }
+  try { return Number(localStorage.getItem('pgo:proyecto')) || 0; } catch { return 0; }
 }
 
 function recuerdaProyecto(id: number) {
   const u = new URL(location.href);
   if (id) u.searchParams.set('proyecto', String(id)); else u.searchParams.delete('proyecto');
   history.replaceState(null, '', u);
-  try { if (id) localStorage.setItem('psf:proyecto', String(id)); else localStorage.removeItem('psf:proyecto'); } catch { /* sin almacenamiento */ }
+  try { if (id) localStorage.setItem('pgo:proyecto', String(id)); else localStorage.removeItem('pgo:proyecto'); } catch { /* sin almacenamiento */ }
 }
 
 export default function App() {
@@ -32,8 +32,8 @@ export default function App() {
       if (prev) setAviso((e as CustomEvent).detail || '');
       return null;
     });
-    window.addEventListener('psf:sin-sesion', sinSesion);
-    return () => window.removeEventListener('psf:sin-sesion', sinSesion);
+    window.addEventListener('pgo:sin-sesion', sinSesion);
+    return () => window.removeEventListener('pgo:sin-sesion', sinSesion);
   }, []);
 
   const salir = useCallback(async () => {

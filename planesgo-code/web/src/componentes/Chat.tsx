@@ -9,7 +9,7 @@ const VACIA: Conversacion = { mensajes: [], sesionAgente: '' };
 
 // Conversaciones por proyecto y proveedor: en memoria y en sessionStorage, para que F5 no las pierda.
 const conversaciones = new Map<string, Conversacion>();
-const claveAlmacen = (k: string) => 'psf:conv:' + k;
+const claveAlmacen = (k: string) => 'pgo:conv:' + k;
 
 function leeConversacion(k: string): Conversacion {
   const c = conversaciones.get(k);
@@ -47,7 +47,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
     get<Proveedor[]>('/api/proveedores').then(l => {
       setProveedores(l);
       let preferido = '';
-      try { preferido = localStorage.getItem('psf:proveedor') || ''; } catch { /* sin almacenamiento */ }
+      try { preferido = localStorage.getItem('pgo:proveedor') || ''; } catch { /* sin almacenamiento */ }
       const p = l.find(x => x.id === preferido && x.disponible) || l.find(x => x.disponible) || l[0];
       if (p) { setProvId(p.id); setModelo(p.por_defecto); }
     }).catch(() => {});
@@ -115,7 +115,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
     const p = proveedores.find(x => x.id === id);
     setProvId(id);
     setModelo(p?.por_defecto || '');
-    try { localStorage.setItem('psf:proveedor', id); } catch { /* sin almacenamiento */ }
+    try { localStorage.setItem('pgo:proveedor', id); } catch { /* sin almacenamiento */ }
   };
 
   const nueva = () => {
@@ -140,7 +140,7 @@ export default function Chat({ proyecto, panelAbierto, alPanel }: Props) {
       {!proyecto ? (
         <div className="vacio">
           <h2>Sin proyecto, no hay trabajo</h2>
-          <p>Todo en PSFCode va ligado a un proyecto de Odoo. Elige uno a la izquierda para hablar con un modelo o un agente, abrir enlaces o ver las pruebas en directo.</p>
+          <p>Todo en Planes Go Code va ligado a un proyecto de Odoo. Elige uno a la izquierda para hablar con un modelo o un agente, abrir enlaces o ver las pruebas en directo.</p>
         </div>
       ) : (
         <>

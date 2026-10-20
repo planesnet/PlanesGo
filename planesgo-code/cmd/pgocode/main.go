@@ -1,7 +1,7 @@
-// psfcode: arnés de desarrollo de Planes Software Factory (backend Go + interfaz web/Electron).
+// pgocode: arnés de desarrollo de Planes Software Factory (backend Go + interfaz web/Electron).
 //
-//	psfcode                         # http://127.0.0.1:7801
-//	psfcode -addr 127.0.0.1:7801 -raices ~/cowork,~/proyectos
+//	pgocode                         # http://127.0.0.1:7801
+//	pgocode -addr 127.0.0.1:7801 -raices ~/cowork,~/proyectos
 //
 // Se entra con el usuario de Odoo (ODOO_URL, ODOO_DB). Proveedores: ANTHROPIC_API_KEY, OPENAI_API_KEY (y
 // OPENAI_BASE_URL para servidores compatibles), GEMINI_API_KEY; agentes: claude, opencode, gemini en el PATH.
@@ -51,15 +51,16 @@ func expande(p string) string {
 }
 
 func main() {
-	addr := flag.String("addr", entorno("PSF_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
+	addr := flag.String("addr", entorno("PGO_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
 	odooURL := flag.String("odoo", entorno("ODOO_URL", "https://planesnet.autopyme.com"), "URL de Odoo")
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")
-	raices := flag.String("raices", entorno("PSF_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.planesgo.json), separadas por comas")
-	studioAddr := flag.String("studio", entorno("PSF_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
+	raices := flag.String("raices", entorno("PGO_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.planesgo.json), separadas por comas")
+	studioAddr := flag.String("studio", entorno("PGO_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
+	navegador := flag.Bool("navegador", os.Getenv("PGO_NAVEGADOR") == "1", "permite abrir Planes Go Code también en el navegador (por defecto, solo desde la app de escritorio)")
 	verVersion := flag.Bool("version", false, "muestra la versión y sale")
 	flag.Parse()
 	if *verVersion {
-		fmt.Println("psfcode", version)
+		fmt.Println("pgocode", version)
 		return
 	}
 
@@ -111,6 +112,12 @@ func main() {
 		log.Fatalf("dirección no válida %q: %v", *addr, err)
 	}
 	s.Puerto = puerto
+	// La app de escritorio pasa su secreto por entorno (no por argumento: se vería en la lista de procesos).
+	s.TokenEscritorio = os.Getenv("PGO_TOKEN_ESCRITORIO")
+	s.PermitirNavegador = *navegador
+	if s.TokenEscritorio == "" && !s.PermitirNavegador {
+		log.Print("aviso: sin PGO_TOKEN_ESCRITORIO ni -navegador nadie podrá usar la interfaz; ábrelo con la app de escritorio")
+	}
 	// Las peticiones heredan base: al apagar se cancelan todas, y con ellas los agentes en marcha
 	// (exec.CommandContext), los chats y los directos. Sin esto, un agente podía seguir editando
 	// ficheros con el arnés ya cerrado.
@@ -121,7 +128,7 @@ func main() {
 	go func() {
 		defer close(apagado)
 		<-ctx.Done()
-		log.Print("cerrando PSFCode…")
+		log.Print("cerrando Planes Go Code…")
 		cancelaBase()
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -131,7 +138,7 @@ func main() {
 			}
 		}
 	}()
-	log.Printf("PSFCode %s en http://%s  (Odoo %s, base %s; proyectos en %s)", version, *addr, *odooURL, *odooDB, strings.Join(rs, ", "))
+	log.Printf("Planes Go Code %s en http://%s  (Odoo %s, base %s; proyectos en %s)", version, *addr, *odooURL, *odooDB, strings.Join(rs, ", "))
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

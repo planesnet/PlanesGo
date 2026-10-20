@@ -1,4 +1,4 @@
-// Cliente de la API del backend Go. Toda escritura lleva X-PSF (defensa CSRF) y la cookie de sesión.
+// Cliente de la API del backend Go. Toda escritura lleva X-PGO (defensa CSRF) y la cookie de sesión.
 
 export interface Usuario { nombre: string; login: string; odoo?: string; version?: string }
 export interface Many2One { id: number; nombre: string }
@@ -17,7 +17,7 @@ async function respuesta<T>(r: Response): Promise<T> {
   if (r.ok) return r.json() as Promise<T>;
   let msg = r.statusText;
   try { msg = (await r.json()).error || msg; } catch { /* sin cuerpo JSON */ }
-  if (r.status === 401) window.dispatchEvent(new CustomEvent('psf:sin-sesion', { detail: msg }));
+  if (r.status === 401) window.dispatchEvent(new CustomEvent('pgo:sin-sesion', { detail: msg }));
   throw new ErrorAPI(r.status, msg);
 }
 
@@ -26,7 +26,7 @@ export const get = <T,>(ruta: string) => fetch(ruta, { credentials: 'same-origin
 export const post = <T,>(ruta: string, cuerpo: unknown) =>
   fetch(ruta, {
     method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-PSF': '1' },
+    headers: { 'Content-Type': 'application/json', 'X-PGO': '1' },
     body: JSON.stringify(cuerpo),
   }).then(r => respuesta<T>(r));
 
@@ -36,7 +36,7 @@ export interface EventoChat { texto?: string; sesion_agente?: string; error?: st
 export async function chat(cuerpo: unknown, cada: (e: EventoChat) => void, señal: AbortSignal) {
   const r = await fetch('/api/chat', {
     method: 'POST', credentials: 'same-origin', signal: señal,
-    headers: { 'Content-Type': 'application/json', 'X-PSF': '1' },
+    headers: { 'Content-Type': 'application/json', 'X-PGO': '1' },
     body: JSON.stringify(cuerpo),
   });
   if (!r.ok || !r.body) await respuesta(r);

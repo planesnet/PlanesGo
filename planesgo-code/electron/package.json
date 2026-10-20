@@ -1,13 +1,15 @@
 {
-  "name": "psfcode-escritorio",
+  "name": "pgocode",
   "private": true,
   "version": "0.1.0",
-  "description": "PSFCode: ventana de escritorio (Electron) sobre el backend Go",
+  "description": "Planes Go Code: ventana de escritorio (Electron) sobre el backend Go",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
   "devDependencies": {
     "electron": "33.2.1"
-  }
+  },
+  "productName": "Planes Go Code",
+  "desktopName": "pgocode.desktop"
 }

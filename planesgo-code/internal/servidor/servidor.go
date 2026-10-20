@@ -1,4 +1,4 @@
-// Package servidor es la API HTTP del arnés PSFCode y sirve la interfaz web.
+// Package servidor es la API HTTP del arnés Planes Go Code y sirve la interfaz web.
 //
 // Reglas:
 //   - Todo pide sesión, que se abre con usuario y contraseña de Odoo (planesnet.autopyme.com).
@@ -8,9 +8,11 @@ package servidor
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -31,7 +33,10 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
-const cookie = "psf_sesion"
+const cookie = "pgo_sesion"
+
+// cookieEscritorio la pone Electron en su ventana con el TokenEscritorio.
+const cookieEscritorio = "pgo_escritorio"
 
 // vigenciaProyecto: cuánto vale la comprobación de acceso a un proyecto antes de repetirla en Odoo.
 const vigenciaProyecto = 5 * time.Minute
@@ -55,6 +60,12 @@ type Servidor struct {
 	// Puerto en el que escucha: solo se aceptan peticiones a 127.0.0.1, localhost o [::1] en este puerto
 	// (defensa contra DNS rebinding: una web ajena no puede hablar con la API aunque resuelva a 127.0.0.1).
 	Puerto string
+	// TokenEscritorio: secreto que genera la app de escritorio (Electron) y guarda como cookie en su ventana.
+	// Si está puesto, toda petición tiene que traerlo: un navegador normal no puede usar Planes Go Code.
+	TokenEscritorio string
+	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
+	// no se atiende ninguna petición.
+	PermitirNavegador bool
 
 	mu      sync.Mutex
 	nombres map[int]string // nombre de cada proyecto comprobado
@@ -81,6 +92,25 @@ func (s *Servidor) Handler() http.Handler {
 	return s.cabeceras(mux)
 }
 
+// desdeEscritorio dice si la petición viene de la app de escritorio (o si se permite el navegador).
+func (s *Servidor) desdeEscritorio(r *http.Request) bool {
+	if s.PermitirNavegador {
+		return true
+	}
+	if s.TokenEscritorio == "" {
+		return false
+	}
+	c, err := r.Cookie(cookieEscritorio)
+	return err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.TokenEscritorio)) == 1
+}
+
+const paginaSoloEscritorio = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Planes Go Code</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 16px;color:#1f1e1b;background:#faf9f5}
+code{background:#f0eee6;border-radius:4px;padding:1px 5px}</style></head><body>
+<h1>Planes Go Code</h1><p>Planes Go Code se abre desde su <b>aplicación de escritorio</b>, no desde el navegador.</p>
+<p>Para usarlo en el navegador (por ejemplo, para desarrollar), arranca el backend con <code>pgocode -navegador</code>.</p>
+</body></html>`
+
 // hostLocal dice si host (con puerto) es 127.0.0.1, localhost o [::1] en el puerto del arnés.
 func (s *Servidor) hostLocal(host string) bool {
 	h, p, err := net.SplitHostPort(host)
@@ -98,6 +128,16 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 			jsonError(w, http.StatusMisdirectedRequest, "host no permitido")
 			return
 		}
+		if r.URL.Path != "/healthz" && !s.desdeEscritorio(r) {
+			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusForbidden)
+				io.WriteString(w, paginaSoloEscritorio)
+				return
+			}
+			jsonError(w, http.StatusForbidden, "Planes Go Code solo se abre desde la aplicación de escritorio")
+			return
+		}
 		// Si el navegador dice de dónde viene la petición, tiene que ser del propio arnés.
 		if o := r.Header.Get("Origin"); o != "" {
 			u, err := url.Parse(o)
@@ -106,9 +146,9 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 				return
 			}
 		}
-		// Defensa CSRF: además de SameSite=Strict, toda escritura debe llevar la cabecera X-PSF.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-PSF") != "1" {
-			jsonError(w, http.StatusForbidden, "falta la cabecera X-PSF")
+		// Defensa CSRF: además de SameSite=Strict, toda escritura debe llevar la cabecera X-PGO.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-PGO") != "1" {
+			jsonError(w, http.StatusForbidden, "falta la cabecera X-PGO")
 			return
 		}
 		h.ServeHTTP(w, r)

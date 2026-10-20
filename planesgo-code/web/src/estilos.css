@@ -1,4 +1,4 @@
-/* PSFCode: tres columnas (proyectos · chat · artefactos), tonos cálidos y neutros, claro y oscuro. */
+/* Planes Go Code: tres columnas (proyectos · chat · artefactos), tonos cálidos y neutros, claro y oscuro. */
 :root {
   --fondo: #faf9f5; --panel: #f3f1ea; --superficie: #ffffff; --texto: #1f1e1b; --suave: #6b6860;
   --linea: #e3e0d6; --acento: #c96442; --acento-texto: #ffffff; --enfoque: #2f6fb3; --error: #b3261e;
@@ -39,9 +39,15 @@ h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
 .acceso { display: grid; place-items: center; height: 100%; padding: 16px; }
 .tarjeta-acceso { width: min(360px, 100%); display: grid; gap: 12px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 14px; padding: 28px; }
 .tarjeta-acceso h1 { font-size: 26px; }
+.tarjeta-acceso .logo { justify-self: center; }
 .tarjeta-acceso h1 span, .marca span { color: var(--acento); }
 .tarjeta-acceso label { display: grid; gap: 4px; font-weight: 600; font-size: 13px; }
+.tarjeta-acceso input { width: 100%; }
 .tarjeta-acceso p { margin: 0; }
+.clave { position: relative; display: block; }
+.clave input { width: 100%; padding-right: 40px; }
+.clave .ojo { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: none; background: none; padding: 4px 6px; color: var(--suave); display: grid; place-items: center; }
+.clave .ojo:hover { color: var(--texto); }
 
 /* Estructura */
 .arnes { display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(360px, 42%); height: 100%; }

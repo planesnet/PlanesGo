@@ -1,4 +1,4 @@
-# PSFCode
+# Planes Go Code
 
 Pipeline y agente de desarrollo de Planes Software Factory, escrito en Go.
 
