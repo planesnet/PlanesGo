@@ -549,3 +549,6 @@ button.miga-item:hover { background: var(--hover); }
 .gestor input { width: auto; margin-top: 3px; }
 .gestor > span { display: grid; gap: 2px; }
 .miga-item.imputa { font-size: 12px; color: var(--suave); }
+.leyenda { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; align-items: center; }
+.leyenda i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: -6px; }
+.leyenda i.trabajando { background: #1a7f37; } .leyenda i.en-espera { background: #bf8700; } .leyenda i.gris { background: #8c959f; } .leyenda i.error { background: #cf222e; }

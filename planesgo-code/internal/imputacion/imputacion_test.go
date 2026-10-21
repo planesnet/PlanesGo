@@ -55,7 +55,7 @@ func TestParteCompleto(t *testing.T) {
 	fin()
 	g.CierraTodo()
 	_, ce := g.Estado()
-	if len(ce) != 1 || ce[0].Estado != "cerrado" || ce[0].Horas != 1.0/60 {
+	if len(ce) != 1 || ce[0].Estado != "cerrado" || ce[0].Horas != 1.0/60 { // menos de un minuto: el mínimo
 		t.Fatalf("cerrado: %+v", ce)
 	}
 	if fmt.Sprint(o.escrito["unit_amount"]) != fmt.Sprint(1.0/60) || o.escrito["ai_tokens_total"] != 1200 || o.escrito["ai_session_id"] != "pgocode-s1" {

@@ -3,9 +3,10 @@
 //
 // Regla: cada sesión imputa a su proyecto y a su tarea (la de sus ajustes; por defecto «pgocode - Sesión IA», que
 // se crea si no existe). Un parte es un periodo de trabajo: se crea en Odoo (con su cronómetro) al empezar el
-// primer turno del agente; mientras se trabaja no se envía nada (pgocode anota la última actividad); se cierra a
-// los 5 minutos sin turnos, al cambiar de tarea o al salir, con las horas reales (inicio → última actividad), la
-// descripción y los datos de IA (tokens, coste, modelo y sesión).
+// primer turno del agente; mientras se trabaja no se envía nada; tras cada turno hay una espera activa de 5
+// minutos que también cuenta (como en PlanesGo); si no llega otro turno, se cierra con las horas desde el inicio
+// hasta el cierre (espera incluida), la descripción y los datos de IA (tokens, coste, modelo y sesión). También se
+// cierra al cambiar de tarea o al salir.
 package imputacion
 
 import (
@@ -279,7 +280,8 @@ func (g *Gestor) cierraParte(p *parte) {
 		p.cierre.Stop()
 	}
 	t, id, uso := p.t, p.LineaID, p.uso
-	dur := p.Ultima.Sub(p.Inicio)
+	// Del inicio al cierre: la espera activa tras el último turno también se imputa.
+	dur := time.Since(p.Inicio)
 	if dur < minimo {
 		dur = minimo
 	}
