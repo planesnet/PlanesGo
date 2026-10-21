@@ -13,7 +13,17 @@ export interface Herramienta { id: string; nombre: string; resumen?: string; ent
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number }
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo }
+export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[] }
+
+// Sube un fichero adjunto a la carpeta de la sesión (para pasárselo al agente).
+export async function subeAdjunto(proyecto: number, carpeta: string, sesion: string, f: File): Promise<Adjunto> {
+  const d = new FormData();
+  d.append('fichero', f, f.name || 'adjunto');
+  const r = await fetch(`/api/adjunto?proyecto=${proyecto}&carpeta=${encodeURIComponent(carpeta)}&sesion=${encodeURIComponent(sesion)}`,
+    { method: 'POST', credentials: 'same-origin', headers: { 'X-PGO': '1' }, body: d });
+  return respuesta<Adjunto>(r);
+}
 
 export interface Candidato { nombre: string; ruta: string; puntuacion: number }
 export interface Eleccion { candidatos: Candidato[]; elegida?: Candidato; umbral: number; ms: number; motor: string }

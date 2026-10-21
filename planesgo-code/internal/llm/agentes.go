@@ -96,6 +96,12 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		return errors.New("identificador de sesión del agente no válido")
 	}
 	msg := p.Mensajes[len(p.Mensajes)-1].Texto
+	if len(p.Adjuntos) > 0 {
+		msg += "\n\nFicheros adjuntos (léelos con tus herramientas):"
+		for _, f := range p.Adjuntos {
+			msg += "\n- " + f
+		}
+	}
 	args := a.Args(msg, p)
 	cmd := exec.CommandContext(ctx, a.Programa, args...)
 	inicio := time.Now()
@@ -340,6 +346,10 @@ func Agentes() []Proveedor {
 				a = append(a, "--model", modelo)
 				if p.SesionAgente != "" {
 					a = append(a, "--session", p.SesionAgente)
+				}
+				// Los adjuntos van además como ficheros del mensaje (imágenes incluidas).
+				for _, f := range p.Adjuntos {
+					a = append(a, "--file", f)
 				}
 				return append(a, "--", msg)
 			}},

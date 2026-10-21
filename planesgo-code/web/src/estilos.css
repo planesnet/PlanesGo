@@ -558,3 +558,13 @@ button.miga-item:hover { background: var(--hover); }
 .punto-parte.pendiente { background: #bf8700; }
 .grupo-imputa { display: grid; gap: 2px; padding: 4px 0; border-top: 1px solid var(--linea); }
 .grupo-imputa > b { font-size: 12.5px; }
+
+/* Adjuntos del chat */
+.adjuntos-pendientes, .adjuntos-mensaje { display: flex; flex-wrap: wrap; gap: 5px; }
+.adjuntos-mensaje { margin-top: 5px; }
+.ficha-adjunto { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; border: 1px solid var(--linea); border-radius: 999px; padding: 2px 4px 2px 8px; background: var(--superficie); max-width: 320px; }
+.ficha-adjunto.error { color: var(--error); border-color: var(--error); }
+.quita-adjunto { border-radius: 50%; width: 18px; height: 18px; line-height: 16px; font-size: 13px; color: var(--suave); padding: 0; }
+.quita-adjunto:hover { background: var(--hover); }
+.icono.adjuntar { align-self: flex-end; margin-bottom: 2px; }
+.entrada.soltando { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--superficie)); }

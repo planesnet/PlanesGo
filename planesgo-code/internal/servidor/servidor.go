@@ -138,6 +138,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
+	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
 	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
 	mux.HandleFunc("GET /api/skills", s.conSesion(s.skillsInventario))
@@ -537,6 +538,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Titulo       string        `json:"titulo"`
 		TareaID      int           `json:"tarea_id"` // tarea de Odoo a la que se imputa (0: por nombre)
 		Tarea        string        `json:"tarea"`
+		Adjuntos     []string      `json:"adjuntos"` // rutas de ficheros adjuntos (en la carpeta de la sesión)
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
 	if err := lee(r, &p); err != nil {
@@ -590,6 +592,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			p.Carpeta = cs[0]
 		}
 	}
+	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)
 	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).
 	if info.NecesitaDir && p.Carpeta != "" && p.Rama != "" {
 		dir, err := repo.CarpetaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
@@ -638,7 +641,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		p.Permisos = "lectura"
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}

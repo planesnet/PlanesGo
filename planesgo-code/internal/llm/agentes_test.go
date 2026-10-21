@@ -213,3 +213,13 @@ func TestSkillDe(t *testing.T) {
 		}
 	}
 }
+
+// Los adjuntos llegan a OpenCode como --file (antes del «--» y el mensaje).
+func TestAdjuntosOpenCode(t *testing.T) {
+	a := Agentes()[2].(*Agente)
+	args := a.Args("hola", Peticion{Adjuntos: []string{"/p/.pgocode/adjuntos/s/a.png"}})
+	j := strings.Join(args, " ")
+	if !strings.Contains(j, "--file /p/.pgocode/adjuntos/s/a.png --") {
+		t.Errorf("args: %q", args)
+	}
+}

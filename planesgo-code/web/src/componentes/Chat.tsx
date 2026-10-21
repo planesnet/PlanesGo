@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, post, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo } from '../api';
+import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
@@ -32,6 +32,22 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   const lista = useRef<HTMLDivElement>(null);
   const idActual = useRef(sesion?.id);
   const area = useRef<HTMLTextAreaElement>(null);
+  // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
+  const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
+  const [arrastrando, setArrastrando] = useState(false);
+  const selector = useRef<HTMLInputElement>(null);
+  useEffect(() => { setAdjuntos([]); }, [sesion?.id]);
+  const adjunta = (fs: File[]) => {
+    if (!proyecto || !sesion) return;
+    for (const f of fs) {
+      const clave = Math.random().toString(36).slice(2);
+      setAdjuntos(l => [...l, { nombre: f.name || 'imagen pegada', ruta: clave, tamano: f.size, subiendo: true }]);
+      subeAdjunto(proyecto.id, sesion.carpeta, sesion.id, f)
+        .then(a => setAdjuntos(l => l.map(x => x.ruta === clave ? a : x)))
+        .catch(e => setAdjuntos(l => l.map(x => x.ruta === clave ? { ...x, subiendo: false, error: (e as Error).message } : x)));
+    }
+  };
+  const subiendo = adjuntos.some(a => a.subiendo);
 
   // El campo empieza en una línea y crece hacia arriba según lo escrito (hasta un máximo, luego scroll).
   useLayoutEffect(() => {
@@ -102,7 +118,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
 
   async function envia(forzado?: string) {
     const t = (forzado ?? texto).trim();
-    if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso) return;
+    if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const id = sesion.id;
     const pon = (m: Mensaje[], final = false) => {
       if (idActual.current === id) setMensajes(m);
@@ -110,10 +126,11 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
     const previos = forzado !== undefined ? conversacion(id) : mensajes;
-    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: t }];
+    const listos = forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : [];
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: t, ...(listos.length ? { adjuntos: listos } : {}) }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
-    if (forzado === undefined) setTexto('');
+    if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
     const ac = new AbortController();
     setEnCurso(ac);
     let sesionAgente = sesion.sesionAgente;
@@ -154,7 +171,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
         permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
-        sesion: sesion.id, titulo: sesion.nombre, tarea_id: sesion.tareaId || 0, tarea: sesion.tarea || '',
+        sesion: sesion.id, titulo: sesion.nombre, adjuntos: listos.map(a => a.ruta), tarea_id: sesion.tareaId || 0, tarea: sesion.tarea || '',
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
@@ -247,6 +264,9 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
                 {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
+                {m.adjuntos && m.adjuntos.length > 0 && (
+                  <div className="adjuntos-mensaje">{m.adjuntos.map(a => <span key={a.ruta} className="ficha-adjunto" title={a.ruta}><Icono n="clip" t={12} /> {a.nombre}</span>)}</div>
+                )}
                 {m.skill && (
                   <span className={'sk-marca sk-pgo ' + m.skill.modo} title={m.skill.modo === 'elegida' ? 'pgocode eligió esta skill (embeddings) y se la indicó al agente' : 'pgocode cree que encaja esta skill (embeddings); el agente decide'}>
                     ✦ {m.skill.modo === 'elegida' ? 'elegida' : 'sugerida'}: {m.skill.nombre} · {m.skill.puntuacion.toFixed(2)}
@@ -263,7 +283,24 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                 <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
               </div>
             )}
-            <div className="entrada">
+            {adjuntos.length > 0 && (
+              <div className="adjuntos-pendientes">
+                {adjuntos.map(a => (
+                  <span key={a.ruta} className={'ficha-adjunto' + (a.error ? ' error' : '')} title={a.error || a.ruta}>
+                    <Icono n="clip" t={12} /> {a.nombre}{a.subiendo ? ' · subiendo…' : a.error ? ' · ⚠ ' + a.error : ` · ${a.tamano < 1024 * 1024 ? Math.ceil(a.tamano / 1024) + ' KB' : (a.tamano / 1048576).toFixed(1) + ' MB'}`}
+                    <button className="quita-adjunto" onClick={() => setAdjuntos(l => l.filter(x => x.ruta !== a.ruta))} aria-label={'Quitar ' + a.nombre}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className={'entrada' + (arrastrando ? ' soltando' : '')}
+              onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setArrastrando(true); } }}
+              onDragLeave={() => setArrastrando(false)}
+              onDrop={e => { e.preventDefault(); setArrastrando(false); adjunta(Array.from(e.dataTransfer.files)); }}>
+              <input ref={selector} type="file" multiple hidden onChange={e => { adjunta(Array.from(e.target.files || [])); e.target.value = ''; }} />
+              <button className="icono adjuntar" onClick={() => selector.current?.click()} title="Adjuntar ficheros (también puedes arrastrarlos o pegar una imagen)" aria-label="Adjuntar ficheros" disabled={!sesion.hosting}>
+                <Icono n="clip" t={17} />
+              </button>
               <div className="selector-agente">
                 <button className="agente-actual" onClick={() => setVerAgentes(v => !v)} title={prov ? prov.nombre : 'Elegir agente'} aria-label="Agente" aria-haspopup="listbox" aria-expanded={verAgentes}>
                   <Agente id={sesion.agente} t={18} /><Icono n="bajar" t={12} />
@@ -282,11 +319,12 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                 )}
               </div>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
+                onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
                 placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
-                : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
+                : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
             <div className="pie-redactor">

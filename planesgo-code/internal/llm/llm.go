@@ -27,6 +27,8 @@ type Peticion struct {
 	Permisos string
 	// Esfuerzo de razonamiento del agente (uno de los de su Info.Esfuerzos; vacío: el suyo por defecto).
 	Esfuerzo string
+	// Adjuntos: ficheros que el usuario adjunta al mensaje (rutas dentro de la carpeta de la sesión).
+	Adjuntos []string
 	// Entorno: variables que se añaden al del agente (PGO_API, PGO_TOKEN… para la orden «pgo»).
 	Entorno []string
 }
