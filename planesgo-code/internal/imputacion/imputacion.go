@@ -1,28 +1,26 @@
 // Package imputacion lleva el tiempo de las sesiones de pgocode directamente a Odoo (partes de horas en
 // account.analytic.line), con la sesión de Odoo del usuario y sin pasar por PlanesGo ni por el agente.
 //
-// Regla (la misma para todo el tiempo imputado):
-//   - Cada sesión imputa a su proyecto y a su tarea (la de sus ajustes; por defecto la canónica «Desarrollo»,
-//     que se crea si no existe). Un parte es un periodo de trabajo continuo de una sesión dentro de un mismo día.
-//   - Hay trabajo cuando el agente está con un turno o cuando la persona usa la sesión (teclado, ratón,
-//     desplazarse, con la ventana en primer plano). Tras el último trabajo hay una espera activa de 5 minutos que
-//     también cuenta; si no hay más trabajo, el parte se cierra con inicio → último trabajo + 5 minutos.
-//   - Dos líneas por parte: «Hora Máquina» con el tiempo de los turnos del agente (con ai_model, tokens y coste) y
-//     «Hora Hombre» con el resto (uso de la persona y esperas), sin ai_model.
-//   - Sin el cronómetro de Odoo (es uno por usuario y chocaría con PlanesGo y con otras sesiones): las líneas son
-//     «vivas», con las horas acumuladas escritas cada 3 minutos, y marcadas con ai_session_id =
-//     pgocode-abierto-<sesión>-m|h mientras están abiertas (pgocode-<sesión>-m|h al cerrarse). Al arrancar (por
-//     ejemplo tras actualizarse), pgocode lee de Odoo sus líneas abiertas y continúa. Al salir para actualizarse no
-//     se cierra nada; al salir de verdad, sí.
-//   - Fiabilidad: también se guarda el estado en disco; si Odoo falla al escribir, se reintenta (salvo que la línea
-//     ya no exista o esté validada). Cada apertura, reanudación y cierre queda en un diario (imputacion.log).
+// Regla:
+//   - En Odoo hay, por día, proyecto y tarea, una línea de «Hora Hombre» y una de «Hora Máquina» por agente
+//     (Claude Code, OpenCode, Antigravity…). Todas las sesiones de ese día, proyecto y tarea suman en ellas: «hoy,
+//     en este proyecto y esta tarea, he invertido tanto». Las líneas se ponen al día cada 3 minutos.
+//   - Cada sesión imputa a su proyecto y su tarea (la de sus ajustes; por defecto la canónica «Desarrollo», que se
+//     crea si no existe). Lleva periodos de trabajo: hay trabajo cuando el agente está con un turno (cuenta como
+//     máquina) o cuando la persona usa la sesión con la ventana en primer plano (cuenta como hombre). Tras el
+//     último trabajo hay una espera activa de 5 minutos que también cuenta (hombre); después el periodo se cierra.
+//   - Los periodos, los latidos y los totales del día se guardan en un fichero local (no en Odoo), así que Odoo no
+//     se llena de líneas pequeñas. Tras actualizarse o un cierre inesperado, pgocode lo retoma. Cada apertura y
+//     cierre de periodo queda en un diario (imputacion.log) para poder auditarlo.
 package imputacion
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -34,10 +32,24 @@ import (
 const (
 	TareaDefecto = "Desarrollo" // tarea canónica de PSF / PlanesGo
 	Espera       = 5 * time.Minute
-	Sincroniza   = 3 * time.Minute // cada cuánto se escriben en Odoo las horas de una línea viva
+	Escritura    = 3 * time.Minute // cada cuánto se ponen al día en Odoo las líneas del día
 	activoHumano = 60 * time.Second
-	marcaAbierta = "pgocode-abierto-"
+	// Redondeo hacia arriba del total del día de cada línea (como Odoo: un segundo cuenta como un bloque entero).
+	BloqueHombre  = 15 * time.Minute
+	BloqueMaquina = 5 * time.Minute
 )
+
+// Redondea hacia arriba los segundos de una línea del día al bloque de su clase; devuelve horas.
+func Redondea(seg float64, clase string) float64 {
+	if seg <= 0 {
+		return 0
+	}
+	b := BloqueHombre.Seconds()
+	if clase == "m" {
+		b = BloqueMaquina.Seconds()
+	}
+	return math.Ceil(seg/b) * b / 3600
+}
 
 // Odoo: lo que necesita del cliente de Odoo (call_kw con la sesión del usuario).
 type Odoo interface {
@@ -58,56 +70,83 @@ type Trabajo struct {
 	Desc       string `json:"desc"`
 }
 
-// Parte es lo que se ve en la interfaz.
-type Parte struct {
-	Sesion       string    `json:"sesion"`
-	Titulo       string    `json:"titulo"`
-	Proyecto     int       `json:"proyecto"`
-	NombreProy   string    `json:"nombre_proyecto"`
-	TareaID      int       `json:"tarea_id"`
-	Tarea        string    `json:"tarea"`
-	LineaMaquina int       `json:"linea_maquina"`
-	LineaHombre  int       `json:"linea_hombre"`
-	Inicio       time.Time `json:"inicio"`
-	Ultima       time.Time `json:"ultima"`
-	Fin          time.Time `json:"fin,omitzero"`
-	Horas        float64   `json:"horas"`
-	HorasMaquina float64   `json:"horas_maquina"`
-	HorasHombre  float64   `json:"horas_hombre"`
-	Tokens       int       `json:"tokens"`
-	Coste        float64   `json:"coste"`
-	Estado       string    `json:"estado"` // trabajando | activo | en-espera | cerrado | pendiente | error
-	Error        string    `json:"error,omitempty"`
-	Desc         string    `json:"desc"`
-}
-
-type parte struct {
-	Parte
+// Periodo: trabajo continuo de una sesión (en memoria y en el fichero local, nunca en Odoo).
+type Periodo struct {
+	Sesion     string        `json:"sesion"`
 	T          Trabajo       `json:"t"`
+	TareaID    int           `json:"tarea_id"` // resuelta en Odoo
+	Inicio     time.Time     `json:"inicio"`
+	Ultima     time.Time     `json:"ultima"`
 	UltimaHum  time.Time     `json:"ultima_hum"`
-	Maquina    time.Duration `json:"maquina"`     // turnos del agente ya terminados
-	TurnoDesde time.Time     `json:"turno_desde"` // inicio del turno en curso (cero si no hay)
-	Turnos     int           `json:"-"`
+	Maquina    time.Duration `json:"maquina"`
+	TurnoDesde time.Time     `json:"turno_desde"`
 	Entrada    int           `json:"entrada"`
 	Salida     int           `json:"salida"`
-	Escrito    time.Time     `json:"escrito"` // última escritura de las horas en Odoo
-	Cerrado    bool          `json:"cerrado"` // ya cerrado en Odoo: no se vuelve a escribir
-	mu         sync.Mutex    // serializa las escrituras en Odoo de este parte
+	Coste      float64       `json:"coste"`
+	Estado     string        `json:"estado"` // trabajando | activo | en-espera | error
+	Error      string        `json:"error,omitempty"`
+	turnos     int
 }
 
-// Gestor lleva los partes de todas las sesiones.
+// Dia: lo acumulado de un día, proyecto, tarea y clase (h: hombre; m: máquina de un agente) = una línea en Odoo.
+type Dia struct {
+	Fecha      string    `json:"fecha"`
+	Proyecto   int       `json:"proyecto"`
+	NombreProy string    `json:"nombre_proyecto"`
+	TareaID    int       `json:"tarea_id"`
+	Tarea      string    `json:"tarea"`
+	Clase      string    `json:"clase"`
+	Agente     string    `json:"agente,omitempty"`
+	Modelo     string    `json:"modelo,omitempty"`
+	LineaID    int       `json:"linea_id"`
+	Cerrado    float64   `json:"cerrado"` // segundos de periodos ya cerrados
+	Entrada    int       `json:"entrada"`
+	Salida     int       `json:"salida"`
+	Coste      float64   `json:"coste"`
+	Sesiones   []string  `json:"sesiones"`
+	UID        int       `json:"uid"`
+	OdooSesion string    `json:"odoo_sesion"`
+	Escrito    float64   `json:"escrito"` // horas escritas en Odoo la última vez
+	Sucio      bool      `json:"sucio"`   // hay que escribirla
+	Error      string    `json:"error,omitempty"`
+	EscritoEn  time.Time `json:"escrito_en"`
+}
+
+// Linea: lo que ve la interfaz de cada línea del día.
+type Linea struct {
+	Dia
+	Horas  float64   `json:"horas"` // en este momento
+	Ritmo  int       `json:"ritmo"` // periodos que la están haciendo crecer ahora
+	Calcul time.Time `json:"calculado"`
+}
+
+// Abierto: lo que ve la interfaz de cada sesión con un periodo abierto.
+type Abierto struct {
+	Sesion     string  `json:"sesion"`
+	Titulo     string  `json:"titulo"`
+	Proyecto   int     `json:"proyecto"`
+	NombreProy string  `json:"nombre_proyecto"`
+	TareaID    int     `json:"tarea_id"`
+	Tarea      string  `json:"tarea"`
+	Estado     string  `json:"estado"`
+	Error      string  `json:"error,omitempty"`
+	Horas      float64 `json:"horas"` // del periodo
+}
+
+// Gestor lleva los periodos de las sesiones y las líneas del día.
 type Gestor struct {
 	Odoo                  Odoo
 	Aviso                 func()
 	FicheroEstado, Diario string
 	Ahora                 func() time.Time
 
-	mu            sync.Mutex
-	partes        map[string]*parte
-	pendientes    []*parte
-	cerrados      []Parte
-	sincronizados map[int]bool
-	arrancado     bool
+	mu        sync.Mutex
+	periodos  map[string]*Periodo
+	dias      map[string]*Dia
+	tareas    map[string]int // tareas ya resueltas en Odoo (proyecto|nombre → id)
+	sinTarea  []*Periodo     // periodos cerrados antes de resolver su tarea: se suman al resolverla
+	escribe   sync.Mutex     // una escritura en Odoo a la vez
+	arrancado bool
 }
 
 func (g *Gestor) ahora() time.Time {
@@ -123,20 +162,61 @@ func (g *Gestor) avisa() {
 	}
 }
 
+func (g *Gestor) inicia() {
+	if g.periodos == nil {
+		g.periodos = map[string]*Periodo{}
+	}
+	if g.dias == nil {
+		g.dias = map[string]*Dia{}
+	}
+	if g.tareas == nil {
+		g.tareas = map[string]int{}
+	}
+}
+
+func claveTarea(t Trabajo) string { return fmt.Sprintf("%d|%s", t.Proyecto, tareaDe(t)) }
+
 func tareaDe(t Trabajo) string {
 	n := strings.TrimSpace(t.Tarea)
-	if n == "" || n == "pgocode - Sesión IA" { // la tarea propia de versiones anteriores pasa a la canónica
+	if n == "" || n == "pgocode - Sesión IA" {
 		return TareaDefecto
 	}
 	return n
 }
 
-// ---- tiempos ----
+// agenteDe: el agente de un modelo («Claude Code opus» → «Claude Code»).
+func agenteDe(modelo string) string {
+	for _, a := range []string{"Claude Code", "OpenCode", "Antigravity", "Gemini CLI"} {
+		if strings.HasPrefix(modelo, a) {
+			return a
+		}
+	}
+	if f := strings.Fields(modelo); len(f) > 0 {
+		return f[0]
+	}
+	return "Agente"
+}
 
-// fin del tiempo que cuenta: último trabajo + espera, sin pasar de ahora ni de la medianoche del día del inicio.
-func (g *Gestor) finDe(p *parte) time.Time {
+var noAlfa = regexp.MustCompile(`[^a-z0-9]+`)
+
+// marca de la línea en ai_session_id: «pgocode-h» o «pgocode-m-<agente>».
+func (d *Dia) marca() string {
+	if d.Clase == "h" {
+		return "pgocode-h"
+	}
+	return "pgocode-m-" + strings.Trim(noAlfa.ReplaceAllString(strings.ToLower(d.Agente), "-"), "-")
+}
+
+func claveDe(fecha string, proyecto, tarea int, clase, agente string) string {
+	return fmt.Sprintf("%s|%d|%d|%s|%s", fecha, proyecto, tarea, clase, agente)
+}
+
+// ---- tiempos de un periodo ----
+
+// fin del tiempo que cuenta: último trabajo + espera, sin pasar de ahora ni de la medianoche del inicio.
+func (g *Gestor) finDe(p *Periodo) time.Time {
 	fin := p.Ultima.Add(Espera)
-	if p.Turnos > 0 || fin.After(g.ahora()) {
+	if p.turnos > 0 || fin.After(g.ahora()) {
 		fin = g.ahora()
 	}
 	y, m, d := p.Inicio.Date()
@@ -146,11 +226,9 @@ func (g *Gestor) finDe(p *parte) time.Time {
 	return fin
 }
 
-func minutos(d time.Duration) float64 { return float64(int(d.Minutes()+0.5)) / 60 }
-
-// horas de máquina y de hombre (redondeadas al minuto) hasta fin.
-func (g *Gestor) horasDe(p *parte) (maq, hom float64, fin time.Time) {
-	fin = g.finDe(p)
+// partes de un periodo: segundos de máquina y de hombre.
+func (g *Gestor) partes(p *Periodo) (maq, hom float64) {
+	fin := g.finDe(p)
 	total := fin.Sub(p.Inicio)
 	m := p.Maquina
 	if !p.TurnoDesde.IsZero() {
@@ -159,17 +237,27 @@ func (g *Gestor) horasDe(p *parte) (maq, hom float64, fin time.Time) {
 	if m > total {
 		m = total
 	}
-	maq, hom = minutos(m), minutos(total-m)
-	if maq+hom == 0 {
-		hom = 1.0 / 60 // al menos un minuto
+	if total < 0 {
+		total = 0
 	}
-	return
+	return m.Seconds(), (total - m).Seconds()
+}
+
+// creciendo: a qué clase está sumando ahora mismo el periodo ("m", "h" o "" si ya no cuenta).
+func (g *Gestor) creciendo(p *Periodo) string {
+	if p.turnos > 0 {
+		return "m"
+	}
+	if g.ahora().Before(p.Ultima.Add(Espera)) {
+		return "h"
+	}
+	return ""
 }
 
 // ---- trabajo ----
 
-// Arranca: recupera el estado (del disco y de Odoo), y pone en marcha el reloj que escribe las horas, cierra tras
-// la espera y reintenta lo pendiente.
+// Arranca: retoma el estado del fichero local y pone en marcha el reloj (cierre de periodos, escritura de las
+// líneas del día cada 3 minutos y reintentos).
 func (g *Gestor) Arranca(ctx context.Context) {
 	g.mu.Lock()
 	if g.arrancado {
@@ -177,56 +265,40 @@ func (g *Gestor) Arranca(ctx context.Context) {
 		return
 	}
 	g.arrancado = true
-	if g.partes == nil {
-		g.partes = map[string]*parte{}
-	}
-	var viejos []*parte
+	g.inicia()
 	if g.FicheroEstado != "" {
-		var e struct{ Abiertos, Pendientes []*parte }
+		var e struct {
+			Periodos []*Periodo
+			Dias     []*Dia
+		}
 		if b, err := os.ReadFile(g.FicheroEstado); err == nil && json.Unmarshal(b, &e) == nil {
-			viejos = append(e.Abiertos, e.Pendientes...)
+			hoy := g.ahora().Format("2006-01-02")
+			for _, d := range e.Dias {
+				if d.Fecha == hoy || d.Sucio {
+					g.dias[claveDe(d.Fecha, d.Proyecto, d.TareaID, d.Clase, d.Agente)] = d
+				}
+			}
+			for _, p := range e.Periodos {
+				if !p.TurnoDesde.IsZero() { // el turno en curso termina donde terminó la ejecución anterior
+					p.Maquina += p.Ultima.Sub(p.TurnoDesde)
+					p.TurnoDesde = time.Time{}
+				}
+				g.periodos[p.Sesion] = p
+				g.estado(p)
+			}
 		}
 	}
 	g.mu.Unlock()
-	usuarios := map[int]string{}
-	for _, p := range viejos {
-		if p.T.UID > 0 && p.T.OdooSesion != "" {
-			usuarios[p.T.UID] = p.T.OdooSesion
-		}
-		p.Turnos = 0
-		if !p.TurnoDesde.IsZero() { // el turno que estaba en curso termina donde terminó la ejecución anterior
-			p.Maquina += p.Ultima.Sub(p.TurnoDesde)
-			p.TurnoDesde = time.Time{}
-		}
-		if p.Estado != "pendiente" && g.ahora().Sub(p.Ultima) < Espera {
-			g.mu.Lock()
-			g.estado(p)
-			g.partes[p.Sesion] = p
-			g.mu.Unlock()
-			g.diario("retoma", p, "parte abierto antes de reiniciar pgocode")
-			continue
-		}
-		g.diario("recupera", p, "parte de una ejecución anterior de pgocode")
-		g.cierraParte(p, "pgocode se cerró sin cerrarlo")
-	}
-	for uid, ses := range usuarios {
-		g.Sincroniza(ctx, uid, ses)
-	}
-	g.guarda()
+	g.revisa() // cierra lo que ya pasó la espera y escribe
 	go func() {
 		tic := time.NewTicker(15 * time.Second)
 		defer tic.Stop()
-		reintento := time.Now()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-tic.C:
 				g.revisa()
-				if time.Since(reintento) > time.Minute {
-					reintento = time.Now()
-					g.reintenta()
-				}
 			}
 		}
 	}()
@@ -240,14 +312,18 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 		una.Do(func() {
 			g.mu.Lock()
 			ahora := g.ahora()
-			if p.Turnos--; p.Turnos == 0 && !p.TurnoDesde.IsZero() {
-				p.Maquina += ahora.Sub(p.TurnoDesde)
-				p.TurnoDesde = time.Time{}
+			if p.turnos--; p.turnos <= 0 {
+				p.turnos = 0
+				if !p.TurnoDesde.IsZero() {
+					p.Maquina += ahora.Sub(p.TurnoDesde)
+					p.TurnoDesde = time.Time{}
+				}
 			}
 			p.Ultima = ahora
 			g.estado(p)
+			g.marcaSucias(p)
 			g.mu.Unlock()
-			go g.escribe(p) // fin de turno: las horas al día en Odoo
+			go g.escribeSucias() // fin de turno: las líneas del día al día
 			g.guarda()
 			g.avisa()
 		})
@@ -257,75 +333,128 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 // Actividad: la persona está usando la sesión (teclado, ratón… con la ventana en primer plano).
 func (g *Gestor) Actividad(t Trabajo) { g.trabajo(t, false, true) }
 
-func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *parte {
+func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *Periodo {
 	g.mu.Lock()
-	if g.partes == nil {
-		g.partes = map[string]*parte{}
-	}
+	g.inicia()
 	ahora := g.ahora()
-	p := g.partes[t.Sesion]
-	// Otra tarea, otro proyecto u otro día: se cierra el parte y se abre otro.
-	if p != nil && (p.T.Proyecto != t.Proyecto || tareaDe(p.T) != tareaDe(t) || (t.TareaID != 0 && p.T.TareaID != t.TareaID) ||
+	p := g.periodos[t.Sesion]
+	// Otra tarea, otro proyecto u otro día: se cierra el periodo y empieza otro.
+	if p != nil && (p.T.Proyecto != t.Proyecto || tareaDe(p.T) != tareaDe(t) || (t.TareaID != 0 && p.TareaID != 0 && p.TareaID != t.TareaID) ||
 		ahora.Format("2006-01-02") != p.Inicio.Format("2006-01-02")) {
-		ant := p
-		delete(g.partes, t.Sesion)
-		go g.cierraParte(ant, "cambio de tarea, de proyecto o de día")
+		g.cierraPeriodo(p, "cambio de tarea, de proyecto o de día")
 		p = nil
 	}
 	nuevo := p == nil
 	if nuevo {
-		p = &parte{T: t}
-		p.Parte = Parte{Sesion: t.Sesion, Titulo: t.Titulo, Proyecto: t.Proyecto, NombreProy: t.NombreProy, TareaID: t.TareaID,
-			Tarea: tareaDe(t), Inicio: ahora}
-		g.partes[t.Sesion] = p
+		p = &Periodo{Sesion: t.Sesion, T: t, TareaID: t.TareaID, Inicio: ahora}
+		if p.TareaID == 0 {
+			p.TareaID = g.tareas[claveTarea(t)]
+		}
+		g.periodos[t.Sesion] = p
 	}
-	if t.Desc != "" {
-		p.T.Desc, p.Desc = t.Desc, t.Desc
-	}
-	if p.T.Desc == "" {
-		p.T.Desc, p.Desc = Descripcion(t.Titulo, ""), Descripcion(t.Titulo, "")
-	}
-	if t.Modelo != "" {
-		p.T.Modelo = t.Modelo
-	}
-	if t.Titulo != "" {
-		p.T.Titulo, p.Titulo = t.Titulo, t.Titulo
-	}
-	if t.OdooSesion != "" {
-		p.T.OdooSesion = t.OdooSesion
+	for _, c := range []struct {
+		dst *string
+		v   string
+	}{{&p.T.Titulo, t.Titulo}, {&p.T.Desc, t.Desc}, {&p.T.Modelo, t.Modelo}, {&p.T.OdooSesion, t.OdooSesion}, {&p.T.NombreProy, t.NombreProy}} {
+		if c.v != "" {
+			*c.dst = c.v
+		}
 	}
 	if turno {
-		if p.Turnos == 0 {
+		if p.turnos == 0 {
 			p.TurnoDesde = ahora
 		}
-		p.Turnos++
+		p.turnos++
 	}
 	if humano {
 		p.UltimaHum = ahora
 	}
 	p.Ultima = ahora
 	g.estado(p)
-	maquinaFalta := turno && p.LineaMaquina == 0
-	hecho := g.sincronizados[t.UID]
 	g.mu.Unlock()
-	if nuevo || maquinaFalta {
-		go g.escribe(p) // crea la(s) línea(s) que falten
+	if nuevo {
+		g.diario("abre", p, "")
+		go g.preparaYEscribe(p)
+	} else if turno && !g.tieneMaquina(p) {
+		go g.preparaYEscribe(p)
 	}
 	g.guarda()
 	g.avisa()
-	if t.UID > 0 && t.OdooSesion != "" && !hecho {
-		go g.Sincroniza(context.Background(), t.UID, t.OdooSesion)
-	}
 	return p
 }
 
+func (g *Gestor) tieneMaquina(p *Periodo) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	d := g.dias[claveDe(p.Inicio.Format("2006-01-02"), p.T.Proyecto, p.TareaID, "m", agenteDe(p.T.Modelo))]
+	return d != nil && d.LineaID > 0
+}
+
+// preparaYEscribe resuelve la tarea del periodo (si hace falta) y escribe sus líneas del día.
+func (g *Gestor) preparaYEscribe(p *Periodo) {
+	g.mu.Lock()
+	t, tarea := p.T, p.TareaID
+	g.mu.Unlock()
+	if tarea == 0 {
+		ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+		id, err := g.tarea(ctx, t)
+		cancela()
+		if err != nil {
+			g.mu.Lock()
+			p.Estado, p.Error = "error", "tarea de Odoo: "+err.Error()
+			g.mu.Unlock()
+			g.diario("error", p, p.Error)
+			g.avisa()
+			return
+		}
+		g.mu.Lock()
+		p.TareaID = id
+		g.tareas[claveTarea(t)] = id
+		g.mu.Unlock()
+	}
+	g.mu.Lock()
+	g.marcaSucias(p)
+	g.mu.Unlock()
+	g.escribeSucias()
+}
+
+// resuelvePendientes: los periodos cerrados sin tarea resuelta se suman en cuanto se resuelve.
+func (g *Gestor) resuelvePendientes() {
+	g.mu.Lock()
+	l := g.sinTarea
+	g.sinTarea = nil
+	g.mu.Unlock()
+	for _, p := range l {
+		g.mu.Lock()
+		id := g.tareas[claveTarea(p.T)]
+		g.mu.Unlock()
+		if id == 0 {
+			ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+			var err error
+			id, err = g.tarea(ctx, p.T)
+			cancela()
+			if err != nil {
+				g.mu.Lock()
+				g.sinTarea = append(g.sinTarea, p)
+				g.mu.Unlock()
+				continue
+			}
+		}
+		g.mu.Lock()
+		g.tareas[claveTarea(p.T)] = id
+		p.TareaID = id
+		g.sumaPeriodo(p)
+		g.mu.Unlock()
+	}
+}
+
 // estado (con el cerrojo).
-func (g *Gestor) estado(p *parte) {
+func (g *Gestor) estado(p *Periodo) {
 	if p.Estado == "error" {
 		return
 	}
 	switch {
-	case p.Turnos > 0:
+	case p.turnos > 0:
 		p.Estado = "trabajando"
 	case g.ahora().Sub(p.UltimaHum) < activoHumano:
 		p.Estado = "activo"
@@ -334,211 +463,354 @@ func (g *Gestor) estado(p *parte) {
 	}
 }
 
-// revisa: cierra lo que ha pasado la espera (o la medianoche), escribe las horas de las líneas vivas cada 3
-// minutos y actualiza los estados.
-func (g *Gestor) revisa() {
-	g.mu.Lock()
-	var cerrar, escribir []*parte
-	cambio := false
-	ahora := g.ahora()
-	for s, p := range g.partes {
-		antes := p.Estado
-		g.estado(p)
-		cambio = cambio || antes != p.Estado
-		y, m, d := p.Inicio.Date()
-		pasada := ahora.After(time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
-		if (p.Turnos == 0 && ahora.Sub(p.Ultima) >= Espera) || pasada {
-			delete(g.partes, s)
-			cerrar = append(cerrar, p)
-		} else if ahora.Sub(p.Escrito) >= Sincroniza {
-			escribir = append(escribir, p)
-		}
-	}
-	g.mu.Unlock()
-	for _, p := range cerrar {
-		motivo := "5 minutos sin trabajo"
-		if g.ahora().Format("2006-01-02") != p.Inicio.Format("2006-01-02") {
-			motivo = "fin del día"
-		}
-		g.cierraParte(p, motivo)
-	}
-	for _, p := range escribir {
-		g.escribe(p)
-	}
-	if cambio {
-		g.avisa()
-	}
-}
-
-// SumaUso añade el consumo de IA de un turno al parte abierto de la sesión.
-func (g *Gestor) SumaUso(sesion string, entrada, salida int, coste float64) {
-	g.mu.Lock()
-	if p := g.partes[sesion]; p != nil {
-		p.Entrada += entrada
-		p.Salida += salida
-		p.Coste += coste
-		p.Tokens = p.Entrada + p.Salida
-	}
-	g.mu.Unlock()
-	g.guarda()
-}
-
-// ActualizaSesionOdoo: tras volver a entrar, los partes y pendientes del usuario usan la nueva sesión de Odoo.
-func (g *Gestor) ActualizaSesionOdoo(uid int, sesion string) {
-	g.mu.Lock()
-	for _, l := range [][]*parte{g.pendientes} {
-		for _, p := range l {
-			if p.T.UID == uid {
-				p.T.OdooSesion = sesion
-			}
-		}
-	}
-	for _, p := range g.partes {
-		if p.T.UID == uid {
-			p.T.OdooSesion = sesion
-		}
-	}
-	g.mu.Unlock()
-	g.guarda()
-}
-
-// ---- Odoo ----
-
-// escribe crea las líneas que falten y pone al día sus horas (y la descripción y los datos de IA).
-func (g *Gestor) escribe(p *parte) error { return g.escribeFin(p, false) }
-
-func (g *Gestor) escribeFin(p *parte, cerrar bool) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// Una escritura «al día» que llega tarde no puede reabrir un parte ya cerrado.
-	if p.Cerrado {
+// dia (con el cerrojo): la línea del día de una clase para un periodo (la crea en memoria si no existe).
+func (g *Gestor) dia(p *Periodo, clase string) *Dia {
+	if p.TareaID == 0 {
 		return nil
 	}
-	ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancela()
-	g.mu.Lock()
-	t := p.T
-	maq, hom, _ := g.horasDe(p)
-	turnos := p.Turnos > 0 || p.Maquina > 0 || !p.TurnoDesde.IsZero()
-	lm, lh, tareaID := p.LineaMaquina, p.LineaHombre, p.TareaID
-	entrada, salida, coste := p.Entrada, p.Salida, p.Coste
 	fecha := p.Inicio.Format("2006-01-02")
-	g.mu.Unlock()
-
-	if tareaID == 0 {
-		id, err := g.tarea(ctx, t)
-		if err != nil {
-			g.falla(p, "tarea: "+err.Error())
-			return err
-		}
-		tareaID = id
-		g.mu.Lock()
-		p.TareaID, p.T.TareaID = id, id
-		g.mu.Unlock()
+	agente := ""
+	if clase == "m" {
+		agente = agenteDe(p.T.Modelo)
 	}
-	marca := func(clase string) string {
-		if cerrar {
-			return "pgocode-" + t.Sesion + "-" + clase
-		}
-		return marcaAbierta + t.Sesion + "-" + clase
+	k := claveDe(fecha, p.T.Proyecto, p.TareaID, clase, agente)
+	d := g.dias[k]
+	if d == nil {
+		d = &Dia{Fecha: fecha, Proyecto: p.T.Proyecto, NombreProy: p.T.NombreProy, TareaID: p.TareaID, Tarea: tareaDe(p.T),
+			Clase: clase, Agente: agente}
+		g.dias[k] = d
 	}
-	nombre := t.Desc
-	if strings.TrimSpace(nombre) == "" {
-		nombre = Descripcion(t.Titulo, "")
+	d.UID, d.OdooSesion = p.T.UID, p.T.OdooSesion
+	if p.T.NombreProy != "" {
+		d.NombreProy = p.T.NombreProy
 	}
-	base := func(horas float64, clase string) map[string]any {
-		v := map[string]any{"name": nombre, "unit_amount": horas, "ai_session_id": marca(clase)}
-		if clase == "m" {
-			v["ai_model"] = t.Modelo
-			v["ai_tokens_input"], v["ai_tokens_output"], v["ai_tokens_total"], v["ai_cost"] = entrada, salida, entrada+salida, coste
-		}
-		return v
+	if clase == "m" && p.T.Modelo != "" {
+		d.Modelo = p.T.Modelo
 	}
-	// Hora Hombre: siempre; Hora Máquina: si ha habido turnos del agente.
-	var err error
-	if lh, err = g.linea(ctx, t, lh, tareaID, fecha, base(hom, "h")); err != nil {
-		return g.errorEscritura(p, err)
+	if tit := strings.TrimSpace(p.T.Titulo); tit != "" && !contiene(d.Sesiones, tit) {
+		d.Sesiones = append(d.Sesiones, tit)
 	}
-	if turnos {
-		if lm, err = g.linea(ctx, t, lm, tareaID, fecha, base(maq, "m")); err != nil {
-			return g.errorEscritura(p, err)
-		}
-	}
-	g.mu.Lock()
-	nuevaH, nuevaM := p.LineaHombre == 0 && lh > 0, p.LineaMaquina == 0 && lm > 0
-	p.LineaHombre, p.LineaMaquina, p.Escrito = lh, lm, g.ahora()
-	p.Cerrado = cerrar
-	if p.Estado == "error" {
-		p.Estado, p.Error = "en-espera", ""
-		g.estado(p)
-	}
-	g.mu.Unlock()
-	if nuevaH || nuevaM {
-		g.diario("abre", p, "")
-	}
-	g.guarda()
-	g.avisa()
-	return nil
+	return d
 }
 
-// linea crea (id 0) o actualiza una línea de parte. Si Odoo no tiene los campos de IA, se escribe sin ellos.
-func (g *Gestor) linea(ctx context.Context, t Trabajo, id, tarea int, fecha string, vals map[string]any) (int, error) {
-	sinIA := func(v map[string]any) map[string]any {
-		x := map[string]any{}
-		for k, val := range v {
-			if !strings.HasPrefix(k, "ai_") {
-				x[k] = val
-			}
-		}
-		return x
-	}
-	var nada any
-	if id > 0 {
-		err := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "write", []any{[]int{id}, vals}, nil, &nada)
-		if err != nil && !definitivo(err) {
-			if e2 := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "write", []any{[]int{id}, sinIA(vals)}, nil, &nada); e2 == nil {
-				depuracion.Log("imputacion", "línea %d escrita sin los campos de IA: %v", id, err)
-				return id, nil
-			}
-		}
-		return id, err
-	}
-	v := map[string]any{"date": fecha, "project_id": t.Proyecto, "task_id": tarea}
-	if t.UID > 0 {
-		v["user_id"] = t.UID
-	}
-	for k, x := range vals {
-		v[k] = x
-	}
-	var nuevo int
-	err := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{v}, nil, &nuevo)
-	if err != nil {
-		if e2 := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{sinIA(v)}, nil, &nuevo); e2 == nil {
-			depuracion.Log("imputacion", "línea %d creada sin los campos de IA: %v", nuevo, err)
-			return nuevo, nil
-		}
-	}
-	return nuevo, err
-}
-
-// definitivo: errores de Odoo que no se arreglan reintentando (la línea ya no existe o está validada).
-func definitivo(err error) bool {
-	s := strings.ToLower(err.Error())
-	for _, k := range []string{"missingerror", "does not exist", "no existe", "has been deleted", "validad", "validated", "accesserror"} {
-		if strings.Contains(s, k) {
+func contiene(l []string, x string) bool {
+	for _, v := range l {
+		if v == x {
 			return true
 		}
 	}
 	return false
 }
 
-func (g *Gestor) errorEscritura(p *parte, err error) error {
-	if definitivo(err) {
-		g.falla(p, "Odoo: "+err.Error())
+// marcaSucias (con el cerrojo): las líneas del día de un periodo hay que escribirlas.
+func (g *Gestor) marcaSucias(p *Periodo) {
+	if d := g.dia(p, "h"); d != nil {
+		d.Sucio = true
+	}
+	if m, _ := g.partes(p); m > 0 || p.turnos > 0 {
+		if d := g.dia(p, "m"); d != nil {
+			d.Sucio = true
+		}
+	}
+}
+
+// cierraPeriodo (con el cerrojo): suma el periodo a sus líneas del día y lo quita.
+func (g *Gestor) cierraPeriodo(p *Periodo, motivo string) {
+	maq, hom := g.partes(p)
+	if p.TareaID == 0 {
+		p.TareaID = g.tareas[claveTarea(p.T)]
+	}
+	// Se congela el tiempo del periodo (ya no crece) para sumarlo ahora o cuando se resuelva su tarea.
+	p.Maquina, p.TurnoDesde, p.turnos = time.Duration(maq*float64(time.Second)), time.Time{}, 0
+	fin := p.Inicio.Add(time.Duration((maq + hom) * float64(time.Second)))
+	p.Ultima = fin.Add(-Espera)
+	if p.TareaID == 0 {
+		g.sinTarea = append(g.sinTarea, p)
 	} else {
-		depuracion.Log("imputacion", "sesión %s: escribir en Odoo: %v (se reintentará)", p.Sesion, err)
+		g.sumaPeriodo(p)
+	}
+	delete(g.periodos, p.Sesion)
+	go g.diario("cierra", p, fmt.Sprintf("%s (máquina %.0f s, hombre %.0f s)", motivo, maq, hom))
+}
+
+// sumaPeriodo (con el cerrojo): añade un periodo cerrado a sus líneas del día.
+func (g *Gestor) sumaPeriodo(p *Periodo) {
+	maq, hom := g.partesCerrado(p)
+	{
+		if d := g.dia(p, "h"); d != nil {
+			d.Cerrado += hom
+			d.Sucio = true
+		}
+		if maq > 0 || p.Entrada+p.Salida > 0 {
+			if d := g.dia(p, "m"); d != nil {
+				d.Cerrado += maq
+				d.Entrada += p.Entrada
+				d.Salida += p.Salida
+				d.Coste += p.Coste
+				d.Sucio = true
+			}
+		}
+	}
+}
+
+// partesCerrado: máquina y hombre de un periodo ya congelado (Ultima = fin - espera).
+func (g *Gestor) partesCerrado(p *Periodo) (maq, hom float64) {
+	total := p.Ultima.Add(Espera).Sub(p.Inicio).Seconds()
+	maq = math.Min(p.Maquina.Seconds(), total)
+	return maq, math.Max(0, total-maq)
+}
+
+// revisa: cierra los periodos que pasaron la espera (o la medianoche) y escribe las líneas del día pendientes
+// (cada 3 minutos las que siguen creciendo).
+func (g *Gestor) revisa() {
+	g.mu.Lock()
+	g.inicia()
+	ahora := g.ahora()
+	cambio := false
+	for _, p := range g.periodos {
+		antes := p.Estado
+		g.estado(p)
+		cambio = cambio || antes != p.Estado
+		y, m, d := p.Inicio.Date()
+		medianoche := ahora.After(time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
+		if (p.turnos == 0 && !ahora.Before(p.Ultima.Add(Espera))) || medianoche {
+			g.cierraPeriodo(p, map[bool]string{true: "fin del día", false: "5 minutos sin trabajo"}[medianoche])
+			cambio = true
+		}
+	}
+	// Las líneas que crecen se ponen al día cada 3 minutos.
+	for _, p := range g.periodos {
+		if c := g.creciendo(p); c != "" {
+			if d := g.dia(p, c); d != nil && ahora.Sub(d.EscritoEn) >= Escritura {
+				d.Sucio = true
+			}
+		}
+	}
+	g.mu.Unlock()
+	g.resuelvePendientes()
+	g.escribeSucias()
+	g.guarda()
+	if cambio {
+		g.avisa()
+	}
+}
+
+// SumaUso añade el consumo de IA de un turno al periodo abierto de la sesión.
+func (g *Gestor) SumaUso(sesion string, entrada, salida int, coste float64) {
+	g.mu.Lock()
+	if p := g.periodos[sesion]; p != nil {
+		p.Entrada += entrada
+		p.Salida += salida
+		p.Coste += coste
+	}
+	g.mu.Unlock()
+	g.guarda()
+}
+
+// ActualizaSesionOdoo: tras volver a entrar, se escribe con la nueva sesión de Odoo del usuario.
+func (g *Gestor) ActualizaSesionOdoo(uid int, sesion string) {
+	g.mu.Lock()
+	for _, p := range g.periodos {
+		if p.T.UID == uid {
+			p.T.OdooSesion = sesion
+		}
+	}
+	for _, d := range g.dias {
+		if d.UID == uid {
+			d.OdooSesion = sesion
+		}
+	}
+	g.mu.Unlock()
+	g.guarda()
+}
+
+// totales (con el cerrojo): segundos de una línea del día ahora mismo (cerrado + periodos abiertos) y uso de IA.
+func (g *Gestor) totales(d *Dia) (seg float64, ent, sal int, coste float64, ritmo int) {
+	seg, ent, sal, coste = d.Cerrado, d.Entrada, d.Salida, d.Coste
+	for _, p := range g.periodos {
+		if p.TareaID != d.TareaID || p.T.Proyecto != d.Proyecto || p.Inicio.Format("2006-01-02") != d.Fecha {
+			continue
+		}
+		maq, hom := g.partes(p)
+		switch {
+		case d.Clase == "h":
+			seg += hom
+		case agenteDe(p.T.Modelo) == d.Agente:
+			seg += maq
+			ent, sal, coste = ent+p.Entrada, sal+p.Salida, coste+p.Coste
+		default:
+			continue
+		}
+		if c := g.creciendo(p); (c == "h" && d.Clase == "h") || (c == "m" && d.Clase == "m" && agenteDe(p.T.Modelo) == d.Agente) {
+			ritmo++
+		}
+	}
+	return
+}
+
+// descripción de la línea del día.
+func (d *Dia) descripcion() string {
+	tipo := "trabajo"
+	if d.Clase == "m" {
+		tipo = "agente " + d.Agente
+	}
+	if len(d.Sesiones) == 0 {
+		return fmt.Sprintf("pgocode (%s)", tipo)
+	}
+	s := d.Sesiones
+	resto := ""
+	if len(s) > 6 {
+		resto = fmt.Sprintf(" y %d más", len(s)-6)
+		s = s[:6]
+	}
+	return fmt.Sprintf("pgocode (%s): «%s»%s", tipo, strings.Join(s, "», «"), resto)
+}
+
+// escribeSucias pone al día en Odoo las líneas del día pendientes (creándolas si hace falta).
+func (g *Gestor) escribeSucias() {
+	g.escribe.Lock()
+	defer g.escribe.Unlock()
+	g.mu.Lock()
+	var l []*Dia
+	for _, d := range g.dias {
+		if d.Sucio && d.OdooSesion != "" {
+			l = append(l, d)
+		}
+	}
+	g.mu.Unlock()
+	for _, d := range l {
+		g.escribeDia(d)
+	}
+	if len(l) > 0 {
+		g.guarda()
+		g.avisa()
+	}
+}
+
+func (g *Gestor) escribeDia(d *Dia) {
+	ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancela()
+	g.mu.Lock()
+	seg, ent, sal, coste, ritmo := g.totales(d)
+	dd := *d
+	g.mu.Unlock()
+	if seg == 0 && ritmo > 0 { // trabajo recién empezado: ya cuenta su primer bloque
+		seg = 1
+	}
+	horas := Redondea(seg, dd.Clase)
+	vals := map[string]any{"name": dd.descripcion(), "unit_amount": horas, "ai_session_id": dd.marca()}
+	if dd.Clase == "m" {
+		vals["ai_model"] = dd.Modelo
+		vals["ai_tokens_input"], vals["ai_tokens_output"], vals["ai_tokens_total"], vals["ai_cost"] = ent, sal, ent+sal, coste
+	}
+	id := dd.LineaID
+	if id == 0 {
+		id = g.buscaLinea(ctx, &dd)
+	}
+	var err error
+	if id == 0 {
+		if horas == 0 { // nada que imputar todavía: no se crea una línea vacía
+			g.mu.Lock()
+			d.Sucio = false
+			g.mu.Unlock()
+			return
+		}
+		v := map[string]any{"date": dd.Fecha, "project_id": dd.Proyecto, "task_id": dd.TareaID}
+		if dd.UID > 0 {
+			v["user_id"] = dd.UID
+		}
+		for k, x := range vals {
+			v[k] = x
+		}
+		id, err = g.crea(ctx, dd.OdooSesion, v)
+	} else {
+		err = g.escribeLinea(ctx, dd.OdooSesion, id, vals)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err != nil {
+		d.Error = err.Error()
+		if definitivo(err) { // la línea ya no existe o está validada: se crea otra con lo que falte la próxima vez
+			d.LineaID = 0
+		}
+		depuracion.Log("imputacion", "línea del día %s/%d/%s: %v", dd.Fecha, dd.Proyecto, dd.marca(), err)
+		return
+	}
+	d.LineaID, d.Escrito, d.EscritoEn, d.Sucio, d.Error = id, horas, g.ahora(), false, ""
+}
+
+// buscaLinea: la línea del día ya existente en Odoo (p. ej. si se perdió el fichero local). Si se encuentra y no
+// había nada acumulado, sus horas pasan a ser lo ya cerrado.
+func (g *Gestor) buscaLinea(ctx context.Context, d *Dia) int {
+	var l []struct {
+		ID    int     `json:"id"`
+		Horas float64 `json:"unit_amount"`
+	}
+	dominio := []any{[]any{"date", "=", d.Fecha}, []any{"project_id", "=", d.Proyecto}, []any{"task_id", "=", d.TareaID},
+		[]any{"ai_session_id", "=", d.marca()}}
+	if d.UID > 0 {
+		dominio = append(dominio, []any{"user_id", "=", d.UID})
+	}
+	if err := g.Odoo.CallKW(ctx, d.OdooSesion, "account.analytic.line", "search_read", []any{dominio},
+		map[string]any{"fields": []string{"id", "unit_amount"}, "limit": 1}, &l); err != nil || len(l) == 0 {
+		return 0
+	}
+	g.mu.Lock()
+	for _, x := range g.dias {
+		if x.Fecha == d.Fecha && x.Proyecto == d.Proyecto && x.TareaID == d.TareaID && x.Clase == d.Clase && x.Agente == d.Agente {
+			if x.LineaID == 0 && x.Cerrado == 0 {
+				x.Cerrado = l[0].Horas * 3600
+				d.Cerrado = x.Cerrado
+			}
+			x.LineaID = l[0].ID
+		}
+	}
+	g.mu.Unlock()
+	return l[0].ID
+}
+
+func sinIA(v map[string]any) map[string]any {
+	x := map[string]any{}
+	for k, val := range v {
+		if !strings.HasPrefix(k, "ai_") {
+			x[k] = val
+		}
+	}
+	return x
+}
+
+func (g *Gestor) crea(ctx context.Context, ses string, v map[string]any) (int, error) {
+	var id int
+	err := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "create", []any{v}, nil, &id)
+	if err != nil {
+		if e2 := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "create", []any{sinIA(v)}, nil, &id); e2 == nil {
+			depuracion.Log("imputacion", "línea %d creada sin los campos de IA: %v", id, err)
+			return id, nil
+		}
+	}
+	return id, err
+}
+
+func (g *Gestor) escribeLinea(ctx context.Context, ses string, id int, v map[string]any) error {
+	var nada any
+	err := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "write", []any{[]int{id}, v}, nil, &nada)
+	if err != nil && !definitivo(err) {
+		if e2 := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "write", []any{[]int{id}, sinIA(v)}, nil, &nada); e2 == nil {
+			return nil
+		}
 	}
 	return err
+}
+
+// definitivo: errores de Odoo que no se arreglan reintentando (la línea ya no existe o está validada).
+func definitivo(err error) bool {
+	s := strings.ToLower(err.Error())
+	for _, k := range []string{"missingerror", "does not exist", "no existe", "has been deleted", "validad", "validated"} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // tarea busca la tarea por nombre en el proyecto y, si no existe, la crea (asignada al usuario).
@@ -570,228 +842,75 @@ func (g *Gestor) tarea(ctx context.Context, t Trabajo) (int, error) {
 	return id, err
 }
 
-func (g *Gestor) falla(p *parte, e string) {
-	g.mu.Lock()
-	p.Estado, p.Error = "error", e
-	g.mu.Unlock()
-	g.diario("error", p, e)
-	g.avisa()
-}
-
-// Cierra el parte de una sesión ya (si no hay turnos del agente en curso).
+// Cierra el periodo de una sesión ya (si el agente no está con un turno).
 func (g *Gestor) Cierra(sesion, motivo string) {
 	g.mu.Lock()
-	p := g.partes[sesion]
-	if p == nil || p.Turnos > 0 {
-		g.mu.Unlock()
-		return
-	}
-	delete(g.partes, sesion)
-	g.mu.Unlock()
-	g.cierraParte(p, motivo)
-}
-
-// cierraParte escribe las horas finales y quita la marca de abierta. Si Odoo falla (y no es definitivo), queda
-// pendiente y se reintenta.
-func (g *Gestor) cierraParte(p *parte, motivo string) {
-	err := g.escribeFin(p, true)
-	g.mu.Lock()
-	maq, hom, fin := g.horasDe(p)
-	p.Fin, p.HorasMaquina, p.HorasHombre, p.Horas = fin, maq, hom, maq+hom
-	switch {
-	case err == nil:
-		p.Estado, p.Error = "cerrado", ""
-	case definitivo(err):
-		p.Estado = "error"
-	default:
-		p.Estado, p.Error = "pendiente", err.Error()
-		g.pendientes = append(g.pendientes, p)
-	}
-	g.cerrados = append([]Parte{p.Parte}, g.cerrados...)
-	if len(g.cerrados) > 100 {
-		g.cerrados = g.cerrados[:100]
+	if p := g.periodos[sesion]; p != nil && p.turnos == 0 {
+		g.cierraPeriodo(p, motivo)
 	}
 	g.mu.Unlock()
-	if err != nil {
-		g.diario("cierre-fallido", p, motivo+": "+err.Error())
-	} else {
-		g.diario("cierra", p, motivo)
-	}
+	g.escribeSucias()
 	g.guarda()
 	g.avisa()
 }
 
-func (g *Gestor) reintenta() {
-	g.mu.Lock()
-	l := g.pendientes
-	g.pendientes = nil
-	var quedan []Parte
-	for _, c := range g.cerrados {
-		pend := false
-		for _, p := range l {
-			pend = pend || (c.Sesion == p.Sesion && c.Inicio.Equal(p.Inicio) && c.Estado == "pendiente")
-		}
-		if !pend {
-			quedan = append(quedan, c)
-		}
-	}
-	g.cerrados = quedan
-	g.mu.Unlock()
-	for _, p := range l {
-		g.cierraParte(p, "reintento")
-	}
-}
-
-// CierraTodo cierra todos los partes (al salir de pgocode de verdad).
+// CierraTodo cierra todos los periodos y escribe (al salir de pgocode de verdad).
 func (g *Gestor) CierraTodo() {
 	g.mu.Lock()
-	var l []*parte
-	for s, p := range g.partes {
+	for _, p := range g.periodos {
 		if !p.TurnoDesde.IsZero() {
 			p.Maquina += g.ahora().Sub(p.TurnoDesde)
 			p.TurnoDesde = time.Time{}
 		}
-		p.Turnos = 0
-		l = append(l, p)
-		delete(g.partes, s)
+		p.turnos = 0
+		g.cierraPeriodo(p, "pgocode se cierra")
 	}
 	g.mu.Unlock()
-	var wg sync.WaitGroup
-	for _, p := range l {
-		wg.Add(1)
-		go func(p *parte) { defer wg.Done(); g.cierraParte(p, "pgocode se cierra") }(p)
-	}
-	wg.Wait()
+	g.escribeSucias()
+	g.guarda()
 }
 
-// Suspende: pgocode sale para actualizarse. No se cierra nada: las líneas siguen abiertas en Odoo con sus horas al
-// día, y la versión nueva las retoma.
+// Suspende: pgocode sale para actualizarse. No se cierra nada: se escriben las líneas del día y se guarda el
+// estado para que la versión nueva continúe.
 func (g *Gestor) Suspende() {
 	g.mu.Lock()
-	var l []*parte
-	for _, p := range g.partes {
-		l = append(l, p)
+	for _, p := range g.periodos {
+		g.marcaSucias(p)
 	}
+	n := len(g.periodos)
 	g.mu.Unlock()
-	for _, p := range l {
-		g.escribe(p)
-	}
+	g.escribeSucias()
 	g.guarda()
-	depuracion.Log("imputacion", "pgocode se actualiza: %d partes siguen abiertos en Odoo", len(l))
+	depuracion.Log("imputacion", "pgocode se actualiza: %d periodos siguen abiertos", n)
 }
 
-// Sincroniza lee de Odoo las líneas abiertas de pgocode del usuario (ai_session_id pgocode-abierto-…) y retoma las
-// que pgocode no tenga: las líneas vivas de Odoo mandan.
-func (g *Gestor) Sincroniza(ctx context.Context, uid int, sesionOdoo string) {
-	g.mu.Lock()
-	if g.sincronizados == nil {
-		g.sincronizados = map[int]bool{}
-	}
-	if g.sincronizados[uid] {
-		g.mu.Unlock()
-		return
-	}
-	g.sincronizados[uid] = true
-	g.mu.Unlock()
-	ctx, cancela := context.WithTimeout(ctx, 30*time.Second)
-	defer cancela()
-	var l []struct {
-		ID        int     `json:"id"`
-		Name      string  `json:"name"`
-		Sesion    any     `json:"ai_session_id"`
-		Model     any     `json:"ai_model"`
-		Creada    string  `json:"create_date"`
-		Fecha     string  `json:"date"`
-		Horas     float64 `json:"unit_amount"`
-		Project   []any   `json:"project_id"`
-		Task      any     `json:"task_id"`
-		TokensIn  any     `json:"ai_tokens_input"`
-		TokensOut any     `json:"ai_tokens_output"`
-		Coste     any     `json:"ai_cost"`
-	}
-	dominio := []any{[]any{"user_id", "=", uid}, []any{"ai_session_id", "=like", marcaAbierta + "%"}}
-	campos := map[string]any{"fields": []string{"id", "name", "ai_session_id", "ai_model", "create_date", "date", "unit_amount",
-		"project_id", "task_id", "ai_tokens_input", "ai_tokens_output", "ai_cost"}, "limit": 100}
-	if err := g.Odoo.CallKW(ctx, sesionOdoo, "account.analytic.line", "search_read", []any{dominio}, campos, &l); err != nil {
-		depuracion.Log("imputacion", "leer las líneas abiertas de Odoo (usuario %d): %v", uid, err)
-		return
-	}
-	num := func(v any) float64 { f, _ := v.(float64); return f }
-	for _, x := range l {
-		s, _ := x.Sesion.(string)
-		resto := strings.TrimPrefix(s, marcaAbierta)
-		if len(resto) < 3 || len(x.Project) < 2 {
-			continue
-		}
-		sesion, clase := resto[:len(resto)-2], resto[len(resto)-1:]
-		creada, err := time.ParseInLocation("2006-01-02 15:04:05", x.Creada, time.UTC)
-		if err != nil {
-			continue
-		}
-		g.mu.Lock()
-		p := g.partes[sesion]
-		if p != nil && (p.LineaHombre == x.ID || p.LineaMaquina == x.ID) {
-			g.mu.Unlock()
-			continue
-		}
-		if p == nil {
-			proy, _ := x.Project[0].(float64)
-			nombreProy, _ := x.Project[1].(string)
-			tareaID, tarea := 0, TareaDefecto
-			if t, ok := x.Task.([]any); ok && len(t) == 2 {
-				tareaID = int(num(t[0]))
-				tarea, _ = t[1].(string)
-			}
-			p = &parte{T: Trabajo{Sesion: sesion, Proyecto: int(proy), NombreProy: nombreProy, TareaID: tareaID, Tarea: tarea,
-				UID: uid, OdooSesion: sesionOdoo, Desc: x.Name}}
-			// No se sabe cuándo fue el último trabajo: se cuenta desde ahora con su espera.
-			p.Parte = Parte{Sesion: sesion, Proyecto: int(proy), NombreProy: nombreProy, TareaID: tareaID, Tarea: tarea,
-				Inicio: creada.Local(), Ultima: g.ahora(), Desc: x.Name, Estado: "en-espera"}
-			if g.partes == nil {
-				g.partes = map[string]*parte{}
-			}
-			g.partes[sesion] = p
-		}
-		if creada.Local().Before(p.Inicio) {
-			p.Inicio = creada.Local()
-		}
-		if clase == "m" {
-			p.LineaMaquina = x.ID
-			p.Maquina = time.Duration(x.Horas * float64(time.Hour))
-			p.Entrada, p.Salida, p.Coste = int(num(x.TokensIn)), int(num(x.TokensOut)), num(x.Coste)
-			p.Tokens = p.Entrada + p.Salida
-			if m, _ := x.Model.(string); m != "" {
-				p.T.Modelo = m
-			}
-		} else {
-			p.LineaHombre = x.ID
-		}
-		g.estado(p)
-		g.mu.Unlock()
-		g.diario("retoma", p, "línea abierta en Odoo")
-	}
-	g.guarda()
-	g.avisa()
-}
-
-// Estado: partes abiertos y los cerrados hoy.
-func (g *Gestor) Estado() (abiertos, cerrados []Parte) {
+// Estado: las líneas de hoy (con sus horas en este momento) y las sesiones con un periodo abierto.
+func (g *Gestor) Estado() (hoy []Linea, abiertos []Abierto) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	abiertos, cerrados = []Parte{}, []Parte{}
-	for _, p := range g.partes {
-		x := p.Parte
-		x.HorasMaquina, x.HorasHombre, _ = g.horasDe(p)
-		x.Horas = x.HorasMaquina + x.HorasHombre
-		abiertos = append(abiertos, x)
-	}
-	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Inicio.Before(abiertos[j].Inicio) })
-	hoy := g.ahora().Format("2006-01-02")
-	for _, c := range g.cerrados {
-		if c.Fin.Format("2006-01-02") == hoy || c.Inicio.Format("2006-01-02") == hoy {
-			cerrados = append(cerrados, c)
+	hoy, abiertos = []Linea{}, []Abierto{}
+	fecha := g.ahora().Format("2006-01-02")
+	for _, d := range g.dias {
+		if d.Fecha != fecha {
+			continue
 		}
+		seg, ent, sal, coste, ritmo := g.totales(d)
+		x := Linea{Dia: *d, Horas: seg / 3600, Ritmo: ritmo, Calcul: g.ahora()}
+		x.Entrada, x.Salida, x.Coste = ent, sal, coste
+		hoy = append(hoy, x)
 	}
+	sort.Slice(hoy, func(i, j int) bool {
+		if hoy[i].NombreProy != hoy[j].NombreProy {
+			return hoy[i].NombreProy < hoy[j].NombreProy
+		}
+		return hoy[i].Clase > hoy[j].Clase
+	})
+	for _, p := range g.periodos {
+		maq, hom := g.partes(p)
+		abiertos = append(abiertos, Abierto{Sesion: p.Sesion, Titulo: p.T.Titulo, Proyecto: p.T.Proyecto, NombreProy: p.T.NombreProy,
+			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: (maq + hom) / 3600})
+	}
+	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Sesion < abiertos[j].Sesion })
 	return
 }
 
@@ -800,9 +919,15 @@ func (g *Gestor) guarda() {
 		return
 	}
 	g.mu.Lock()
-	e := struct{ Abiertos, Pendientes []*parte }{Pendientes: g.pendientes}
-	for _, p := range g.partes {
-		e.Abiertos = append(e.Abiertos, p)
+	e := struct {
+		Periodos []*Periodo
+		Dias     []*Dia
+	}{}
+	for _, p := range g.periodos {
+		e.Periodos = append(e.Periodos, p)
+	}
+	for _, d := range g.dias {
+		e.Dias = append(e.Dias, d)
 	}
 	b, err := json.Marshal(e)
 	g.mu.Unlock()
@@ -815,16 +940,16 @@ func (g *Gestor) guarda() {
 	}
 }
 
-func (g *Gestor) diario(evento string, p *parte, motivo string) {
+// diario: registro local de auditoría (apertura y cierre de cada periodo).
+func (g *Gestor) diario(evento string, p *Periodo, motivo string) {
 	g.mu.Lock()
-	maq, hom, _ := g.horasDe(p)
-	r := map[string]any{"fecha": g.ahora().Format(time.RFC3339), "evento": evento, "sesion": p.Sesion, "titulo": p.Titulo,
-		"proyecto": p.Proyecto, "nombre_proyecto": p.NombreProy, "tarea_id": p.TareaID, "tarea": p.Tarea,
-		"linea_maquina": p.LineaMaquina, "linea_hombre": p.LineaHombre, "inicio": p.Inicio.Format(time.RFC3339),
-		"ultimo_trabajo": p.Ultima.Format(time.RFC3339), "horas_maquina": maq, "horas_hombre": hom, "tokens": p.Tokens, "motivo": motivo}
+	maq, hom := g.partes(p)
+	r := map[string]any{"fecha": g.ahora().Format(time.RFC3339), "evento": evento, "sesion": p.Sesion, "titulo": p.T.Titulo,
+		"proyecto": p.T.Proyecto, "tarea_id": p.TareaID, "tarea": tareaDe(p.T), "agente": agenteDe(p.T.Modelo),
+		"inicio": p.Inicio.Format(time.RFC3339), "ultimo_trabajo": p.Ultima.Format(time.RFC3339),
+		"segundos_maquina": math.Round(maq), "segundos_hombre": math.Round(hom), "tokens": p.Entrada + p.Salida, "motivo": motivo}
 	g.mu.Unlock()
-	depuracion.Log("imputacion", "%s sesión %s (proyecto %d, %s): máquina %.2f h [%d], hombre %.2f h [%d] %s", evento, p.Sesion,
-		p.Proyecto, p.Tarea, maq, p.LineaMaquina, hom, p.LineaHombre, motivo)
+	depuracion.Log("imputacion", "%s periodo sesión %s (proyecto %d, %s): máquina %.0f s, hombre %.0f s %s", evento, p.Sesion, p.T.Proyecto, tareaDe(p.T), maq, hom, motivo)
 	if g.Diario == "" {
 		return
 	}
@@ -835,7 +960,7 @@ func (g *Gestor) diario(evento string, p *parte, motivo string) {
 	}
 }
 
-// Descripcion: lo que se imputa (en español): la sesión y lo último que se ha pedido.
+// Descripcion: lo que se pide en una sesión (para el diario y la depuración).
 func Descripcion(titulo, pedido string) string {
 	pedido = strings.Join(strings.Fields(pedido), " ")
 	if r := []rune(pedido); len(r) > 200 {

@@ -61,8 +61,8 @@ func cierraPartesAgentes() {
 
 // imputacionEstado: partes abiertos y cerrados hoy por pgocode, y el interruptor.
 func (s *Servidor) imputacionEstado(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	ab, ce := s.Imputacion.Estado()
-	jsonOK(w, map[string]any{"abiertos": ab, "cerrados": ce, "gestor_pgocode": GestorPgocode()})
+	hoy, ab := s.Imputacion.Estado()
+	jsonOK(w, map[string]any{"hoy": hoy, "abiertos": ab, "gestor_pgocode": GestorPgocode()})
 }
 
 func (s *Servidor) imputacionGestor(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {

@@ -556,3 +556,5 @@ button.miga-item:hover { background: var(--hover); }
 .leyenda i.trabajando { background: #1a7f37; } .leyenda i.en-espera { background: #bf8700; } .leyenda i.gris { background: #8c959f; } .leyenda i.error { background: #cf222e; }
 .punto-parte.activo { background: #1a7f37; animation: latido 1.2s infinite alternate; }
 .punto-parte.pendiente { background: #bf8700; }
+.grupo-imputa { display: grid; gap: 2px; padding: 4px 0; border-top: 1px solid var(--linea); }
+.grupo-imputa > b { font-size: 12.5px; }

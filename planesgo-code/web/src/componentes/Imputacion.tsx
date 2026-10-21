@@ -2,18 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import { get, post } from '../api';
 import Icono from './Icono';
 
-// Imputación de tiempo en Odoo, que lleva pgocode: los partes abiertos (proyecto · tarea · tiempo) en la barra y,
-// al pulsar, el panel con la regla, los partes de hoy y el interruptor «PlanesGo en los agentes».
+// Imputación de tiempo en Odoo, que lleva pgocode. En Odoo hay, por día, proyecto y tarea, una línea de Hora
+// Hombre y una de Hora Máquina por agente. La etiqueta (centrada en la barra) muestra lo que llevas hoy en el
+// proyecto y la tarea de la sesión abierta, avanzando en vivo; su color es el estado de esa sesión.
 
-interface Parte {
-  sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string;
-  linea_maquina: number; linea_hombre: number; horas_maquina: number; horas_hombre: number;
-  inicio: string; ultima: string; fin?: string; horas: number; tokens: number; coste: number; estado: 'trabajando' | 'activo' | 'en-espera' | 'cerrado' | 'pendiente' | 'error'; error?: string; desc: string;
+interface Linea {
+  fecha: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string; clase: 'h' | 'm'; agente?: string;
+  modelo?: string; linea_id: number; entrada: number; salida: number; coste: number; sesiones: string[]; error?: string; sucio: boolean;
+  horas: number; ritmo: number; calculado: string;
 }
-interface Estado { abiertos: Parte[]; cerrados: Parte[]; gestor_pgocode: boolean }
+interface Abierto {
+  sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string;
+  estado: 'trabajando' | 'activo' | 'en-espera' | 'error'; error?: string; horas: number;
+}
+interface Estado { hoy: Linea[]; abiertos: Abierto[]; gestor_pgocode: boolean }
 
+const BLOQUE = { h: 15, m: 5 }; // redondeo hacia arriba en Odoo (minutos)
 const hm = (h: number) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+const reloj = (h: number) => { const s = Math.max(0, Math.round(h * 3600)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const k = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+const enOdoo = (l: Linea, h: number) => h <= 0 ? 0 : Math.ceil((h * 60) / BLOQUE[l.clase]) * BLOQUE[l.clase] / 60;
 
 export default function Imputacion({ version, sesion }: { version: number; sesion?: string }) {
   const [e, setE] = useState<Estado | null>(null);
@@ -22,8 +30,12 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
   const caja = useRef<HTMLDivElement>(null);
   const carga = () => get<Estado>('/api/imputacion').then(setE).catch(() => {});
   useEffect(() => { carga(); }, [version]);
-  // El tiempo avanza en pantalla cada segundo (sin pedir nada al servidor).
-  useEffect(() => { const t = setInterval(() => setTic(x => x + 1), 1000); return () => clearInterval(t); }, []);
+  // Avanza cada segundo en pantalla y se refresca del servidor cada 30 s (sin tocar Odoo).
+  useEffect(() => {
+    const t = setInterval(() => setTic(x => x + 1), 1000);
+    const r = setInterval(carga, 30000);
+    return () => { clearInterval(t); clearInterval(r); };
+  }, []);
   useEffect(() => {
     if (!abierto) return;
     const fuera = (ev: MouseEvent) => { if (!caja.current?.contains(ev.target as Node)) setAbierto(false); };
@@ -37,42 +49,78 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     carga();
   };
 
-  // Lo que se está imputando: desde el inicio hasta ahora, sin pasar del último trabajo + 5 min (la espera cuenta).
-  const duracion = (p: Parte) => (Math.min(Date.now(), new Date(p.ultima).getTime() + 5 * 60000) - new Date(p.inicio).getTime()) / 3600000;
+  // Horas de una línea ahora mismo: lo calculado + lo que ha crecido desde entonces.
+  const ahora = (l: Linea) => l.horas + l.ritmo * Math.max(0, Date.now() - new Date(l.calculado).getTime()) / 3600000;
+  const hoy = e?.hoy || [];
   const ab = e?.abiertos || [];
-  const hoy = (e?.cerrados || []).reduce((t, p) => t + p.horas, 0) + ab.reduce((t, p) => t + duracion(p), 0);
-  // La etiqueta es la de la sesión abierta: verde (imputando), amarillo (espera activa, cuenta), gris (sin parte:
-  // no se imputa, a cero) o rojo (error). Sin sesión abierta, el parte que esté trabajando o el total de hoy.
-  const principal = sesion ? ab.find(p => p.sesion === sesion) : (ab.find(p => p.estado === 'trabajando' || p.estado === 'activo') || ab[0]);
-  // Para la etiqueta, al segundo: h:mm:ss.
-  const reloj = (h: number) => { const s = Math.max(0, Math.round(h * 3600)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+  const mia = ab.find(a => a.sesion === sesion);
+  // La etiqueta: lo de hoy en el proyecto y la tarea de la sesión abierta (máquina + hombre).
+  const delaTarea = mia ? hoy.filter(l => l.proyecto === mia.proyecto && l.tarea_id === mia.tarea_id) : [];
+  const total = delaTarea.reduce((t, l) => t + ahora(l), 0);
+  const estado = mia ? (mia.estado === 'activo' ? 'trabajando' : mia.estado) : '';
+  const totalDia = hoy.reduce((t, l) => t + ahora(l), 0);
+
+  // Agrupado por proyecto y tarea para el panel.
+  const grupos = new Map<string, Linea[]>();
+  for (const l of hoy) {
+    const c = `${l.nombre_proyecto} · ${l.tarea}`;
+    grupos.set(c, [...(grupos.get(c) || []), l]);
+  }
 
   return (
     <div className="imputacion" ref={caja}>
-      <button className={'chip-imputa' + (principal ? ' ' + (principal.estado === 'activo' ? 'trabajando' : principal.estado) : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
-        title="Tiempo imputado en Odoo por pgocode">
+      <button className={'chip-imputa' + (estado ? ' ' + estado : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
+        title="Tiempo de hoy imputado en Odoo por pgocode">
         <Icono n="reloj" t={14} />
-        {principal
-          ? <><span className="recorta">{principal.nombre_proyecto} · {principal.tarea}</span><b className="reloj-vivo">{reloj(duracion(principal))}</b></>
-          : sesion ? <><span>Sin imputar</span><b className="reloj-vivo">0:00:00</b></> : <span>Hoy {hm(hoy)}</span>}
-        {ab.length > 1 && <b>+{ab.length - 1}</b>}
+        {mia
+          ? <><span className="recorta">{mia.nombre_proyecto} · {mia.tarea}</span><b className="reloj-vivo">{reloj(total)}</b></>
+          : <><span>Hoy</span><b className="reloj-vivo">{reloj(totalDia)}</b></>}
       </button>
       {abierto && e && (
         <div className="panel-imputa" role="dialog" aria-label="Imputación de tiempo">
           <p className="suave pequeno regla">
-            Cada sesión imputa en Odoo a <b>su proyecto</b> y a <b>su tarea</b> (en los ajustes de la sesión; por defecto la canónica «Desarrollo»),
-            en dos líneas: <b>Hora Máquina</b> (los turnos del agente, con sus tokens) y <b>Hora Hombre</b> (tu trabajo y las esperas).
-            Las líneas están vivas en Odoo: sus horas se ponen al día cada 3 minutos.
-            Hay trabajo cuando el agente está con un turno o cuando tú usas la sesión (teclado, ratón, con la ventana en primer plano).
-            Tras el último trabajo hay una espera activa de 5 minutos que también cuenta; si no hay más, el parte se cierra con el tiempo
-            del inicio al último trabajo + 5 min. Si pgocode se cierra mal, al volver se cierra con su último trabajo; si Odoo falla, se reintenta.
-            <br /><span className="leyenda"><i className="trabajando" /> imputando (agente o tú) <i className="en-espera" /> espera activa (cuenta) <i className="gris" /> sin imputar <i className="error" /> error</span>
+            En Odoo hay, por <b>día, proyecto y tarea</b>, una línea de <b>Hora Hombre</b> (tu trabajo y las esperas) y una de
+            <b> Hora Máquina</b> por agente (sus turnos, con tokens y coste). Todas las sesiones suman en ellas y se ponen al día cada 3 minutos.
+            Redondeo hacia arriba del total del día: hombre a 15 min, máquina a 5 min. Los periodos de cada sesión se guardan en tu equipo, no en Odoo.
+            <br /><span className="leyenda"><i className="trabajando" /> trabajando (agente o tú) <i className="en-espera" /> espera activa (cuenta) <i className="gris" /> sin trabajo <i className="error" /> error</span>
           </p>
-          <p className="titulo-lista">Abiertos <span className="gh-cuenta">{ab.length}</span></p>
-          {ab.length === 0 && <p className="suave pequeno">Ninguno: se abre uno al hablar con un agente.</p>}
-          {ab.map(p => <Fila key={p.sesion} p={p} horas={duracion(p)} />)}
-          <p className="titulo-lista">Cerrados hoy <span className="gh-cuenta">{e.cerrados.length}</span> <span className="suave">· {hm(hoy)} en total</span></p>
-          {e.cerrados.map((p, i) => <Fila key={p.sesion + i} p={p} horas={p.horas} />)}
+          <p className="titulo-lista">Hoy <span className="suave">· {hm(totalDia)} de trabajo</span></p>
+          {grupos.size === 0 && <p className="suave pequeno">Todavía nada: empieza en cuanto hables con un agente o uses una sesión.</p>}
+          {[...grupos.entries()].map(([titulo, ls]) => (
+            <div key={titulo} className="grupo-imputa">
+              <b className="recorta">{titulo}</b>
+              {ls.map(l => {
+                const h = ahora(l);
+                return (
+                  <div key={l.clase + (l.agente || '')} className="fila-parte" title={(l.sesiones || []).join(', ') + (l.error ? '\n⚠ ' + l.error : '')}>
+                    <span className={'punto-parte ' + (l.ritmo > 0 ? 'trabajando' : l.error ? 'pendiente' : '')} />
+                    <span className="parte-texto">
+                      <span>{l.clase === 'h' ? 'Hora Hombre' : `Hora Máquina · ${l.agente}`}</span>
+                      <span className="suave pequeno recorta">
+                        {(l.sesiones || []).length} {(l.sesiones || []).length === 1 ? 'sesión' : 'sesiones'}
+                        {l.clase === 'm' && l.entrada + l.salida > 0 ? ` · ${k(l.entrada + l.salida)} tokens` : ''}{l.coste ? ` · $${l.coste.toFixed(2)}` : ''}
+                        {l.linea_id ? ` · en Odoo ${hm(enOdoo(l, h))}` : ' · aún no está en Odoo'}{l.error ? ' · ⚠ se reintenta' : ''}
+                      </span>
+                    </span>
+                    <span className="parte-horas">{reloj(h)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {ab.length > 0 && <>
+            <p className="titulo-lista">Sesiones trabajando ahora <span className="gh-cuenta">{ab.length}</span></p>
+            {ab.map(a => (
+              <div key={a.sesion} className="fila-parte" title={a.error || ''}>
+                <span className={'punto-parte ' + (a.estado === 'activo' ? 'trabajando' : a.estado)} />
+                <span className="parte-texto">
+                  <span className="recorta">{a.titulo || 'Sesión sin nombre'}</span>
+                  <span className="suave pequeno recorta">{a.nombre_proyecto} · {a.tarea} · {a.estado === 'trabajando' ? 'el agente trabaja' : a.estado === 'activo' ? 'trabajas tú' : a.estado === 'error' ? '⚠ ' + a.error : 'espera activa (cuenta)'}</span>
+                </span>
+                <span className="parte-horas">{hm(a.horas)}</span>
+              </div>
+            ))}
+          </>}
           <label className="gestor">
             <input type="checkbox" checked={e.gestor_pgocode} onChange={ev => cambiaGestor(ev.target.checked)} />
             <span><b>PlanesGo dormido en los agentes</b>
@@ -80,20 +128,6 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
           </label>
         </div>
       )}
-    </div>
-  );
-}
-
-function Fila({ p, horas }: { p: Parte; horas: number }) {
-  return (
-    <div className={'fila-parte ' + p.estado} title={p.desc + (p.error ? '\n⚠ ' + p.error : '')}>
-      <span className={'punto-parte ' + p.estado} />
-      <span className="parte-texto">
-        <b className="recorta">{p.nombre_proyecto || 'Proyecto ' + p.proyecto} · {p.tarea}</b>
-        <span className="suave pequeno recorta">{p.titulo || 'Sesión sin nombre'} · máquina {hm(p.horas_maquina || 0)} · hombre {hm(p.horas_hombre || 0)}{p.tokens ? ` · ${k(p.tokens)} tokens` : ''}
-          {p.estado === 'activo' ? ' · trabajando tú' : p.estado === 'trabajando' ? ' · trabajando el agente' : p.estado === 'en-espera' ? ' · espera activa: cuenta; se cierra a los 5 min sin trabajo' : p.estado === 'pendiente' ? ' · Odoo no lo aceptó: se reintenta' : ''}{p.error ? ' · ⚠ ' + p.error : ''}</span>
-      </span>
-      <span className="parte-horas">{hm(horas)}</span>
     </div>
   );
 }

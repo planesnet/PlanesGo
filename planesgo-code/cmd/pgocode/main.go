@@ -284,7 +284,7 @@ func main() {
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
 	// Imputación directa en Odoo; y PlanesGo dormido en los agentes (la primera vez se activa el interruptor).
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
-		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "partes-abiertos.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log")}
+		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log")}
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
 	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".planesgo", "gestor")); os.IsNotExist(err) {
