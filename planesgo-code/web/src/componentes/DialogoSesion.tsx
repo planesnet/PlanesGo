@@ -8,7 +8,7 @@ import { Agente, Hosting } from './Marca';
 
 // Ventana de la sesión (crear o ajustar). Lo primero, la rama del repositorio; después el nombre, el alojamiento
 // (obligatorio) y la carpeta local donde vive esa rama: por defecto, el directorio principal del proyecto + el
-// nombre de la rama (o la carpeta donde ya está abierta), elegible con el diálogo de carpetas del sistema.
+// nombre de la rama (o la carpeta donde ya está descargada), elegible con el diálogo de carpetas del sistema.
 
 interface Ramas { repo: string; repositorio?: string; ramas: string[]; actual?: string; copias: Record<string, string>; principal: string; tipo?: string }
 
@@ -39,7 +39,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
     }).catch(e => setError(e.message));
   }, [s.proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Carpeta por defecto: donde ya está abierta la rama o, si no, directorio principal + rama.
+  // Carpeta por defecto: donde ya está descargada la rama o, si no, directorio principal + rama.
   const rama = s.rama === NUEVA ? ramaNueva.trim() : s.rama;
   const sugerida = rama ? (info?.copias[rama] || (directorio ? unir(directorio, rama) : '')) : '';
   useEffect(() => { if (!carpetaElegida && sugerida) cambia({ carpeta: sugerida }); }, [sugerida, carpetaElegida]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -53,6 +53,13 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   const falta = !rama ? 'Elige la rama' : !s.hosting ? 'Elige el alojamiento' : !s.carpeta ? 'Elige la carpeta' : !s.agente ? 'Elige el agente' : '';
   const guarda = async () => {
     if (falta || guardando) return;
+    // Si la rama no está ya en esa carpeta, se pide confirmación antes de crearla o descargarla.
+    if (info?.copias[rama] !== s.carpeta) {
+      const aviso = s.rama === NUEVA
+        ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y se descargará en:\n${s.carpeta}\n\n¿Continuar?`
+        : `La rama «${rama}» no está descargada en local. Se descargará en:\n${s.carpeta}\n\n¿Continuar?`;
+      if (!confirm(aviso)) return;
+    }
     setGuardando(true);
     setError('');
     try {
@@ -81,7 +88,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
           <span className="con-icono"><Icono n="rama" t={15} />
             <select value={s.rama} onChange={e => { cambia({ rama: e.target.value }); }} autoFocus={nueva}>
               <option value="" disabled>Elige la rama…</option>
-              {(info?.ramas || []).map(r => <option key={r} value={r}>{r}{info?.copias[r] ? ' · abierta' : ''}</option>)}
+              {(info?.ramas || []).map(r => <option key={r} value={r}>{r}</option>)}
               <option value={NUEVA}>Rama nueva…</option>
             </select>
           </span>
@@ -111,9 +118,8 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
             <button type="button" className="boton-secundario" onClick={elegir}><Icono n="carpeta" t={14} /> Elegir…</button>
           </div>
           <span className="suave pequeno">
-            {info?.copias[rama] && s.carpeta === info.copias[rama] ? 'La rama ya está abierta en esta carpeta.'
-              : 'Si no existe, se crea como copia de trabajo del repositorio en esa rama.'}
-            {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}
+            {info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como copia de trabajo del repositorio en esa rama.
+              {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}</>}
           </span>
         </div>
 
