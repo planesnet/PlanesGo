@@ -23,6 +23,8 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
+interface EnCola { texto: string; adjuntos: Adjunto[] }
+
 export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -35,6 +37,13 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
   const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
+  // Cola de mensajes (como en Claude Code): lo que se escribe mientras el agente trabaja espera su turno.
+  // Va por sesión; si el turno se para o falla, la cola se detiene hasta que se envíe algo a mano.
+  const [colas, setColas] = useState<Record<string, EnCola[]>>({});
+  const cola = (sesion && colas[sesion.id]) || [];
+  const [paradas, setParadas] = useState<Record<string, boolean>>({});
+  const paraCola = (id: string, v: boolean) => setParadas(x => (Boolean(x[id]) === v ? x : { ...x, [id]: v }));
+  const ponCola = (id: string, f: (l: EnCola[]) => EnCola[]) => setColas(c => ({ ...c, [id]: f(c[id] || []) }));
   const selector = useRef<HTMLInputElement>(null);
   useEffect(() => { setAdjuntos([]); }, [sesion?.id]);
   const adjunta = (fs: File[]) => {
@@ -116,17 +125,46 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     envia(envioPendiente.texto);
   }, [envioPendiente, sesion?.id, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function envia(forzado?: string) {
+  // Al acabar un turno sin error, sale el primero de la cola.
+  useEffect(() => {
+    if (!sesion || enCurso || !prov?.disponible || cola.length === 0 || paradas[sesion.id]) return;
+    const [primero] = cola;
+    ponCola(sesion.id, l => l.slice(1));
+    envia(primero.texto, primero.adjuntos);
+  }, [enCurso, sesion?.id, cola.length, prov?.disponible, paradas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Con el agente trabajando, Intro deja el mensaje (y sus adjuntos) en la cola.
+  function encola() {
+    const t = texto.trim();
+    if (!t || !sesion || subiendo) return;
+    ponCola(sesion.id, l => [...l, { texto: t, adjuntos: adjuntos.filter(a => !a.subiendo && !a.error) }]);
+    setTexto('');
+    setAdjuntos([]);
+  }
+
+  // Parar: el turno se corta y lo que había en la cola vuelve al cuadro de texto, para revisarlo.
+  function para() {
+    if (!enCurso || !sesion) return;
+    if (cola.length) {
+      setTexto(x => [...cola.map(c => c.texto), x].filter(Boolean).join('\n\n'));
+      setAdjuntos(x => [...cola.flatMap(c => c.adjuntos), ...x]);
+      ponCola(sesion.id, () => []);
+    }
+    enCurso.abort();
+  }
+
+  async function envia(forzado?: string, adjCola?: Adjunto[]) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const id = sesion.id;
+    paraCola(id, false);
     const pon = (m: Mensaje[], final = false) => {
       if (idActual.current === id) setMensajes(m);
       if (final) guardaConversacion(id, m);
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
     const previos = forzado !== undefined ? conversacion(id) : mensajes;
-    const listos = forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : [];
+    const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
     const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: t, ...(listos.length ? { adjuntos: listos } : {}) }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
@@ -183,6 +221,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
     } catch (err) {
+      paraCola(id, true);
       if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
       pon(actual, true);
@@ -192,7 +231,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); envia(); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (enCurso) encola(); else envia(); }
   };
 
   const eligeAgente = (p: Proveedor) => {
@@ -283,6 +322,30 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                 <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
               </div>
             )}
+            {cola.length > 0 && (
+              <ol className="cola" aria-label="Mensajes en cola">
+                {cola.map((c, i) => (
+                  <li key={i} className="en-cola">
+                    <span className="cola-num">{i + 1}</span>
+                    <span className="cola-texto recorta" title={c.texto}>{c.texto}</span>
+                    {c.adjuntos.length > 0 && <span className="suave pequeno"><Icono n="clip" t={11} /> {c.adjuntos.length}</span>}
+                    <button className="icono" title="Editar (vuelve al cuadro de texto)" aria-label="Editar mensaje en cola" onClick={() => {
+                      ponCola(sesion.id, l => l.filter((_, j) => j !== i));
+                      setTexto(x => [x, c.texto].filter(Boolean).join('\n\n'));
+                      setAdjuntos(x => [...x, ...c.adjuntos]);
+                      area.current?.focus();
+                    }}><Icono n="lapiz" t={13} /></button>
+                    <button className="quita-adjunto" title="Quitar de la cola" aria-label="Quitar mensaje de la cola" onClick={() => ponCola(sesion.id, l => l.filter((_, j) => j !== i))}>×</button>
+                  </li>
+                ))}
+                {!enCurso && paradas[sesion.id] && (
+                  <li className="cola-parada suave pequeno">
+                    Cola detenida: el último turno se paró o falló.
+                    <button className="enlace" onClick={() => paraCola(sesion.id, false)}>Seguir con la cola</button>
+                  </li>
+                )}
+              </ol>
+            )}
             {adjuntos.length > 0 && (
               <div className="adjuntos-pendientes">
                 {adjuntos.map(a => (
@@ -321,10 +384,12 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'}
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; se enviará cuando termine el agente…' : 'Escribe…'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
-                ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
+                ? (texto.trim()
+                  ? <button className="redondo primario" onClick={encola} disabled={subiendo} title="Poner en cola (Intro): se enviará cuando termine el agente" aria-label="Poner en cola"><Icono n="enviar" t={16} /></button>
+                  : <button className="redondo" onClick={para} title={cola.length ? 'Parar (la cola vuelve al cuadro de texto)' : 'Parar'} aria-label="Parar"><Icono n="parar" t={16} /></button>)
                 : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}

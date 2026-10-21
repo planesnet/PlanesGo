@@ -611,3 +611,10 @@ button.miga-item:hover { background: var(--hover); }
 .boton-logo { padding: 2px; border-radius: 8px; display: grid; place-items: center; }
 .boton-logo img { width: 28px; height: 28px; display: block; }
 .boton-logo:hover, .boton-logo[aria-expanded="true"] { background: var(--hover); }
+
+/* Cola de mensajes: lo escrito mientras el agente trabaja, en orden, encima del cuadro de texto */
+.cola { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.en-cola { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px 4px 10px; border: 1px dashed var(--linea); border-radius: 10px; background: var(--superficie); font-size: 13px; color: var(--suave); }
+.cola-num { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; background: var(--hover); color: var(--suave); }
+.cola-texto { flex: 1; min-width: 0; white-space: nowrap; }
+.cola-parada { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
