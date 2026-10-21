@@ -15,7 +15,7 @@ interface Linea {
 interface Abierto {
   sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string;
   estado: 'trabajando' | 'activo' | 'en-espera' | 'error'; error?: string; horas: number;
-  inicio: string; ultima: string; agente: boolean; maquina: number; calculado: string;
+  inicio: string; ultima: string; agente: boolean; maquina: number; hombre?: number; presente?: boolean; calculado: string;
 }
 interface Resumen { tarea_id: number; hoy_h: number; hoy_m: number; total_h: number; total_m: number }
 // La sesión abierta: su proyecto y su tarea (aunque todavía no tenga periodo de trabajo).
@@ -124,8 +124,9 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
   const hoyTarea = hoyH + hoyM;
   const totalH = (res?.total_h || 0) + pendProy('h');
   const totalM = (res?.total_m || 0) + pendProy('m');
-  // Cronómetro: el periodo de trabajo actual de la sesión (con su espera activa).
-  const crono = mia ? (Math.min(Date.now(), mia.agente ? Date.now() : new Date(mia.ultima).getTime() + 5 * 60000) - new Date(mia.inicio).getTime()) / 3600000 : 0;
+  // Cronómetro: el periodo de trabajo actual de la sesión (lo calcula el backend; sigue mientras trabaja el agente
+  // o hay presencia humana, con su mínimo de 15 minutos).
+  const crono = mia ? mia.horas + ((mia.agente || mia.presente) ? Math.max(0, Date.now() - new Date(mia.calculado).getTime()) / 3600000 : 0) : 0;
   const estado = mia ? (mia.estado === 'activo' ? 'trabajando' : mia.estado) : 'parado';
   const nombreProy = mia?.nombre_proyecto || sesion?.nombreProyecto || '';
   const pctHoy = Math.min(100, (hoyTarea / JORNADA) * 100);
@@ -141,7 +142,7 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     <div className="imputacion" ref={caja}>
       {proyecto ? (
         <button className={'marcador ' + estado} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
-          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Esta semana en el proyecto: ${hm(totalH + totalM)}`}>
+          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : mia.presente ? ' (presencia: cuenta, mínimo 15 min)' : ' (en espera: no cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Esta semana en el proyecto: ${hm(totalH + totalM)}`}>
           <span className="m-tarea recorta"><b>{nombreProy}</b> / {nombreTarea}</span>
           <span className="m-seg m-crono"><i className="m-punto" />
             <span className="m-cifras"><span>{reloj(crono)}</span></span></span>
@@ -161,8 +162,8 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
           <p className="suave pequeno regla">
             En Odoo hay, por <b>día, proyecto y tarea</b>, una línea de <b>Hora Hombre</b> (tu trabajo y las esperas) y una de
             <b> Hora Máquina</b> por agente (sus turnos, con tokens y coste). Todas las sesiones suman en ellas y se ponen al día cada 3 minutos.
-            Redondeo hacia arriba del total del día: hombre a 15 min, máquina a 5 min. Los periodos de cada sesión se guardan en tu equipo, no en Odoo.
-            <br /><span className="leyenda"><i className="trabajando" /> trabajando (agente o tú) <i className="en-espera" /> espera activa (cuenta) <i className="gris" /> sin trabajo <i className="error" /> error</span>
+            Hombre: tu presencia (cualquier intervención abre un tramo de 15 min como mínimo; sigue hasta 5 min sin intervenir). Máquina: los turnos del agente. Se cuentan por separado. Redondeo hacia arriba del total del día: hombre a 15 min, máquina a 5 min. Los periodos de cada sesión se guardan en tu equipo, no en Odoo.
+            <br /><span className="leyenda"><i className="trabajando" /> trabajando (agente o tú) <i className="en-espera" /> presencia (cuenta) o en espera <i className="gris" /> sin trabajo <i className="error" /> error</span>
           </p>
           <p className="titulo-lista">Hoy <span className="suave">· {hm(totalDia)} de trabajo</span></p>
           {grupos.size === 0 && <p className="suave pequeno">Todavía nada: empieza en cuanto hables con un agente o uses una sesión.</p>}
@@ -195,7 +196,7 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
                 <span className={'punto-parte ' + (a.estado === 'activo' ? 'trabajando' : a.estado)} />
                 <span className="parte-texto">
                   <span className="recorta">{a.titulo || 'Sesión sin nombre'}</span>
-                  <span className="suave pequeno recorta">{a.nombre_proyecto} · {a.tarea} · {a.estado === 'trabajando' ? 'el agente trabaja' : a.estado === 'activo' ? 'trabajas tú' : a.estado === 'error' ? '⚠ ' + a.error : 'espera activa (cuenta)'}</span>
+                  <span className="suave pequeno recorta">{a.nombre_proyecto} · {a.tarea} · {a.estado === 'trabajando' ? 'el agente trabaja' : a.estado === 'activo' ? 'trabajas tú' : a.estado === 'error' ? '⚠ ' + a.error : a.presente ? 'presencia (cuenta, mínimo 15 min)' : 'en espera (no cuenta)'}</span>
                 </span>
                 <span className="parte-horas">{hm(a.horas)}</span>
               </div>

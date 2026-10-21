@@ -188,6 +188,19 @@ app.on('web-contents-created', (_, wc) => {
   wc.setWindowOpenHandler(({ url }) => { if (esWeb(url)) shell.openExternal(url); return { action: 'deny' }; });
   // Las webs del navegador interno también tienen menú contextual (copiar, pegar, copiar enlaces).
   if (wc.getType() === 'webview') wc.on('context-menu', (_, p) => menuContextual(p, BrowserWindow.fromWebContents(wc.hostWebContents)));
+  // Usar el navegador interno es trabajo de la persona (imputación de tiempo): sus teclas y su ratón no llegan a la
+  // ventana de la interfaz, así que se le avisa (como mucho cada 5 s).
+  if (wc.getType() === 'webview') {
+    let ultimo = 0;
+    const avisa = () => {
+      const ahora = Date.now();
+      if (ahora - ultimo < 5000 || !wc.hostWebContents || wc.hostWebContents.isDestroyed()) return;
+      ultimo = ahora;
+      wc.hostWebContents.send('pgo:actividad');
+    };
+    wc.on('before-input-event', avisa);
+    wc.on('input-event', avisa); // ratón y rueda (Electron ≥ 31)
+  }
 });
 
 ipcMain.handle('abrir-fuera', (_, url) => { if (esWeb(url)) return shell.openExternal(url); throw new Error('solo http o https'); });

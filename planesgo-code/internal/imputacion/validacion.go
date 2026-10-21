@@ -96,6 +96,8 @@ type suceso struct {
 	TurnoCorte bool    `json:"turno_cortado"`
 	Solapado   float64 `json:"solapado_s"`
 	Ritmo      int     `json:"ritmo"`
+	// Tramos humanos del periodo ([inicio, fin]); los registros de antes de los tramos no los traen.
+	Tramos *[][2]string `json:"tramos"`
 }
 
 // PeriodoLargo: un periodo más largo que esto es sospechoso (alguien se dejó la sesión abierta, un turno colgado…).
@@ -148,7 +150,7 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 	}
 	var humanos []intervalo
 	solapados := map[string]float64{} // tiempo humano solapado que ya se descontó, por sesión
-	turnos := map[string]int{} // turnos vivos por sesión
+	turnos := map[string]int{}        // turnos vivos por sesión
 	turnoDesde := map[string]time.Time{}
 	var ultimo time.Time
 
@@ -202,17 +204,47 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 			if s.MaquinaS < 0 || s.HombreS < 0 {
 				av(&s, "error", "periodo", "tiempos negativos: máquina %.0f s, hombre %.0f s", s.MaquinaS, s.HombreS)
 			}
-			if math.Abs(s.MaquinaS+s.HombreS-total) > 1 {
-				av(&s, "error", "periodo", "descuadre: máquina %.0f s + hombre %.0f s ≠ duración %.0f s", s.MaquinaS, s.HombreS, total)
+			if s.Tramos == nil {
+				// Registro antiguo: el tiempo del periodo se repartía entre máquina y hombre.
+				if math.Abs(s.MaquinaS+s.HombreS-total) > 1 {
+					av(&s, "error", "periodo", "descuadre: máquina %.0f s + hombre %.0f s ≠ duración %.0f s", s.MaquinaS, s.HombreS, total)
+				}
+				if s.HombreS > 0 {
+					humanos = append(humanos, intervalo{s.Sesion, s.UID, ini, fin})
+				}
+			} else {
+				// Máquina y hombre son independientes: cada uno cabe en el periodo; el hombre son sus tramos, y cada
+				// tramo dura al menos 15 minutos (salvo que lo corte la medianoche).
+				if s.MaquinaS > total+1 {
+					av(&s, "error", "periodo", "máquina %.0f s en un periodo de %.0f s", s.MaquinaS, total)
+				}
+				var ts []Tramo
+				for _, t := range *s.Tramos {
+					a, e1 := time.Parse(time.RFC3339Nano, t[0])
+					b, e2 := time.Parse(time.RFC3339Nano, t[1])
+					if e1 != nil || e2 != nil || !b.After(a) {
+						av(&s, "error", "humano", "tramo humano ilegible o vacío: %v", t)
+						continue
+					}
+					medianoche := b.Hour() == 0 && b.Minute() == 0 && b.Second() == 0
+					if b.Sub(a) < MinHumano-time.Second && !medianoche {
+						av(&s, "error", "humano", "tramo humano de %s (%s–%s): el mínimo es de %s", dur(b.Sub(a).Seconds()), a.Format("15:04"), b.Format("15:04"), dur(MinHumano.Seconds()))
+					}
+					if a.Before(ini.Add(-time.Second)) || b.After(fin.Add(time.Second)) {
+						av(&s, "error", "humano", "tramo humano %s–%s fuera del periodo %s–%s", a.Format("15:04:05"), b.Format("15:04:05"), ini.Format("15:04:05"), fin.Format("15:04:05"))
+					}
+					ts = append(ts, Tramo{a, b})
+					humanos = append(humanos, intervalo{s.Sesion, s.UID, a, b})
+				}
+				if u := union(ts); math.Abs(u-s.HombreS) > 1 {
+					av(&s, "error", "humano", "hombre %.0f s, pero sus tramos suman %.0f s", s.HombreS, u)
+				}
 			}
 			if total > PeriodoLargo.Seconds() {
 				av(&s, "aviso", "periodo", "periodo de %s (%s): ¿sesión olvidada o turno colgado?", dur(total), s.Motivo)
 			}
 			if s.SinTarea {
 				av(&s, "aviso", "tarea", "periodo cerrado sin tarea de Odoo resuelta: se sumará al resolverla")
-			}
-			if s.HombreS > 0 {
-				humanos = append(humanos, intervalo{s.Sesion, s.UID, ini, fin})
 			}
 			turnos[s.Sesion] = 0
 		case "dia-suma":

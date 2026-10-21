@@ -77,17 +77,22 @@ export default function App() {
       .some(e => e.value.trim() !== '');
     const avisa = () => {
       if (!usado && !borrador()) return;
+      // Sin sesión abierta, el trabajo con el proyecto (elegirlo, sus propiedades, su panel) va al proyecto.
       const s = sesionActividad.current;
-      const cuerpo = s && humana ? { humana: true, sesion: s.id, titulo: s.nombre, proyecto: s.proyecto, tarea_id: s.tareaId || 0, tarea: s.tarea || '' } : {};
+      const pid = proyectoId.current;
+      const cuerpo = !humana ? {} : s ? { humana: true, sesion: s.id, titulo: s.nombre, proyecto: s.proyecto, tarea_id: s.tareaId || 0, tarea: s.tarea || '' }
+        : pid ? { humana: true, sesion: `proyecto-${pid}`, titulo: 'Proyecto', proyecto: pid } : {};
       usado = false;
       humana = false;
       post('/api/actividad', cuerpo).catch(() => {});
     };
-    const eventos = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'focus'] as const;
-    eventos.forEach(ev => window.addEventListener(ev, marca, { passive: true }));
+    const eventos = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'focus', 'input', 'change'] as const;
+    eventos.forEach(ev => window.addEventListener(ev, marca, { passive: true, capture: true }));
+    // El navegador interno (webview) avisa por Electron: sus teclas y su ratón no llegan a esta ventana.
+    const fueraWebview = window.psf?.alActividad?.(() => { usado = true; humana = true; });
     avisa();
     const t = setInterval(avisa, 20000);
-    return () => { clearInterval(t); eventos.forEach(ev => window.removeEventListener(ev, marca)); };
+    return () => { clearInterval(t); fueraWebview?.(); eventos.forEach(ev => window.removeEventListener(ev, marca, { capture: true })); };
   }, [usuario]);
 
   // Título de la ventana con la versión.

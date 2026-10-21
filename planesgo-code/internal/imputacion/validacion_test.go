@@ -44,13 +44,13 @@ func TestRegistroCuadra(t *testing.T) {
 		r.pasa(2 * time.Minute)
 		fin()
 		g.Actividad(tr(s))
-		r.pasa(6 * time.Minute)
+		r.pasa(16 * time.Minute)
 		g.revisa()
 	}
 	g.revisa()
 	espera(t, func() bool {
 		m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
-		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == float64(20)/60 && h[0]["unit_amount"] == 1.0
+		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == float64(20)/60 && h[0]["unit_amount"] == 2.5
 	})
 	g.escribeSucias()
 	inf := valida(t, reg, t0.Format("2006-01-02"), false)
@@ -60,7 +60,7 @@ func TestRegistroCuadra(t *testing.T) {
 	h, m := 0, 0
 	for _, l := range inf.Lineas {
 		switch {
-		case l.Clase == "h" && l.Segundos == 3000 && l.Calculadas == 1 && l.Odoo == 1:
+		case l.Clase == "h" && l.Segundos == 9000 && l.Calculadas == 2.5 && l.Odoo == 2.5:
 			h++
 		case l.Clase == "m" && l.Segundos == 1200 && l.Odoo == float64(20)/60:
 			m++

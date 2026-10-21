@@ -6,9 +6,14 @@
 //     (Claude Code, OpenCode, Antigravity…). Todas las sesiones de ese día, proyecto y tarea suman en ellas: «hoy,
 //     en este proyecto y esta tarea, he invertido tanto». Las líneas se ponen al día cada 3 minutos.
 //   - Cada sesión imputa a su proyecto y su tarea (la de sus ajustes; por defecto la canónica «Desarrollo», que se
-//     crea si no existe). Lleva periodos de trabajo: hay trabajo cuando el agente está con un turno (cuenta como
-//     máquina) o cuando la persona usa la sesión con la ventana en primer plano (cuenta como hombre). Tras el
-//     último trabajo hay una espera activa de 5 minutos que también cuenta (hombre); después el periodo se cierra.
+//     crea si no existe). Lleva periodos de trabajo con dos tiempos independientes (pueden solaparse: la persona
+//     supervisa mientras el agente trabaja):
+//     · Máquina: el tiempo de los turnos del agente.
+//     · Hombre: tramos de presencia. Cualquier intervención (proyecto, sesión, propiedades, chat, navegador interno,
+//     teclado, ratón…) abre un tramo, que dura como mínimo 15 minutos desde que empezó (un valor absoluto, no por
+//     intervención) y, pasados esos 15, sigue mientras no haya 5 minutos seguidos sin intervenir. Una persona solo
+//     está en un sitio: lo que se solapa entre sesiones se cuenta como hombre una sola vez.
+//     El periodo se cierra cuando no hay turno, ni tramo humano abierto, ni trabajo en los últimos 5 minutos.
 //   - Los periodos, los latidos y los totales del día se guardan en un fichero local (no en Odoo), así que Odoo no
 //     se llena de líneas pequeñas. Tras actualizarse o un cierre inesperado, pgocode lo retoma. Cada apertura y
 //     cierre de periodo queda en un diario (imputacion.log) para poder auditarlo.
@@ -30,9 +35,10 @@ import (
 )
 
 const (
-	TareaDefecto = "Desarrollo" // tarea canónica de PSF / PlanesGo
-	Espera       = 5 * time.Minute
-	Escritura    = 3 * time.Minute // cada cuánto se ponen al día en Odoo las líneas del día
+	TareaDefecto = "Desarrollo"     // tarea canónica de PSF / PlanesGo
+	Espera       = 5 * time.Minute  // sin intervenir tanto tiempo, se acaba la presencia (pasado el mínimo)
+	MinHumano    = 15 * time.Minute // un tramo de presencia humana dura como mínimo esto desde que empieza
+	Escritura    = 3 * time.Minute  // cada cuánto se ponen al día en Odoo las líneas del día
 	activoHumano = 60 * time.Second
 	// Redondeo hacia arriba del total del día de cada línea (como Odoo: un segundo cuenta como un bloque entero).
 	BloqueHombre  = 15 * time.Minute
@@ -78,6 +84,8 @@ type Periodo struct {
 	Inicio     time.Time     `json:"inicio"`
 	Ultima     time.Time     `json:"ultima"`
 	UltimaHum  time.Time     `json:"ultima_hum"`
+	HumDesde   time.Time     `json:"hum_desde"`        // inicio del tramo humano abierto (cero: no hay)
+	Tramos     []Tramo       `json:"tramos,omitempty"` // tramos humanos ya cerrados del periodo
 	Maquina    time.Duration `json:"maquina"`
 	TurnoDesde time.Time     `json:"turno_desde"`
 	Entrada    int           `json:"entrada"`
@@ -131,11 +139,13 @@ type Abierto struct {
 	Tarea      string    `json:"tarea"`
 	Estado     string    `json:"estado"`
 	Error      string    `json:"error,omitempty"`
-	Horas      float64   `json:"horas"` // del periodo
+	Horas      float64   `json:"horas"` // duración del periodo (de su inicio a su último trabajo)
 	Inicio     time.Time `json:"inicio"`
 	Ultima     time.Time `json:"ultima"`
-	Agente     bool      `json:"agente"`  // el agente está con un turno (el periodo sigue creciendo)
-	Maquina    float64   `json:"maquina"` // horas de máquina del periodo (en el momento del cálculo)
+	Agente     bool      `json:"agente"`   // el agente está con un turno (el periodo sigue creciendo)
+	Maquina    float64   `json:"maquina"`  // horas de máquina del periodo (en el momento del cálculo)
+	Hombre     float64   `json:"hombre"`   // horas de presencia humana del periodo (antes de quitar solapes)
+	Presente   bool      `json:"presente"` // el tramo humano está abierto (crece)
 	Calculado  time.Time `json:"calculado"`
 }
 
@@ -158,7 +168,7 @@ type Gestor struct {
 	escribe   sync.Mutex      // una escritura en Odoo a la vez
 	// humanos: los tramos de tiempo humano ya imputados por usuario y día (uid|fecha). Una persona solo está en un
 	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
-	humanos map[string][]Tramo
+	humanos   map[string][]Tramo
 	arrancado bool
 }
 
@@ -226,45 +236,73 @@ func claveDe(fecha string, proyecto, tarea int, clase, agente string) string {
 
 // ---- tiempos de un periodo ----
 
-// fin del tiempo que cuenta: último trabajo + espera, sin pasar de ahora ni de la medianoche del inicio.
-func (g *Gestor) finDe(p *Periodo) time.Time {
-	fin := p.Ultima.Add(Espera)
-	if p.turnos > 0 || fin.After(g.ahora()) {
-		fin = g.ahora()
+// limite: hasta dónde puede contar el periodo ahora (ahora, sin pasar de la medianoche de su inicio).
+func (g *Gestor) limite(p *Periodo) time.Time {
+	y, m, d := p.Inicio.Date()
+	return minT(g.ahora(), time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
+}
+
+// finTramo: el final del tramo humano abierto: 5 minutos tras la última intervención y, como mínimo, 15 minutos
+// desde que empezó.
+func finTramo(p *Periodo) time.Time { return maxT(p.UltimaHum.Add(Espera), p.HumDesde.Add(MinHumano)) }
+
+// humanoAbierto: el tramo humano sigue (aún no ha llegado a su final).
+func (g *Gestor) humanoAbierto(p *Periodo) bool {
+	return !p.HumDesde.IsZero() && g.ahora().Before(finTramo(p))
+}
+
+// tramosHumanos: los tramos humanos del periodo hasta ahora (los cerrados y el abierto, hasta donde va).
+func (g *Gestor) tramosHumanos(p *Periodo) []Tramo {
+	l := append([]Tramo(nil), p.Tramos...)
+	if !p.HumDesde.IsZero() {
+		if fin := minT(finTramo(p), g.limite(p)); fin.After(p.HumDesde) {
+			l = append(l, Tramo{p.HumDesde, fin})
+		}
+	}
+	return l
+}
+
+// cierraTramo (con el cerrojo): el tramo humano abierto pasa a los cerrados.
+func (g *Gestor) cierraTramo(p *Periodo) {
+	if p.HumDesde.IsZero() {
+		return
 	}
 	y, m, d := p.Inicio.Date()
-	if medianoche := time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()); fin.After(medianoche) {
-		fin = medianoche
+	fin := minT(finTramo(p), time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
+	if fin.After(p.HumDesde) {
+		p.Tramos = append(p.Tramos, Tramo{p.HumDesde, fin})
+		g.anota("humano-tramo", p, map[string]any{"inicio": p.HumDesde.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano),
+			"s": math.Round(fin.Sub(p.HumDesde).Seconds()*1000) / 1000})
 	}
-	return fin
+	p.HumDesde = time.Time{}
 }
 
-// partes de un periodo: segundos de máquina y de hombre.
+// finDe: el final del periodo hasta ahora (su último trabajo de máquina o de hombre).
+func (g *Gestor) finDe(p *Periodo) time.Time {
+	fin := p.Ultima
+	if p.turnos > 0 {
+		fin = g.limite(p)
+	}
+	for _, t := range g.tramosHumanos(p) {
+		fin = maxT(fin, t.Fin)
+	}
+	return minT(fin, g.limite(p))
+}
+
+// partes de un periodo: segundos de máquina (turnos del agente) y de hombre (tramos de presencia), independientes.
 func (g *Gestor) partes(p *Periodo) (maq, hom float64) {
-	fin := g.finDe(p)
-	total := fin.Sub(p.Inicio)
 	m := p.Maquina
 	if !p.TurnoDesde.IsZero() {
-		m += fin.Sub(p.TurnoDesde)
+		if fin := g.limite(p); fin.After(p.TurnoDesde) {
+			m += fin.Sub(p.TurnoDesde)
+		}
 	}
-	if m > total {
-		m = total
-	}
-	if total < 0 {
-		total = 0
-	}
-	return m.Seconds(), (total - m).Seconds()
+	return m.Seconds(), union(g.tramosHumanos(p))
 }
 
-// creciendo: a qué clase está sumando ahora mismo el periodo ("m", "h" o "" si ya no cuenta).
-func (g *Gestor) creciendo(p *Periodo) string {
-	if p.turnos > 0 {
-		return "m"
-	}
-	if g.ahora().Before(p.Ultima.Add(Espera)) {
-		return "h"
-	}
-	return ""
+// creciendo: qué tiempos del periodo están sumando ahora mismo.
+func (g *Gestor) creciendo(p *Periodo) (maq, hom bool) {
+	return p.turnos > 0, g.humanoAbierto(p)
 }
 
 // ---- trabajo ----
@@ -400,6 +438,13 @@ func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *Periodo {
 	if humano {
 		if toca, desde := g.Tiempos.humanoToca(p.Sesion); toca {
 			g.anota("humano", p, map[string]any{"desde_anterior_s": seg(desde), "sin_actividad_s": seg(ahora.Sub(p.UltimaHum))})
+		}
+		// Si el tramo anterior ya acabó, empieza otro (con su mínimo de 15 minutos).
+		if !p.HumDesde.IsZero() && !ahora.Before(finTramo(p)) {
+			g.cierraTramo(p)
+		}
+		if p.HumDesde.IsZero() {
+			p.HumDesde = ahora
 		}
 		p.UltimaHum = ahora
 	}
@@ -578,8 +623,10 @@ func contiene(l []string, x string) bool {
 
 // marcaSucias (con el cerrojo): las líneas del día de un periodo hay que escribirlas.
 func (g *Gestor) marcaSucias(p *Periodo) {
-	if d := g.dia(p, "h"); d != nil {
-		d.ensucia()
+	if _, h := g.partes(p); h > 0 {
+		if d := g.dia(p, "h"); d != nil {
+			d.ensucia()
+		}
 	}
 	if m, _ := g.partes(p); m > 0 || p.turnos > 0 {
 		if d := g.dia(p, "m"); d != nil {
@@ -590,66 +637,64 @@ func (g *Gestor) marcaSucias(p *Periodo) {
 
 // cierraPeriodo (con el cerrojo): suma el periodo a sus líneas del día y lo quita.
 func (g *Gestor) cierraPeriodo(p *Periodo, motivo string) {
-	maq, hom := g.partes(p)
+	// Se congela el tiempo del periodo (ya no crece) para sumarlo ahora o cuando se resuelva su tarea.
+	maq, _ := g.partes(p)
+	fin := g.finDe(p)
+	g.cierraTramo(p)
+	hom := union(p.Tramos)
+	for _, t := range p.Tramos { // un tramo humano acaba en su mínimo de 15 minutos aunque sea después de ahora
+		fin = maxT(fin, t.Fin)
+	}
 	if p.TareaID == 0 {
 		p.TareaID = g.tareas[claveTarea(p.T)]
 	}
-	// Se congela el tiempo del periodo (ya no crece) para sumarlo ahora o cuando se resuelva su tarea.
 	p.Maquina, p.TurnoDesde, p.turnos = time.Duration(maq*float64(time.Second)), time.Time{}, 0
-	fin := p.Inicio.Add(time.Duration((maq + hom) * float64(time.Second)))
-	p.Ultima = fin.Add(-Espera)
 	if p.TareaID == 0 {
 		g.sinTarea = append(g.sinTarea, p)
 	} else {
 		g.sumaPeriodo(p)
 	}
 	delete(g.periodos, p.Sesion)
+	tramos := make([][2]string, len(p.Tramos))
+	for i, t := range p.Tramos {
+		tramos[i] = [2]string{t.Ini.Format(time.RFC3339Nano), t.Fin.Format(time.RFC3339Nano)}
+	}
 	g.anota("periodo-cierra", p, map[string]any{"motivo": motivo, "inicio": p.Inicio.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano),
-		"maquina_s": math.Round(maq*1000) / 1000, "hombre_s": math.Round(hom*1000) / 1000, "sin_tarea": p.TareaID == 0,
+		"maquina_s": math.Round(maq*1000) / 1000, "hombre_s": math.Round(hom*1000) / 1000, "tramos": tramos, "sin_tarea": p.TareaID == 0,
 		"tokens": p.Entrada + p.Salida, "coste": p.Coste})
 	go g.diario("cierra", p, fmt.Sprintf("%s (máquina %.0f s, hombre %.0f s)", motivo, maq, hom))
 }
 
-// sumaPeriodo (con el cerrojo): añade un periodo cerrado a sus líneas del día.
+// sumaPeriodo (con el cerrojo): añade un periodo cerrado (congelado) a sus líneas del día.
 func (g *Gestor) sumaPeriodo(p *Periodo) {
-	maq, hom := g.partesCerrado(p)
+	maq, hom := p.Maquina.Seconds(), union(p.Tramos)
 	// Tiempo humano que ya se imputó en otra sesión a la vez: no se cuenta otra vez.
-	fin := p.Ultima.Add(Espera)
 	if hom > 0 {
 		k := claveHumano(p)
-		if sol := math.Min(hom, solape(g.humanos[k], p.Inicio, fin)); sol > 0 {
+		if sol := math.Min(hom, solapeTramos(g.humanos[k], p.Tramos)); sol > 0 {
 			hom -= sol
-			g.anota("periodo-solape", p, map[string]any{"solapado_s": math.Round(sol*1000) / 1000, "inicio": p.Inicio.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano)})
+			g.anota("periodo-solape", p, map[string]any{"solapado_s": math.Round(sol*1000) / 1000})
 		}
 		if g.humanos == nil {
 			g.humanos = map[string][]Tramo{}
 		}
-		g.humanos[k] = append(g.humanos[k], Tramo{p.Inicio, fin})
+		g.humanos[k] = append(g.humanos[k], p.Tramos...)
 	}
-	{
-		if d := g.dia(p, "h"); d != nil {
-			d.Cerrado += hom
+	if d := g.dia(p, "h"); d != nil && (hom > 0 || len(p.Tramos) > 0) {
+		d.Cerrado += hom
+		d.ensucia()
+		g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "h", "mas_s": math.Round(hom*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
+	}
+	if maq > 0 || p.Entrada+p.Salida > 0 {
+		if d := g.dia(p, "m"); d != nil {
+			d.Cerrado += maq
+			g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "m", "linea_agente": d.Agente, "mas_s": math.Round(maq*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
+			d.Entrada += p.Entrada
+			d.Salida += p.Salida
+			d.Coste += p.Coste
 			d.ensucia()
-			g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "h", "mas_s": math.Round(hom*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
-		}
-		if maq > 0 || p.Entrada+p.Salida > 0 {
-			if d := g.dia(p, "m"); d != nil {
-				d.Cerrado += maq
-				g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "m", "linea_agente": d.Agente, "mas_s": math.Round(maq*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
-				d.Entrada += p.Entrada
-				d.Salida += p.Salida
-				d.Coste += p.Coste
-				d.ensucia()
-			}
 		}
 	}
-}
-
-// partesCerrado: máquina y hombre de un periodo ya congelado (Ultima = fin - espera).
-func (g *Gestor) partesCerrado(p *Periodo) (maq, hom float64) {
-	total := p.Ultima.Add(Espera).Sub(p.Inicio).Seconds()
-	maq = math.Min(p.Maquina.Seconds(), total)
-	return maq, math.Max(0, total-maq)
 }
 
 // revisa: cierra los periodos que pasaron la espera (o la medianoche) y escribe las líneas del día pendientes
@@ -668,15 +713,19 @@ func (g *Gestor) revisa() {
 		cambio = cambio || antes != p.Estado
 		y, m, d := p.Inicio.Date()
 		medianoche := ahora.After(time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
-		if (p.turnos == 0 && !ahora.Before(p.Ultima.Add(Espera))) || medianoche {
-			g.cierraPeriodo(p, map[bool]string{true: "fin del día", false: "5 minutos sin trabajo"}[medianoche])
+		if !p.HumDesde.IsZero() && !g.humanoAbierto(p) {
+			g.cierraTramo(p) // la presencia acabó (pasados sus 15 minutos y 5 sin intervenir)
+		}
+		if (p.turnos == 0 && p.HumDesde.IsZero() && !ahora.Before(p.Ultima.Add(Espera))) || medianoche {
+			g.cierraPeriodo(p, map[bool]string{true: "fin del día", false: "sin trabajo ni presencia"}[medianoche])
 			cambio = true
 		}
 	}
 	// Las líneas que crecen se ponen al día cada 3 minutos.
 	for _, p := range g.periodos {
-		if c := g.creciendo(p); c != "" {
-			if d := g.dia(p, c); d != nil && ahora.Sub(d.EscritoEn) >= Escritura {
+		maq, hom := g.creciendo(p)
+		for c, sube := range map[string]bool{"m": maq, "h": hom} {
+			if d := g.dia(p, c); sube && d != nil && ahora.Sub(d.EscritoEn) >= Escritura {
 				d.ensucia()
 			}
 		}
@@ -730,17 +779,20 @@ func (g *Gestor) totales(d *Dia) (seg float64, ent, sal int, coste float64, ritm
 			continue
 		}
 		maq, hom := g.partes(p)
+		cm, ch := g.creciendo(p)
 		switch {
 		case d.Clase == "h":
 			seg += math.Max(0, hom-g.solapeAbierto(p))
+			// Una persona en varias sesiones a la vez suma una sola vez: la línea humana crece a 1 s/s como mucho.
+			if ch {
+				ritmo = 1
+			}
 		case agenteDe(p.T.Modelo) == d.Agente:
 			seg += maq
 			ent, sal, coste = ent+p.Entrada, sal+p.Salida, coste+p.Coste
-		default:
-			continue
-		}
-		if c := g.creciendo(p); (c == "h" && d.Clase == "h") || (c == "m" && d.Clase == "m" && agenteDe(p.T.Modelo) == d.Agente) {
-			ritmo++
+			if cm {
+				ritmo++
+			}
 		}
 	}
 	return
@@ -1071,9 +1123,10 @@ func (g *Gestor) Estado() (hoy []Linea, abiertos []Abierto) {
 	})
 	for _, p := range g.periodos {
 		maq, hom := g.partes(p)
+		_, ch := g.creciendo(p)
 		abiertos = append(abiertos, Abierto{Sesion: p.Sesion, Titulo: p.T.Titulo, Proyecto: p.T.Proyecto, NombreProy: p.T.NombreProy,
-			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: (maq + hom) / 3600,
-			Inicio: p.Inicio, Ultima: p.Ultima, Agente: p.turnos > 0, Maquina: maq / 3600, Calculado: g.ahora()})
+			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: g.finDe(p).Sub(p.Inicio).Hours(),
+			Inicio: p.Inicio, Ultima: p.Ultima, Agente: p.turnos > 0, Maquina: maq / 3600, Hombre: hom / 3600, Presente: ch, Calculado: g.ahora()})
 	}
 	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Sesion < abiertos[j].Sesion })
 	return
@@ -1266,7 +1319,9 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 // Tramo de tiempo.
 type Tramo struct{ Ini, Fin time.Time }
 
-func claveHumano(p *Periodo) string { return fmt.Sprintf("%d|%s", p.T.UID, p.Inicio.Format("2006-01-02")) }
+func claveHumano(p *Periodo) string {
+	return fmt.Sprintf("%d|%s", p.T.UID, p.Inicio.Format("2006-01-02"))
+}
 
 // solape: los segundos de [ini, fin] que caen dentro de alguno de los tramos (contando cada instante una vez).
 func solape(tramos []Tramo, ini, fin time.Time) float64 {
@@ -1292,8 +1347,8 @@ func solape(tramos []Tramo, ini, fin time.Time) float64 {
 	return total.Seconds()
 }
 
-// solapeAbierto (con el cerrojo): el tiempo de un periodo abierto que ya cuenta como humano en otro sitio (los ya
-// imputados y los otros periodos abiertos del mismo usuario y día que empezaron antes).
+// solapeAbierto (con el cerrojo): el tiempo humano de un periodo abierto que ya cuenta como humano en otro sitio
+// (los tramos ya imputados y los de los otros periodos abiertos del mismo usuario y día que empezaron antes).
 func (g *Gestor) solapeAbierto(p *Periodo) float64 {
 	k := claveHumano(p)
 	tramos := append([]Tramo(nil), g.humanos[k]...)
@@ -1302,12 +1357,46 @@ func (g *Gestor) solapeAbierto(p *Periodo) float64 {
 			continue
 		}
 		if o.Inicio.Before(p.Inicio) || (o.Inicio.Equal(p.Inicio) && o.Sesion < p.Sesion) {
-			if _, h := g.partes(o); h > 0 {
-				tramos = append(tramos, Tramo{o.Inicio, g.finDe(o)})
-			}
+			tramos = append(tramos, g.tramosHumanos(o)...)
 		}
 	}
-	return solape(tramos, p.Inicio, g.finDe(p))
+	return solapeTramos(tramos, g.tramosHumanos(p))
+}
+
+// solapeTramos: los segundos de los tramos «de» que caen dentro de «en» (cada instante una vez).
+func solapeTramos(en, de []Tramo) float64 {
+	total := 0.0
+	for _, t := range unidos(de) {
+		total += solape(en, t.Ini, t.Fin)
+	}
+	return total
+}
+
+// unidos: los tramos fundidos (sin solapes), en orden.
+func unidos(l []Tramo) []Tramo {
+	c := append([]Tramo(nil), l...)
+	sort.Slice(c, func(i, j int) bool { return c[i].Ini.Before(c[j].Ini) })
+	var r []Tramo
+	for _, t := range c {
+		if !t.Fin.After(t.Ini) {
+			continue
+		}
+		if n := len(r); n > 0 && !t.Ini.After(r[n-1].Fin) {
+			r[n-1].Fin = maxT(r[n-1].Fin, t.Fin)
+			continue
+		}
+		r = append(r, t)
+	}
+	return r
+}
+
+// union: los segundos que cubren los tramos (cada instante una vez).
+func union(l []Tramo) float64 {
+	total := 0.0
+	for _, t := range unidos(l) {
+		total += t.Fin.Sub(t.Ini).Seconds()
+	}
+	return total
 }
 
 func maxT(a, b time.Time) time.Time {

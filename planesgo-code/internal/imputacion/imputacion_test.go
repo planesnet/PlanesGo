@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -166,21 +167,20 @@ func TestUnaLineaPorDia(t *testing.T) {
 		r.pasa(2 * time.Minute) // 2 min de agente
 		fin()
 		g.Actividad(tr(s))
-		r.pasa(6 * time.Minute) // y la espera de 5 min, que cierra el periodo
+		r.pasa(16 * time.Minute) // la presencia dura su mínimo de 15 min; después se cierra el periodo
 		g.revisa()
 	}
-	// Máquina: 10 × 2 min = 20 min → 20 min. Hombre: 10 × 5 min = 50 min → 60 min (bloques de 15).
+	// Máquina: 10 × 2 min = 20 min. Hombre: 10 tramos de presencia de 15 min (su mínimo) = 150 min.
 	g.revisa()
 	espera(t, func() bool {
 		m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
-		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == float64(20)/60 && h[0]["unit_amount"] == 1.0
+		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == float64(20)/60 && h[0]["unit_amount"] == 2.5
 	})
 	m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
 	if len(m) != 1 || len(h) != 1 {
 		t.Fatalf("líneas: %d máquina, %d hombre (total %d)", len(m), len(h), o.n())
 	}
-	// Máquina: 10 × 2 min = 20 min → 20 min. Hombre: 10 × 5 min = 50 min → 60 min (bloques de 15).
-	if m[0]["unit_amount"] != float64(20)/60 || h[0]["unit_amount"] != 1.0 {
+	if m[0]["unit_amount"] != float64(20)/60 || h[0]["unit_amount"] != 2.5 {
 		t.Errorf("horas: máquina %v hombre %v", m[0]["unit_amount"], h[0]["unit_amount"])
 	}
 	if m[0]["ai_model"] != "Claude Code opus" || fmt.Sprint(m[0]["task_id"]) != "7" {
@@ -195,7 +195,8 @@ func TestUnaLineaPorDia(t *testing.T) {
 	}
 }
 
-// Otro agente el mismo día, proyecto y tarea: su propia línea de máquina; la de hombre es la misma.
+// Otro agente el mismo día, proyecto y tarea: su propia línea de máquina. Sin nadie delante no hay línea de hombre
+// (máquina y hombre son independientes).
 func TestOtroAgente(t *testing.T) {
 	o := nuevoOdoo()
 	r := &reloj{t: t0}
@@ -208,8 +209,11 @@ func TestOtroAgente(t *testing.T) {
 	fa()
 	fb()
 	espera(t, func() bool {
-		return len(o.con("pgocode-m-claude-code")) == 1 && len(o.con("pgocode-m-opencode")) == 1 && len(o.con("pgocode-h")) == 1
+		return len(o.con("pgocode-m-claude-code")) == 1 && len(o.con("pgocode-m-opencode")) == 1
 	})
+	if h := o.con("pgocode-h"); len(h) != 0 {
+		t.Errorf("sin presencia humana no hay línea de hombre: %v", h)
+	}
 }
 
 // Tras actualizarse (Suspende), la versión nueva continúa en las mismas líneas (no crea otras).
@@ -232,7 +236,7 @@ func TestContinuaTrasActualizar(t *testing.T) {
 	r.pasa(10 * time.Minute)
 	g2.revisa()
 	espera(t, func() bool { m := o.con("pgocode-m-claude-code"); return len(m) == 1 && m[0]["unit_amount"] == 5.0/60 })
-	if o.n() != 2 {
+	if o.n() != 1 { // solo la de máquina: no hubo nadie delante
 		t.Errorf("se han creado líneas de más: %d", o.n())
 	}
 }
@@ -332,4 +336,78 @@ func TestOdooSinSesion(t *testing.T) {
 	if _, ok := m["ai_session_id"]; ok {
 		t.Error("no debe enviar ai_session_id a un Odoo que no lo tiene")
 	}
+}
+
+// Presencia humana: cada tramo dura como mínimo 15 minutos desde que empieza (un valor absoluto, no por
+// intervención); pasado el mínimo, sigue hasta 5 minutos sin intervenir. Máquina y hombre son independientes.
+func TestMinimoHumano(t *testing.T) {
+	hombre := func(g *Gestor, s string) float64 {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if p := g.periodos[s]; p != nil {
+			_, h := g.partes(p)
+			return h
+		}
+		return -1
+	}
+	cerrado := func(g *Gestor) float64 {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		for _, d := range g.dias {
+			if d.Clase == "h" {
+				return d.Cerrado
+			}
+		}
+		return 0
+	}
+	for _, c := range []struct {
+		nombre string
+		toques []time.Duration // momentos de las intervenciones
+		quiero time.Duration
+	}{
+		{"una sola intervención: 15 min", []time.Duration{0}, 15 * time.Minute},
+		{"varias dentro del mínimo: 15 min, no 15 por cada una", []time.Duration{0, time.Minute, 3 * time.Minute, 9 * time.Minute}, 15 * time.Minute},
+		{"pasado el mínimo sigue 5 min tras la última", []time.Duration{0, 14 * time.Minute, 18 * time.Minute}, 23 * time.Minute},
+		{"dos tramos separados: 15 + 15", []time.Duration{0, 40 * time.Minute}, 30 * time.Minute},
+	} {
+		t.Run(c.nombre, func(t *testing.T) {
+			r := &reloj{t: t0}
+			g := &Gestor{Odoo: nuevoOdoo(), Ahora: r.ahora}
+			antes := time.Duration(0)
+			for _, x := range c.toques {
+				r.pasa(x - antes)
+				antes = x
+				g.Actividad(tr("s"))
+				g.revisa()
+			}
+			// Mientras dura el mínimo, el periodo no se cierra aunque no haya nadie.
+			r.pasa(10 * time.Minute)
+			g.revisa()
+			if hombre(g, "s") < 0 && c.quiero > 0 && len(c.toques) == 1 {
+				t.Fatal("el periodo se ha cerrado antes de su mínimo de 15 minutos")
+			}
+			r.pasa(time.Hour)
+			g.revisa()
+			if h := cerrado(g); math.Abs(h-c.quiero.Seconds()) > 0.5 {
+				t.Errorf("hombre %.0f s, quiero %.0f s", h, c.quiero.Seconds())
+			}
+		})
+	}
+}
+
+// Un turno de 40 min empezado por una intervención: 40 min de máquina y 15 de hombre (a la vez, no repartidos).
+func TestHombreYMaquinaIndependientes(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Actividad(tr("s"))
+	fin := g.Empieza(tr("s"))
+	r.pasa(40 * time.Minute)
+	fin()
+	r.pasa(10 * time.Minute)
+	g.revisa()
+	espera(t, func() bool {
+		m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
+		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == 40.0/60 && h[0]["unit_amount"] == 0.25
+	})
 }
