@@ -108,6 +108,7 @@ type Dia struct {
 	OdooSesion string    `json:"odoo_sesion"`
 	Escrito    float64   `json:"escrito"` // horas escritas en Odoo la última vez
 	Sucio      bool      `json:"sucio"`   // hay que escribirla
+	version    int       // cambia cada vez que se ensucia: una escritura que empezó antes no la da por escrita
 	Error      string    `json:"error,omitempty"`
 	EscritoEn  time.Time `json:"escrito_en"`
 }
@@ -578,11 +579,11 @@ func contiene(l []string, x string) bool {
 // marcaSucias (con el cerrojo): las líneas del día de un periodo hay que escribirlas.
 func (g *Gestor) marcaSucias(p *Periodo) {
 	if d := g.dia(p, "h"); d != nil {
-		d.Sucio = true
+		d.ensucia()
 	}
 	if m, _ := g.partes(p); m > 0 || p.turnos > 0 {
 		if d := g.dia(p, "m"); d != nil {
-			d.Sucio = true
+			d.ensucia()
 		}
 	}
 }
@@ -628,7 +629,7 @@ func (g *Gestor) sumaPeriodo(p *Periodo) {
 	{
 		if d := g.dia(p, "h"); d != nil {
 			d.Cerrado += hom
-			d.Sucio = true
+			d.ensucia()
 			g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "h", "mas_s": math.Round(hom*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
 		}
 		if maq > 0 || p.Entrada+p.Salida > 0 {
@@ -638,7 +639,7 @@ func (g *Gestor) sumaPeriodo(p *Periodo) {
 				d.Entrada += p.Entrada
 				d.Salida += p.Salida
 				d.Coste += p.Coste
-				d.Sucio = true
+				d.ensucia()
 			}
 		}
 	}
@@ -676,7 +677,7 @@ func (g *Gestor) revisa() {
 	for _, p := range g.periodos {
 		if c := g.creciendo(p); c != "" {
 			if d := g.dia(p, c); d != nil && ahora.Sub(d.EscritoEn) >= Escritura {
-				d.Sucio = true
+				d.ensucia()
 			}
 		}
 	}
@@ -816,7 +817,7 @@ func (g *Gestor) escribeDia(d *Dia) {
 	if id == 0 {
 		if horas == 0 { // nada que imputar todavía: no se crea una línea vacía
 			g.mu.Lock()
-			d.Sucio = false
+			d.Sucio = d.version != dd.version
 			g.mu.Unlock()
 			return
 		}
@@ -834,7 +835,7 @@ func (g *Gestor) escribeDia(d *Dia) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	reg := map[string]any{"fecha": dd.Fecha, "proyecto": dd.Proyecto, "tarea_id": dd.TareaID, "clase": dd.Clase, "linea_agente": dd.Agente,
-		"linea": id, "nueva": dd.LineaID == 0, "segundos": math.Round(seg*1000) / 1000, "horas": horas, "antes": dd.Escrito, "ritmo": ritmo}
+		"linea": id, "nueva": dd.LineaID == 0, "segundos": seg, "horas": horas, "antes": dd.Escrito, "ritmo": ritmo}
 	if err != nil {
 		reg["error"] = err.Error()
 	}
@@ -849,7 +850,8 @@ func (g *Gestor) escribeDia(d *Dia) {
 		depuracion.Log("imputacion", "línea del día %s/%d/%s: %v", dd.Fecha, dd.Proyecto, dd.marca(), err)
 		return
 	}
-	d.LineaID, d.Escrito, d.EscritoEn, d.Sucio, d.Error = id, horas, g.ahora(), false, ""
+	// Si mientras se escribía cambió (se cerró otro periodo…), sigue pendiente: lo escrito ya no es lo último.
+	d.LineaID, d.Escrito, d.EscritoEn, d.Sucio, d.Error = id, horas, g.ahora(), d.version != dd.version, ""
 }
 
 // buscaLinea: la línea del día ya existente en Odoo (p. ej. si se perdió el fichero local). Si se encuentra y no
@@ -1238,7 +1240,7 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 		d.Entrada += int(num(x.TokensIn))
 		d.Salida += int(num(x.TokensOut))
 		d.Coste += num(x.Coste)
-		d.Sucio = true
+		d.ensucia()
 		g.mu.Unlock()
 		r.Lineas++
 		r.Horas += x.Horas
@@ -1313,4 +1315,10 @@ func maxT(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+// ensucia (con el cerrojo): la línea hay que escribirla (otra vez).
+func (d *Dia) ensucia() {
+	d.Sucio = true
+	d.version++
 }

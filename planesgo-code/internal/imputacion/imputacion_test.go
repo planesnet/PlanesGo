@@ -105,7 +105,11 @@ func (o *odooFalso) con(marca string) []map[string]any {
 	var l []map[string]any
 	for _, v := range o.lineas {
 		if v["ai_session_id"] == marca {
-			l = append(l, v)
+			c := map[string]any{} // copia: el gestor puede seguir escribiendo la línea
+			for k, x := range v {
+				c[k] = x
+			}
+			l = append(l, c)
 		}
 	}
 	return l
@@ -123,7 +127,7 @@ func (r *reloj) pasa(d time.Duration) { r.mu.Lock(); r.t = r.t.Add(d); r.mu.Unlo
 
 func espera(t *testing.T, cond func() bool) {
 	t.Helper()
-	for i := 0; i < 300 && !cond(); i++ {
+	for i := 0; i < 1200 && !cond(); i++ { // hasta 6 s: con -race y el equipo cargado va más lento
 		time.Sleep(5 * time.Millisecond)
 	}
 	if !cond() {

@@ -95,6 +95,7 @@ type suceso struct {
 	Coste      float64 `json:"coste"`
 	TurnoCorte bool    `json:"turno_cortado"`
 	Solapado   float64 `json:"solapado_s"`
+	Ritmo      int     `json:"ritmo"`
 }
 
 // PeriodoLargo: un periodo más largo que esto es sospechoso (alguien se dejó la sesión abierta, un turno colgado…).
@@ -233,7 +234,12 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 				av(&s, "error", "odoo", "no se pudo escribir la línea %s (%.2f h): %s", l.nombre(), s.Horas, s.Error)
 				break
 			}
-			if r := Redondea(s.Segundos, s.Clase); math.Abs(r-s.Horas) > 0.0001 {
+			// Un trabajo recién empezado (con ritmo y aún 0 s) ya cuenta su primer bloque.
+			seg := s.Segundos
+			if seg < 0.5 && s.Ritmo > 0 {
+				seg = 1
+			}
+			if r := Redondea(seg, s.Clase); math.Abs(r-s.Horas) > 0.0001 {
 				av(&s, "error", "redondeo", "línea %s: %.0f s se redondean a %.4f h, pero se escribieron %.4f h", l.nombre(), s.Segundos, r, s.Horas)
 			}
 			if s.Antes > 0 && s.Horas+0.0001 < s.Antes {
@@ -274,29 +280,22 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 		return inf, err
 	}
 
-	// Tiempo humano contado dos veces: periodos de distintas sesiones del mismo usuario que se solapan.
+	// Tiempo humano contado dos veces: lo de cada periodo que cae en tiempo humano ya contado antes (del mismo
+	// usuario, otra sesión), como hace la imputación; si se anotó ese descuento («periodo-solape»), no es un fallo.
 	sort.Slice(humanos, func(i, j int) bool { return humanos[i].ini.Before(humanos[j].ini) })
-	for i := range humanos {
-		for j := i + 1; j < len(humanos) && humanos[j].ini.Before(humanos[i].fin); j++ {
-			a, b := humanos[i], humanos[j]
-			if a.sesion == b.sesion || (a.uid != 0 && b.uid != 0 && a.uid != b.uid) {
-				continue
-			}
-			sol := minT(a.fin, b.fin).Sub(b.ini).Seconds()
-			// Ya descontado al imputar (una persona solo está en un sitio): no es un fallo.
-			if solapados[b.sesion] >= sol-60 || solapados[a.sesion] >= sol-60 {
-				if solapados[b.sesion] >= sol-60 {
-					solapados[b.sesion] -= sol
-				} else {
-					solapados[a.sesion] -= sol
-				}
-				continue
-			}
-			if sol >= 60 {
-				av(&suceso{T: b.ini, Sesion: b.sesion}, "aviso", "solape", "%s de tiempo humano a la vez en las sesiones %s y %s (%s–%s): se cuenta dos veces",
-					dur(sol), a.sesion, b.sesion, b.ini.Format("15:04"), minT(a.fin, b.fin).Format("15:04"))
-			}
+	porUsuario := map[int][]Tramo{}
+	for _, b := range humanos {
+		var antes []Tramo
+		for _, x := range porUsuario[b.uid] {
+			antes = append(antes, x)
 		}
+		sol := solape(antes, b.ini, b.fin)
+		if sol >= 60 && solapados[b.sesion]+60 < sol {
+			av(&suceso{T: b.ini, Sesion: b.sesion}, "aviso", "solape", "%s de tiempo humano de la sesión %s ya contado en otra sesión a la vez (%s–%s): se cuenta dos veces",
+				dur(sol-solapados[b.sesion]), b.sesion, b.ini.Format("15:04"), b.fin.Format("15:04"))
+		}
+		solapados[b.sesion] = math.Max(0, solapados[b.sesion]-sol)
+		porUsuario[b.uid] = append(porUsuario[b.uid], Tramo{b.ini, b.fin})
 	}
 	// Turnos sin acabar.
 	for s, n := range turnos {
