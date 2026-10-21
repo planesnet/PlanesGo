@@ -94,7 +94,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
     setGuardando(true);
     setError('');
     try {
-      const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, rama, carpeta: s.carpeta, remoto: pideRemoto ? remoto.trim() : '' });
+      const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, sesion: s.id, rama, carpeta: s.carpeta, remoto: pideRemoto ? remoto.trim() : '' });
       const cambioDeContexto = !nueva && (rama !== sesion.rama || s.carpeta !== sesion.carpeta || s.agente !== sesion.agente);
       alGuardar({ ...s, rama, tipo: repo.tipo, sesionAgente: cambioDeContexto ? undefined : s.sesionAgente }, repo);
     } catch (e) { setError((e as Error).message); setGuardando(false); }

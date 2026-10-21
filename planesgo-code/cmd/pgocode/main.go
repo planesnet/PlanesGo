@@ -33,6 +33,7 @@ import (
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
+	"planesgo-code/internal/repo"
 	"planesgo-code/internal/selector"
 	"planesgo-code/internal/servidor"
 	"planesgo-code/internal/sesiones"
@@ -380,6 +381,9 @@ func main() {
 	}
 	s.Actualizador = act
 	s.DirRamas = filepath.Join(datos, "ramas")
+	// Registro de las copias de trabajo que crea pgocode; al arrancar, git olvida las que se borraron a mano.
+	s.RegistroCopias = &repo.Registro{Fichero: filepath.Join(datos, "copias-trabajo.json")}
+	go s.PodaCopias(context.Background())
 	if e := act.Estado(); e.Estado == "desactivada" {
 		log.Printf("autoactualización desactivada: %s", e.Error)
 	} else {

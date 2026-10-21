@@ -84,6 +84,8 @@ type Servidor struct {
 	QA qa.Ejecutor
 	// DirRamas: dónde se crean las copias de trabajo de otras ramas (git worktree) de las sesiones.
 	DirRamas string
+	// RegistroCopias: las copias de trabajo que crea pgocode (para poder quitarlas luego sin perder nada).
+	RegistroCopias *repo.Registro
 	// Procesos: programas del proyecto en marcha (Odoo, servicios…); Eventos: avisos a la interfaz (SSE).
 	Procesos *procesos.Gestor
 	Eventos  Eventos
@@ -129,6 +131,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/proyecto/carpeta", s.conSesion(s.proyectoCarpeta))
 	mux.HandleFunc("GET /api/proyecto/info-carpeta", s.conSesion(s.proyectoInfoCarpeta))
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
+	mux.HandleFunc("GET /api/proyecto/copias", s.conSesion(s.proyectoCopias))
+	mux.HandleFunc("POST /api/proyecto/quitar-copia", s.conSesion(s.proyectoQuitarCopia))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
 	mux.HandleFunc("GET /api/qa/campanas", s.conSesion(s.qaCampanas))
 	mux.HandleFunc("GET /api/qa/casos", s.conSesion(s.qaCasos))
@@ -633,12 +637,14 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	autorizadas := carpetasAutorizadas(p.Autorizadas)
 	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).
 	if info.NecesitaDir && p.Carpeta != "" && p.Rama != "" {
-		dir, err := repo.CarpetaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
+		c, err := repo.CopiaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
 		if err != nil {
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		p.Carpeta = dir
+		c.Sesion, c.Proyecto = p.Sesion, p.Proyecto
+		s.apuntaCopia(c)
+		p.Carpeta = c.Carpeta
 	}
 
 	// Tiempo: pgocode lo imputa directamente en Odoo (proyecto y tarea de la sesión), sin PlanesGo ni el agente.

@@ -172,3 +172,30 @@ func busca(raices []string) map[int][]string {
 	}
 	return m
 }
+
+// Olvida una carpeta registrada para el proyecto (p. ej. una copia de trabajo que se ha quitado).
+func (x *Indice) Olvida(proyecto int, carpeta string) error {
+	c := filepath.Clean(carpeta)
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.cargaRegistro()
+	l := x.registradas[proyecto][:0:0]
+	for _, y := range x.registradas[proyecto] {
+		if y != c {
+			l = append(l, y)
+		}
+	}
+	if len(l) == len(x.registradas[proyecto]) {
+		return nil
+	}
+	x.registradas[proyecto] = l
+	if x.Registro == "" {
+		return nil
+	}
+	b, _ := json.MarshalIndent(x.registradas, "", " ")
+	tmp := x.Registro + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, x.Registro)
+}
