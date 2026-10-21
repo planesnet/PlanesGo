@@ -16,6 +16,7 @@ vet:
 test:
 	go test -race ./...
 	cd studio-tv && go test -race ./...
+	cd web && npm test
 
 # Interfaz web (React + Vite) que se incluye en el binario pgocode
 web:

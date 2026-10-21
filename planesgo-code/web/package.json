@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && touch dist/.gitkeep",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types 'src/**/*.test.ts'"
   },
   "dependencies": {
     "react": "18.3.1",

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
+import * as C from '../cola';
 import Icono from './Icono';
 import Texto from './Texto';
 import { Agente, Hosting, nombreHosting } from './Marca';
@@ -23,8 +24,6 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-interface EnCola { texto: string; adjuntos: Adjunto[] }
-
 export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -37,13 +36,14 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
   const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
-  // Cola de mensajes (como en Claude Code): lo que se escribe mientras el agente trabaja espera su turno.
-  // Va por sesión; si el turno se para o falla, la cola se detiene hasta que se envíe algo a mano.
-  const [colas, setColas] = useState<Record<string, EnCola[]>>({});
-  const cola = (sesion && colas[sesion.id]) || [];
-  const [paradas, setParadas] = useState<Record<string, boolean>>({});
-  const paraCola = (id: string, v: boolean) => setParadas(x => (Boolean(x[id]) === v ? x : { ...x, [id]: v }));
-  const ponCola = (id: string, f: (l: EnCola[]) => EnCola[]) => setColas(c => ({ ...c, [id]: f(c[id] || []) }));
+  // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
+  const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
+  const colaSesion = (sesion && colas[sesion.id]) || C.vacia<Adjunto>();
+  const cola = colaSesion.mensajes;
+  const ponCola = (id: string, f: (c: C.Cola<Adjunto>) => C.Cola<Adjunto>) => setColas(x => {
+    const n = f(x[id] || C.vacia<Adjunto>());
+    return n === x[id] ? x : { ...x, [id]: n };
+  });
   const selector = useRef<HTMLInputElement>(null);
   useEffect(() => { setAdjuntos([]); }, [sesion?.id]);
   const adjunta = (fs: File[]) => {
@@ -127,17 +127,18 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
 
   // Al acabar un turno sin error, sale el primero de la cola.
   useEffect(() => {
-    if (!sesion || enCurso || !prov?.disponible || cola.length === 0 || paradas[sesion.id]) return;
-    const [primero] = cola;
-    ponCola(sesion.id, l => l.slice(1));
-    envia(primero.texto, primero.adjuntos);
-  }, [enCurso, sesion?.id, cola.length, prov?.disponible, paradas]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!sesion || !prov?.disponible) return;
+    const { enviar, cola: resto } = C.siguiente(colaSesion, Boolean(enCurso));
+    if (!enviar) return;
+    ponCola(sesion.id, () => resto);
+    envia(enviar.texto, enviar.adjuntos);
+  }, [enCurso, sesion?.id, colaSesion, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Con el agente trabajando, Intro deja el mensaje (y sus adjuntos) en la cola.
   function encola() {
-    const t = texto.trim();
-    if (!t || !sesion || subiendo) return;
-    ponCola(sesion.id, l => [...l, { texto: t, adjuntos: adjuntos.filter(a => !a.subiendo && !a.error) }]);
+    if (!texto.trim() || !sesion || subiendo) return;
+    const listos = adjuntos.filter(a => !a.subiendo && !a.error);
+    ponCola(sesion.id, c => C.encola(c, texto, listos));
     setTexto('');
     setAdjuntos([]);
   }
@@ -146,9 +147,10 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   function para() {
     if (!enCurso || !sesion) return;
     if (cola.length) {
-      setTexto(x => [...cola.map(c => c.texto), x].filter(Boolean).join('\n\n'));
-      setAdjuntos(x => [...cola.flatMap(c => c.adjuntos), ...x]);
-      ponCola(sesion.id, () => []);
+      const d = C.devuelve(cola, texto, adjuntos);
+      setTexto(d.texto);
+      setAdjuntos(d.adjuntos);
+      ponCola(sesion.id, c => ({ ...c, mensajes: [] }));
     }
     enCurso.abort();
   }
@@ -157,7 +159,8 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const id = sesion.id;
-    paraCola(id, false);
+    ponCola(id, C.empieza);
+    let fallo = false;
     const pon = (m: Mensaje[], final = false) => {
       if (idActual.current === id) setMensajes(m);
       if (final) guardaConversacion(id, m);
@@ -218,13 +221,15 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta });
         if (e.uso) ultimo(m => ({ ...m, uso: e.uso }));
         if (e.sesion_agente) sesionAgente = e.sesion_agente;
+        if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
     } catch (err) {
-      paraCola(id, true);
+      fallo = true;
       if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
       pon(actual, true);
+      if (fallo) ponCola(id, C.falla);
       setEnCurso(c => (c === ac ? null : c));
       alCambiarSesion({ ...sesion, nombre: sesion.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
     }
@@ -330,18 +335,19 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                     <span className="cola-texto recorta" title={c.texto}>{c.texto}</span>
                     {c.adjuntos.length > 0 && <span className="suave pequeno"><Icono n="clip" t={11} /> {c.adjuntos.length}</span>}
                     <button className="icono" title="Editar (vuelve al cuadro de texto)" aria-label="Editar mensaje en cola" onClick={() => {
-                      ponCola(sesion.id, l => l.filter((_, j) => j !== i));
-                      setTexto(x => [x, c.texto].filter(Boolean).join('\n\n'));
-                      setAdjuntos(x => [...x, ...c.adjuntos]);
+                      ponCola(sesion.id, k => C.quita(k, i));
+                      const d = C.devuelve([c], texto, adjuntos, false);
+                      setTexto(d.texto);
+                      setAdjuntos(d.adjuntos);
                       area.current?.focus();
                     }}><Icono n="lapiz" t={13} /></button>
-                    <button className="quita-adjunto" title="Quitar de la cola" aria-label="Quitar mensaje de la cola" onClick={() => ponCola(sesion.id, l => l.filter((_, j) => j !== i))}>×</button>
+                    <button className="quita-adjunto" title="Quitar de la cola" aria-label="Quitar mensaje de la cola" onClick={() => ponCola(sesion.id, k => C.quita(k, i))}>×</button>
                   </li>
                 ))}
-                {!enCurso && paradas[sesion.id] && (
+                {!enCurso && colaSesion.parada && (
                   <li className="cola-parada suave pequeno">
                     Cola detenida: el último turno se paró o falló.
-                    <button className="enlace" onClick={() => paraCola(sesion.id, false)}>Seguir con la cola</button>
+                    <button className="enlace" onClick={() => ponCola(sesion.id, C.empieza)}>Seguir con la cola</button>
                   </li>
                 )}
               </ol>
