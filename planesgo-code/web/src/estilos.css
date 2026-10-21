@@ -66,20 +66,26 @@ textarea { resize: none; }
 
 /* Estructura: barra superior + tres columnas */
 .aplicacion { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
-.arnes { display: grid; grid-template-columns: 248px minmax(0, 1fr) minmax(360px, 42%); min-height: 0; }
-.arnes.sin-panel { grid-template-columns: 248px minmax(0, 1fr); }
+.arnes { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(360px, 42%); min-height: 0; }
+.arnes.sin-panel { grid-template-columns: auto minmax(0, 1fr); }
 @media (max-width: 900px) {
   .arnes, .arnes.sin-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; min-height: 100%; }
   .proyectos { max-height: 40vh; }
 }
 
 /* Proyectos */
-.proyectos { background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
+/* El panel de proyectos se ajusta a lo más largo (proyectos y nombres de sesión), entre 248 px y el 40 % de la ventana. */
+.proyectos { width: max-content; min-width: 248px; max-width: 40vw; background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
 .marca { font-weight: 700; font-size: 14px; padding: 14px 14px 10px; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
 .busca input { flex: 1; background: transparent; }
 .interruptor { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--suave); padding: 8px 14px 2px; }
 .lista { overflow: auto; padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 1px; }
+.proyectos .lista { display: flex; flex-direction: column; }
+.proyectos .lista > * { flex: none; }
+/* Los proyectos que no son el activo, abajo del todo (si caben; si no, siguen al activo). */
+.otros-proyectos { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--linea); display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.otros-proyectos.solos { margin-top: 0; border-top: none; padding-top: 0; }
 .lista p { padding: 6px 8px; margin: 0; }
 .proyecto { text-align: left; border-radius: 6px; padding: 6px 8px; display: grid; gap: 0; }
 .proyecto.activo { background: var(--hover); }

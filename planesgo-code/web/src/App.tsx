@@ -249,7 +249,7 @@ export default function App() {
     <Barra usuario={usuario} alSalir={salir} versionImputacion={versionImputacion}
       sesion={sesion ? { id: sesion.id, proyecto: sesion.proyecto, nombreProyecto: proyecto?.nombre, tareaId: sesion.tareaId, tarea: sesion.tarea } : undefined} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}
-      style={panel && anchoPanel ? { gridTemplateColumns: `248px minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
+      style={panel && anchoPanel ? { gridTemplateColumns: `auto minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}

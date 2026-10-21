@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
@@ -93,35 +93,13 @@ export default function Proyectos(props: Props) {
     return todos.filter(p => sinAcentos(p.nombre + ' ' + (p.cliente?.nombre || '')).includes(f));
   }, [lista, filtro, recientes, buscando]);
 
-  return (
-    <nav className="proyectos" aria-label="Proyectos">
-      <div className="busca">
-        <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
-        <button className="icono" title="Volver a cargar de Odoo" aria-label="Volver a cargar de Odoo" onClick={() => carga(true)}><Icono n="recargar" t={16} /></button>
-      </div>
-      <div className="lista">
-        {error && <p className="error">{error}</p>}
-        {!lista && !error && <p className="suave">Cargando proyectos de Odoo…</p>}
-        {lista && !buscando && !visibles.some(p => p.id === actual?.id) && <p className="titulo-lista">Recientes</p>}
-        {lista && visibles.length === 0 && <p className="suave">{buscando ? 'Ningún proyecto coincide.' : 'Aún no has abierto ningún proyecto. Búscalo arriba para empezar.'}</p>}
-        {buscando ? visibles.map(p => (
-          <button key={p.id} className={'proyecto' + (actual?.id === p.id ? ' activo' : '')} onClick={() => { alElegir(p); setFiltro(''); }}>
-            <span className="nombre">{p.nombre}</span>
-            <span className="detalle">
-              {p.cliente?.nombre || 'Sin cliente'}{p.carpetas.length > 0 && <span className="local" title={p.carpetas.join('\n')}> · local</span>}
-            </span>
-          </button>
-        )) : visibles.map((p, i) => {
-          // Como los grupos de Claude Code: el proyecto y, debajo, sus sesiones abiertas.
+  // Un proyecto (como los grupos de Claude Code) con sus sesiones abiertas debajo.
+  const grupo = (p: Proyecto) => {
           const activo = actual?.id === p.id;
           const plegado = plegados.has(p.id);
           const ss = activo ? props.sesiones : sesionesDe(usuario.login, p.id);
-          // Tras el proyecto activo (siempre el primero), el título del resto.
-          const otros = i === 1 && visibles[0].id === actual?.id;
           return (
-            <Fragment key={p.id}>
-            {otros && <p className="titulo-lista">Otros proyectos</p>}
-            <section className={'grupo' + (activo ? ' activo' : '')}>
+            <section key={p.id} className={'grupo' + (activo ? ' activo' : '')}>
               <div className="grupo-cabecera">
                 <button className="icono plegar" onClick={() => pliega(p.id)} aria-expanded={!plegado} aria-label={plegado ? 'Desplegar' : 'Plegar'}>
                   <Icono n="bajar" t={12} />
@@ -146,9 +124,37 @@ export default function Proyectos(props: Props) {
               </div>
               {!plegado && <Sesiones {...props} hostingDe={id => leeAjustes(usuario.login, id).hosting?.tipo} proyecto={p} lista={ss} alCambiarSesion={cambia} alBorrarSesion={borra} />}
             </section>
-            </Fragment>
           );
-        })}
+  };
+
+  return (
+    <nav className="proyectos" aria-label="Proyectos">
+      <div className="busca">
+        <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
+        <button className="icono" title="Volver a cargar de Odoo" aria-label="Volver a cargar de Odoo" onClick={() => carga(true)}><Icono n="recargar" t={16} /></button>
+      </div>
+      <div className="lista">
+        {error && <p className="error">{error}</p>}
+        {!lista && !error && <p className="suave">Cargando proyectos de Odoo…</p>}
+        {lista && !buscando && !visibles.some(p => p.id === actual?.id) && <p className="titulo-lista">Recientes</p>}
+        {lista && visibles.length === 0 && <p className="suave">{buscando ? 'Ningún proyecto coincide.' : 'Aún no has abierto ningún proyecto. Búscalo arriba para empezar.'}</p>}
+        {buscando ? visibles.map(p => (
+          <button key={p.id} className={'proyecto' + (actual?.id === p.id ? ' activo' : '')} onClick={() => { alElegir(p); setFiltro(''); }}>
+            <span className="nombre">{p.nombre}</span>
+            <span className="detalle">
+              {p.cliente?.nombre || 'Sin cliente'}{p.carpetas.length > 0 && <span className="local" title={p.carpetas.join('\n')}> · local</span>}
+            </span>
+          </button>
+        )) : <>
+          {visibles.filter(p => p.id === actual?.id).map(grupo)}
+          {/* El resto de proyectos, pegados al borde inferior del panel. */}
+          {visibles.some(p => p.id !== actual?.id) && (
+            <div className={'otros-proyectos' + (visibles.some(p => p.id === actual?.id) ? '' : ' solos')}>
+              {visibles.some(p => p.id === actual?.id) && <p className="titulo-lista">Otros proyectos</p>}
+              {visibles.filter(p => p.id !== actual?.id).map(grupo)}
+            </div>
+          )}
+        </>}
       </div>
       {propiedades && <PropiedadesProyecto p={propiedades} login={usuario.login} alCerrar={() => setPropiedades(null)}
         alGuardar={a => props.alAjustes(propiedades, a)} />}
