@@ -1,12 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- Planes Go Code (pgocode): play de tangram y «GO!» en los colores del logotipo de Planes (www.planesnet.com) -->
-  <rect x="16" y="16" width="480" height="480" rx="108" fill="#ffffff" stroke="#d9e3ee" stroke-width="6"/>
-  <g stroke="#ffffff" stroke-width="8" stroke-linejoin="round">
-    <polygon points="180,62 180,182 284,122" fill="#0a6fc9"/>
-    <polygon points="180,182 284,122 388,182" fill="#12a6da"/>
-    <polygon points="180,182 388,182 284,242" fill="#c5da00"/>
-    <polygon points="180,182 284,242 180,302" fill="#12a6da"/>
+  <!-- Planes Go Code (pgocode): el play de tangram en los colores del logotipo de Planes (www.planesnet.com), grande y sin texto -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#ffffff" stroke="#d9e3ee" stroke-width="8"/>
+  <g stroke="#ffffff" stroke-width="12" stroke-linejoin="round">
+    <polygon points="123,56 123,256 295.5,156" fill="#0a6fc9"/>
+    <polygon points="123,256 295.5,156 468,256" fill="#12a6da"/>
+    <polygon points="123,256 468,256 295.5,356" fill="#c5da00"/>
+    <polygon points="123,256 295.5,356 123,456" fill="#12a6da"/>
   </g>
-  <text x="352" y="440" text-anchor="end" font-family="DejaVu Sans" font-weight="bold" font-size="150" fill="#0a6fc9">GO</text>
-  <text x="356" y="440" text-anchor="start" font-family="DejaVu Sans" font-weight="bold" font-size="150" fill="#c5da00">!</text>
 </svg>

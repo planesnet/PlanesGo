@@ -80,7 +80,42 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		emite(Evento{Texto: "_(La conversación anterior de OpenCode era de otra carpeta; empiezo una nueva en la de esta sesión.)_\n\n"})
 		p.SesionAgente = ""
 	}
-	err := a.chat(ctx, p, emite)
+	// OpenCode: se apunta su sesión (también la nueva) para repararla si el turno se corta.
+	sesionOC := p.SesionAgente
+	emiteOC := emite
+	if a.Clave == "opencode" {
+		emiteOC = func(e Evento) {
+			if e.SesionAgente != "" {
+				sesionOC = e.SesionAgente
+			}
+			emite(e)
+		}
+	}
+	err := a.chat(ctx, p, emiteOC)
+	if a.Clave == "opencode" && sesionOC != "" {
+		switch {
+		case ctx.Err() != nil:
+			// Turno cortado: OpenCode deja una respuesta a medias (vacía) que Gemini rechaza en el siguiente.
+			go func() {
+				c, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancela()
+				if e := reparaOpenCode(c, a, p, sesionOC); e != nil {
+					depuracion.Log(a.Clave, "reparar la sesión %s tras cortar el turno: %v", sesionOC, e)
+				}
+			}()
+		case err != nil && historialRoto(err):
+			depuracion.Log(a.Clave, "la sesión %s tiene una respuesta vacía: se repara y se repite", sesionOC)
+			if reparaOpenCode(ctx, a, p, sesionOC) == nil {
+				p.SesionAgente = sesionOC
+				if err = a.chat(ctx, p, emiteOC); err == nil || !historialRoto(err) {
+					return err
+				}
+			}
+			emite(Evento{Texto: "_(La conversación anterior de OpenCode estaba dañada; empiezo una nueva.)_\n\n"})
+			p.SesionAgente = ""
+			return a.chat(ctx, p, emite)
+		}
+	}
 	// La sesión propia del agente ya no existe (p. ej. OpenCode con otra carpeta de datos): se empieza otra.
 	if err != nil && p.SesionAgente != "" && ctx.Err() == nil && sesionPerdida(err) {
 		depuracion.Log(a.Clave, "la sesión %s ya no existe: se empieza otra", p.SesionAgente)
@@ -510,4 +545,41 @@ func sesionOpenCodeEn(ctx context.Context, a *Agente, p Peticion) bool {
 		}
 	}
 	return false
+}
+
+// historialRoto: el error del modelo cuando el historial lleva un mensaje vacío (una respuesta cortada).
+func historialRoto(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "at least one parts field") || strings.Contains(s, "contents.parts must not be empty") ||
+		strings.Contains(s, "must alternate between")
+}
+
+var idSesionOC = regexp.MustCompile(`^ses_[A-Za-z0-9]+$`)
+
+// reparaOpenCode: quita de la sesión las respuestas sin contenido (un turno cortado) y la pregunta que quedó sin
+// contestar, para que el historial vuelva a ser válido; la conversación conserva todo lo demás.
+func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) error {
+	if !idSesionOC.MatchString(sesion) {
+		return errors.New("sesión no válida")
+	}
+	rotas := `SELECT m.id FROM message m WHERE m.session_id='` + sesion + `' AND json_extract(m.data,'$.role')='assistant' AND NOT EXISTS (` +
+		`SELECT 1 FROM part x WHERE x.message_id=m.id AND ((json_extract(x.data,'$.type') IN ('text','reasoning') AND ` +
+		`length(coalesce(json_extract(x.data,'$.text'),''))>0) OR json_extract(x.data,'$.type')='tool'))`
+	previas := `SELECT (SELECT u.id FROM message u WHERE u.session_id='` + sesion + `' AND json_extract(u.data,'$.role')='user' AND ` +
+		`u.time_created<=r.time_created ORDER BY u.time_created DESC LIMIT 1) FROM message r WHERE r.id IN (` + rotas + `)`
+	for _, q := range []string{
+		"DELETE FROM part WHERE message_id IN (" + previas + ") OR message_id IN (" + rotas + ")",
+		"DELETE FROM message WHERE id IN (" + previas + ") OR id IN (" + rotas + ")",
+	} {
+		cmd := exec.CommandContext(ctx, "opencode", "db", q)
+		cmd.Dir = p.Carpeta
+		cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+		if a.EntornoPara != nil {
+			cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
 }
