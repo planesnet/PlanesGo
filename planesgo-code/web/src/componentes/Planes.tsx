@@ -59,7 +59,7 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
 }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [texto, setTexto] = useState('');
-  const [vista, setVista] = useState(false);
+  const [vista, setVista] = useState(true); // se abre para leerlo; «Editar» a un clic
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
   useEffect(() => {
@@ -95,8 +95,8 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
         <code className="recorta suave pequeno" title={ruta}>{ruta}</code>
         {error && <p className="error">{error}</p>}
         <div className="editor-plan-pestanas" role="tablist">
-          <button role="tab" aria-selected={!vista} onClick={() => setVista(false)}>Editar</button>
           <button role="tab" aria-selected={vista} onClick={() => setVista(true)}>Vista previa</button>
+          <button role="tab" aria-selected={!vista} onClick={() => setVista(false)}>Editar</button>
           {cambiado && <span className="suave pequeno">Cambios sin guardar</span>}
         </div>
         {vista
