@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { get, post, type Usuario } from '../api';
 import Icono from './Icono';
-import Imputacion from './Imputacion';
+import Imputacion, { type SesionMarcador } from './Imputacion';
 
 interface EstadoAct { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; pausada?: boolean }
 
 const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
 
 // Barra superior: marca, aviso de actualización pendiente y menú del usuario (avatar).
-export default function Barra({ usuario, alSalir, versionImputacion, sesion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number; sesion?: string }) {
+export default function Barra({ usuario, alSalir, versionImputacion, sesion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number; sesion?: SesionMarcador }) {
   const [act, setAct] = useState<EstadoAct | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [acerca, setAcerca] = useState(false);

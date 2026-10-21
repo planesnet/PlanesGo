@@ -569,3 +569,35 @@ button.miga-item:hover { background: var(--hover); }
 .icono.adjuntar { align-self: flex-end; margin-bottom: 2px; }
 .entrada.soltando { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--superficie)); }
 .unificar { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--linea); padding-top: 8px; }
+
+/* Marcador de imputación: proyecto / tarea │ ⏱ cronómetro │ ☀ hoy │ Σ total del proyecto */
+.marcador { display: inline-flex; align-items: stretch; height: 28px; max-width: min(760px, 62vw); border-radius: 999px; overflow: hidden;
+  border: 1px solid #c9d1d9; background: var(--superficie); font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06); padding: 0; }
+.marcador:hover { box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.m-tarea { display: flex; align-items: center; padding: 0 12px; color: var(--texto); min-width: 0; }
+.m-tarea b { margin-right: 3px; }
+.m-seg { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; font: 600 12px ui-monospace, monospace;
+  font-variant-numeric: tabular-nums; white-space: nowrap; border-left: 1px solid rgba(0,0,0,.06); }
+.m-icono { font-family: system-ui, sans-serif; font-weight: 700; opacity: .8; }
+.m-crono { background: #eef1f4; color: #57606a; }
+.m-punto { width: 7px; height: 7px; border-radius: 50%; background: #8c959f; }
+.marcador.trabajando .m-crono { background: #dafbe1; color: #0f5c2a; }
+.marcador.trabajando .m-punto { background: #1a7f37; animation: latido 1s infinite alternate; box-shadow: 0 0 0 3px rgba(26,127,55,.18); }
+.marcador.en-espera .m-crono { background: #fff1b8; color: #7a5200; }
+.marcador.en-espera .m-punto { background: #bf8700; animation: latido 1.6s infinite alternate; }
+.marcador.error .m-crono { background: #ffe4e6; color: #a40e26; }
+.marcador.error .m-punto { background: #cf222e; }
+.m-hoy { background: #ddf4ff; color: #0550ae; }
+.m-total { background: #fbefff; color: #6639ba; }
+.m-barra { position: absolute; left: 8px; right: 8px; bottom: 3px; height: 2px; border-radius: 2px; background: rgba(0,0,0,.08); overflow: hidden; display: flex; }
+.m-barra > span { display: block; height: 100%; background: #0969da; transition: width .6s ease; }
+.m-barra.doble > span.h { background: #0969da; }
+.m-barra.doble > span.m { background: #8250df; }
+@media (prefers-color-scheme: dark) {
+  .marcador { border-color: #3d444d; }
+  .m-crono { background: #262c34; color: #9198a1; }
+  .marcador.trabajando .m-crono { background: #0f3d1f; color: #7ee2a0; }
+  .marcador.en-espera .m-crono { background: #3d2e00; color: #f2cc60; }
+  .m-hoy { background: #0c2d4b; color: #79c0ff; }
+  .m-total { background: #2a1846; color: #d2a8ff; }
+}

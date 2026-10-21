@@ -122,15 +122,18 @@ type Linea struct {
 
 // Abierto: lo que ve la interfaz de cada sesión con un periodo abierto.
 type Abierto struct {
-	Sesion     string  `json:"sesion"`
-	Titulo     string  `json:"titulo"`
-	Proyecto   int     `json:"proyecto"`
-	NombreProy string  `json:"nombre_proyecto"`
-	TareaID    int     `json:"tarea_id"`
-	Tarea      string  `json:"tarea"`
-	Estado     string  `json:"estado"`
-	Error      string  `json:"error,omitempty"`
-	Horas      float64 `json:"horas"` // del periodo
+	Sesion     string    `json:"sesion"`
+	Titulo     string    `json:"titulo"`
+	Proyecto   int       `json:"proyecto"`
+	NombreProy string    `json:"nombre_proyecto"`
+	TareaID    int       `json:"tarea_id"`
+	Tarea      string    `json:"tarea"`
+	Estado     string    `json:"estado"`
+	Error      string    `json:"error,omitempty"`
+	Horas      float64   `json:"horas"` // del periodo
+	Inicio     time.Time `json:"inicio"`
+	Ultima     time.Time `json:"ultima"`
+	Agente     bool      `json:"agente"` // el agente está con un turno (el periodo sigue creciendo)
 }
 
 // Gestor lleva los periodos de las sesiones y las líneas del día.
@@ -947,7 +950,8 @@ func (g *Gestor) Estado() (hoy []Linea, abiertos []Abierto) {
 	for _, p := range g.periodos {
 		maq, hom := g.partes(p)
 		abiertos = append(abiertos, Abierto{Sesion: p.Sesion, Titulo: p.T.Titulo, Proyecto: p.T.Proyecto, NombreProy: p.T.NombreProy,
-			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: (maq + hom) / 3600})
+			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: (maq + hom) / 3600,
+			Inicio: p.Inicio, Ultima: p.Ultima, Agente: p.turnos > 0})
 	}
 	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Sesion < abiertos[j].Sesion })
 	return

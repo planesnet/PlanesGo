@@ -9,12 +9,18 @@ import Icono from './Icono';
 interface Linea {
   fecha: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string; clase: 'h' | 'm'; agente?: string;
   modelo?: string; linea_id: number; entrada: number; salida: number; coste: number; sesiones: string[]; error?: string; sucio: boolean;
+  escrito: number; // horas ya escritas en Odoo (redondeadas)
   horas: number; ritmo: number; calculado: string;
 }
 interface Abierto {
   sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string;
   estado: 'trabajando' | 'activo' | 'en-espera' | 'error'; error?: string; horas: number;
+  inicio: string; ultima: string; agente: boolean;
 }
+interface Resumen { tarea_id: number; hoy_h: number; hoy_m: number; total_h: number; total_m: number }
+// La sesión abierta: su proyecto y su tarea (aunque todavía no tenga periodo de trabajo).
+export interface SesionMarcador { id: string; proyecto: number; nombreProyecto?: string; tareaId?: number; tarea?: string }
+const JORNADA = 8; // horas de una jornada, para la barra de «hoy»
 interface Estado { hoy: Linea[]; abiertos: Abierto[]; gestor_pgocode: boolean }
 
 const BLOQUE = { h: 15, m: 5 }; // redondeo hacia arriba en Odoo (minutos)
@@ -23,7 +29,7 @@ const reloj = (h: number) => { const s = Math.max(0, Math.round(h * 3600)); retu
 const k = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 const enOdoo = (l: Linea, h: number) => h <= 0 ? 0 : Math.ceil((h * 60) / BLOQUE[l.clase]) * BLOQUE[l.clase] / 60;
 
-export default function Imputacion({ version, sesion }: { version: number; sesion?: string }) {
+export default function Imputacion({ version, sesion }: { version: number; sesion?: SesionMarcador }) {
   const [e, setE] = useState<Estado | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [, setTic] = useState(0);
@@ -60,14 +66,50 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
 
   // Horas de una línea ahora mismo: lo calculado + lo que ha crecido desde entonces.
   const ahora = (l: Linea) => l.horas + l.ritmo * Math.max(0, Date.now() - new Date(l.calculado).getTime()) / 3600000;
+  // Lo que hay en Odoo se lee una vez (al abrir la sesión o cambiar de proyecto o tarea). Desde entonces se suma
+  // lo que pgocode lleva en cada línea del día por encima de lo que ya estaba escrito en ese momento.
+  const clave = (l: Linea) => `${l.fecha}|${l.proyecto}|${l.tarea_id}|${l.clase}|${l.agente || ''}`;
+  const base = useRef<Map<string, number>>(new Map());
+  const eActual = useRef(e);
+  eActual.current = e;
+  const baseFalta = useRef(false); // el resumen llegó antes que el estado de pgocode: la base se toma al llegar este
+  const tomaBase = (est: Estado) => { base.current = new Map(est.hoy.map(l => [clave(l), l.linea_id ? (l.escrito || 0) : 0])); };
+  useEffect(() => { if (e && baseFalta.current) { baseFalta.current = false; tomaBase(e); } }, [e]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pendiente = (l: Linea) => Math.max(0, ahora(l) - (base.current.get(clave(l)) ?? 0));
   const hoy = e?.hoy || [];
   const ab = e?.abiertos || [];
-  const mia = ab.find(a => a.sesion === sesion);
-  // La etiqueta: lo de hoy en el proyecto y la tarea de la sesión abierta (máquina + hombre).
-  const delaTarea = mia ? hoy.filter(l => l.proyecto === mia.proyecto && l.tarea_id === mia.tarea_id) : [];
-  const total = delaTarea.reduce((t, l) => t + ahora(l), 0);
-  const estado = mia ? (mia.estado === 'activo' ? 'trabajando' : mia.estado) : '';
+  const mia = sesion ? ab.find(a => a.sesion === sesion.id) : undefined;
   const totalDia = hoy.reduce((t, l) => t + ahora(l), 0);
+
+  // Marcador de la sesión abierta: lo que hay en Odoo (resumen, cada minuto) + lo pendiente del cronómetro.
+  const proyecto = mia?.proyecto || sesion?.proyecto || 0;
+  const [res, setRes] = useState<Resumen | null>(null);
+  const tareaPedida = mia?.tarea_id || sesion?.tareaId || 0;
+  const nombreTarea = mia?.tarea || sesion?.tarea || 'Desarrollo';
+  useEffect(() => {
+    if (!proyecto) { setRes(null); return; }
+    let vivo = true;
+    get<Resumen>(`/api/imputacion/resumen?proyecto=${proyecto}&tarea_id=${tareaPedida}&tarea=${encodeURIComponent(nombreTarea)}`)
+      .then(r => {
+        if (!vivo) return;
+        // Lo escrito en Odoo de cada línea de pgocode en el momento de la lectura (ya va dentro del resumen).
+        if (eActual.current) tomaBase(eActual.current); else baseFalta.current = true;
+        setRes(r);
+      }).catch(() => {});
+    return () => { vivo = false; };
+  }, [proyecto, tareaPedida, nombreTarea]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tareaID = res?.tarea_id || tareaPedida;
+  const pendTarea = hoy.filter(l => l.proyecto === proyecto && l.tarea_id === tareaID).reduce((t, l) => t + pendiente(l), 0);
+  const pendProy = (clase: 'h' | 'm') => hoy.filter(l => l.proyecto === proyecto && l.clase === clase).reduce((t, l) => t + pendiente(l), 0);
+  const hoyTarea = (res ? res.hoy_h + res.hoy_m : 0) + pendTarea;
+  const totalH = (res?.total_h || 0) + pendProy('h');
+  const totalM = (res?.total_m || 0) + pendProy('m');
+  // Cronómetro: el periodo de trabajo actual de la sesión (con su espera activa).
+  const crono = mia ? (Math.min(Date.now(), mia.agente ? Date.now() : new Date(mia.ultima).getTime() + 5 * 60000) - new Date(mia.inicio).getTime()) / 3600000 : 0;
+  const estado = mia ? (mia.estado === 'activo' ? 'trabajando' : mia.estado) : 'parado';
+  const nombreProy = mia?.nombre_proyecto || sesion?.nombreProyecto || '';
+  const pctHoy = Math.min(100, (hoyTarea / JORNADA) * 100);
+  const pctH = totalH + totalM > 0 ? (totalH / (totalH + totalM)) * 100 : 0;
 
   // Agrupado por proyecto y tarea para el panel.
   const grupos = new Map<string, Linea[]>();
@@ -78,13 +120,20 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
 
   return (
     <div className="imputacion" ref={caja}>
-      <button className={'chip-imputa' + (estado ? ' ' + estado : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
-        title="Tiempo de hoy imputado en Odoo por pgocode">
-        <Icono n="reloj" t={14} />
-        {mia
-          ? <><span className="recorta">{mia.nombre_proyecto} · {mia.tarea}</span><b className="reloj-vivo">{reloj(total)}</b></>
-          : <><span>Hoy</span><b className="reloj-vivo">{reloj(totalDia)}</b></>}
-      </button>
+      {proyecto ? (
+        <button className={'marcador ' + estado} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
+          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea)})\nΣ Total tuyo en el proyecto: ${hm(totalH + totalM)} — hombre ${hm(totalH)} · máquina ${hm(totalM)}`}>
+          <span className="m-tarea recorta"><b>{nombreProy}</b> / {nombreTarea}</span>
+          <span className="m-seg m-crono"><i className="m-punto" />{reloj(crono)}</span>
+          <span className="m-seg m-hoy"><span className="m-icono">☀</span>{hm(hoyTarea)}<span className="m-barra"><span style={{ width: pctHoy + '%' }} /></span></span>
+          <span className="m-seg m-total"><span className="m-icono">Σ</span>{hm(totalH + totalM)}
+            <span className="m-barra doble" title={`hombre ${hm(totalH)} · máquina ${hm(totalM)}`}><span className="h" style={{ width: pctH + '%' }} /><span className="m" style={{ width: (100 - pctH) + '%' }} /></span></span>
+        </button>
+      ) : (
+        <button className="chip-imputa" onClick={() => setAbierto(a => !a)} aria-expanded={abierto} title="Tiempo de hoy imputado por pgocode">
+          <Icono n="reloj" t={14} /><span>Hoy</span><b className="reloj-vivo">{reloj(totalDia)}</b>
+        </button>
+      )}
       {abierto && e && (
         <div className="panel-imputa" role="dialog" aria-label="Imputación de tiempo">
           <p className="suave pequeno regla">
