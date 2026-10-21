@@ -133,7 +133,9 @@ type Abierto struct {
 	Horas      float64   `json:"horas"` // del periodo
 	Inicio     time.Time `json:"inicio"`
 	Ultima     time.Time `json:"ultima"`
-	Agente     bool      `json:"agente"` // el agente está con un turno (el periodo sigue creciendo)
+	Agente     bool      `json:"agente"`  // el agente está con un turno (el periodo sigue creciendo)
+	Maquina    float64   `json:"maquina"` // horas de máquina del periodo (en el momento del cálculo)
+	Calculado  time.Time `json:"calculado"`
 }
 
 // Gestor lleva los periodos de las sesiones y las líneas del día.
@@ -951,7 +953,7 @@ func (g *Gestor) Estado() (hoy []Linea, abiertos []Abierto) {
 		maq, hom := g.partes(p)
 		abiertos = append(abiertos, Abierto{Sesion: p.Sesion, Titulo: p.T.Titulo, Proyecto: p.T.Proyecto, NombreProy: p.T.NombreProy,
 			TareaID: p.TareaID, Tarea: tareaDe(p.T), Estado: p.Estado, Error: p.Error, Horas: (maq + hom) / 3600,
-			Inicio: p.Inicio, Ultima: p.Ultima, Agente: p.turnos > 0})
+			Inicio: p.Inicio, Ultima: p.Ultima, Agente: p.turnos > 0, Maquina: maq / 3600, Calculado: g.ahora()})
 	}
 	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Sesion < abiertos[j].Sesion })
 	return
