@@ -47,6 +47,17 @@ type Agente struct {
 	Lee func(r io.Reader, emite func(Evento)) error
 	// NoDisponible: el agente existe pero no se puede usar desde aquí (y por qué).
 	NoDisponible string
+	// Entrada: si el agente lee los mensajes por su entrada (uno por línea) también a mitad de turno, cómo se
+	// codifica cada uno. Entonces el primer mensaje va por la entrada y no como argumento.
+	Entrada func(texto string) []byte
+}
+
+// ErrEntradaCerrada: el turno ya no admite mensajes (el agente ha acabado su respuesta).
+var ErrEntradaCerrada = errors.New("el agente ya ha acabado su respuesta")
+
+// porEntrada: el mensaje va por la entrada del agente (y se le pueden mandar más durante el turno).
+func (a *Agente) porEntrada(p Peticion) bool {
+	return a.Entrada != nil && p.AlInyectar != nil && !p.Aparte
 }
 
 func (a *Agente) ID() string { return a.Clave }
@@ -61,7 +72,7 @@ func (a *Agente) Info(ctx context.Context) Info {
 		modelos, defecto = lista, a.PorDefecto
 	}
 	i := Info{ID: a.Clave, Nombre: a.Nombre, Tipo: "agente", Modelos: modelos, PorDefecto: defecto,
-		NecesitaDir: true, Esfuerzos: a.Esfuerzos, Modos: a.Modos}
+		NecesitaDir: true, Esfuerzos: a.Esfuerzos, Modos: a.Modos, Inyecta: a.Entrada != nil}
 	if a.NoDisponible != "" {
 		i.Motivo = a.NoDisponible
 		return i
@@ -184,10 +195,13 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		}
 	}
 	args := a.Args(msg, p)
+	if a.porEntrada(p) {
+		args = append(args, "--input-format", "stream-json")
+	}
 	cmd := exec.CommandContext(ctx, a.Programa, args...)
 	inicio := time.Now()
 	id := fmt.Sprintf("%s-%d", a.Clave, inicio.UnixNano()%1e6)
-	depuracion.Log(id, "lanza %s %q en %s (entorno añadido: %s)", a.Programa, args, p.Carpeta, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
+	depuracion.Log(id, "lanza %s %q en %s [%s] (entorno añadido: %s)", a.Programa, args, p.Carpeta, p.Traza, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
 	cmd.Dir = p.Carpeta
 	entorno := append([]string(nil), p.Entorno...)
 	// PWD con la carpeta de la sesión: algunos agentes (OpenCode) toman su carpeta de PWD, no de la del proceso, y
@@ -218,9 +232,58 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if err != nil {
 		return err
 	}
+	var entrada io.WriteCloser
+	if a.porEntrada(p) {
+		if entrada, err = cmd.StdinPipe(); err != nil {
+			return err
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		depuracion.Log(id, "no arranca: %v", err)
 		return err
+	}
+	// Mensajes por la entrada: el primero ya, los demás cuando lleguen (a mitad de turno). La entrada se cierra al
+	// acabar la respuesta (el primer consumo): si no, el agente esperaría otro mensaje para siempre; sus tareas en
+	// segundo plano siguen igual (probado con Claude Code).
+	if entrada != nil {
+		var muE sync.Mutex
+		abierta := true
+		envia := func(t string) error {
+			muE.Lock()
+			defer muE.Unlock()
+			if !abierta {
+				return ErrEntradaCerrada
+			}
+			_, err := entrada.Write(a.Entrada(t))
+			return err
+		}
+		cierra := func() {
+			muE.Lock()
+			fue := abierta
+			if abierta {
+				abierta = false
+				entrada.Close()
+			}
+			muE.Unlock()
+			if fue {
+				p.AlInyectar(nil)
+			}
+		}
+		defer cierra()
+		if err := envia(msg); err != nil {
+			return err
+		}
+		p.AlInyectar(func(t string) error {
+			depuracion.Log(id, "mensaje a mitad de turno (%d caracteres)", len(t))
+			return envia(t)
+		})
+		previo := emite
+		emite = func(e Evento) {
+			if e.Uso != nil {
+				cierra()
+			}
+			previo(e)
+		}
 	}
 	proceso.Vigila(cmd.Process.Pid)
 	lee := a.Lee
@@ -438,8 +501,15 @@ func Agentes() []Proveedor {
 					}
 					a = append(a, "--no-session-persistence")
 				}
+				if p.AlInyectar != nil && !p.Aparte {
+					return a // el mensaje va por la entrada (stream-json): se le pueden mandar más a mitad de turno
+				}
 				// «--» antes del mensaje: un texto que empiece por «-» no se toma como opción.
 				return append(a, "--", msg)
+			},
+			Entrada: func(t string) []byte {
+				b, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": t}})
+				return append(b, '\n')
 			}},
 		// Antigravity: su CLI «agy» en modo print con eventos stream-json; --conversation continúa la sesión.
 		&Agente{Clave: "antigravity", Nombre: "Antigravity", Programa: "agy", Lee: leeAntigravity, Modos: true,

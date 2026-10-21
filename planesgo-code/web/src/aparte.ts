@@ -10,7 +10,8 @@
 import type { Herramienta, Mensaje, Uso } from './api';
 import type { Tarea } from './tareas';
 
-export type Destino = 'conversacion' | 'estado' | 'suelta' | 'contexto';
+// turno: a la conversación, pero ya, al turno en curso (solo agentes que lo admiten: Claude Code); nunca automático.
+export type Destino = 'conversacion' | 'turno' | 'estado' | 'suelta' | 'contexto';
 export interface Decision {
   destino: Destino;
   texto: string;       // sin el prefijo
@@ -140,17 +141,21 @@ export const incorporacion = (l: { pregunta: string; respuesta: string }[]) => l
 // sumaUso: el consumo acumulado de las preguntas aparte de una sesión (se suma al gasto de la conversación).
 export const sumaUso = (a: Uso | undefined, b: Uso): Uso => ({ entrada: (a?.entrada || 0) + b.entrada, salida: (a?.salida || 0) + b.salida, coste: (a?.coste || 0) + (b.coste || 0) });
 
-export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto' };
+export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', turno: 'Al turno en curso', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto' };
 
 // Etiqueta del destino mientras se escribe (antes de enviar).
-export function etiqueta(d: Decision): string {
-  if (d.destino === 'conversacion') return d.duda ? '→ Conversación o aparte: lo decide pgocode al enviar' : '→ Conversación';
+export function etiqueta(d: Decision, ocupado = false): string {
+  if (d.destino === 'conversacion') return d.duda ? '→ Conversación o aparte: lo decide pgocode al enviar' : ocupado ? '→ Conversación (a la cola)' : '→ Conversación';
+  if (d.destino === 'turno') return '→ Al turno en curso (el agente lo lee ya)';
   return '→ ' + (d.destino === 'estado' ? 'Estado (sin tokens)' : 'Aparte · ' + NOMBRES[d.destino].toLowerCase());
 }
 
-// siguiente: el destino al pulsar la etiqueta (conversación → aparte con contexto → suelta → estado → conversación).
-const ORDEN_DESTINOS: Destino[] = ['conversacion', 'contexto', 'suelta', 'estado'];
-export const siguiente = (d: Destino): Destino => ORDEN_DESTINOS[(ORDEN_DESTINOS.indexOf(d) + 1) % ORDEN_DESTINOS.length];
+// siguiente: el destino al pulsar la etiqueta (conversación → al turno en curso, si se puede → aparte con contexto
+// → suelta → estado → conversación).
+export const siguiente = (d: Destino, conTurno = false): Destino => {
+  const orden: Destino[] = conTurno ? ['conversacion', 'turno', 'contexto', 'suelta', 'estado'] : ['conversacion', 'contexto', 'suelta', 'estado'];
+  return orden[(orden.indexOf(d) + 1) % orden.length];
+};
 
 function ultimoTexto(m: Mensaje): string {
   const ps = m.partes || [];

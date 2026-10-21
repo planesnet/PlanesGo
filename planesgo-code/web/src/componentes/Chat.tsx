@@ -246,6 +246,23 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     activo: sesion?.decideAparte !== false, ordenPlan: PL.interpreta(t) !== null });
   const decisionViva = useMemo(() => (texto.trim() && prov?.tipo === 'agente' ? AP.decide(texto, situacion(texto)) : null),
     [texto, enCurso, mensajes, adjuntos, sesion?.decideAparte, prov?.tipo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Mensajes al turno en curso (agentes que los admiten, como Claude Code): los de cada sesión durante su turno,
+  // que al acabar se guardan con la respuesta.
+  const conTurno = Boolean(enCurso && prov?.inyecta);
+  const [inyectados, setInyectados] = useState<Record<string, string[]>>({});
+  const inyectadosRef = useRef(inyectados);
+  inyectadosRef.current = inyectados;
+  async function alTurno(id: string, t: string, adj: Adjunto[] = []) {
+    // Con adjuntos, o si el turno ya acabó o no lo admite: a la cola, como siempre.
+    if (adj.length || !enCursosRef.current[id]) { aConversacion(id, t, adj); return; }
+    try {
+      await post('/api/chat/inyecta', { sesion: id, texto: t });
+      inyectadosRef.current = { ...inyectadosRef.current, [id]: [...(inyectadosRef.current[id] || []), t] };
+      setInyectados(inyectadosRef.current);
+    } catch {
+      aConversacion(id, t, adj);
+    }
+  }
   // Destino elegido a mano en la etiqueta (o con Ctrl+Intro): manda sobre la decisión automática.
   const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
   useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
@@ -267,6 +284,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     }
     const d: AP.Decision = elegido ? { destino: elegido, texto: auto.forzado ? auto.texto : t, forzado: true, motivo: forzar ? 'Ctrl+Intro' : 'elegido por ti' } : auto;
     setDestinoManual(null);
+    if (d.destino === 'turno') {
+      setTexto(''); setAdjuntos([]);
+      await alTurno(ses.id, d.texto, listos);
+      return;
+    }
     if (d.destino === 'conversacion' && !d.duda) {
       if (!d.forzado) { if (enCurso) encola(); else envia(); return; }
       setTexto(''); setAdjuntos([]);
@@ -404,6 +426,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const ac = new AbortController();
     setEnCursos(x => ({ ...x, [id]: ac }));
     inicioTurno.current[id] = Date.now();
+    if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
     let sesionAgente = ses.sesionAgente;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
@@ -486,6 +509,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       fallo = true;
       if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
+      // Los mensajes que se le mandaron durante el turno quedan con su respuesta.
+      const iny = inyectadosRef.current[id];
+      if (iny?.length) {
+        ultimo(m => ({ ...m, inyectados: iny }));
+        const { [id]: _, ...resto } = inyectadosRef.current;
+        inyectadosRef.current = resto;
+        setInyectados(resto);
+      }
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
       pon(actual, true);
@@ -571,8 +602,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Intro: decide pgocode (o lo elegido en la etiqueta); Ctrl+Intro: siempre a la conversación.
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); decideYEnvia(e.ctrlKey || e.metaKey ? 'conversacion' : undefined); }
+    // Intro: decide pgocode (o lo elegido en la etiqueta); Ctrl+Intro: siempre a la conversación; Alt+Intro: al turno
+    // en curso (si el agente lo admite; si no, a la cola).
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      decideYEnvia(e.altKey ? (conTurno ? 'turno' : 'conversacion') : e.ctrlKey || e.metaKey ? 'conversacion' : undefined);
+    }
   };
 
   const eligeAgente = (p: Proveedor) => {
@@ -649,6 +684,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
+                {(m.inyectados || (enCurso && i === mensajes.length - 1 ? inyectados[sesion.id] : undefined))?.map((x, j) => (
+                  <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}</div>
+                ))}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…</span> : null}
                 {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
                 {m.adjuntos && m.adjuntos.length > 0 && (
@@ -732,6 +770,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                       setAdjuntos(d.adjuntos);
                       area.current?.focus();
                     }}><Icono n="lapiz" t={13} /></button>
+                    {c.adjuntos.length === 0 && conTurno && (
+                      <button className="enlace aparte-boton" title="Mandarlo ya al turno en curso: el agente lo lee antes de acabar" onClick={() => {
+                        ponCola(sesion.id, k => C.quita(k, i));
+                        alTurno(sesion.id, c.texto);
+                      }}>Al turno</button>
+                    )}
                     {c.adjuntos.length === 0 && (
                       <button className="enlace aparte-boton" title="Preguntarlo aparte, sin que entre en la conversación" onClick={() => {
                         ponCola(sesion.id, k => C.quita(k, i));
@@ -762,9 +806,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             )}
             {decisionViva && (
               <div className="destino-mensaje">
-                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino))}
-                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo. Ctrl+Intro: siempre a la conversación; prefijos «!» conversación, «//» aparte, «?» estado.`}>
-                  {destinoManual ? AP.etiqueta({ destino: destinoManual, texto: '', motivo: '' }) : AP.etiqueta(decisionViva)}
+                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino, conTurno))}
+                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo. Ctrl+Intro: siempre a la conversación${conTurno ? '; Alt+Intro: al turno en curso' : ''}; prefijos «!» conversación, «//» aparte, «?» estado.`}>
+                  {destinoManual ? AP.etiqueta({ destino: destinoManual === 'turno' && !conTurno ? 'conversacion' : destinoManual, texto: '', motivo: '' }, Boolean(enCurso)) : AP.etiqueta(decisionViva, Boolean(enCurso))}
                 </button>
                 {destinoManual && <span className="suave pequeno">elegido por ti</span>}
               </div>

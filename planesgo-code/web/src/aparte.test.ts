@@ -70,10 +70,13 @@ test('prefijo «!»: a la conversación, aunque parezca una pregunta de estado o
 
 test('etiqueta y cambio de destino', () => {
   assert.equal(A.etiqueta(A.decide('¿cómo va?', ocupado)), '→ Estado (sin tokens)');
-  assert.equal(A.etiqueta(A.decide('haz los tests', ocupado)), '→ Conversación');
+  assert.equal(A.etiqueta(A.decide('haz los tests', ocupado), true), '→ Conversación (a la cola)');
+  assert.equal(A.etiqueta(A.decide('haz los tests', { ocupado: false })), '→ Conversación');
+  assert.match(A.etiqueta({ destino: 'turno', texto: 'x', motivo: '' }), /Al turno en curso/);
   assert.match(A.etiqueta(A.decide('¿hay tests en el repo?', ocupado)), /lo decide pgocode/);
   assert.equal(A.etiqueta({ destino: 'suelta', texto: 'x', motivo: '' }), '→ Aparte · suelta');
   assert.deepEqual(['conversacion', 'contexto', 'suelta', 'estado'].map(d => A.siguiente(d as A.Destino)), ['contexto', 'suelta', 'estado', 'conversacion']);
+  assert.deepEqual(['conversacion', 'turno', 'estado'].map(d => A.siguiente(d as A.Destino, true)), ['turno', 'contexto', 'conversacion']);
 });
 
 test('aprende de las correcciones (por la firma del mensaje)', () => {

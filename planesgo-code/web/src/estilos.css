@@ -842,3 +842,5 @@ button.miga-item:hover { background: var(--hover); }
 /* Adónde irá el mensaje (encima del cuadro, a la derecha): se puede cambiar con un clic antes de enviar. */
 .destino-mensaje { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 11.5px; margin: 0 4px -2px; }
 .destino-mensaje .enlace { font-size: 11.5px; }
+/* Lo que el usuario mandó al agente durante su turno (lo leyó antes de acabar). */
+.inyectado { font-size: 12.5px; color: var(--suave); border-left: 2px solid var(--acento); padding: 2px 8px; white-space: pre-wrap; }

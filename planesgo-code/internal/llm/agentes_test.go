@@ -1,11 +1,14 @@
 package llm
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -239,5 +242,72 @@ func TestIdiomaEnElPrimerMensaje(t *testing.T) {
 	a.chat(context.Background(), p, func(Evento) {})
 	if visto != "hola" {
 		t.Errorf("siguiente mensaje: %q", visto)
+	}
+}
+
+// Mensajes a mitad de turno: el primero va por la entrada, los que llegan durante el turno también, y al acabar
+// la respuesta (el consumo) la entrada se cierra: el agente termina y ya no se admiten más.
+func TestMensajesAMitadDeTurno(t *testing.T) {
+	// Agente falso: lee una línea, la repite; lee otra (la de mitad de turno), la repite; da su consumo y espera
+	// a que se cierre su entrada para terminar.
+	guion := `read a; echo "texto:$a"; read b; echo "texto:$b"; echo "fin"; cat >/dev/null; echo "cerrada"`
+	a := &Agente{Clave: "falso", Nombre: "Falso", Programa: "sh",
+		Args:    func(msg string, p Peticion) []string { return []string{"-c", guion} },
+		Entrada: func(t string) []byte { return []byte(t + "\n") },
+		Lee: func(r io.Reader, emite func(Evento)) error {
+			sc := bufio.NewScanner(r)
+			for sc.Scan() {
+				switch l := sc.Text(); {
+				case strings.HasPrefix(l, "texto:"):
+					emite(Evento{Texto: strings.TrimPrefix(l, "texto:") + "|"})
+				case l == "fin":
+					emite(Evento{Uso: &Uso{Entrada: 1}})
+				default:
+					emite(Evento{Texto: l + "|"})
+				}
+			}
+			return nil
+		}}
+	var enviar func(string) error
+	var mu sync.Mutex
+	listo := make(chan struct{}, 1)
+	p := Peticion{Carpeta: t.TempDir(), Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}, AlInyectar: func(f func(string) error) {
+		mu.Lock()
+		enviar = f
+		mu.Unlock()
+		if f != nil {
+			listo <- struct{}{}
+		}
+	}}
+	var texto strings.Builder
+	hecho := make(chan error, 1)
+	go func() {
+		hecho <- a.chat(context.Background(), p, func(e Evento) { mu.Lock(); texto.WriteString(e.Texto); mu.Unlock() })
+	}()
+	<-listo
+	mu.Lock()
+	f := enviar
+	mu.Unlock()
+	if err := f("KIWI"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-hecho:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("el agente no termina: la entrada no se cerró al acabar la respuesta")
+	}
+	if g := texto.String(); g != "hola|KIWI|cerrada|" {
+		t.Errorf("texto %q", g)
+	}
+	if err := f("tarde"); !errors.Is(err, ErrEntradaCerrada) {
+		t.Errorf("tras la respuesta: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if enviar != nil {
+		t.Error("al cerrar la entrada se avisa con nil")
 	}
 }

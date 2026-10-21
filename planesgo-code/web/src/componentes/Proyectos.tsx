@@ -329,6 +329,8 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
           {menu?.id === s.id && (
             <MenuSesion ancla={menu.ancla} alCerrar={() => setMenu(null)} opciones={[
               { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
+              // Para analizar la sesión (registro de tiempos, depuracion.log, conversación del agente) a partir de sus ids.
+              { icono: 'copiar', texto: 'Copiar identificador', accion: () => navigator.clipboard.writeText(identificador(s)).catch(() => {}) },
               { icono: 'borrar', texto: 'Borrar', peligro: true, accion: () => { if (confirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`)) alBorrarSesion(s); } },
               null,
               { icono: 'ajustes', texto: 'Ajustes', accion: () => alAjustesSesion(s) },
@@ -399,3 +401,9 @@ export function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; 
   );
 }
 
+// identificador: lo que hace falta para encontrar una sesión en los registros (tiempos/*.jsonl y depuracion.log,
+// por su id de pgocode) y su conversación en el agente (por su sesión propia).
+function identificador(s: Sesion): string {
+  return [`Sesión de pgocode: ${s.id}`, `Agente: ${s.agente}${s.sesionAgente ? ` · sesión del agente: ${s.sesionAgente}` : ' · sin sesión del agente todavía'}`,
+    `Proyecto: ${s.proyecto} · carpeta: ${s.carpeta}${s.rama ? ` · rama: ${s.rama}` : ''}`, `Nombre: ${titulo(s)}`].join('\n');
+}

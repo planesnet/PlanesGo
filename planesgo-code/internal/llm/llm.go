@@ -39,6 +39,11 @@ type Peticion struct {
 	MCP []string
 	// Idioma del usuario (su nombre, p. ej. «español»): el agente responde en él.
 	Idioma string
+	// Traza: la sesión de pgocode y el turno (para encontrar en depuracion.log lo de cada sesión).
+	Traza string
+	// AlInyectar: si el agente admite mensajes a mitad de turno (Claude Code), se llama con la función que se los
+	// pasa mientras su entrada está abierta, y con nil cuando se cierra (acaba su respuesta).
+	AlInyectar func(enviar func(texto string) error)
 	// Aparte: una pregunta que no entra en la conversación. Va a una copia de la sesión del agente (Claude:
 	// --fork-session sin guardarla; OpenCode: --fork y se borra al acabar), en solo lectura.
 	Aparte bool
@@ -149,6 +154,7 @@ type Info struct {
 	NecesitaDir bool     `json:"necesita_carpeta"`
 	Esfuerzos   []string `json:"esfuerzos,omitempty"` // niveles de esfuerzo que admite (vacío: ninguno)
 	Modos       bool     `json:"modos,omitempty"`     // admite los modos de permisos (lectura, editar, auto)
+	Inyecta     bool     `json:"inyecta,omitempty"`   // admite mensajes durante el turno (los lee antes de acabarlo)
 }
 
 // Proveedor habla con un modelo o agente. ID no hace llamadas de red; Info tampoco bloquea (la lista de

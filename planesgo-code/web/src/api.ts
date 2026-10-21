@@ -8,7 +8,7 @@ export interface Proyecto { id: number; nombre: string; cliente: Many2One; respo
 export interface Proveedor {
   id: string; nombre: string; tipo: 'api' | 'agente'; disponible: boolean; motivo?: string;
   modelos: string[] | null; por_defecto: string; necesita_carpeta: boolean;
-  esfuerzos?: string[]; modos?: boolean;
+  esfuerzos?: string[]; modos?: boolean; inyecta?: boolean; // inyecta: admite mensajes durante el turno
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
 export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[] }
@@ -16,7 +16,7 @@ export interface Uso { entrada: number; salida: number; coste?: number; segundos
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean }
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[] }
 
 // Sube un fichero adjunto a la carpeta de la sesión (para pasárselo al agente).
 export async function subeAdjunto(proyecto: number, carpeta: string, sesion: string, f: File): Promise<Adjunto> {
