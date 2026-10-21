@@ -390,7 +390,10 @@ func leeTexto(r io.Reader, emite func(Evento)) error {
 func Agentes() []Proveedor {
 	return []Proveedor{
 		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode, Modos: true,
-			Modelos: []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
+			// Con los modelos actuales Claude Code no trae la lista de tareas (TaskCreate/TaskUpdate) si no se pide:
+			// pgocode la pinta en el chat y la usa para el estado de las preguntas aparte.
+			EntornoDefecto: []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
+			Modelos:        []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
 				// La imputación la hace pgocode: sus skills de imputación no se pueden usar.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -187,5 +188,83 @@ func TestTareasOpenCode(t *testing.T) {
 	}
 	if sub == 0 {
 		t.Error("sin subagente")
+	}
+}
+
+// listasClaude: las sucesivas Tareas «lista» de una muestra de Claude Code, con la lista guardada de cada sesión
+// en carpeta (vacía: nada guardado).
+func listasClaude(t *testing.T, f, carpeta string) []Tarea {
+	t.Helper()
+	antes := carpetaTareasClaude
+	t.Cleanup(func() { carpetaTareasClaude = antes })
+	carpetaTareasClaude = func(s string) string { return filepath.Join(carpeta, s) }
+	var l []Tarea
+	for _, e := range lee(t, f, func(r *os.File, e func(Evento)) error { return leeClaudeCode(r, e) }) {
+		if e.Tarea != nil && e.Tarea.Tipo == "lista" {
+			l = append(l, *e.Tarea)
+		}
+	}
+	return l
+}
+
+func estadosLista(t Tarea) string {
+	var b strings.Builder
+	for _, e := range t.Elementos {
+		b.WriteString(e.Texto + "=" + e.Estado + ";")
+	}
+	return t.Estado + ":" + b.String()
+}
+
+// Claude Code 2.1 (con CLAUDE_CODE_ENABLE_TODO_TOOLS) lleva la lista con TaskCreate/TaskUpdate, a trozos: se monta
+// entera en cada cambio, como la de TodoWrite.
+func TestListaClaudeTaskCreate(t *testing.T) {
+	ls := listasClaude(t, "claude-8-lista.jsonl", t.TempDir())
+	if len(ls) != 9 { // 3 altas y 6 cambios de estado
+		t.Fatalf("listas: %d", len(ls))
+	}
+	for i, q := range map[int]string{
+		2: "ok:Crear a.txt=pendiente;Crear b.txt=pendiente;Crear c.txt=pendiente;",
+		3: "curso:Crear a.txt=curso;Crear b.txt=pendiente;Crear c.txt=pendiente;",
+		5: "curso:Crear a.txt=hecho;Crear b.txt=curso;Crear c.txt=pendiente;",
+		8: "ok:Crear a.txt=hecho;Crear b.txt=hecho;Crear c.txt=hecho;",
+	} {
+		if g := estadosLista(ls[i]); g != q {
+			t.Errorf("lista %d: %s, quería %s", i, g, q)
+		}
+	}
+}
+
+// Al continuar la sesión, la lista parte de la guardada por Claude Code (las tareas de los turnos anteriores).
+func TestListaClaudeResume(t *testing.T) {
+	ls := listasClaude(t, "claude-9-lista-resume.jsonl", "testdata/agentes/claude-tareas")
+	q := "ok:Crear a.txt=hecho;Crear b.txt=hecho;Crear c.txt=hecho;Crear d.txt=hecho;Borrar b.txt=pendiente;"
+	if len(ls) == 0 || estadosLista(ls[len(ls)-1]) != q {
+		t.Fatalf("listas: %+v", ls)
+	}
+	// Sin la lista guardada (pregunta aparte, sesión nueva): solo lo de este turno.
+	ls = listasClaude(t, "claude-9-lista-resume.jsonl", t.TempDir())
+	if g := estadosLista(ls[len(ls)-1]); g != "ok:Crear d.txt=hecho;Borrar b.txt=pendiente;" {
+		t.Errorf("sin guardada: %s", g)
+	}
+}
+
+// TodoWrite (Claude Code anterior o con otros modelos) trae la lista entera; un TaskUpdate que falla no cambia nada.
+func TestListaClaudeTodoWrite(t *testing.T) {
+	l := &listaClaude{}
+	tw := l.usa("t1", "TodoWrite", []byte(`{"todos":[{"content":"Uno","status":"completed","activeForm":"Uno"},{"content":"Dos","status":"in_progress","activeForm":"Dos"}]}`))
+	if tw == nil || estadosLista(*tw) != "curso:Uno=hecho;Dos=curso;" {
+		t.Errorf("TodoWrite: %+v", tw)
+	}
+	l.usa("t2", "TaskUpdate", []byte(`{"taskId":"1","status":"completed"}`))
+	if x := l.resultado("t2", true, "Task not found", nil); x != nil {
+		t.Errorf("TaskUpdate fallido: %+v", x)
+	}
+	l.usa("t3", "TaskCreate", []byte(`{"subject":"Tres","description":"x"}`))
+	if x := l.resultado("t3", false, "Task #7 created successfully: Tres", nil); x == nil || estadosLista(*x) != "ok:Tres=pendiente;" {
+		t.Errorf("TaskCreate sin tool_use_result: %+v", x)
+	}
+	l.usa("t4", "TaskUpdate", []byte(`{"taskId":"7","status":"deleted"}`))
+	if x := l.resultado("t4", false, "Updated task #7 deleted", nil); x != nil {
+		t.Errorf("lista vacía: %+v", x)
 	}
 }

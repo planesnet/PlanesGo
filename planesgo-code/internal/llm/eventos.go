@@ -160,6 +160,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		f    Fondo
 	}
 	vivas := map[string]viva{}
+	lista := &listaClaude{}
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -194,11 +195,12 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					IsError   bool            `json:"is_error"`
 				} `json:"content"`
 			} `json:"message"`
-			IsError  bool    `json:"is_error"`
-			Result   string  `json:"result"`
-			Coste    float64 `json:"total_cost_usd"`
-			Duracion float64 `json:"duration_ms"`
-			Usage    struct {
+			ResultadoHerr json.RawMessage `json:"tool_use_result"`
+			IsError       bool            `json:"is_error"`
+			Result        string          `json:"result"`
+			Coste         float64         `json:"total_cost_usd"`
+			Duracion      float64         `json:"duration_ms"`
+			Usage         struct {
 				Total         int `json:"total_tokens"` // task_progress
 				Herramientas  int `json:"tool_uses"`
 				Input         int `json:"input_tokens"`
@@ -212,6 +214,20 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		if ev.SessionID != "" && ev.Type == "system" && ev.Subtype == "init" {
 			emite(Evento{SesionAgente: ev.SessionID})
+			lista.sesion = ev.SessionID
+		}
+		// La lista de tareas (TodoWrite, TaskCreate, TaskUpdate), también si la toca un subagente.
+		for _, c := range ev.Message.Content {
+			var t *Tarea
+			switch {
+			case ev.Type == "assistant" && c.Type == "tool_use":
+				t = lista.usa(c.ID, c.Name, c.Input)
+			case ev.Type == "user" && c.Type == "tool_result":
+				t = lista.resultado(c.ToolUseID, c.IsError, textoDe(c.Content), ev.ResultadoHerr)
+			}
+			if t != nil {
+				emite(Evento{Tarea: t})
+			}
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
 			switch {
@@ -629,20 +645,185 @@ func tareaOpenCode(id, herr string, entrada json.RawMessage, salida string, meta
 		if json.Unmarshal(meta, &md) != nil || len(md.Todos) == 0 {
 			return nil
 		}
-		t := &Tarea{ID: "lista", Tipo: "lista", Titulo: "Lista de tareas", Estado: "ok"}
+		var l [][2]string
 		for _, x := range md.Todos {
-			e := "pendiente"
-			switch x.Estado {
-			case "in_progress":
-				e, t.Estado = "curso", "curso"
-			case "completed", "cancelled":
-				e = "hecho"
-			}
-			t.Elementos = append(t.Elementos, Elemento{Texto: x.Contenido, Estado: e})
+			l = append(l, [2]string{x.Contenido, x.Estado})
 		}
-		return t
+		return tareaLista(l)
 	}
 	return nil
+}
+
+// tareaLista: la lista de tareas del agente (pares texto, estado: pending | in_progress | completed | cancelled)
+// como la Tarea «lista»; nil si está vacía.
+func tareaLista(l [][2]string) *Tarea {
+	if len(l) == 0 {
+		return nil
+	}
+	t := &Tarea{ID: "lista", Tipo: "lista", Titulo: "Lista de tareas", Estado: "ok"}
+	for _, x := range l {
+		e := "pendiente"
+		switch x[1] {
+		case "in_progress":
+			e, t.Estado = "curso", "curso"
+		case "completed", "cancelled":
+			e = "hecho"
+		}
+		t.Elementos = append(t.Elementos, Elemento{Texto: x[0], Estado: e})
+	}
+	return t
+}
+
+// listaClaude monta la lista de tareas de Claude Code. Con TodoWrite llega entera en cada llamada; con
+// TaskCreate/TaskUpdate (Claude Code 2.1 con los modelos actuales) llega a trozos y se aplica cada cambio cuando
+// sale bien. Al continuar la sesión (--resume) la lista sigue guardada en <config>/tasks/<sesión>: se parte de ella.
+type listaClaude struct {
+	sesion    string
+	cargada   bool
+	elementos map[string]*elementoClaude
+	entradas  map[string]json.RawMessage // tool_use de TaskCreate/TaskUpdate → su entrada, hasta su resultado
+}
+
+type elementoClaude struct {
+	ID      string `json:"id"`
+	Asunto  string `json:"subject"`
+	Estado  string `json:"status"`
+	TareaID string `json:"taskId"` // TaskUpdate
+}
+
+// carpetaTareasClaude: donde guarda Claude Code la lista de tareas de una sesión (variable para las pruebas).
+var carpetaTareasClaude = func(sesion string) string {
+	base := os.Getenv("CLAUDE_CONFIG_DIR")
+	if base == "" {
+		casa, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		base = filepath.Join(casa, ".claude")
+	}
+	return filepath.Join(base, "tasks", sesion)
+}
+
+var tareaCreadaClaude = regexp.MustCompile(`Task #(\d+) created`)
+
+func (l *listaClaude) usa(id, herr string, entrada json.RawMessage) *Tarea {
+	switch herr {
+	case "TodoWrite":
+		var in struct {
+			Todos []struct {
+				Contenido string `json:"content"`
+				Estado    string `json:"status"`
+			} `json:"todos"`
+		}
+		if json.Unmarshal(entrada, &in) != nil {
+			return nil
+		}
+		var ls [][2]string
+		for _, x := range in.Todos {
+			ls = append(ls, [2]string{x.Contenido, x.Estado})
+		}
+		return tareaLista(ls)
+	case "TaskCreate", "TaskUpdate":
+		if l.entradas == nil {
+			l.entradas = map[string]json.RawMessage{}
+		}
+		l.entradas[id] = entrada
+	}
+	return nil
+}
+
+func (l *listaClaude) resultado(id string, fallo bool, texto string, res json.RawMessage) *Tarea {
+	entrada, ok := l.entradas[id]
+	if !ok {
+		return nil
+	}
+	delete(l.entradas, id)
+	if fallo {
+		return nil
+	}
+	l.carga()
+	var in elementoClaude
+	if json.Unmarshal(entrada, &in) != nil {
+		return nil
+	}
+	if in.TareaID == "" { // TaskCreate: el id lo da el resultado
+		var r struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+		}
+		json.Unmarshal(res, &r)
+		in.ID = r.Task.ID
+		if m := tareaCreadaClaude.FindStringSubmatch(texto); in.ID == "" && m != nil {
+			in.ID = m[1]
+		}
+		if in.ID == "" {
+			return nil
+		}
+		if in.Estado == "" {
+			in.Estado = "pending"
+		}
+		if e := l.elementos[in.ID]; e == nil || e.Asunto == "" {
+			l.elementos[in.ID] = &in
+		}
+	} else {
+		e := l.elementos[in.TareaID]
+		if e == nil {
+			e = &elementoClaude{ID: in.TareaID, Estado: "pending"}
+			l.elementos[in.TareaID] = e
+		}
+		if in.Asunto != "" {
+			e.Asunto = in.Asunto
+		}
+		if in.Estado == "deleted" {
+			delete(l.elementos, in.TareaID)
+		} else if in.Estado != "" {
+			e.Estado = in.Estado
+		}
+	}
+	return l.tarea()
+}
+
+// carga: la lista guardada de la sesión (la primera vez que hace falta).
+func (l *listaClaude) carga() {
+	if l.elementos == nil {
+		l.elementos = map[string]*elementoClaude{}
+	}
+	if l.cargada || l.sesion == "" {
+		return
+	}
+	l.cargada = true
+	ds, _ := filepath.Glob(filepath.Join(carpetaTareasClaude(l.sesion), "*.json"))
+	for _, f := range ds {
+		var e elementoClaude
+		if b, err := os.ReadFile(f); err == nil && json.Unmarshal(b, &e) == nil && e.ID != "" && e.Estado != "deleted" {
+			l.elementos[e.ID] = &e
+		}
+	}
+}
+
+func (l *listaClaude) tarea() *Tarea {
+	ids := make([]string, 0, len(l.elementos))
+	for id := range l.elementos {
+		ids = append(ids, id)
+	}
+	// Ids numéricos («1», «2»… «10»): por número.
+	sort.Slice(ids, func(i, j int) bool {
+		if len(ids[i]) != len(ids[j]) {
+			return len(ids[i]) < len(ids[j])
+		}
+		return ids[i] < ids[j]
+	})
+	var ls [][2]string
+	for _, id := range ids {
+		e := l.elementos[id]
+		texto := e.Asunto
+		if texto == "" {
+			texto = "Tarea #" + id
+		}
+		ls = append(ls, [2]string{texto, e.Estado})
+	}
+	return tareaLista(ls)
 }
 
 // salidaTareaClaude: el fichero donde Claude Code guarda la salida de una tarea en segundo plano
