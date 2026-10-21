@@ -120,6 +120,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/imputacion/gestor", s.conSesion(s.imputacionGestor))
 	mux.HandleFunc("POST /api/imputacion/unificar", s.conSesion(s.imputacionUnificar))
 	mux.HandleFunc("GET /api/imputacion/resumen", s.conSesion(s.imputacionResumen))
+	mux.HandleFunc("GET /api/imputacion/validar", s.conSesion(s.imputacionValidar))
 	mux.HandleFunc("POST /api/proyecto/carpeta", s.conSesion(s.proyectoCarpeta))
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
@@ -645,13 +646,34 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Permisos != "" && p.Permisos != "lectura" && p.Permisos != "editar" && p.Permisos != "auto" {
 		p.Permisos = "lectura"
 	}
+	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
+	inicioTurno := time.Now()
+	if s.Imputacion != nil {
+		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
+	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}
+		if h := e.Herramienta; h != nil && s.Imputacion != nil {
+			c := map[string]any{"id": h.ID, "nombre": h.Nombre, "estado": h.Estado}
+			if h.Entrada != "" {
+				c["tipo"] = imputacion.TipoHerramienta(h.Nombre, h.Entrada)
+				c["resumen"] = recortaTexto(h.Resumen, 120)
+			}
+			s.Imputacion.AnotaAgente(sesionImp, "herramienta", c)
+		}
 		envia(e)
 	})
+	if s.Imputacion != nil {
+		fin := map[string]any{"turno_s": time.Since(inicioTurno).Seconds(), "cancelada": r.Context().Err() != nil,
+			"procesos_vivos": proceso.GruposVivos()}
+		if err != nil {
+			fin["error"] = err.Error()
+		}
+		s.Imputacion.AnotaAgente(sesionImp, "agente-fin", fin)
+	}
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
 	}

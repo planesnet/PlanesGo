@@ -646,3 +646,15 @@ button.miga-item:hover { background: var(--hover); }
 .planes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .planes button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 8px; text-align: left; border-radius: 8px; }
 .planes button:hover { background: var(--hover); }
+
+/* Validación del registro de tiempos (panel de imputación) */
+.validar-tiempos { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--linea); }
+.validar-tiempos .boton-secundario { justify-self: start; }
+.v-lineas { width: 100%; border-collapse: collapse; font-size: 12px; }
+.v-lineas th { text-align: left; font-weight: 500; color: var(--suave); padding: 2px 4px; }
+.v-lineas td { padding: 2px 4px; border-top: 1px solid var(--linea); }
+.v-lineas tr.v-distinto td { color: #c0392b; }
+.v-avisos { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; max-height: 220px; overflow: auto; }
+.v-avisos li { padding: 3px 6px; border-radius: 6px; background: var(--hover); }
+.v-avisos li.v-error, .v-error { color: #c0392b; }
+.v-avisos li.v-info { color: var(--suave); }

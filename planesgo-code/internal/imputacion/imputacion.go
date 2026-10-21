@@ -144,6 +144,8 @@ type Gestor struct {
 	Aviso                 func()
 	FicheroEstado, Diario string
 	Ahora                 func() time.Time
+	// Tiempos: registro detallado de todo lo que interviene en la imputación (registro.go), para validarla.
+	Tiempos *Registro
 
 	mu        sync.Mutex
 	periodos  map[string]*Periodo
@@ -286,16 +288,23 @@ func (g *Gestor) Arranca(ctx context.Context) {
 				}
 			}
 			for _, p := range e.Periodos {
-				if !p.TurnoDesde.IsZero() { // el turno en curso termina donde terminó la ejecución anterior
+				turno := !p.TurnoDesde.IsZero()
+				if turno { // el turno en curso termina donde terminó la ejecución anterior
 					p.Maquina += p.Ultima.Sub(p.TurnoDesde)
 					p.TurnoDesde = time.Time{}
 				}
 				g.periodos[p.Sesion] = p
 				g.estado(p)
+				g.anota("periodo-recupera", p, map[string]any{"inicio": p.Inicio.Format(time.RFC3339Nano), "ultima": p.Ultima.Format(time.RFC3339Nano),
+					"maquina_s": seg(p.Maquina), "turno_cortado": turno})
 			}
 		}
 	}
+	n := len(g.periodos)
 	g.mu.Unlock()
+	if g.Tiempos != nil {
+		g.Tiempos.Anota("arranca", map[string]any{"periodos": n})
+	}
 	g.revisa() // cierra lo que ya pasó la espera y escribe
 	go func() {
 		tic := time.NewTicker(15 * time.Second)
@@ -319,13 +328,16 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 		una.Do(func() {
 			g.mu.Lock()
 			ahora := g.ahora()
+			dur := time.Duration(0)
 			if p.turnos--; p.turnos <= 0 {
 				p.turnos = 0
 				if !p.TurnoDesde.IsZero() {
-					p.Maquina += ahora.Sub(p.TurnoDesde)
+					dur = ahora.Sub(p.TurnoDesde)
+					p.Maquina += dur
 					p.TurnoDesde = time.Time{}
 				}
 			}
+			g.anota("turno-acaba", p, map[string]any{"turno_s": seg(dur), "turnos_vivos": p.turnos, "maquina_s": seg(p.Maquina)})
 			p.Ultima = ahora
 			g.estado(p)
 			g.marcaSucias(p)
@@ -367,17 +379,28 @@ func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *Periodo {
 			*c.dst = c.v
 		}
 	}
+	if nuevo {
+		g.anota("periodo-abre", p, map[string]any{"titulo": p.T.Titulo, "por": map[bool]string{true: "turno", false: "humano"}[turno]})
+	}
 	if turno {
 		if p.turnos == 0 {
 			p.TurnoDesde = ahora
 		}
 		p.turnos++
+		g.anota("turno-empieza", p, map[string]any{"turnos_vivos": p.turnos, "modelo": p.T.Modelo})
 	}
 	if humano {
+		if toca, desde := g.Tiempos.humanoToca(p.Sesion); toca {
+			g.anota("humano", p, map[string]any{"desde_anterior_s": seg(desde), "sin_actividad_s": seg(ahora.Sub(p.UltimaHum))})
+		}
 		p.UltimaHum = ahora
 	}
 	p.Ultima = ahora
+	antes := p.Estado
 	g.estado(p)
+	if !nuevo && antes != p.Estado {
+		g.anota("estado", p, map[string]any{"de": antes, "a": p.Estado})
+	}
 	g.mu.Unlock()
 	if nuevo {
 		g.diario("abre", p, "")
@@ -446,6 +469,7 @@ func (g *Gestor) preparaYEscribe(p *Periodo) {
 			p.Estado, p.Error = "error", "tarea de Odoo: "+err.Error()
 			g.mu.Unlock()
 			g.diario("error", p, p.Error)
+			g.anota("error", p, map[string]any{"error": p.Error})
 			g.avisa()
 			return
 		}
@@ -572,6 +596,9 @@ func (g *Gestor) cierraPeriodo(p *Periodo, motivo string) {
 		g.sumaPeriodo(p)
 	}
 	delete(g.periodos, p.Sesion)
+	g.anota("periodo-cierra", p, map[string]any{"motivo": motivo, "inicio": p.Inicio.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano),
+		"maquina_s": math.Round(maq*1000) / 1000, "hombre_s": math.Round(hom*1000) / 1000, "sin_tarea": p.TareaID == 0,
+		"tokens": p.Entrada + p.Salida, "coste": p.Coste})
 	go g.diario("cierra", p, fmt.Sprintf("%s (máquina %.0f s, hombre %.0f s)", motivo, maq, hom))
 }
 
@@ -582,10 +609,12 @@ func (g *Gestor) sumaPeriodo(p *Periodo) {
 		if d := g.dia(p, "h"); d != nil {
 			d.Cerrado += hom
 			d.Sucio = true
+			g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "h", "mas_s": math.Round(hom*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
 		}
 		if maq > 0 || p.Entrada+p.Salida > 0 {
 			if d := g.dia(p, "m"); d != nil {
 				d.Cerrado += maq
+				g.anota("dia-suma", p, map[string]any{"fecha": d.Fecha, "clase": "m", "linea_agente": d.Agente, "mas_s": math.Round(maq*1000) / 1000, "cerrado_s": math.Round(d.Cerrado*1000) / 1000})
 				d.Entrada += p.Entrada
 				d.Salida += p.Salida
 				d.Coste += p.Coste
@@ -612,6 +641,9 @@ func (g *Gestor) revisa() {
 	for _, p := range g.periodos {
 		antes := p.Estado
 		g.estado(p)
+		if antes != p.Estado {
+			g.anota("estado", p, map[string]any{"de": antes, "a": p.Estado})
+		}
 		cambio = cambio || antes != p.Estado
 		y, m, d := p.Inicio.Date()
 		medianoche := ahora.After(time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location()))
@@ -644,6 +676,9 @@ func (g *Gestor) SumaUso(sesion string, entrada, salida int, coste float64) {
 		p.Entrada += entrada
 		p.Salida += salida
 		p.Coste += coste
+		g.anota("uso", p, map[string]any{"entrada": entrada, "salida": salida, "coste": coste})
+	} else {
+		g.Tiempos.Anota("uso-sin-periodo", map[string]any{"sesion": sesion, "entrada": entrada, "salida": salida, "coste": coste})
 	}
 	g.mu.Unlock()
 	g.guarda()
@@ -778,6 +813,14 @@ func (g *Gestor) escribeDia(d *Dia) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	reg := map[string]any{"fecha": dd.Fecha, "proyecto": dd.Proyecto, "tarea_id": dd.TareaID, "clase": dd.Clase, "linea_agente": dd.Agente,
+		"linea": id, "nueva": dd.LineaID == 0, "segundos": math.Round(seg*1000) / 1000, "horas": horas, "antes": dd.Escrito, "ritmo": ritmo}
+	if err != nil {
+		reg["error"] = err.Error()
+	}
+	if g.Tiempos != nil {
+		g.Tiempos.Anota("odoo", reg)
+	}
 	if err != nil {
 		d.Error = err.Error()
 		if definitivo(err) { // la línea ya no existe o está validada: se crea otra con lo que falte la próxima vez
@@ -949,6 +992,9 @@ func (g *Gestor) Cierra(sesion, motivo string) {
 
 // CierraTodo cierra todos los periodos y escribe (al salir de pgocode de verdad).
 func (g *Gestor) CierraTodo() {
+	if g.Tiempos != nil {
+		g.Tiempos.Anota("cierra-todo", nil)
+	}
 	g.mu.Lock()
 	for _, p := range g.periodos {
 		if !p.TurnoDesde.IsZero() {
@@ -975,6 +1021,9 @@ func (g *Gestor) Suspende() {
 	g.escribeSucias()
 	g.guarda()
 	depuracion.Log("imputacion", "pgocode se actualiza: %d periodos siguen abiertos", n)
+	if g.Tiempos != nil {
+		g.Tiempos.Anota("suspende", map[string]any{"periodos": n})
+	}
 }
 
 // Estado: las líneas de hoy (con sus horas en este momento) y las sesiones con un periodo abierto.

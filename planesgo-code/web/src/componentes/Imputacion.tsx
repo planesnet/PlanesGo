@@ -21,6 +21,13 @@ interface Resumen { tarea_id: number; hoy_h: number; hoy_m: number; total_h: num
 // La sesión abierta: su proyecto y su tarea (aunque todavía no tenga periodo de trabajo).
 export interface SesionMarcador { id: string; proyecto: number; nombreProyecto?: string; tareaId?: number; tarea?: string }
 const JORNADA = 8; // horas de una jornada, para la barra de «hoy»
+interface Validacion {
+  dia: string; fichero: string; sucesos: number; errores: number;
+  avisos: { t?: string; gravedad: 'error' | 'aviso' | 'info'; tipo: string; sesion?: string; texto: string }[];
+  lineas: { fecha: string; proyecto: number; tarea_id: number; clase: 'h' | 'm'; agente?: string; segundos: number; horas_calculadas: number; horas_odoo: number }[];
+}
+const hhmm = (h: number) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+
 interface Estado { hoy: Linea[]; abiertos: Abierto[]; gestor_pgocode: boolean }
 
 const BLOQUE = { h: 15, m: 5 }; // redondeo hacia arriba en Odoo (minutos)
@@ -49,6 +56,15 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     return () => document.removeEventListener('mousedown', fuera);
   }, [abierto]);
 
+  // Validación del registro de tiempos de hoy (todo lo que interviene en la imputación, para encontrar fallos).
+  const [validacion, setValidacion] = useState<Validacion | null>(null);
+  const [validando, setValidando] = useState(false);
+  const valida = async () => {
+    setValidando(true);
+    try { setValidacion(await get<Validacion>('/api/imputacion/validar')); }
+    catch (err) { setValidacion({ dia: '', fichero: '', sucesos: 0, errores: 1, avisos: [{ gravedad: 'error', tipo: 'validar', texto: (err as Error).message }], lineas: [] }); }
+    finally { setValidando(false); }
+  };
   const [unificando, setUnificando] = useState(false);
   const [unificado, setUnificado] = useState('');
   const unifica = async () => {
@@ -192,6 +208,31 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
           <div className="unificar">
             <button className="boton-secundario" onClick={unifica} disabled={unificando}>{unificando ? 'Unificando…' : 'Unificar líneas sueltas'}</button>
             <span className="suave pequeno">{unificado || 'Suma a la línea del día las líneas de pgocode de menos de 5 minutos (de versiones anteriores) y las borra.'}</span>
+          </div>
+          <div className="validar-tiempos">
+            <button className="boton-secundario" onClick={valida} disabled={validando}>{validando ? 'Validando…' : 'Validar el registro de hoy'}</button>
+            {validacion && <>
+              <span className="suave pequeno" title={validacion.fichero}>
+                {validacion.sucesos} sucesos · {validacion.errores ? <b className="v-error">{validacion.errores} errores</b> : 'sin errores'} · {validacion.avisos.filter(a => a.gravedad === 'aviso').length} avisos
+              </span>
+              {validacion.lineas.length > 0 && (
+                <table className="v-lineas">
+                  <thead><tr><th>Línea</th><th>Calculado</th><th>En Odoo</th></tr></thead>
+                  <tbody>{validacion.lineas.map(l => (
+                    <tr key={`${l.fecha}${l.proyecto}${l.tarea_id}${l.clase}${l.agente || ''}`} className={l.horas_odoo >= 0 && Math.abs(l.horas_odoo - l.horas_calculadas) > 0.0001 ? 'v-distinto' : ''}>
+                      <td>{l.proyecto}/{l.tarea_id} · {l.clase === 'h' ? 'Hombre' : 'Máquina ' + (l.agente || '')}</td>
+                      <td>{hhmm(l.horas_calculadas)} <span className="suave">({Math.round(l.segundos / 60)} min)</span></td>
+                      <td>{l.horas_odoo < 0 ? '—' : hhmm(l.horas_odoo)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+              {validacion.avisos.length > 0 && (
+                <ul className="v-avisos">{validacion.avisos.map((a, i) => (
+                  <li key={i} className={'v-' + a.gravedad}><span className="suave">{a.t}</span> {a.texto}</li>
+                ))}</ul>
+              )}
+            </>}
           </div>
           <label className="gestor">
             <input type="checkbox" checked={e.gestor_pgocode} onChange={ev => cambiaGestor(ev.target.checked)} />

@@ -203,7 +203,24 @@ func main() {
 	dirGrab := flag.String("grabaciones", entorno("PGO_GRABACIONES", "~/.local/share/pgocode/grabaciones"), "carpeta de las grabaciones del Studio TV local")
 	navegador := flag.Bool("navegador", os.Getenv("PGO_NAVEGADOR") == "1", "permite abrir Planes Go Code también en el navegador (por defecto, solo desde la app de escritorio)")
 	verVersion := flag.Bool("version", false, "muestra la versión y sale")
+	validaTiempos := flag.String("valida-tiempos", "", "valida un registro de tiempos (…/pgocode/tiempos/AAAA-MM-DD.jsonl), muestra el informe y sale")
 	flag.Parse()
+	if *validaTiempos != "" {
+		f, err := os.Open(*validaTiempos)
+		if err != nil {
+			log.Fatal(err)
+		}
+		inf, err := imputacion.Valida(f, strings.HasPrefix(filepath.Base(*validaTiempos), time.Now().Format("2006-01-02")))
+		if err != nil {
+			log.Fatal(err)
+		}
+		b, _ := json.MarshalIndent(inf, "", "  ")
+		fmt.Println(string(b))
+		if inf.Errores > 0 {
+			os.Exit(1)
+		}
+		return
+	}
 	*dirGrab = expande(*dirGrab)
 	if *verVersion {
 		fmt.Println("pgocode", version)
@@ -285,7 +302,9 @@ func main() {
 	// Imputación directa en Odoo. PlanesGo se duerme solo en los agentes que lanza pgocode (PLANESGO_GESTOR);
 	// las sesiones de los agentes fuera de pgocode siguen imputando por su cuenta en el mismo equipo.
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
-		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log")}
+		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log"),
+		// Registro detallado de tiempos (un JSONL por día) para validar la imputación: Imputación → Validar.
+		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos")}}
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
 	s.Procesos = procesos.Nuevo()
