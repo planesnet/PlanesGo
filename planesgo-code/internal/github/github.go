@@ -459,3 +459,44 @@ func (l *Lector) Cuerpo(ctx context.Context, repo string, numero int) (string, e
 	}
 	return strings.TrimSpace(string(b)), nil
 }
+
+// Acciones sobre issues y pull requests (las que permite GitHub): cerrar una issue como hecha o como «no se
+// hará» (lo más parecido a archivarla), reabrirla o borrarla (solo administradores del repositorio); cerrar una
+// PR sin fusionar o reabrirla.
+var acciones = map[string]map[string][]string{
+	"issue": {
+		"cerrar":    {"issue", "close", "--reason", "completed"},
+		"descartar": {"issue", "close", "--reason", "not planned"},
+		"reabrir":   {"issue", "reopen"},
+		"borrar":    {"issue", "delete", "--yes"},
+	},
+	"pr": {
+		"cerrar":  {"pr", "close"},
+		"reabrir": {"pr", "reopen"},
+	},
+}
+
+// Accion aplica una acción a una issue o PR y descarta la caché del repositorio.
+func (l *Lector) Accion(ctx context.Context, repo, tipo string, numero int, accion string) error {
+	a, ok := acciones[tipo][accion]
+	if !ok || !nombreRepo.MatchString(repo) || numero <= 0 {
+		return errors.New("acción no válida")
+	}
+	ctx, cancela := context.WithTimeout(ctx, 30*time.Second)
+	defer cancela()
+	args := append([]string{a[0], a[1], fmt.Sprint(numero), "-R", repo}, a[2:]...)
+	var errSalida strings.Builder
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Stderr = &errSalida
+	if err := cmd.Run(); err != nil {
+		m := strings.TrimSpace(errSalida.String())
+		if accion == "borrar" && strings.Contains(strings.ToLower(m), "permission") {
+			m = "solo los administradores del repositorio pueden borrar issues (puedes cerrarla como «no se hará»)"
+		}
+		return fmt.Errorf("GitHub: %s", strings.TrimSpace(m+" "+err.Error()))
+	}
+	l.mu.Lock()
+	delete(l.cache, repo)
+	l.mu.Unlock()
+	return nil
+}

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -155,6 +156,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/skills/elegir", s.conSesion(s.skillsElegir))
 	mux.HandleFunc("GET /api/github", s.conSesion(s.githubEstado))
 	mux.HandleFunc("POST /api/github/issue", s.conSesion(s.githubCrea))
+	mux.HandleFunc("POST /api/github/accion", s.conSesion(s.githubAccion))
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
@@ -541,6 +543,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Carpeta      string        `json:"carpeta"`
 		SesionAgente string        `json:"sesion_agente"`
 		Rama         string        `json:"rama"`
+		Autorizadas  []string      `json:"autorizadas"` // carpetas de fuera del proyecto autorizadas en la sesión
 		Permisos     string        `json:"permisos"`
 		Esfuerzo     string        `json:"esfuerzo"`
 		Sesion       string        `json:"sesion"` // id de la sesión de pgocode (para imputar su tiempo)
@@ -602,6 +605,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		}
 	}
 	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)
+	autorizadas := carpetasAutorizadas(p.Autorizadas)
 	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).
 	if info.NecesitaDir && p.Carpeta != "" && p.Rama != "" {
 		dir, err := repo.CarpetaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
@@ -655,7 +659,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}
@@ -1013,4 +1017,21 @@ func (s *Servidor) qaComenta(w http.ResponseWriter, r *http.Request, ses *sesion
 		return
 	}
 	jsonOK(w, c)
+}
+
+// carpetasAutorizadas: las carpetas de fuera del proyecto que la sesión autoriza, solo si son rutas completas de
+// carpetas que existen (y nunca la raíz ni la carpeta personal entera, que equivaldría a no restringir nada).
+func carpetasAutorizadas(l []string) []string {
+	casa, _ := os.UserHomeDir()
+	var out []string
+	for _, c := range l {
+		c = filepath.Clean(strings.TrimSpace(c))
+		if !filepath.IsAbs(c) || c == "/" || c == filepath.Clean(casa) || slices.Contains(out, c) {
+			continue
+		}
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			out = append(out, c)
+		}
+	}
+	return out
 }

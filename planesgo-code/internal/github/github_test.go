@@ -62,3 +62,15 @@ func TestCuerpoReal(t *testing.T) {
 	}
 	t.Logf("cuerpo (%d bytes): %.120s", len(c), c)
 }
+
+func TestAccionNoValida(t *testing.T) {
+	var l Lector
+	for _, c := range []struct {
+		repo, tipo, accion string
+		n                  int
+	}{{"a/b", "issue", "fusionar", 1}, {"a/b", "pr", "borrar", 1}, {"a/b", "otro", "cerrar", 1}, {"a/b; rm", "issue", "cerrar", 1}, {"a/b", "issue", "cerrar", 0}} {
+		if err := l.Accion(context.Background(), c.repo, c.tipo, c.n, c.accion); err == nil || err.Error() != "acción no válida" {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+}

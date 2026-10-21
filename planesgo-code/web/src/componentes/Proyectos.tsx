@@ -352,11 +352,11 @@ function Renombra({ s, alFin }: { s: Sesion; alFin: (nombre: string | null) => v
   );
 }
 
-type Opcion = { icono: string; texto: string; accion: () => void; peligro?: boolean } | null;
+export type Opcion = { icono: string; texto: string; accion: () => void; peligro?: boolean } | null;
 const ANCHO_MENU = 200, MARGEN = 8;
 
 // Menú flotante del ⋮ (portal sobre document.body, position: fixed), como el de las sesiones de Claude.
-function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; opciones: Opcion[]; alCerrar: () => void }) {
+export function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; opciones: Opcion[]; alCerrar: () => void }) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const caja = useRef<HTMLDivElement>(null);
 

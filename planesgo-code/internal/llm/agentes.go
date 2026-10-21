@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -176,22 +177,28 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 }
 
 // permisosOpenCode: la configuración de permisos de OpenCode para cada modo de pgocode.
-func permisosOpenCode(modo string) string {
+func permisosOpenCode(modo string, autorizadas []string) string {
 	// La imputación la hace pgocode: sus skills de imputación, denegadas.
-	sk := make([]string, 0, len(skills.Sustituidas)+1)
-	sk = append(sk, `"*":"allow"`)
+	sk := map[string]string{"*": "allow"}
 	for _, n := range skills.Sustituidas {
-		sk = append(sk, `"`+n+`":"deny"`)
+		sk[n] = "deny"
 	}
-	skill := `,"skill":{` + strings.Join(sk, ",") + `}}`
+	// Fuera de la carpeta de la sesión, solo las carpetas autorizadas en ella (en todos los modos).
+	fuera := map[string]string{"*": "deny"}
+	for _, d := range autorizadas {
+		fuera[strings.TrimRight(d, "/")+"/**"] = "allow"
+	}
+	p := map[string]any{"webfetch": "allow", "external_directory": fuera, "skill": sk}
 	switch modo {
 	case "auto":
-		return `{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"` + skill
+		p["edit"], p["bash"], p["doom_loop"] = "allow", "allow", "allow"
 	case "editar":
-		return `{"edit":"allow","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"` + skill
+		p["edit"], p["bash"], p["doom_loop"] = "allow", "deny", "deny"
 	default:
-		return `{"edit":"deny","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"` + skill
+		p["edit"], p["bash"], p["doom_loop"] = "deny", "deny", "deny"
 	}
+	b, _ := json.Marshal(p)
+	return string(b)
 }
 
 // clavesEntorno: los nombres de las variables añadidas (sin sus valores: llevan tokens).
@@ -296,6 +303,9 @@ func Agentes() []Proveedor {
 				for _, sk := range skills.Sustituidas {
 					a = append(a, "--disallowedTools", "Skill("+sk+")")
 				}
+				for _, d := range p.Autorizadas {
+					a = append(a, "--add-dir", d)
+				}
 				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
 				switch p.Permisos {
 				case "editar":
@@ -339,6 +349,9 @@ func Agentes() []Proveedor {
 				}
 				if p.SesionAgente != "" {
 					a = append(a, "--conversation", p.SesionAgente)
+				}
+				for _, d := range p.Autorizadas {
+					a = append(a, "--add-dir", d)
 				}
 				// El mensaje va pegado a la opción: así nunca se toma como otra opción.
 				return append(a, "--print="+msg)

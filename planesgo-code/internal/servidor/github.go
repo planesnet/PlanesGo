@@ -92,3 +92,28 @@ func (s *Servidor) githubEstado(w http.ResponseWriter, r *http.Request, ses *ses
 	}
 	jsonOK(w, e)
 }
+
+// githubAccion: cerrar, descartar, reabrir o borrar una issue; cerrar o reabrir una PR.
+func (s *Servidor) githubAccion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Carpeta  string `json:"carpeta"`
+		Tipo     string `json:"tipo"` // issue | pr
+		Numero   int    `json:"numero"`
+		Accion   string `json:"accion"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	nombre, ok := s.repoGitHub(w, r, ses, p.Proyecto, p.Carpeta)
+	if !ok {
+		return
+	}
+	if err := s.GitHub.Accion(r.Context(), nombre, p.Tipo, p.Numero, p.Accion); err != nil {
+		jsonError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	log.Printf("github: %s %s #%d en %s (%s)", p.Accion, p.Tipo, p.Numero, nombre, ses.Login)
+	jsonOK(w, map[string]bool{"ok": true})
+}

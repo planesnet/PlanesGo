@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, post, type Proyecto } from '../api';
 import Icono from './Icono';
+import { MenuSesion, type Opcion } from './Proyectos';
 
 // Flujo del repositorio (GitHub): la rama de la sesión y su pull request, las issues por fase (por empezar →
 // en desarrollo → en revisión → en test → cerradas) y por clase (peticiones nuevas / mantenimiento), y las PR.
@@ -127,6 +128,29 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   };
   useEffect(() => { setE(null); carga(); }, [proyecto.id, carpeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Acciones de GitHub sobre una issue o PR (menú ⋮ de cada fila): cerrar, «no se hará», reabrir, borrar.
+  const [menu, setMenu] = useState<{ tipo: 'issue' | 'pr'; numero: number; estado: string; ancla: HTMLElement } | null>(null);
+  const [errorAccion, setErrorAccion] = useState('');
+  const accion = async (tipo: 'issue' | 'pr', numero: number, que: string) => {
+    setErrorAccion('');
+    try { await post('/api/github/accion', { proyecto: proyecto.id, carpeta, tipo, numero, accion: que }); carga(true); }
+    catch (err) { setErrorAccion((err as Error).message); }
+  };
+  const abreMenu = (tipo: 'issue' | 'pr', numero: number, estado: string) => (ancla: HTMLElement) =>
+    setMenu(m => (m && m.tipo === tipo && m.numero === numero ? null : { tipo, numero, estado, ancla }));
+  const opciones = (m: NonNullable<typeof menu>): Opcion[] => m.tipo === 'issue'
+    ? (m.estado === 'OPEN'
+      ? [{ icono: 'hecho', texto: 'Cerrar como hecha', accion: () => accion('issue', m.numero, 'cerrar') },
+        { icono: 'cerrar', texto: 'Cerrar como «no se hará»', accion: () => accion('issue', m.numero, 'descartar') },
+        null,
+        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: () => { if (confirm(`¿Borrar la issue #${m.numero}? No se puede deshacer (solo pueden los administradores del repositorio).`)) accion('issue', m.numero, 'borrar'); } }]
+      : [{ icono: 'recargar', texto: 'Reabrir', accion: () => accion('issue', m.numero, 'reabrir') },
+        null,
+        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: () => { if (confirm(`¿Borrar la issue #${m.numero}? No se puede deshacer.`)) accion('issue', m.numero, 'borrar'); } }])
+    : (m.estado === 'OPEN'
+      ? [{ icono: 'cerrar', texto: 'Cerrar sin fusionar', accion: () => { if (confirm(`¿Cerrar la pull request #${m.numero} sin fusionarla?`)) accion('pr', m.numero, 'cerrar'); } }]
+      : [{ icono: 'recargar', texto: 'Reabrir', accion: () => accion('pr', m.numero, 'reabrir') }]);
+
   const abiertas = useMemo(() => (e?.issues || []).filter(i => i.estado === 'OPEN'), [e]);
   const cuenta = (c: Clase) => c === 'todas' ? abiertas.length : abiertas.filter(i => i.clase === c).length;
   const visibles = (e?.issues || []).filter(i => clase === 'todas' || i.clase === clase);
@@ -140,6 +164,8 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
 
   return (
     <div className="flujo">
+      {errorAccion && <p className="error">{errorAccion}</p>}
+      {menu && <MenuSesion ancla={menu.ancla} alCerrar={() => setMenu(null)} opciones={opciones(menu)} />}
       <div className="flujo-cabecera">
         <Oct n="github" t={18} />
         {e ? <button className="enlace gh-repo" onClick={() => alAbrir(e.url)} title="Abrir en GitHub">{e.repo}</button> : <span className="suave">GitHub</span>}
@@ -162,7 +188,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
           {deRama.map(p => <TarjetaPR key={p.numero} p={p} porNumero={porNumero} alAbrir={alAbrir} />)}
           {aRama.length > 0 && <>
             <p className="titulo-lista">Entran en esta rama</p>
-            {aRama.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+            {aRama.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
           </>}
         </section>
 
@@ -194,7 +220,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
           return (
             <details key={f.id} className="gh-fase" open={f.id !== 'cerrada'}>
               <summary><span className={'gh-marca ' + f.id} /> {f.nombre} <span className="gh-cuenta">{l.length}</span><span className="suave pequeno"> · {f.ayuda}</span></summary>
-              {l.map(i => <FilaIssue key={i.numero} i={i} alAbrir={alAbrir} alResolver={i.estado === 'OPEN' ? () => resolver(i) : undefined} resolviendo={resolviendo === i.numero} />)}
+              {l.map(i => <FilaIssue key={i.numero} i={i} alAbrir={alAbrir} alMenu={abreMenu('issue', i.numero, i.estado)} alResolver={i.estado === 'OPEN' ? () => resolver(i) : undefined} resolviendo={resolviendo === i.numero} />)}
             </details>
           );
         })}
@@ -202,18 +228,18 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
         {/* Pull requests */}
         {prsAbiertas.length > 0 && <details className="gh-fase" open>
           <summary><Oct n="pr" color={VERDE} t={14} /> Pull requests abiertas <span className="gh-cuenta">{prsAbiertas.length}</span></summary>
-          {prsAbiertas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+          {prsAbiertas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
         </details>}
         {prsHechas.length > 0 && <details className="gh-fase">
           <summary><Oct n="pr-fusionada" color={MORADO} t={14} /> Pull requests recientes <span className="gh-cuenta">{prsHechas.length}</span></summary>
-          {prsHechas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} />)}
+          {prsHechas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
         </details>}
       </>}
     </div>
   );
 }
 
-function FilaIssue({ i, alAbrir, alResolver, resolviendo }: { i: Issue; alAbrir: (u: string) => void; alResolver?: () => void; resolviendo: boolean }) {
+function FilaIssue({ i, alAbrir, alResolver, resolviendo, alMenu }: { i: Issue; alAbrir: (u: string) => void; alResolver?: () => void; resolviendo: boolean; alMenu?: (ancla: HTMLElement) => void }) {
   return (
     <div className="gh-fila-caja">
     <button className="gh-fila" onClick={() => alAbrir(i.url)} title={i.titulo}>
@@ -234,12 +260,14 @@ function FilaIssue({ i, alAbrir, alResolver, resolviendo }: { i: Issue; alAbrir:
         <Icono n="ejecutar" t={13} /> {resolviendo ? '…' : 'Resolver'}
       </button>
     )}
+    {alMenu && <BotonMenu titulo={'Más acciones de la issue #' + i.numero} alAbrir={alMenu} />}
     </div>
   );
 }
 
-function FilaPR({ p, alAbrir }: { p: PR; alAbrir: (u: string) => void }) {
+function FilaPR({ p, alAbrir, alMenu }: { p: PR; alAbrir: (u: string) => void; alMenu?: (ancla: HTMLElement) => void }) {
   return (
+    <div className="gh-fila-caja">
     <button className="gh-fila" onClick={() => alAbrir(p.url)} title={p.titulo}>
       {iconoPR(p)}
       <span className="gh-cuerpo">
@@ -248,6 +276,17 @@ function FilaPR({ p, alAbrir }: { p: PR; alAbrir: (u: string) => void }) {
       </span>
       {p.estado === 'OPEN' && p.checks && <Checks estado={p.checks} />}
       <span className="gh-diff"><b style={{ color: VERDE }}>+{p.mas}</b> <b style={{ color: ROJO }}>−{p.menos}</b></span>
+    </button>
+    {alMenu && <BotonMenu titulo={'Más acciones de la pull request #' + p.numero} alAbrir={alMenu} />}
+    </div>
+  );
+}
+
+// Botón ⋮ de una fila: abre el menú de acciones de GitHub.
+function BotonMenu({ titulo, alAbrir }: { titulo: string; alAbrir: (ancla: HTMLElement) => void }) {
+  return (
+    <button className="icono puntos gh-menu" onClick={e => alAbrir(e.currentTarget)} title={titulo} aria-label={titulo} aria-haspopup="menu">
+      <Icono n="puntos" t={15} />
     </button>
   );
 }

@@ -31,6 +31,9 @@ type Peticion struct {
 	Adjuntos []string
 	// Entorno: variables que se añaden al del agente (PGO_API, PGO_TOKEN… para la orden «pgo»).
 	Entorno []string
+	// Autorizadas: carpetas de fuera del proyecto que el usuario ha autorizado en la sesión. El agente no puede
+	// salir de su carpeta salvo a estas (ahorra tokens y evita que recorra el equipo).
+	Autorizadas []string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,

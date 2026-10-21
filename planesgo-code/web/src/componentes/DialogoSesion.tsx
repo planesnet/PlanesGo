@@ -67,6 +67,14 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
     if (c) { cambia({ carpeta: c }); setCarpetaElegida(true); }
   };
 
+  const autoriza = async () => {
+    if (!window.psf?.elegirCarpeta) { setError('El diálogo de carpetas solo está en la aplicación de escritorio'); return; }
+    const c = await window.psf.elegirCarpeta(s.carpeta || directorio);
+    if (!c) return;
+    if (c === s.carpeta || s.carpeta.startsWith(c.replace(/\/+$/, '') + '/')) { setError('Esa carpeta ya es (o contiene) la de la sesión'); return; }
+    cambia({ autorizadas: [...new Set([...(s.autorizadas || []), c])] });
+  };
+
   const falta = !rama ? 'Elige la rama' : !s.hosting ? 'Elige el alojamiento' : !s.carpeta ? 'Elige la carpeta' : !s.agente ? 'Elige el agente' : '';
   const guarda = async () => {
     if (falta || guardando) return;
@@ -149,6 +157,20 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
             {!conRepo && !pideRemoto && info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como copia de trabajo del repositorio en esa rama.
               {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}</>}
           </span>
+        </div>
+
+        <div className="campo">
+          <span className="etiqueta-campo">Carpetas autorizadas fuera del proyecto</span>
+          {(s.autorizadas || []).length > 0 && (
+            <ul className="autorizadas">
+              {(s.autorizadas || []).map(c => (
+                <li key={c}><Icono n="carpeta" t={13} /><code className="recorta" title={c}>{c}</code>
+                  <button type="button" className="quita-adjunto" onClick={() => cambia({ autorizadas: (s.autorizadas || []).filter(x => x !== c) })} aria-label={'Quitar ' + c}>×</button></li>
+              ))}
+            </ul>
+          )}
+          <button type="button" className="boton-secundario autorizar" onClick={autoriza}><Icono n="nuevo" t={13} /> Autorizar una carpeta…</button>
+          <span className="suave pequeno">El agente solo trabaja en la carpeta de la sesión. Si necesita leer otra (p. ej. un proyecto de referencia), autorízala aquí.</span>
         </div>
 
         <label>Tarea de Odoo a la que se imputa

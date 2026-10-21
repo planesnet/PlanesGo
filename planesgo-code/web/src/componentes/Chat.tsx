@@ -254,7 +254,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         permisos: modoPlan ? 'lectura' : ses.permisos || 'lectura', sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
-        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
+        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {

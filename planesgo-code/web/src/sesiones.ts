@@ -15,6 +15,7 @@ export interface Sesion {
   permisos?: 'lectura' | 'editar' | 'auto' | 'plan'; // qué puede hacer el agente; «plan»: redacta un plan sin tocar nada
   modoPrevio?: 'lectura' | 'editar' | 'auto'; // el modo de antes de pasar a «plan» (con el que se ejecuta el plan)
   plan?: string;         // ruta del plan en revisión de la sesión (modo plan)
+  autorizadas?: string[]; // carpetas de fuera del proyecto a las que el agente puede acceder (si no, solo la suya)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
