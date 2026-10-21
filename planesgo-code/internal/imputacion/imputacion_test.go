@@ -51,7 +51,33 @@ func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []a
 			}
 		}
 	case "account.analytic.line.search_read":
-		r = []any{}
+		var l []any
+		cumple := func(v map[string]any) bool { // solo las condiciones «=» del dominio
+			for _, c := range args[0].([]any) {
+				if x, ok := c.([]any); ok && len(x) == 3 && x[1] == "=" && fmt.Sprint(v[x[0].(string)]) != fmt.Sprint(x[2]) {
+					return false
+				}
+			}
+			return true
+		}
+		unifica := false // la búsqueda de líneas sueltas lleva un «|» en el dominio
+		for _, c := range args[0].([]any) {
+			unifica = unifica || c == "|"
+		}
+		for id, v := range o.lineas {
+			if (unifica && v["_suelta"] == true) || (!unifica && v["_suelta"] != true && cumple(v)) {
+				l = append(l, map[string]any{"id": id, "date": v["date"], "unit_amount": v["unit_amount"], "project_id": []any{v["project_id"], "MADERAS"},
+					"task_id": []any{v["task_id"], "pgocode - Sesión IA"}, "ai_session_id": v["ai_session_id"], "ai_model": v["ai_model"], "name": v["name"]})
+			}
+		}
+		if l == nil {
+			l = []any{}
+		}
+		r = l
+	case "account.analytic.line.unlink":
+		for _, id := range args[0].([]int) {
+			delete(o.lineas, id)
+		}
 	}
 	b, _ := json.Marshal(r)
 	return json.Unmarshal(b, res)
@@ -218,5 +244,30 @@ func TestMedianoche(t *testing.T) {
 	g.revisa()
 	if _, ab := g.Estado(); len(ab) != 0 {
 		t.Fatal("a medianoche el periodo se cierra")
+	}
+}
+
+// Las líneas sueltas de versiones anteriores (menos de 5 min) se suman a la línea del día y se borran.
+func TestUnificaSueltas(t *testing.T) {
+	o := nuevoOdoo()
+	for i := 0; i < 17; i++ {
+		o.lineas[i+1] = map[string]any{"_suelta": true, "date": "2026-10-21", "unit_amount": 1.0 / 60, "project_id": 447, "task_id": 9,
+			"ai_session_id": fmt.Sprintf("pgocode-abierto-s%d-h", i), "name": "Sesión de pgocode «Sitio web»"}
+	}
+	o.lineas[50] = map[string]any{"_suelta": true, "date": "2026-10-21", "unit_amount": 2.0 / 60, "project_id": 447, "task_id": 9,
+		"ai_session_id": "pgocode-s1-m", "ai_model": "Claude Code opus", "name": "x"}
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	res, err := g.UnificaSueltas(context.Background(), 2, "x")
+	if err != nil || res.Lineas != 18 || res.Fallos != 0 {
+		t.Fatalf("resultado %+v err %v", res, err)
+	}
+	h, m := o.con("pgocode-h"), o.con("pgocode-m-claude-code")
+	if o.n() != 2 || len(h) != 1 || len(m) != 1 {
+		t.Fatalf("quedan %d líneas: %v", o.n(), o.lineas)
+	}
+	// 17 min de hombre → 30 min (bloques de 15); 2 min de máquina → 5 min.
+	if h[0]["unit_amount"] != 0.5 || m[0]["unit_amount"] != 5.0/60 || fmt.Sprint(h[0]["task_id"]) != "9" {
+		t.Errorf("hombre %v máquina %v", h[0], m[0])
 	}
 }

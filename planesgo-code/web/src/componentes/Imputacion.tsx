@@ -43,6 +43,15 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     return () => document.removeEventListener('mousedown', fuera);
   }, [abierto]);
 
+  const [unificando, setUnificando] = useState(false);
+  const [unificado, setUnificado] = useState('');
+  const unifica = async () => {
+    setUnificando(true);
+    try { const r = await post<{ mensaje: string }>('/api/imputacion/unificar', {}); setUnificado(r.mensaje); }
+    catch (x) { setUnificado('⚠ ' + (x as Error).message); }
+    finally { setUnificando(false); carga(); }
+  };
+
   const cambiaGestor = async (pgocode: boolean) => {
     setE(x => x && { ...x, gestor_pgocode: pgocode });
     await post('/api/imputacion/gestor', { pgocode }).catch(() => {});
@@ -121,6 +130,10 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
               </div>
             ))}
           </>}
+          <div className="unificar">
+            <button className="boton-secundario" onClick={unifica} disabled={unificando}>{unificando ? 'Unificando…' : 'Unificar líneas sueltas'}</button>
+            <span className="suave pequeno">{unificado || 'Suma a la línea del día las líneas de pgocode de menos de 5 minutos (de versiones anteriores) y las borra.'}</span>
+          </div>
           <label className="gestor">
             <input type="checkbox" checked={e.gestor_pgocode} onChange={ev => cambiaGestor(ev.target.checked)} />
             <span><b>PlanesGo dormido en los agentes</b>

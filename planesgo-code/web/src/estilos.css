@@ -568,3 +568,4 @@ button.miga-item:hover { background: var(--hover); }
 .quita-adjunto:hover { background: var(--hover); }
 .icono.adjuntar { align-self: flex-end; margin-bottom: 2px; }
 .entrada.soltando { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--superficie)); }
+.unificar { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--linea); padding-top: 8px; }

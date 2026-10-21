@@ -145,6 +145,7 @@ type Gestor struct {
 	dias      map[string]*Dia
 	tareas    map[string]int // tareas ya resueltas en Odoo (proyecto|nombre → id)
 	sinTarea  []*Periodo     // periodos cerrados antes de resolver su tarea: se suman al resolverla
+	unificado map[int]bool   // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
 	escribe   sync.Mutex     // una escritura en Odoo a la vez
 	arrancado bool
 }
@@ -380,7 +381,45 @@ func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *Periodo {
 	}
 	g.guarda()
 	g.avisa()
+	if t.UID > 0 && t.OdooSesion != "" {
+		go g.unificaUnaVez(t.UID, t.OdooSesion)
+	}
 	return p
+}
+
+// unificaUnaVez: la primera vez (por usuario y equipo) se unifican las líneas sueltas de versiones anteriores.
+func (g *Gestor) unificaUnaVez(uid int, ses string) {
+	g.mu.Lock()
+	if g.unificado == nil {
+		g.unificado = map[int]bool{}
+	}
+	hecho := g.unificado[uid]
+	g.unificado[uid] = true
+	g.mu.Unlock()
+	marca := ""
+	if g.FicheroEstado != "" {
+		marca = fmt.Sprintf("%s.unificado-%d", g.FicheroEstado, uid)
+		if _, err := os.Stat(marca); err == nil {
+			return
+		}
+	}
+	if hecho {
+		return
+	}
+	ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancela()
+	r, err := g.UnificaSueltas(ctx, uid, ses)
+	if err != nil {
+		depuracion.Log("imputacion", "unificar las líneas sueltas: %v", err)
+		g.mu.Lock()
+		g.unificado[uid] = false
+		g.mu.Unlock()
+		return
+	}
+	if marca != "" && r.Fallos == 0 {
+		os.WriteFile(marca, []byte(r.Mensaje+"\n"), 0o600)
+	}
+	g.avisa()
 }
 
 func (g *Gestor) tieneMaquina(p *Periodo) bool {
@@ -975,4 +1014,109 @@ func Descripcion(titulo, pedido string) string {
 		return fmt.Sprintf("Sesión de pgocode «%s»", titulo)
 	}
 	return fmt.Sprintf("Sesión de pgocode «%s»: %s", titulo, pedido)
+}
+
+// ---- unificar líneas sueltas ----
+
+// UmbralSueltas: las líneas de pgocode por debajo de esta duración se unifican en la línea del día.
+const UmbralSueltas = 5 * time.Minute
+
+// Unificado: resultado de unificar las líneas sueltas.
+type Unificado struct {
+	Lineas  int     `json:"lineas"`  // líneas sueltas unificadas (y borradas)
+	Horas   float64 `json:"horas"`   // su tiempo, sumado a las líneas del día
+	Fallos  int     `json:"fallos"`  // no se pudieron borrar (siguen como estaban)
+	Mensaje string  `json:"mensaje"` // resumen
+}
+
+// UnificaSueltas suma a la línea del día de su fecha, proyecto y tarea las líneas creadas por versiones anteriores
+// de pgocode (una por periodo) de menos de 5 minutos, y las borra. Solo toca líneas de pgocode (ai_session_id
+// «pgocode-…» que no sea una línea del día, o descripción «Sesión de pgocode…»); si Odoo no deja borrar una, su
+// tiempo no se suma.
+func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string) (Unificado, error) {
+	var r Unificado
+	var l []struct {
+		ID        int     `json:"id"`
+		Fecha     string  `json:"date"`
+		Horas     float64 `json:"unit_amount"`
+		Project   []any   `json:"project_id"`
+		Task      any     `json:"task_id"`
+		Sesion    any     `json:"ai_session_id"`
+		Modelo    any     `json:"ai_model"`
+		TokensIn  any     `json:"ai_tokens_input"`
+		TokensOut any     `json:"ai_tokens_output"`
+		Coste     any     `json:"ai_cost"`
+		Name      string  `json:"name"`
+	}
+	dominio := []any{[]any{"user_id", "=", uid}, []any{"unit_amount", "<", UmbralSueltas.Hours()},
+		"|", []any{"ai_session_id", "=like", "pgocode-%"}, []any{"name", "=like", "Sesión de pgocode%"}}
+	campos := map[string]any{"fields": []string{"id", "date", "unit_amount", "project_id", "task_id", "ai_session_id", "ai_model",
+		"ai_tokens_input", "ai_tokens_output", "ai_cost", "name"}, "limit": 2000}
+	if err := g.Odoo.CallKW(ctx, sesionOdoo, "account.analytic.line", "search_read", []any{dominio}, campos, &l); err != nil {
+		return r, err
+	}
+	num := func(v any) float64 { f, _ := v.(float64); return f }
+	texto := func(v any) string { s, _ := v.(string); return s }
+	for _, x := range l {
+		marca := texto(x.Sesion)
+		if marca == "pgocode-h" || strings.HasPrefix(marca, "pgocode-m-") || len(x.Project) < 2 {
+			continue // ya es una línea del día
+		}
+		t, ok := x.Task.([]any)
+		if !ok || len(t) < 2 {
+			continue // sin tarea: no hay línea del día a la que sumarla
+		}
+		clase, agente, modelo := "h", "", texto(x.Modelo)
+		if modelo != "" {
+			clase, agente = "m", agenteDe(modelo)
+		}
+		proy, nombreProy := int(num(x.Project[0])), texto(x.Project[1])
+		tarea, nombreTarea := int(num(t[0])), texto(t[1])
+		k := claveDe(x.Fecha, proy, tarea, clase, agente)
+		g.mu.Lock()
+		g.inicia()
+		d := g.dias[k]
+		if d == nil {
+			d = &Dia{Fecha: x.Fecha, Proyecto: proy, NombreProy: nombreProy, TareaID: tarea, Tarea: nombreTarea, Clase: clase, Agente: agente, Modelo: modelo}
+			g.dias[k] = d
+		}
+		d.UID, d.OdooSesion = uid, sesionOdoo
+		dd := *d
+		g.mu.Unlock()
+		// La línea del día existente (si la hay) se busca antes de sumar, para partir de lo que ya tiene.
+		if dd.LineaID == 0 {
+			g.buscaLinea(ctx, &dd)
+		}
+		var nada any
+		if err := g.Odoo.CallKW(ctx, sesionOdoo, "account.analytic.line", "unlink", []any{[]int{x.ID}}, nil, &nada); err != nil {
+			r.Fallos++
+			depuracion.Log("imputacion", "unificar: no se pudo borrar la línea %d: %v", x.ID, err)
+			continue
+		}
+		g.mu.Lock()
+		d.Cerrado += x.Horas * 3600
+		d.Entrada += int(num(x.TokensIn))
+		d.Salida += int(num(x.TokensOut))
+		d.Coste += num(x.Coste)
+		d.Sucio = true
+		g.mu.Unlock()
+		r.Lineas++
+		r.Horas += x.Horas
+		if g.Diario != "" {
+			if f, err := os.OpenFile(g.Diario, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+				b, _ := json.Marshal(map[string]any{"fecha": g.ahora().Format(time.RFC3339), "evento": "unifica", "linea_borrada": x.ID,
+					"fecha_parte": x.Fecha, "proyecto": proy, "tarea_id": tarea, "clase": clase, "agente": agente, "horas": x.Horas, "descripcion": x.Name})
+				f.Write(append(b, '\n'))
+				f.Close()
+			}
+		}
+	}
+	g.escribeSucias()
+	g.guarda()
+	r.Mensaje = fmt.Sprintf("%d líneas sueltas unificadas (%.0f min) en las líneas del día", r.Lineas, r.Horas*60)
+	if r.Fallos > 0 {
+		r.Mensaje += fmt.Sprintf("; %d no se pudieron borrar y siguen como estaban", r.Fallos)
+	}
+	depuracion.Log("imputacion", "unificar (usuario %d): %s", uid, r.Mensaje)
+	return r, nil
 }

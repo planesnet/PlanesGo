@@ -81,6 +81,17 @@ func (s *Servidor) imputacionGestor(w http.ResponseWriter, r *http.Request, ses 
 	jsonOK(w, map[string]bool{"gestor_pgocode": GestorPgocode()})
 }
 
+// imputacionUnificar: suma a las líneas del día las líneas sueltas de pgocode de menos de 5 minutos y las borra.
+func (s *Servidor) imputacionUnificar(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	res, err := s.Imputacion.UnificaSueltas(r.Context(), ses.UID, ses.OdooSesion)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	s.Eventos.Emite(map[string]string{"tipo": "imputacion"})
+	jsonOK(w, res)
+}
+
 // proyectoTareas: tareas abiertas del proyecto en Odoo (para elegir a cuál imputa una sesión).
 func (s *Servidor) proyectoTareas(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("proyecto"))
