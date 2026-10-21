@@ -124,10 +124,11 @@ export const PlanesGo = async ({ directory, worktree }: { directory?: string; wo
       const sid = String(input?.sessionID || "default");
       const toolName = String(input?.tool || "");
       const args = (output?.args || {}) as Record<string, any>;
-      if (toolName.startsWith("planesgo_") || toolName.startsWith("mcp__planesgo__")) {
+      if (toolName.startsWith("pgo_") || toolName.startsWith("planesgo_") || toolName.startsWith("mcp__pgo__") || toolName.startsWith("mcp__planesgo__")) {
         const updated = runHook(workDir, "mcp", { session_id: sid, tool_name: toolName, tool_input: args })?.hookSpecificOutput?.updatedInput;
         if (updated) Object.assign(args, updated);
-        if (!toolName.endsWith("planesgo_search_projects")) {
+        // Buscar proyecto (pgo_project sin project_id) no lleva ruta ni sesión.
+        if (!toolName.endsWith("planesgo_search_projects") && !(toolName.endsWith("pgo_project") && !args.project_id)) {
           if (!args.project_path && workDir) args.project_path = workDir;
           if (!args.session_id && sid) args.session_id = sid;
         }

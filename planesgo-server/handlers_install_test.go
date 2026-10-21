@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,9 +35,25 @@ func TestInstallBundleContainsHookAndSource(t *testing.T) {
 		}
 		found[h.Name] = h.Mode
 	}
-	for _, f := range []string{".claude/hooks/planesgo_claude_hook.py", ".claude/commands/planesgo.md", ".claude/commands/pgo.md", ".opencode/plugins/planesgo.ts", "cmd/planesgo-mcp/main.go", "go.mod", "scripts/install-claude-hook.sh", "scripts/install-opencode-plugin.sh"} {
+	esperados := []string{".claude/hooks/planesgo_claude_hook.py", ".claude/commands/pgo.md", ".opencode/plugins/planesgo.ts", "go.mod", "go.sum", "scripts/install-claude-hook.sh", "scripts/install-opencode-plugin.sh"}
+	// Todo el código de pgo-mcp (menos las pruebas), para que el instalador pueda compilar el paquete
+	fuentes, err := filepath.Glob("cmd/pgo-mcp/*.go")
+	if err != nil || len(fuentes) == 0 {
+		t.Fatalf("no se encuentran los fuentes de cmd/pgo-mcp: %v", err)
+	}
+	for _, f := range fuentes {
+		if !strings.HasSuffix(f, "_test.go") {
+			esperados = append(esperados, filepath.ToSlash(f))
+		}
+	}
+	for _, f := range esperados {
 		if _, ok := found[f]; !ok {
-			t.Errorf("falta %s en el paquete", f)
+			t.Errorf("falta %s en el paquete (añádelo a //go:embed en handlers_install.go)", f)
+		}
+	}
+	for f := range found {
+		if strings.HasSuffix(f, "_test.go") {
+			t.Errorf("las pruebas no deben ir en el paquete: %s", f)
 		}
 	}
 	if found[".claude/hooks/planesgo_claude_hook.py"] != 0755 {

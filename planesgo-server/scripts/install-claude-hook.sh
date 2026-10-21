@@ -4,8 +4,8 @@
 # USUARIO: funciona en CUALQUIER proyecto (no solo PlanesGo), bloquea
 # Edit/Write/Bash hasta que el proyecto esté vinculado a Odoo (nunca asume
 # "PLANESGO" por defecto), y reutiliza el mismo binario/cuenta que Antigravity.
-# También instala el comando /planesgo para revisar el estado del tracking
-# (proyecto vinculado, token, hook, binario) en cualquier sesión, a demanda.
+# También instala el comando /pgo (estado, buscar y vincular el proyecto, añadir
+# minutos) y el servidor MCP «pgo» (binario pgo-mcp) en cualquier sesión.
 #
 # Uso genérico en cualquier sesión de Claude Code (nueva o ya abierta), local
 # o en la nube — siempre descarga la versión más reciente desde el servidor de PlanesGo
@@ -15,7 +15,7 @@
 # También sirve como "Setup script" del entorno cloud pegando ese mismo
 # curl|bash, o el contenido de este fichero directamente.
 #
-# Requisitos: curl, tar, python3 y go (para compilar planesgo-mcp), y $PLANESGO_TOKEN o
+# Requisitos: curl, tar, python3 y go (para compilar pgo-mcp), y $PLANESGO_TOKEN o
 # $ANTIGRAVITY_TOKEN, o ~/.planesgo_auth.json. Con token, instala también PSF (Planes Software Factory)
 # en ~/.planesgo/PSF; sin token (p. ej. en el «Setup script» de la nube), PSF se descarga al empezar la sesión.
 # Idempotente: se puede ejecutar varias veces sin duplicar nada.
@@ -37,7 +37,7 @@ rm -f "$HOOKS_DIR/planesgo-track.sh"
 
 # 0. Origen de los ficheros: el repositorio local si se ejecuta desde él; si no, el paquete del servidor --
 SRC_DIR=""
-if [ -f "./cmd/planesgo-mcp/main.go" ] && [ -f "./.claude/hooks/planesgo_claude_hook.py" ]; then
+if [ -d "./cmd/pgo-mcp" ] && [ -f "./.claude/hooks/planesgo_claude_hook.py" ]; then
     SRC_DIR="$(pwd)"
 else
     SRC_DIR="$(mktemp -d)"
@@ -53,16 +53,15 @@ cp "$SRC_DIR/.claude/hooks/planesgo_claude_hook.py" "$HOOKS_DIR/planesgo_claude_
 chmod +x "$HOOKS_DIR/planesgo_claude_hook.py"
 echo "OK: hook instalado en $HOOKS_DIR/planesgo_claude_hook.py"
 
-# 1b. Comando /planesgo (diagnóstico, búsqueda/vinculación, +N horas, --update, init, psf) y su alias /pgo --
+# 1b. Comando /pgo (estado, búsqueda/vinculación, +N minutos, --update, psf); /planesgo ya no existe -------
 COMMANDS_DIR="$HOME/.claude/commands"
 mkdir -p "$COMMANDS_DIR"
-for c in planesgo pgo; do
-    if cp "$SRC_DIR/.claude/commands/$c.md" "$COMMANDS_DIR/$c.md" 2>/dev/null; then
-        echo "OK: comando /$c instalado en $COMMANDS_DIR/$c.md"
-    else
-        echo "AVISO: no se pudo instalar el comando /$c (no crítico, el tracking funciona igual)."
-    fi
-done
+rm -f "$COMMANDS_DIR/planesgo.md"
+if cp "$SRC_DIR/.claude/commands/pgo.md" "$COMMANDS_DIR/pgo.md" 2>/dev/null; then
+    echo "OK: comando /pgo instalado en $COMMANDS_DIR/pgo.md"
+else
+    echo "AVISO: no se pudo instalar el comando /pgo (no crítico, el tracking funciona igual)."
+fi
 
 # 2. settings.json de usuario: fusiona los hooks sin machacar lo que ya haya -
 SETTINGS_FILE="$HOME/.claude/settings.json"
@@ -100,7 +99,7 @@ def ensure(event, matcher, mode, timeout):
 ensure("SessionStart", None, "session-start", 10)
 ensure("UserPromptSubmit", None, "prompt", 10)
 ensure("PreToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "guard", 10)
-ensure("PreToolUse", "mcp__planesgo(-mcp)?__.*", "mcp", 10)
+ensure("PreToolUse", "mcp__(pgo|planesgo(-mcp)?)__.*", "mcp", 10)
 ensure("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash", "track", 25)
 ensure("Stop", None, "turn-end", 10)
 ensure("SessionEnd", None, "session-end", 30)
@@ -112,33 +111,39 @@ with open(path, "w") as f:
 print(f"OK: hooks globales (PSF unificado) fusionados en {path}")
 PY_EOF
 
-# 3. Binario planesgo-mcp: siempre se reconstruye con la versión actual del repo ---
+# 3. Binario pgo-mcp: siempre se reconstruye con la versión actual del repo --------
+# planesgo-mcp queda como enlace simbólico a pgo-mcp, para los hooks que aún lo llaman así.
 if command -v go >/dev/null 2>&1; then
-    if [ -n "$SRC_DIR" ] && [ -f "$SRC_DIR/cmd/planesgo-mcp/main.go" ]; then
-        echo "==> Compilando planesgo-mcp..."
-        (cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_DIR/planesgo-mcp" cmd/planesgo-mcp/main.go) \
-            && echo "OK: planesgo-mcp instalado en $BIN_DIR/planesgo-mcp" \
-            || echo "AVISO: fallo al compilar planesgo-mcp."
+    if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR/cmd/pgo-mcp" ]; then
+        echo "==> Compilando pgo-mcp..."
+        (cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_DIR/pgo-mcp.nuevo" ./cmd/pgo-mcp \
+            && mv -f "$BIN_DIR/pgo-mcp.nuevo" "$BIN_DIR/pgo-mcp") \
+            && echo "OK: pgo-mcp instalado en $BIN_DIR/pgo-mcp" \
+            || echo "AVISO: fallo al compilar pgo-mcp."
     fi
-elif [ -x "$BIN_DIR/planesgo-mcp" ]; then
-    echo "AVISO: 'go' no está disponible; se mantiene el planesgo-mcp ya instalado (puede no tener las últimas funciones)."
+elif [ -x "$BIN_DIR/pgo-mcp" ]; then
+    echo "AVISO: 'go' no está disponible; se mantiene el pgo-mcp ya instalado (puede no tener las últimas funciones)."
 else
-    echo "AVISO: 'go' no está disponible; no se pudo instalar planesgo-mcp. El hook quedará en no-op hasta que lo instales manualmente."
+    echo "AVISO: 'go' no está disponible; no se pudo instalar pgo-mcp. El hook quedará en no-op hasta que lo instales manualmente."
+fi
+if [ -x "$BIN_DIR/pgo-mcp" ]; then
+    ln -sfn pgo-mcp "$BIN_DIR/planesgo-mcp" && echo "OK: $BIN_DIR/planesgo-mcp enlaza a pgo-mcp (compatibilidad)."
 fi
 
-# 3b. Servidor MCP: registra planesgo-mcp como herramienta nativa (user scope) -
-# Evita el guard de Bash y los problemas de escapado de shell al buscar/vincular
-# proyectos. Idempotente: se borra y se vuelve a añadir, porque "claude mcp add"
-# falla si ya existe.
-if [ -x "$BIN_DIR/planesgo-mcp" ] && command -v claude >/dev/null 2>&1; then
-    claude mcp remove planesgo-mcp -s user >/dev/null 2>&1 || true
-    if claude mcp add --scope user --transport stdio planesgo-mcp -- "$BIN_DIR/planesgo-mcp" >/dev/null 2>&1; then
-        echo "OK: planesgo-mcp registrado como servidor MCP (user scope)."
+# 3b. Servidor MCP «pgo» como herramienta nativa (user scope) ------------------
+# Idempotente: se borra y se vuelve a añadir, porque "claude mcp add" falla si ya existe.
+# Se retiran los registros antiguos (planesgo y planesgo-mcp).
+if [ -x "$BIN_DIR/pgo-mcp" ] && command -v claude >/dev/null 2>&1; then
+    for viejo in planesgo planesgo-mcp pgo; do
+        claude mcp remove "$viejo" -s user >/dev/null 2>&1 || true
+    done
+    if claude mcp add --scope user --transport stdio pgo -- "$BIN_DIR/pgo-mcp" >/dev/null 2>&1; then
+        echo "OK: pgo-mcp registrado como servidor MCP «pgo» (user scope)."
     else
-        echo "AVISO: no se pudo registrar planesgo-mcp como servidor MCP; se seguirá usando por CLI."
+        echo "AVISO: no se pudo registrar el servidor MCP «pgo»; se seguirá usando pgo-mcp por CLI."
     fi
 else
-    echo "AVISO: 'claude' no disponible o falta el binario; se seguirá usando planesgo-mcp por CLI."
+    echo "AVISO: 'claude' no disponible o falta el binario; se seguirá usando pgo-mcp por CLI."
 fi
 
 # 3c. Arranque de PSF en cada sesión (hook SessionStart): descarga PSF con el token de la sesión y carga su
@@ -195,5 +200,5 @@ fi
 echo ""
 echo "Instalación completada. Cada proyecto NUEVO (distinto de PlanesGo) se bloqueará"
 echo "para editar hasta que lo vincules una vez a su proyecto de Odoo:"
-echo '  planesgo-mcp --set-project "Nombre exacto del proyecto en Odoo" --path "/ruta/al/proyecto"'
+echo '  /pgo <texto del proyecto>   (o: pgo-mcp --project "<texto>", y luego pgo-mcp --project-id N --link --path "/ruta/al/proyecto")'
 echo "El propio asistente te lo pedirá automáticamente si intenta trabajar sin vincular."

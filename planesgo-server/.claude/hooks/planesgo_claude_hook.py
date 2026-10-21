@@ -77,7 +77,7 @@ EXEMPT_PREFIXES = (
 )
 
 SAFE_BINS = {
-    "planesgo-mcp", "planesgo-track", "cd", "ls", "pwd", "grep", "find",
+    "pgo-mcp", "planesgo-mcp", "planesgo-track", "cd", "ls", "pwd", "grep", "find",
     "cat", "head", "tail", "echo", "which", "test", "true", "false",
     "uname", "id", "whoami", "ps", "env", "printenv",
 }
@@ -192,9 +192,11 @@ def has_token():
 def find_bin():
     # En Claude Code en la web el binario suele compilarse dentro del repo (scripts/build_mcp.sh)
     project = os.environ.get("CLAUDE_PROJECT_DIR", "")
-    candidates = [shutil.which("planesgo-mcp"), os.path.join(HOME, ".local/bin/planesgo-mcp")]
+    candidates = [shutil.which("pgo-mcp"), os.path.join(HOME, ".local/bin/pgo-mcp"),
+                  shutil.which("planesgo-mcp"), os.path.join(HOME, ".local/bin/planesgo-mcp")]
     if project:
-        candidates += [os.path.join(project, "bin/planesgo-mcp"), os.path.join(project, "planesgo-mcp")]
+        candidates += [os.path.join(project, "bin/pgo-mcp"), os.path.join(project, "bin/planesgo-mcp"),
+                       os.path.join(project, "planesgo-mcp")]
     for cand in candidates:
         if cand and os.access(cand, os.X_OK):
             return cand
@@ -208,14 +210,11 @@ def unlinked_instructions(root):
         "y las ediciones y comandos de desarrollo están bloqueados. Antes de trabajar:\n"
         "1. Pregunta al usuario a qué proyecto de Odoo corresponde este repositorio. No lo asumas ni lo "
         "deduzcas del nombre de la carpeta, y nunca uses PLANESGO por defecto.\n"
-        "2. Si no conoces el nombre exacto (o el usuario tampoco), búscalo primero con la herramienta MCP "
-        '`mcp__planesgo__planesgo_search_projects` con {"query": "<texto parcial>"} '
-        f'(alternativa CLI: `planesgo-mcp --search-project "<texto parcial>"`); no hace falta acento ni '
-        "mayúsculas exactas. Muestra las coincidencias al usuario para que confirme cuál es.\n"
-        "3. Con el nombre confirmado, vincula con `mcp__planesgo__planesgo_set_project` usando "
-        f'{{"project_name": "<nombre exacto>", "project_path": "{root}"}} '
-        f'(alternativa CLI: `planesgo-mcp --set-project "<nombre exacto>" --path "{root}"`).\n'
-        "4. Si aun así responde que el proyecto no existe, díselo al usuario y repite la búsqueda. "
+        "2. Búscalo con la herramienta MCP `mcp__pgo__pgo_project` con {\"query\": \"<texto>\"} "
+        "(alternativa CLI: `pgo-mcp --project \"<texto>\"`) y pregunta al usuario cuál de las coincidencias es.\n"
+        "3. Con la elegida, vincula con `mcp__pgo__pgo_project` usando "
+        f'{{"project_id": <id>, "project_path": "{root}"}} '
+        f'(alternativa CLI: `pgo-mcp --project-id <id> --link --path "{root}"`).\n'
         "No continúes con la tarea hasta que la vinculación se confirme."
     )
 
@@ -481,7 +480,7 @@ def is_safe_command(cmd):
         return True
     parts = cmd.split()
     base = os.path.basename(parts[0])
-    if base in ("planesgo-mcp", "planesgo-track"):
+    if base in ("pgo-mcp", "planesgo-mcp", "planesgo-track"):
         return True
     if SHELL_META.search(cmd):
         return False
@@ -533,14 +532,15 @@ def on_mcp(payload):
     tool_name = str(payload.get("tool_name") or "")
     changed = False
 
-    if not args.get("project_path") and not tool_name.endswith("planesgo_search_projects"):
+    busqueda = tool_name.endswith("planesgo_search_projects") or (tool_name.endswith("pgo_project") and not args.get("project_id"))
+    if not args.get("project_path") and not busqueda:
         root = session_project(payload)
         if root:
             args["project_path"] = root
             changed = True
 
     sid = str(payload.get("session_id") or "").strip()
-    if sid and not args.get("session_id") and not tool_name.endswith("planesgo_search_projects"):
+    if sid and not args.get("session_id") and not busqueda:
         args["session_id"] = sid
         changed = True
 
@@ -566,7 +566,7 @@ def on_guard(payload):
         if is_safe_command(cmd):
             # Si invoca planesgo-mcp o planesgo-track por CLI y hay session_id, inyectarlo para aislamiento por sesión
             sid = sanitize_session_id(payload.get("session_id"))
-            if sid and cmd and os.path.basename(cmd.split()[0]) in ("planesgo-mcp", "planesgo-track"):
+            if sid and cmd and os.path.basename(cmd.split()[0]) in ("pgo-mcp", "planesgo-mcp", "planesgo-track"):
                 if "--session-id" not in cmd and "PLANESGO_SESSION_ID=" not in cmd:
                     args["command"] = f"{cmd} --session-id {sid}"
                     print(json.dumps({"hookSpecificOutput": {

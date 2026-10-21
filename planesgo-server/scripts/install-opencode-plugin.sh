@@ -3,10 +3,10 @@
 # Instala el sistema de telemetría e imputación horaria de PlanesGo (PSF) en
 # OpenCode Desktop / OpenCode CLI (v2.1+) a nivel de USUARIO:
 #   1. Hook unificado ~/.claude/hooks/planesgo_claude_hook.py (con soporte OpenCode)
-#   2. Binario ~/.local/bin/planesgo-mcp
+#   2. Binario ~/.local/bin/pgo-mcp (y planesgo-mcp como enlace a él)
 #   3. Plugin nativo ~/.config/opencode/plugins/planesgo.ts
-#   4. Comandos /planesgo y /pgo en ~/.config/opencode/commands/
-#   5. Configuración MCP e instrucciones PSF en ~/.config/opencode/opencode.json
+#   4. Comando /pgo en ~/.config/opencode/commands/
+#   5. Servidor MCP «pgo» e instrucciones PSF en ~/.config/opencode/opencode.json
 #
 # Uso directo desde el repositorio o vía servidor:
 #   bash scripts/install-opencode-plugin.sh
@@ -31,7 +31,7 @@ mkdir -p "$HOOKS_DIR" "$BIN_DIR" "$OPENCODE_PLUGINS_DIR" "$OPENCODE_COMMANDS_DIR
 
 # 0. Origen de los ficheros: repositorio local o paquete del servidor ----------
 SRC_DIR=""
-if [ -f "./cmd/planesgo-mcp/main.go" ] && [ -f "./.opencode/plugins/planesgo.ts" ]; then
+if [ -d "./cmd/pgo-mcp" ] && [ -f "./.opencode/plugins/planesgo.ts" ]; then
     SRC_DIR="$(pwd)"
 else
     SRC_DIR="$(mktemp -d)"
@@ -47,32 +47,35 @@ cp "$SRC_DIR/.claude/hooks/planesgo_claude_hook.py" "$HOOKS_DIR/planesgo_claude_
 chmod +x "$HOOKS_DIR/planesgo_claude_hook.py"
 echo "OK: motor de reglas y latidos instalado en $HOOKS_DIR/planesgo_claude_hook.py"
 
-# 2. Binario planesgo-mcp ------------------------------------------------------
-if command -v go >/dev/null 2>&1 && [ -f "$SRC_DIR/cmd/planesgo-mcp/main.go" ]; then
-    echo "==> Compilando planesgo-mcp..."
-    (cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_DIR/planesgo-mcp" cmd/planesgo-mcp/main.go) \
-        && echo "OK: planesgo-mcp instalado en $BIN_DIR/planesgo-mcp" \
-        || echo "AVISO: fallo al compilar planesgo-mcp."
-elif [ -x "$BIN_DIR/planesgo-mcp" ]; then
-    echo "OK: planesgo-mcp ya presente en $BIN_DIR/planesgo-mcp"
+# 2. Binario pgo-mcp (planesgo-mcp queda como enlace, para los hooks que aún lo llaman así) ---
+if command -v go >/dev/null 2>&1 && [ -d "$SRC_DIR/cmd/pgo-mcp" ]; then
+    echo "==> Compilando pgo-mcp..."
+    (cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_DIR/pgo-mcp.nuevo" ./cmd/pgo-mcp \
+        && mv -f "$BIN_DIR/pgo-mcp.nuevo" "$BIN_DIR/pgo-mcp") \
+        && echo "OK: pgo-mcp instalado en $BIN_DIR/pgo-mcp" \
+        || echo "AVISO: fallo al compilar pgo-mcp."
+elif [ -x "$BIN_DIR/pgo-mcp" ]; then
+    echo "OK: pgo-mcp ya presente en $BIN_DIR/pgo-mcp"
 else
-    echo "AVISO: 'go' no disponible y no existe $BIN_DIR/planesgo-mcp."
+    echo "AVISO: 'go' no disponible y no existe $BIN_DIR/pgo-mcp."
+fi
+if [ -x "$BIN_DIR/pgo-mcp" ]; then
+    ln -sfn pgo-mcp "$BIN_DIR/planesgo-mcp" && echo "OK: $BIN_DIR/planesgo-mcp enlaza a pgo-mcp (compatibilidad)."
 fi
 
 # 3. Plugin nativo de OpenCode (v2.1+) -----------------------------------------
 cp "$SRC_DIR/.opencode/plugins/planesgo.ts" "$OPENCODE_PLUGINS_DIR/planesgo.ts"
 echo "OK: plugin de OpenCode instalado en $OPENCODE_PLUGINS_DIR/planesgo.ts"
 
-# 4. Comandos /planesgo y /pgo en OpenCode -------------------------------------
-for c in planesgo pgo; do
-    if cp "$SRC_DIR/.claude/commands/$c.md" "$OPENCODE_COMMANDS_DIR/$c.md" 2>/dev/null; then
-        echo "OK: comando /$c instalado en $OPENCODE_COMMANDS_DIR/$c.md"
-    fi
-done
+# 4. Comando /pgo en OpenCode (/planesgo ya no existe) -------------------------
+rm -f "$OPENCODE_COMMANDS_DIR/planesgo.md"
+if cp "$SRC_DIR/.claude/commands/pgo.md" "$OPENCODE_COMMANDS_DIR/pgo.md" 2>/dev/null; then
+    echo "OK: comando /pgo instalado en $OPENCODE_COMMANDS_DIR/pgo.md"
+fi
 
 # 5. Configuración ~/.config/opencode/opencode.json (fusión idempotente) -------
 OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
-python3 - "$OPENCODE_JSON" "$BIN_DIR/planesgo-mcp" <<'PY_EOF'
+python3 - "$OPENCODE_JSON" "$BIN_DIR/pgo-mcp" <<'PY_EOF'
 import json, os, sys
 
 cfg_path = sys.argv[1]
@@ -89,12 +92,17 @@ if os.path.exists(cfg_path):
 
 data.setdefault("$schema", "https://opencode.ai/config.json")
 mcp = data.setdefault("mcp", {})
-# Limpiar clave plana si existía para evitar diagnóstico de conflicto con mcp.servers
+# Se retiran las entradas antiguas «planesgo» (la plana y la de mcp.servers, de instalaciones anteriores)
 mcp.pop("planesgo", None)
-servers = mcp.setdefault("servers", {})
-servers["planesgo"] = {
+servers = mcp.get("servers")
+if isinstance(servers, dict):
+    servers.pop("planesgo", None)
+    if not servers:
+        mcp.pop("servers", None)
+mcp["pgo"] = {
     "type": "local",
     "command": [mcp_bin],
+    "enabled": True,
 }
 
 rules_candidates = [

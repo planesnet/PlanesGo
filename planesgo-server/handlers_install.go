@@ -21,11 +21,16 @@ import (
 // Instalación servida por el propio PlanesGo, para que no dependa de que el repositorio sea público.
 //
 //   - /install/claude-hook.sh: instalador del hook de Claude Code (público, no lleva secretos).
-//   - /install/planesgo.tar.gz: hook, comandos /planesgo y /pgo y código de planesgo-mcp (público: es lo que
-//     el instalador necesita en el «Setup script» de la nube, donde no hay variables de entorno).
+//   - /install/planesgo.tar.gz: hook, comando /pgo, plugin de OpenCode y código de pgo-mcp (cmd/pgo-mcp sin
+//     pruebas, más go.mod y go.sum, para compilarlo con «go build ./cmd/pgo-mcp»). Es público: es lo que el
+//     instalador necesita en el «Setup script» de la nube, donde no hay variables de entorno.
 //   - /install/psf.tar.gz: Planes Software Factory (carpeta PSF/). Solo con token de empleado.
 
-//go:embed scripts/install-claude-hook.sh scripts/install-opencode-plugin.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/planesgo.md .claude/commands/pgo.md .opencode/plugins/planesgo.ts go.mod go.sum cmd/planesgo-mcp/main.go
+// Los .go de cmd/pgo-mcp van uno a uno porque embed no permite excluir los _test.go con un patrón;
+// TestInstallBundleContainsHookAndSource avisa si falta alguno.
+//
+//go:embed scripts/install-claude-hook.sh scripts/install-opencode-plugin.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/pgo.md .opencode/plugins/planesgo.ts go.mod go.sum
+//go:embed cmd/pgo-mcp/cli.go cmd/pgo-mcp/cliente.go cmd/pgo-mcp/config.go cmd/pgo-mcp/herramientas.go cmd/pgo-mcp/latidos.go cmd/pgo-mcp/mcp.go cmd/pgo-mcp/proceso_unix.go cmd/pgo-mcp/proceso_windows.go cmd/pgo-mcp/tipos.go
 var planesgoBundleFS embed.FS
 
 //go:embed all:PSF
