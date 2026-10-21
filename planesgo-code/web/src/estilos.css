@@ -608,3 +608,6 @@ button.miga-item:hover { background: var(--hover); }
 .m-m { color: #8250df; }
 .m-crono .m-h, .m-crono .m-m { color: inherit; opacity: .85; }
 @media (prefers-color-scheme: dark) { .m-h { color: #79c0ff; } .m-m { color: #d2a8ff; } }
+.boton-logo { padding: 2px; border-radius: 8px; display: grid; place-items: center; }
+.boton-logo img { width: 28px; height: 28px; display: block; }
+.boton-logo:hover, .boton-logo[aria-expanded="true"] { background: var(--hover); }

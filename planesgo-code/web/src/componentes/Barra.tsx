@@ -60,8 +60,9 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
   return (
     <header className="barra">
       <div className="menu-usuario" ref={menu}>
-        <button className="boton-avatar" onClick={() => setAbierto(a => !a)} aria-haspopup="menu" aria-expanded={abierto} title={usuario.nombre}>
-          {foto}
+        {/* El logo de pgocode abre el menú: arriba el usuario (avatar y nombre) y debajo sus opciones. */}
+        <button className="boton-logo" onClick={() => setAbierto(a => !a)} aria-haspopup="menu" aria-expanded={abierto} title={`Planes Go Code · ${usuario.nombre}`}>
+          <img src="/logo.svg" alt="Planes Go Code" />
         </button>
         {abierto && (
           <div className="panel-usuario" role="menu">
