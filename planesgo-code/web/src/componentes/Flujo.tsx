@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { get, post, type Proyecto } from '../api';
+import { get, listaCopias, post, quitaCopia, type Proyecto } from '../api';
+import * as C from '../copias';
 import Icono from './Icono';
 import { MenuSesion, type Opcion } from './Proyectos';
 
@@ -107,6 +108,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   const [creando, setCreando] = useState(false);
   const [creada, setCreada] = useState<{ numero: number; url: string } | null>(null);
   const [resolviendo, setResolviendo] = useState<number | null>(null);
+  const [errorAccion, setErrorAccion] = useState('');
 
   // Resolver una issue: se lee su descripción y se pasa al chat (sesión nueva) para que el agente la resuelva.
   const resolver = async (i: Issue) => {
@@ -128,9 +130,22 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   };
   useEffect(() => { setE(null); carga(); }, [proyecto.id, carpeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Copias de trabajo locales por rama: una PR fusionada cuya rama tiene copia ofrece limpiar rama y copia.
+  const [copias, setCopias] = useState<C.Copia[]>([]);
+  const cargaCopias = () => { listaCopias(proyecto.id).then(setCopias).catch(() => setCopias([])); };
+  useEffect(() => { if (e) cargaCopias(); }, [e]); // eslint-disable-line react-hooks/exhaustive-deps
+  const copiaDe = (rama: string) => copias.find(c => c.rama === rama && c.worktree);
+  const limpia = async (c: C.Copia) => {
+    if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Limpiar rama y copia?')) return;
+    setErrorAccion('');
+    try {
+      const r = await quitaCopia(proyecto.id, c.carpeta, true);
+      if (r.aviso) setErrorAccion(r.aviso);
+    } catch (err) { setErrorAccion((err as Error).message); } finally { cargaCopias(); }
+  };
+
   // Acciones de GitHub sobre una issue o PR (menú ⋮ de cada fila): cerrar, «no se hará», reabrir, borrar.
   const [menu, setMenu] = useState<{ tipo: 'issue' | 'pr'; numero: number; estado: string; ancla: HTMLElement } | null>(null);
-  const [errorAccion, setErrorAccion] = useState('');
   const accion = async (tipo: 'issue' | 'pr', numero: number, que: string) => {
     setErrorAccion('');
     try { await post('/api/github/accion', { proyecto: proyecto.id, carpeta, tipo, numero, accion: que }); carga(true); }
@@ -232,7 +247,11 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
         </details>}
         {prsHechas.length > 0 && <details className="gh-fase">
           <summary><Oct n="pr-fusionada" color={MORADO} t={14} /> Pull requests recientes <span className="gh-cuenta">{prsHechas.length}</span></summary>
-          {prsHechas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
+          {prsHechas.map(p => {
+            const c = p.estado === 'MERGED' ? copiaDe(p.rama) : undefined;
+            return <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)}
+              copia={c} alLimpiar={c ? () => limpia(c) : undefined} />;
+          })}
         </details>}
       </>}
     </div>
@@ -265,7 +284,7 @@ function FilaIssue({ i, alAbrir, alResolver, resolviendo, alMenu }: { i: Issue; 
   );
 }
 
-function FilaPR({ p, alAbrir, alMenu }: { p: PR; alAbrir: (u: string) => void; alMenu?: (ancla: HTMLElement) => void }) {
+function FilaPR({ p, alAbrir, alMenu, copia, alLimpiar }: { p: PR; alAbrir: (u: string) => void; alMenu?: (ancla: HTMLElement) => void; copia?: C.Copia; alLimpiar?: () => void }) {
   return (
     <div className="gh-fila-caja">
     <button className="gh-fila" onClick={() => alAbrir(p.url)} title={p.titulo}>
@@ -277,6 +296,12 @@ function FilaPR({ p, alAbrir, alMenu }: { p: PR; alAbrir: (u: string) => void; a
       {p.estado === 'OPEN' && p.checks && <Checks estado={p.checks} />}
       <span className="gh-diff"><b style={{ color: VERDE }}>+{p.mas}</b> <b style={{ color: ROJO }}>−{p.menos}</b></span>
     </button>
+    {alLimpiar && copia && (
+      <button className="gh-limpiar" onClick={alLimpiar} disabled={!copia.se_puede_quitar}
+        title={copia.se_puede_quitar ? `Quita la copia local ${copia.carpeta} y la rama «${p.rama}» (ya fusionada)` : `La copia ${copia.carpeta} tiene trabajo sin guardar: ${copia.pendiente || copia.error || ''}`}>
+        Limpiar rama y copia
+      </button>
+    )}
     {alMenu && <BotonMenu titulo={'Más acciones de la pull request #' + p.numero} alAbrir={alMenu} />}
     </div>
   );

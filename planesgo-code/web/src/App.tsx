@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { escuchaAvisos, get, post, type Proveedor, type Proyecto, type Usuario } from './api';
+import { escuchaAvisos, get, listaCopias, post, quitaCopia, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
+import * as C from './copias';
 import type { PedidoWeb } from './componentes/Navegador';
 import { leeAjustes, AJUSTES_DEFECTO, type AjustesProyecto } from './ajustes';
 import Acceso from './componentes/Acceso';
@@ -26,6 +27,23 @@ function recuerdaProyecto(login: string, id: number) {
   history.replaceState(null, '', u);
   if (!id) return; // al salir se quita de la URL, pero el último proyecto del usuario se conserva
   try { localStorage.setItem(claveProyecto(login), String(id)); } catch { /* sin almacenamiento */ }
+}
+
+// Al borrar una sesión: si trabajaba en una copia de trabajo que creó pgocode y ninguna otra sesión la usa, se
+// ofrece quitarla (solo si no tiene nada sin guardar; si lo tiene, se avisa y se deja).
+async function ofreceQuitarCopia(s: S.Sesion, otras: S.Sesion[]) {
+  let c: C.Copia | null = null;
+  try { c = C.copiaDeSesion(await listaCopias(s.proyecto), s, otras); } catch { return; }
+  if (!c) return;
+  if (!c.se_puede_quitar) {
+    alert(`La sesión trabajaba en una copia de trabajo creada por pgocode:\n${c.carpeta}\n\nTiene trabajo sin guardar (${c.pendiente || c.error || 'no se ha podido comprobar'}): no se quita.`);
+    return;
+  }
+  if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Quitar la copia de trabajo de la sesión borrada?')) return;
+  try {
+    const r = await quitaCopia(s.proyecto, c.carpeta, true);
+    if (r.aviso) alert(r.aviso);
+  } catch (e) { alert('No se ha quitado la copia: ' + (e as Error).message); }
 }
 
 export default function App() {
@@ -213,6 +231,7 @@ export default function App() {
   const borraSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
     const l = S.borra(usuario.login, s);
+    ofreceQuitarCopia(s, l);
     if (s.proyecto !== proyecto?.id) return;
     setSesiones(l);
     setSesion(x => (x?.id === s.id ? l[0] || null : x));

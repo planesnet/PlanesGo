@@ -83,6 +83,7 @@ func (s *Servidor) proyectoPreparar(w http.ResponseWriter, r *http.Request, ses 
 		Rama     string `json:"rama"`
 		Carpeta  string `json:"carpeta"`
 		Remoto   string `json:"remoto"` // carpeta sin repositorio: el que se clona en ella (SSH)
+		Sesion   string `json:"sesion"` // sesión de pgocode (para el registro de copias de trabajo)
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -115,9 +116,17 @@ func (s *Servidor) proyectoPreparar(w http.ResponseWriter, r *http.Request, ses 
 			jsonError(w, http.StatusBadRequest, "esa carpeta no tiene repositorio y el proyecto tampoco: indica el repositorio (SSH) para clonarlo en ella")
 			return
 		}
-		if err := repo.PreparaRama(r.Context(), dir, p.Rama, c); err != nil {
+		creada, nueva, err := repo.PreparaCopia(r.Context(), dir, p.Rama, c)
+		if err != nil {
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if creada {
+			principal, err := repo.RepoPrincipal(r.Context(), dir)
+			if err != nil {
+				principal = dir
+			}
+			s.apuntaCopia(repo.CopiaCreada{Carpeta: c, Rama: p.Rama, Repo: principal, RamaNueva: nueva, Sesion: p.Sesion, Proyecto: p.Proyecto})
 		}
 	}
 	if err := s.Indice.Registra(p.Proyecto, c); err != nil {

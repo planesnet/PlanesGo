@@ -39,10 +39,16 @@ var ramaValida = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	out, err := execGit(ctx, dir, args...).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// execGit prepara una orden git en dir, sin preguntas por terminal (p. ej. al hacer fetch sin clave).
+func execGit(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd
 }
 
 // Lee la información de git de la carpeta (si no es un repositorio, solo carpeta y tipo local).
@@ -107,39 +113,42 @@ func tipo(carpeta string) string {
 // CarpetaDeRama devuelve dónde trabajar en una rama: la propia carpeta si ya está en ella o, si no, una copia
 // de trabajo (git worktree) en base/<repositorio>/<rama>, creada si hace falta. La carpeta del usuario no se toca.
 func CarpetaDeRama(ctx context.Context, carpeta, rama, base string) (string, error) {
+	c, err := CopiaDeRama(ctx, carpeta, rama, base)
+	return c.Carpeta, err
+}
+
+// CopiaDeRama es CarpetaDeRama con lo que ha hecho: Repo vacío si no ha creado ninguna copia (ya estaba).
+func CopiaDeRama(ctx context.Context, carpeta, rama, base string) (CopiaCreada, error) {
 	if rama == "" {
-		return carpeta, nil
+		return CopiaCreada{Carpeta: carpeta}, nil
 	}
 	if !ramaValida.MatchString(rama) || strings.Contains(rama, "..") || strings.HasPrefix(rama, "-") {
-		return "", errors.New("nombre de rama no válido")
+		return CopiaCreada{}, errors.New("nombre de rama no válido")
 	}
 	actual, _ := git(ctx, carpeta, "branch", "--show-current")
 	if actual == rama {
-		return carpeta, nil
+		return CopiaCreada{Carpeta: carpeta}, nil
 	}
 	raiz, err := git(ctx, carpeta, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", errors.New("la carpeta no es un repositorio git")
+		return CopiaCreada{}, errors.New("la carpeta no es un repositorio git")
 	}
 	dir := filepath.Join(base, filepath.Base(raiz), strings.ReplaceAll(rama, "/", "_"))
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return dir, nil
+		return CopiaCreada{Carpeta: dir}, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return "", err
+	creada, nueva, err := PreparaCopia(ctx, raiz, rama, dir)
+	if err != nil {
+		return CopiaCreada{}, fmt.Errorf("no se pudo preparar la copia de la rama %s: %v", rama, err)
 	}
-	// Rama local, o rama remota con seguimiento.
-	if _, err := git(ctx, raiz, "show-ref", "--verify", "--quiet", "refs/heads/"+rama); err == nil {
-		_, err = git(ctx, raiz, "worktree", "add", "--", dir, rama)
-		if err != nil {
-			return "", errors.New("no se pudo preparar la copia de la rama " + rama + " (¿está abierta en otra copia de trabajo?)")
+	c := CopiaCreada{Carpeta: dir, Rama: rama, RamaNueva: nueva}
+	if creada {
+		c.Repo = raiz
+		if p, _, err := Principal(ctx, raiz); err == nil {
+			c.Repo = p
 		}
-		return dir, nil
 	}
-	if _, err := git(ctx, raiz, "worktree", "add", "--track", "-b", rama, "--", dir, "origin/"+rama); err != nil {
-		return "", errors.New("no se pudo preparar la copia de la rama " + rama)
-	}
-	return dir, nil
+	return c, nil
 }
 
 // Copias devuelve en qué carpeta está abierta cada rama (git worktree list): la principal y las copias de trabajo.
@@ -165,40 +174,49 @@ func Copias(ctx context.Context, carpeta string) map[string]string {
 // una copia de trabajo (git worktree) del repositorio en esa rama (local, remota o nueva desde la actual).
 // Nunca cambia de rama una carpeta que ya tenga otra.
 func PreparaRama(ctx context.Context, repoDir, rama, carpeta string) error {
+	_, _, err := PreparaCopia(ctx, repoDir, rama, carpeta)
+	return err
+}
+
+// PreparaCopia es PreparaRama diciendo si ha creado la copia de trabajo y si la rama es nueva.
+func PreparaCopia(ctx context.Context, repoDir, rama, carpeta string) (creada, ramaNueva bool, err error) {
 	if !ramaValida.MatchString(rama) || strings.Contains(rama, "..") || strings.HasPrefix(rama, "-") {
-		return errors.New("nombre de rama no válido")
+		return false, false, errors.New("nombre de rama no válido")
 	}
 	if st, err := os.Stat(carpeta); err == nil {
 		if !st.IsDir() {
-			return errors.New("ya existe un fichero con ese nombre")
+			return false, false, errors.New("ya existe un fichero con ese nombre")
 		}
 		if _, err := git(ctx, carpeta, "rev-parse", "--is-inside-work-tree"); err == nil {
 			actual, _ := git(ctx, carpeta, "branch", "--show-current")
 			if actual != rama {
-				return fmt.Errorf("esa carpeta ya es un repositorio en la rama «%s»", actual)
+				return false, false, fmt.Errorf("esa carpeta ya es un repositorio en la rama «%s»", actual)
 			}
-			return nil
+			return false, false, nil
 		}
 		if ents, _ := os.ReadDir(carpeta); len(ents) > 0 {
-			return errors.New("la carpeta no está vacía y no es un repositorio git")
+			return false, false, errors.New("la carpeta no está vacía y no es un repositorio git")
 		}
 	} else if err := os.MkdirAll(filepath.Dir(carpeta), 0o755); err != nil {
-		return err
+		return false, false, err
 	}
+	// Copias cuya carpeta se borró a mano: git las sigue teniendo y no deja abrir su rama en otra.
+	Prune(ctx, repoDir)
 	if donde, ok := Copias(ctx, repoDir)[rama]; ok {
-		return fmt.Errorf("la rama «%s» ya está abierta en %s", rama, donde)
+		return false, false, fmt.Errorf("la rama «%s» ya está abierta en %s", rama, donde)
 	}
-	git(ctx, repoDir, "fetch", "--quiet", "origin", rama)
 	if _, err := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+rama); err == nil {
 		_, err = git(ctx, repoDir, "worktree", "add", "--", carpeta, rama)
-		return err
+		return err == nil, false, err
 	}
+	// Sin rama local: la del remoto, si la hay (solo entonces hace falta preguntar a origin).
+	git(ctx, repoDir, "fetch", "--quiet", "origin", rama)
 	if _, err := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+rama); err == nil {
 		_, err = git(ctx, repoDir, "worktree", "add", "--track", "-b", rama, "--", carpeta, "origin/"+rama)
-		return err
+		return err == nil, false, err
 	}
-	_, err := git(ctx, repoDir, "worktree", "add", "-b", rama, "--", carpeta)
-	return err
+	_, err = git(ctx, repoDir, "worktree", "add", "-b", rama, "--", carpeta)
+	return err == nil, err == nil, err
 }
 
 // RemotoSSH: un repositorio en formato SSH (git@servidor:organizacion/repositorio.git o ssh://…).

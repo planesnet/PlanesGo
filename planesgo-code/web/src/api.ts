@@ -1,4 +1,5 @@
 import type { Tarea } from './tareas';
+import type { Copia } from './copias';
 // Cliente de la API del backend Go. Toda escritura lleva X-PGO (defensa CSRF) y la cookie de sesión.
 
 export interface Usuario { nombre: string; login: string; odoo?: string; version?: string }
@@ -102,3 +103,8 @@ declare global {
   interface Window { psf?: { escritorio: true; abrirFuera: (url: string) => Promise<void>; elegirCarpeta?: (inicial?: string) => Promise<string | null> } }
 }
 export const enEscritorio = () => Boolean(window.psf?.escritorio);
+
+// Copias de trabajo (git worktree) del proyecto y quitar una sin perder nada.
+export const listaCopias = (proyecto: number) => get<{ copias: Copia[] }>(`/api/proyecto/copias?proyecto=${proyecto}`).then(r => r.copias);
+export const quitaCopia = (proyecto: number, carpeta: string, borrarRama: boolean) =>
+  post<{ ok: boolean; rama_borrada: boolean; aviso?: string }>('/api/proyecto/quitar-copia', { proyecto, carpeta, borrar_rama: borrarRama });

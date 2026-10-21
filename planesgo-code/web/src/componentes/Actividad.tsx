@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Proyecto } from '../api';
+import { listaCopias, quitaCopia, type Proyecto } from '../api';
+import * as C from '../copias';
 import { conversacion, type Sesion } from '../sesiones';
 import * as T from '../tareas';
 import Icono from './Icono';
@@ -8,7 +9,7 @@ import Programas from './Programas';
 
 // Actividad: todo lo que corre a la vez en el proyecto, en un sitio. El agente de la sesión (si está trabajando),
 // sus subagentes, tareas en segundo plano y lista de tareas; los programas del proyecto (fuera del agente, también
-// los que adoptó pgocode), y los planes guardados.
+// los que adoptó pgocode), los planes guardados y las copias de trabajo (git worktree) de los repositorios.
 
 export default function Actividad({ proyecto, carpeta, sesion, directorio, versionProcesos, alAbrir }: {
   proyecto: Proyecto; carpeta: string; sesion?: Sesion | null; directorio?: string; versionProcesos: number; alAbrir: (url: string) => void;
@@ -87,6 +88,8 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
         </ul>
       </section>
 
+      <CopiasTrabajo proyecto={proyecto.id} />
+
       {plan && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={plan} ocupado={trabajando}
         alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()} alBorrar={() => cargaPlanes()}
         alEjecutar={p => { window.dispatchEvent(new CustomEvent('pgo:ejecutar-plan', { detail: p })); setPlan(null); cargaPlanes(); }} />}
@@ -104,5 +107,48 @@ function FilaTarea({ t }: { t: T.Tarea }) {
         {(t.progreso || t.detalle) && <span className="suave pequeno recorta" title={t.detalle}>{t.estado === 'curso' ? t.progreso : t.detalle}</span>}
       </span>
     </div>
+  );
+}
+
+// Copias de trabajo (git worktree) de los repositorios del proyecto: de pgocode, de subagentes o del usuario.
+// «Quitar» solo aparece si no se pierde nada; si la rama está fusionada, se borra también (git branch -d).
+function CopiasTrabajo({ proyecto }: { proyecto: number }) {
+  const [copias, setCopias] = useState<C.Copia[] | null>(null);
+  const [error, setError] = useState('');
+  const [quitando, setQuitando] = useState('');
+  const carga = () => { setError(''); listaCopias(proyecto).then(setCopias).catch(e => { setCopias([]); setError((e as Error).message); }); };
+  useEffect(() => { setCopias(null); carga(); }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
+  const quita = async (c: C.Copia) => {
+    if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Continuar?')) return;
+    setQuitando(c.carpeta);
+    setError('');
+    try {
+      const r = await quitaCopia(proyecto, c.carpeta, true);
+      if (r.aviso) setError(r.aviso);
+    } catch (e) { setError((e as Error).message); } finally { setQuitando(''); carga(); }
+  };
+  return (
+    <section>
+      <h4>Copias de trabajo <span className="gh-cuenta">{copias?.length ?? 0}</span>
+        <button className="icono" onClick={carga} title="Volver a cargar" aria-label="Volver a cargar las copias de trabajo"><Icono n="recargar" t={13} /></button></h4>
+      {copias && copias.length === 0 && !error && <p className="suave pequeno">Sin copias de trabajo (git worktree) en los repositorios del proyecto.</p>}
+      {error && <p className="error pequeno">{error}</p>}
+      {(copias || []).map(c => {
+        const e = C.estado(c);
+        return (
+          <div key={c.carpeta} className="copia">
+            <span className="copia-texto">
+              <span className="recorta" title={c.carpeta}>{c.carpeta.split('/').pop()}</span>
+              <span className="suave pequeno recorta" title={c.pendiente || c.error || c.carpeta}>
+                {c.rama ? <code>{c.rama}</code> : 'sin rama'} · {C.ORIGENES[c.origen]}{c.pendiente ? ' · ' + c.pendiente : ''}
+              </span>
+            </span>
+            <span className={'copia-estado ' + e}>{C.NOMBRE_ESTADO[e]}</span>
+            {c.se_puede_quitar && <button className="copia-quitar" onClick={() => quita(c)} disabled={quitando === c.carpeta}
+              title={'Quitar la copia de trabajo ' + c.carpeta}>{quitando === c.carpeta ? '…' : 'Quitar'}</button>}
+          </div>
+        );
+      })}
+    </section>
   );
 }

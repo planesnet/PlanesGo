@@ -777,6 +777,17 @@ button.miga-item:hover { background: var(--hover); }
 .act-tarea-texto { flex: 1; min-width: 0; display: grid; }
 .act-tarea.parada { opacity: .7; }
 .act-hechas summary { cursor: pointer; }
+/* Copias de trabajo (git worktree) en Actividad */
+.copia { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; font-size: 12.5px; }
+.copia:hover { background: var(--hover); }
+.copia-texto { flex: 1; min-width: 0; display: grid; }
+.copia-estado { flex: none; font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--linea); white-space: nowrap; }
+.copia-estado.limpia { color: #1a7f37; border-color: #1a7f37; }
+.copia-estado.fusionada { color: #8250df; border-color: #8250df; }
+.copia-estado.cambios { color: #9a6700; border-color: #9a6700; }
+.copia-quitar, .gh-limpiar { flex: none; font-size: 11.5px; font-weight: 600; border: 1px solid var(--linea); border-radius: 6px; padding: 2px 8px; }
+.copia-quitar:hover:not(:disabled), .gh-limpiar:hover:not(:disabled) { background: var(--hover); border-color: var(--suave); }
+.gh-limpiar { margin: 5px 4px 0 0; color: #8250df; border-color: #8250df; }
 
 /* Selector único de formato (ordenador, tablet, móvil; vertical u horizontal) */
 .selector-formato { position: relative; flex: none; }
