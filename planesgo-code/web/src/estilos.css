@@ -529,11 +529,12 @@ button.miga-item:hover { background: var(--hover); }
 
 /* Imputación de tiempo */
 .imputacion { position: relative; }
-.chip-imputa { display: inline-flex; align-items: center; gap: 6px; max-width: 420px; font-size: 12px; border: 1px solid var(--linea); border-radius: 999px; padding: 3px 10px; color: var(--suave); background: var(--superficie); }
-.chip-imputa.trabajando { color: #1a7f37; border-color: #8ddb9e; }
+.chip-imputa { display: inline-flex; align-items: center; gap: 6px; max-width: 460px; font-size: 12px; border: 1px solid #b6c2cf; border-radius: 999px; padding: 3px 11px; color: #3d4b5c; background: #eef2f7; }
+.chip-imputa.trabajando { color: #0f5c2a; border-color: #1a7f37; background: #d3f5dc; }
 .chip-imputa.trabajando svg { animation: latido 1.2s infinite alternate; }
-.chip-imputa.en-espera { color: #9a6700; border-color: #d4a72c; }
-.chip-imputa.error { color: var(--error); }
+.chip-imputa.en-espera { color: #7a5200; border-color: #bf8700; background: #fff1b8; }
+.chip-imputa.error { color: #a40e26; border-color: #cf222e; background: #ffe4e6; }
+.reloj-vivo { font: 600 12px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .panel-imputa { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 420px; max-height: 70vh; overflow-y: auto; scrollbar-width: none; display: grid; gap: 6px;
   background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; box-shadow: 0 10px 32px rgba(0,0,0,.16); padding: 12px; }
 .panel-imputa .regla { margin: 0 0 4px; }

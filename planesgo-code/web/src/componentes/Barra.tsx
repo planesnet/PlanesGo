@@ -8,7 +8,7 @@ interface EstadoAct { version: string; estado: string; nueva?: string; error?: s
 const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
 
 // Barra superior: marca, aviso de actualización pendiente y menú del usuario (avatar).
-export default function Barra({ usuario, alSalir, versionImputacion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number }) {
+export default function Barra({ usuario, alSalir, versionImputacion, sesion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number; sesion?: string }) {
   const [act, setAct] = useState<EstadoAct | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [acerca, setAcerca] = useState(false);
@@ -101,7 +101,7 @@ export default function Barra({ usuario, alSalir, versionImputacion }: { usuario
       </div>
       <span className="marca-barra">Planes <b>Go</b> Code</span>
       <span className="hueco" />
-      <Imputacion version={versionImputacion} />
+      <Imputacion version={versionImputacion} sesion={sesion} />
       {etiqueta && (act!.estado === 'pendiente'
         ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
         : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}

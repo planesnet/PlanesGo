@@ -14,15 +14,15 @@ interface Estado { abiertos: Parte[]; cerrados: Parte[]; gestor_pgocode: boolean
 const hm = (h: number) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
 const k = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 
-export default function Imputacion({ version }: { version: number }) {
+export default function Imputacion({ version, sesion }: { version: number; sesion?: string }) {
   const [e, setE] = useState<Estado | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [, setTic] = useState(0);
   const caja = useRef<HTMLDivElement>(null);
   const carga = () => get<Estado>('/api/imputacion').then(setE).catch(() => {});
   useEffect(() => { carga(); }, [version]);
-  // El tiempo de los partes abiertos avanza en pantalla (sin pedir nada al servidor).
-  useEffect(() => { const t = setInterval(() => setTic(x => x + 1), 30000); return () => clearInterval(t); }, []);
+  // El tiempo avanza en pantalla cada segundo (sin pedir nada al servidor).
+  useEffect(() => { const t = setInterval(() => setTic(x => x + 1), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (!abierto) return;
     const fuera = (ev: MouseEvent) => { if (!caja.current?.contains(ev.target as Node)) setAbierto(false); };
@@ -36,17 +36,23 @@ export default function Imputacion({ version }: { version: number }) {
     carga();
   };
 
-  const duracion = (p: Parte) => (Date.now() - new Date(p.inicio).getTime()) / 3600000;
+  // Lo que se está imputando: trabajando, hasta ahora; en espera, hasta la última actividad (la espera no cuenta).
+  const duracion = (p: Parte) => ((p.estado === 'trabajando' ? Date.now() : new Date(p.ultima).getTime()) - new Date(p.inicio).getTime()) / 3600000;
   const ab = e?.abiertos || [];
   const hoy = (e?.cerrados || []).reduce((t, p) => t + p.horas, 0) + ab.reduce((t, p) => t + duracion(p), 0);
-  const principal = ab.find(p => p.estado === 'trabajando') || ab[0];
+  // La etiqueta muestra el parte de la sesión abierta; si no tiene, el que esté trabajando.
+  const principal = ab.find(p => p.sesion === sesion) || ab.find(p => p.estado === 'trabajando') || ab[0];
+  // Para la etiqueta, al segundo: h:mm:ss.
+  const reloj = (h: number) => { const s = Math.max(0, Math.round(h * 3600)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
   return (
     <div className="imputacion" ref={caja}>
       <button className={'chip-imputa' + (principal ? ' ' + principal.estado : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
         title="Tiempo imputado en Odoo por pgocode">
         <Icono n="reloj" t={14} />
-        {principal ? <span className="recorta">{principal.nombre_proyecto} · {principal.tarea} · {hm(duracion(principal))}</span> : <span>Hoy {hm(hoy)}</span>}
+        {principal
+          ? <><span className="recorta">{principal.nombre_proyecto} · {principal.tarea}</span><b className="reloj-vivo">{reloj(duracion(principal))}</b></>
+          : <span>Hoy {hm(hoy)}</span>}
         {ab.length > 1 && <b>+{ab.length - 1}</b>}
       </button>
       {abierto && e && (

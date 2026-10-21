@@ -239,7 +239,7 @@ export default function App() {
 
   return (
     <div className="aplicacion">
-    <Barra usuario={usuario} alSalir={salir} versionImputacion={versionImputacion} />
+    <Barra usuario={usuario} alSalir={salir} versionImputacion={versionImputacion} sesion={sesion?.id} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}
       style={panel && anchoPanel ? { gridTemplateColumns: `248px minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
