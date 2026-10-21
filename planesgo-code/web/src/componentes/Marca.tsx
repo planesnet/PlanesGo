@@ -46,7 +46,8 @@ export function Agente({ id, t = 18 }: { id?: string; t?: number }) {
     case 'opencode':
       return (<svg {...v} aria-label="OpenCode"><rect x="3" y="4" width="18" height="16" rx="3" fill="#1c1c1a" /><path d="M8 10l3 2-3 2M13 15h3" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>);
     case 'antigravity':
-      return (<svg {...v} aria-label="Antigravity"><path d="M12 3l8 17H4z" fill="none" stroke="#7b61ff" strokeWidth="2.2" strokeLinejoin="round" /><circle cx="12" cy="14" r="2" fill="#7b61ff" /></svg>);
+      // Logotipo oficial (antigravity.google/assets/image/brand/antigravity-icon__full-color.png, reducido a 64 px).
+      return <img src="/antigravity.png" width={t} height={t} alt="Antigravity" role="img" style={{ objectFit: 'contain' }} />;
     default:
       return <Icono n="web" t={t} />;
   }
