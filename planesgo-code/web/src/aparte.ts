@@ -4,7 +4,8 @@
 //   · suelta: nada que ver con el trabajo; un modelo barato sin historial.
 //   · contexto: sobre el trabajo, sin pedir nada; una copia de la sesión del agente que después se tira.
 // Solo se manda aparte lo que está claro: en la duda, a la conversación (que el agente no se pierda una orden es
-// más importante que algo de ruido en su contexto). Prefijos: «?» estado, «//» aparte.
+// más importante que algo de ruido en su contexto). Prefijos: «?» estado, «//» aparte, «!» a la conversación
+// (también Ctrl+Intro).
 // Funciones puras para poder probarlas: node --test src/aparte.test.ts
 import type { Herramienta, Mensaje, Uso } from './api';
 import type { Tarea } from './tareas';
@@ -50,6 +51,7 @@ export interface Situacion {
 export function decide(texto: string, s: Situacion): Decision {
   const t = texto.trim();
   // Prefijos: los pide el usuario, se respetan siempre.
+  if (/^!(\s|$)/.test(t)) return { destino: 'conversacion', texto: t.slice(1).trim(), forzado: true, motivo: 'prefijo «!»' };
   if (/^\?(\s|$)/.test(t) || t === '?') return { destino: 'estado', texto: t.slice(1).trim(), forzado: true, motivo: 'prefijo «?»' };
   if (t.startsWith('//')) {
     const r = t.slice(2).trim();
@@ -139,6 +141,16 @@ export const incorporacion = (l: { pregunta: string; respuesta: string }[]) => l
 export const sumaUso = (a: Uso | undefined, b: Uso): Uso => ({ entrada: (a?.entrada || 0) + b.entrada, salida: (a?.salida || 0) + b.salida, coste: (a?.coste || 0) + (b.coste || 0) });
 
 export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto' };
+
+// Etiqueta del destino mientras se escribe (antes de enviar).
+export function etiqueta(d: Decision): string {
+  if (d.destino === 'conversacion') return d.duda ? '→ Conversación o aparte: lo decide pgocode al enviar' : '→ Conversación';
+  return '→ ' + (d.destino === 'estado' ? 'Estado (sin tokens)' : 'Aparte · ' + NOMBRES[d.destino].toLowerCase());
+}
+
+// siguiente: el destino al pulsar la etiqueta (conversación → aparte con contexto → suelta → estado → conversación).
+const ORDEN_DESTINOS: Destino[] = ['conversacion', 'contexto', 'suelta', 'estado'];
+export const siguiente = (d: Destino): Destino => ORDEN_DESTINOS[(ORDEN_DESTINOS.indexOf(d) + 1) % ORDEN_DESTINOS.length];
 
 function ultimoTexto(m: Mensaje): string {
   const ps = m.partes || [];

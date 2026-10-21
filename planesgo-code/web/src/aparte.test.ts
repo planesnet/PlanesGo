@@ -61,6 +61,21 @@ test('prefijos: «?» estado y «//» aparte, siempre (también con el agente li
   assert.equal(A.decide('// ¿qué hora es?', { ...ocupado, activo: false }).destino, 'suelta', 'los prefijos valen aunque esté desactivado');
 });
 
+test('prefijo «!»: a la conversación, aunque parezca una pregunta de estado o esté desactivado', () => {
+  assert.deepEqual(A.decide('! ¿cómo va?', ocupado), { destino: 'conversacion', texto: '¿cómo va?', forzado: true, motivo: 'prefijo «!»' });
+  assert.equal(A.decide('! el puerto es 8069', { ...ocupado, activo: false }).texto, 'el puerto es 8069');
+  assert.equal(A.decide('¡Perfecto!', ocupado).destino, 'conversacion', '«¡» no es el prefijo');
+  assert.ok(!A.decide('!importante', ocupado).forzado, 'el prefijo va seguido de un espacio');
+});
+
+test('etiqueta y cambio de destino', () => {
+  assert.equal(A.etiqueta(A.decide('¿cómo va?', ocupado)), '→ Estado (sin tokens)');
+  assert.equal(A.etiqueta(A.decide('haz los tests', ocupado)), '→ Conversación');
+  assert.match(A.etiqueta(A.decide('¿hay tests en el repo?', ocupado)), /lo decide pgocode/);
+  assert.equal(A.etiqueta({ destino: 'suelta', texto: 'x', motivo: '' }), '→ Aparte · suelta');
+  assert.deepEqual(['conversacion', 'contexto', 'suelta', 'estado'].map(d => A.siguiente(d as A.Destino)), ['contexto', 'suelta', 'estado', 'conversacion']);
+});
+
 test('aprende de las correcciones (por la firma del mensaje)', () => {
   assert.equal(A.firma('¿Oye, qué tal va el despliegue en Odoo?'), 'despliegue odoo');
   let a: A.Aprendidas = {};

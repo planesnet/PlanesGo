@@ -240,16 +240,39 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     return (u && u.tipo === 'texto' ? u.texto : m?.texto || '').slice(-600);
   };
 
+  // La decisión de adónde irá lo que se escribe (se ve en la etiqueta encima del cuadro, antes de enviar).
+  const situacion = (t: string): AP.Situacion => ({ ocupado: Boolean(enCurso), ultimo: ultimoDelAgente(mensajes), hayConversacion: mensajes.length > 0,
+    adjuntos: adjuntos.filter(a => !a.subiendo && !a.error).length, aprendidas: proyecto ? leeLS(claveAprendidas(proyecto.id), {}) : {},
+    activo: sesion?.decideAparte !== false, ordenPlan: PL.interpreta(t) !== null });
+  const decisionViva = useMemo(() => (texto.trim() && prov?.tipo === 'agente' ? AP.decide(texto, situacion(texto)) : null),
+    [texto, enCurso, mensajes, adjuntos, sesion?.decideAparte, prov?.tipo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Destino elegido a mano en la etiqueta (o con Ctrl+Intro): manda sobre la decisión automática.
+  const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
+  useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
+  useEffect(() => setDestinoManual(null), [sesion?.id]);
+
   // Intro: pgocode decide antes de enviar si va a la conversación (ahora o a la cola) o aparte (ver aparte.ts).
-  async function decideYEnvia() {
+  // forzar: el destino que manda (Ctrl+Intro → conversación); si no, el elegido en la etiqueta o el automático.
+  async function decideYEnvia(forzar?: AP.Destino) {
     const t = texto.trim();
     if (!t || !sesion || !proyecto || subiendo) return;
     const ses = sesion;
     const listos = adjuntos.filter(a => !a.subiendo && !a.error);
     const ultimo = ultimoDelAgente(mensajes);
-    const d = AP.decide(t, { ocupado: Boolean(enCurso), ultimo, hayConversacion: mensajes.length > 0, adjuntos: listos.length, aprendidas: leeLS(claveAprendidas(proyecto.id), {}),
-      activo: ses.decideAparte !== false, ordenPlan: PL.interpreta(t) !== null });
-    if (d.destino === 'conversacion' && !d.duda) { if (enCurso) encola(); else envia(); return; }
+    const auto = AP.decide(t, situacion(t));
+    const elegido = forzar || destinoManual;
+    // Lo que el usuario elige en contra de lo que habría decidido pgocode se aprende (para los parecidos).
+    if (elegido && !auto.forzado && !auto.duda && elegido !== auto.destino) {
+      ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), t, elegido));
+    }
+    const d: AP.Decision = elegido ? { destino: elegido, texto: auto.forzado ? auto.texto : t, forzado: true, motivo: forzar ? 'Ctrl+Intro' : 'elegido por ti' } : auto;
+    setDestinoManual(null);
+    if (d.destino === 'conversacion' && !d.duda) {
+      if (!d.forzado) { if (enCurso) encola(); else envia(); return; }
+      setTexto(''); setAdjuntos([]);
+      aConversacion(ses.id, d.texto, listos);
+      return;
+    }
     setTexto(''); setAdjuntos([]);
     let destino: AP.Destino = d.destino, motivo = d.motivo;
     if (d.duda) {
@@ -548,7 +571,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); decideYEnvia(); }
+    // Intro: decide pgocode (o lo elegido en la etiqueta); Ctrl+Intro: siempre a la conversación.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); decideYEnvia(e.ctrlKey || e.metaKey ? 'conversacion' : undefined); }
   };
 
   const eligeAgente = (p: Proveedor) => {
@@ -736,6 +760,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 ))}
               </div>
             )}
+            {decisionViva && (
+              <div className="destino-mensaje">
+                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino))}
+                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo. Ctrl+Intro: siempre a la conversación; prefijos «!» conversación, «//» aparte, «?» estado.`}>
+                  {destinoManual ? AP.etiqueta({ destino: destinoManual, texto: '', motivo: '' }) : AP.etiqueta(decisionViva)}
+                </button>
+                {destinoManual && <span className="suave pequeno">elegido por ti</span>}
+              </div>
+            )}
             <div className={'entrada' + (arrastrando ? ' soltando' : '')}
               onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setArrastrando(true); } }}
               onDragLeave={() => setArrastrando(false)}
@@ -764,14 +797,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; irá a la cola… («?» estado, «//» pregunta aparte)'
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; irá a la cola… («?» estado, «//» aparte, «!» o Ctrl+Intro a la conversación)'
                   : 'Escribe… (/plan para crear un plan)'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? (texto.trim()
-                  ? <button className="redondo primario" onClick={decideYEnvia} disabled={subiendo} title="Intro: a la cola (se enviará cuando termine el agente) o, si no es para el agente, aparte" aria-label="Poner en cola"><Icono n="enviar" t={16} /></button>
+                  ? <button className="redondo primario" onClick={() => decideYEnvia()} disabled={subiendo} title="Intro: a la cola (se enviará cuando termine el agente) o, si no es para el agente, aparte" aria-label="Poner en cola"><Icono n="enviar" t={16} /></button>
                   : <button className="redondo" onClick={para} title={cola.length ? 'Parar (la cola vuelve al cuadro de texto)' : 'Parar'} aria-label="Parar"><Icono n="parar" t={16} /></button>)
-                : <button className="redondo primario" onClick={decideYEnvia} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
+                : <button className="redondo primario" onClick={() => decideYEnvia()} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
             <div className="pie-redactor">
