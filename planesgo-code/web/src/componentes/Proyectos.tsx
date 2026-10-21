@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
@@ -40,11 +40,14 @@ export default function Proyectos(props: Props) {
   const [plegados, setPlegados] = useState<Set<number>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('pgo:plegados:' + usuario.login.toLowerCase()) || '[]') as number[]); } catch { return new Set(); }
   });
+  const guardaPlegados = (n: Set<number>) => {
+    try { localStorage.setItem('pgo:plegados:' + usuario.login.toLowerCase(), JSON.stringify([...n])); } catch { /* sin almacenamiento */ }
+    return n;
+  };
   const pliega = (id: number) => setPlegados(prev => {
     const n = new Set(prev);
     if (n.has(id)) n.delete(id); else n.add(id);
-    try { localStorage.setItem('pgo:plegados:' + usuario.login.toLowerCase(), JSON.stringify([...n])); } catch { /* sin almacenamiento */ }
-    return n;
+    return guardaPlegados(n);
   });
   // Al cambiar o borrar una sesión de otro proyecto, se vuelve a leer su lista.
   const [, setCambios] = useState(0);
@@ -55,7 +58,13 @@ export default function Proyectos(props: Props) {
   const borra = (s: Sesion) => { props.alBorrarSesion(s); setCambios(c => c + 1); };
 
   // Cada proyecto que se abre pasa a ser el más reciente.
-  useEffect(() => { if (actual) setRecientes(guardaReciente(usuario.login, actual.id)); }, [actual?.id, usuario.login]);
+  // El proyecto elegido (o el de la sesión elegida) queda arriba y desplegado; el resto, debajo y plegados.
+  useEffect(() => {
+    if (!actual) return;
+    const r = guardaReciente(usuario.login, actual.id);
+    setRecientes(r);
+    setPlegados(guardaPlegados(new Set(r.filter(id => id !== actual.id))));
+  }, [actual?.id, usuario.login]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carga = (recargar = false) => {
     setError('');
@@ -93,7 +102,7 @@ export default function Proyectos(props: Props) {
       <div className="lista">
         {error && <p className="error">{error}</p>}
         {!lista && !error && <p className="suave">Cargando proyectos de Odoo…</p>}
-        {lista && !buscando && <p className="titulo-lista">Recientes</p>}
+        {lista && !buscando && !visibles.some(p => p.id === actual?.id) && <p className="titulo-lista">Recientes</p>}
         {lista && visibles.length === 0 && <p className="suave">{buscando ? 'Ningún proyecto coincide.' : 'Aún no has abierto ningún proyecto. Búscalo arriba para empezar.'}</p>}
         {buscando ? visibles.map(p => (
           <button key={p.id} className={'proyecto' + (actual?.id === p.id ? ' activo' : '')} onClick={() => { alElegir(p); setFiltro(''); }}>
@@ -102,13 +111,17 @@ export default function Proyectos(props: Props) {
               {p.cliente?.nombre || 'Sin cliente'}{p.carpetas.length > 0 && <span className="local" title={p.carpetas.join('\n')}> · local</span>}
             </span>
           </button>
-        )) : visibles.map(p => {
+        )) : visibles.map((p, i) => {
           // Como los grupos de Claude Code: el proyecto y, debajo, sus sesiones abiertas.
           const activo = actual?.id === p.id;
           const plegado = plegados.has(p.id);
           const ss = activo ? props.sesiones : sesionesDe(usuario.login, p.id);
+          // Tras el proyecto activo (siempre el primero), el título del resto.
+          const otros = i === 1 && visibles[0].id === actual?.id;
           return (
-            <section key={p.id} className={'grupo' + (activo ? ' activo' : '')}>
+            <Fragment key={p.id}>
+            {otros && <p className="titulo-lista">Otros proyectos</p>}
+            <section className={'grupo' + (activo ? ' activo' : '')}>
               <div className="grupo-cabecera">
                 <button className="icono plegar" onClick={() => pliega(p.id)} aria-expanded={!plegado} aria-label={plegado ? 'Desplegar' : 'Plegar'}>
                   <Icono n="bajar" t={12} />
@@ -133,6 +146,7 @@ export default function Proyectos(props: Props) {
               </div>
               {!plegado && <Sesiones {...props} hostingDe={id => leeAjustes(usuario.login, id).hosting?.tipo} proyecto={p} lista={ss} alCambiarSesion={cambia} alBorrarSesion={borra} />}
             </section>
+            </Fragment>
           );
         })}
       </div>
