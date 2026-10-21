@@ -18,3 +18,6 @@ func SenalGrupo(pgid int, fuerza bool) {
 	}
 	syscall.Kill(-pgid, s)
 }
+
+// MiGrupo: el grupo de procesos de pgocode.
+func MiGrupo() int { return syscall.Getpgrp() }

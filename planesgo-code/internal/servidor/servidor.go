@@ -162,6 +162,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
 	mux.HandleFunc("POST /api/procesos/guardar", s.conSesion(s.procesosGuarda))
+	mux.HandleFunc("GET /api/procesos/externos", s.conSesion(s.procesosExternos))
+	mux.HandleFunc("POST /api/procesos/externos/parar", s.conSesion(s.procesosExternosPara))
 	mux.HandleFunc("GET /api/procesos/salida", s.conSesion(s.procesosSalida))
 	mux.HandleFunc("GET /api/pgo/{orden}", s.pgo)
 	mux.HandleFunc("POST /api/pgo/{orden}", s.pgo)

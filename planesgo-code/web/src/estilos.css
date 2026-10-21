@@ -780,3 +780,9 @@ button.miga-item:hover { background: var(--hover); }
 .icono-formato { display: inline-flex; }
 .icono-formato.girado svg { transform: rotate(90deg); }
 .selector-formato .menu-lanzador { width: 200px; }
+
+/* Programas externos (en marcha fuera de pgocode): ver y parar */
+.externos { display: grid; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--linea); }
+.externos h5 { margin: 0; font-size: 12px; font-weight: 600; }
+.externos details summary { cursor: pointer; padding: 2px 0; }
+.programa.externo .enlace { flex: none; font-family: ui-monospace, monospace; }

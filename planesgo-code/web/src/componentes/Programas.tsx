@@ -63,6 +63,61 @@ export default function Programas({ proyecto, carpeta, version, alAbrir }: {
       {nuevo
         ? <NuevoPrograma alCancelar={() => setNuevo(false)} alLanzar={(c, g) => { setNuevo(false); lanza(c, g); }} />
         : carpeta && <button className="enlace" onClick={() => setNuevo(true)}><Icono n="nuevo" t={13} /> Añadir programa</button>}
+      <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} />
+    </div>
+  );
+}
+
+interface EnRed { grupo: number; pid: number; puertos: number[]; nombre: string; orden: string; carpeta: string; segundos: number }
+
+const edad = (s: number) => s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min' : s < 86400 ? Math.round(s / 3600) + ' h' : Math.round(s / 86400) + ' d';
+
+// Programas externos: los que tienes escuchando en un puerto y no lanzó pgocode (un Odoo que arrancó un agente
+// fuera de pgocode…), del proyecto y del resto de tus carpetas de trabajo, para verlos y pararlos.
+function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version: number; alAbrir: (url: string) => void }) {
+  const [l, setL] = useState<{ proyecto: EnRed[]; otros: EnRed[] } | null>(null);
+  const [error, setError] = useState('');
+  const [parando, setParando] = useState<number[]>([]);
+  const carga = () => get<{ proyecto: EnRed[]; otros: EnRed[] }>(`/api/procesos/externos?proyecto=${proyecto.id}`).then(setL).catch(() => {});
+  useEffect(() => {
+    carga();
+    const t = setInterval(carga, 10000);
+    return () => clearInterval(t);
+  }, [proyecto.id, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const para = async (x: EnRed) => {
+    if (!confirm(`¿Parar «${x.orden.slice(0, 120)}» (puerto ${x.puertos.join(', ')})?`)) return;
+    setError('');
+    setParando(p => [...p, x.grupo]);
+    try { await post('/api/procesos/externos/parar', { proyecto: proyecto.id, grupo: x.grupo }); setTimeout(carga, 1500); setTimeout(carga, 6000); }
+    catch (e) { setError((e as Error).message); }
+  };
+  if (!l || (l.proyecto.length === 0 && l.otros.length === 0)) return null;
+  const fila = (x: EnRed) => (
+    <div key={x.grupo} className="programa externo">
+      <div className="programa-fila">
+        <span className={'punto ' + (parando.includes(x.grupo) ? '' : 'ok')} title={parando.includes(x.grupo) ? 'parando…' : 'en marcha'} />
+        <span className="programa-texto">
+          <b className="recorta" title={x.carpeta}>{x.carpeta.split('/').filter(Boolean).slice(-2).join('/')} <span className="suave pequeno">· {edad(x.segundos)}</span></b>
+          <code className="recorta" title={x.orden}>{x.orden}</code>
+        </span>
+        {x.puertos.slice(0, 2).map(p => (
+          <button key={p} className="enlace pequeno" onClick={() => alAbrir(`http://localhost:${p}/`)} title={`Abrir http://localhost:${p}/`}>:{p}</button>
+        ))}
+        <button className="icono" onClick={() => para(x)} disabled={parando.includes(x.grupo)} title="Parar (todo su grupo de procesos)" aria-label="Parar"><Icono n="parar" t={14} /></button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="externos">
+      <h5>Otros programas en marcha <span className="suave pequeno">(fuera de pgocode)</span></h5>
+      {error && <p className="error">{error}</p>}
+      {l.proyecto.length > 0 ? l.proyecto.map(fila) : <p className="suave pequeno">Ninguno de este proyecto.</p>}
+      {l.otros.length > 0 && (
+        <details>
+          <summary className="suave pequeno">De otras carpetas de trabajo ({l.otros.length})</summary>
+          {l.otros.map(fila)}
+        </details>
+      )}
     </div>
   );
 }

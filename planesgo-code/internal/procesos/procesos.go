@@ -44,6 +44,7 @@ type Proceso struct {
 	Fin      time.Time `json:"fin,omitzero"`
 	Lanzado  string    `json:"lanzado"` // usuario | agente
 
+	grupo   int // su grupo de procesos
 	lineas  []string
 	total   int
 	cancela context.CancelFunc
@@ -91,6 +92,7 @@ func (g *Gestor) Lanza(nombre string, proyecto int, carpeta, orden, lanzado stri
 		cancela()
 		return nil, err
 	}
+	p.grupo = cmd.Process.Pid
 	g.mu.Lock()
 	g.ps[nombre] = p
 	g.mu.Unlock()
@@ -251,4 +253,17 @@ func (g *Gestor) EnCurso() int {
 		}
 	}
 	return n
+}
+
+// Grupos: los grupos de procesos de los programas en marcha de pgocode.
+func (g *Gestor) Grupos() map[int]bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	m := map[int]bool{}
+	for _, p := range g.ps {
+		if p.Estado == "curso" && p.grupo > 0 {
+			m[p.grupo] = true
+		}
+	}
+	return m
 }

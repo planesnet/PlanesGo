@@ -23,7 +23,7 @@ func (g *Gestor) Adopta(nombre string, proyecto int, carpeta, orden string, grup
 	g.Para(nombre)
 	ctx, cancela := context.WithCancel(context.Background())
 	p := &Proceso{Nombre: nombre, Proyecto: proyecto, Carpeta: carpeta, Orden: orden, Estado: "curso", Inicio: time.Now(),
-		Lanzado: "agente", cancela: cancela, hecho: make(chan struct{})}
+		Lanzado: "agente", cancela: cancela, hecho: make(chan struct{}), grupo: grupo}
 	g.mu.Lock()
 	g.ps[nombre] = p
 	g.mu.Unlock()
