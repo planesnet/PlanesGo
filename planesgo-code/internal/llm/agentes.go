@@ -70,6 +70,22 @@ func (a *Agente) Info(ctx context.Context) Info {
 }
 
 func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error {
+	err := a.chat(ctx, p, emite)
+	// La sesión propia del agente ya no existe (p. ej. OpenCode con otra carpeta de datos): se empieza otra.
+	if err != nil && p.SesionAgente != "" && ctx.Err() == nil && sesionPerdida(err) {
+		depuracion.Log(a.Clave, "la sesión %s ya no existe: se empieza otra", p.SesionAgente)
+		p.SesionAgente = ""
+		return a.chat(ctx, p, emite)
+	}
+	return err
+}
+
+func sesionPerdida(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "session") && (strings.Contains(s, "not found") || strings.Contains(s, "no existe") || strings.Contains(s, "notfound"))
+}
+
+func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error {
 	if p.Carpeta == "" {
 		return errors.New("este proyecto no tiene carpeta local: falta un .planesgo.json con su odoo_project_id")
 	}

@@ -1,6 +1,6 @@
 ---
-description: Imputación en Odoo — estado, buscar y vincular el proyecto (pgo <texto>), añadir minutos (pgo +N [tarea]), actualizar (--update) o PSF (psf on|off|estado)
-argument-hint: [texto de búsqueda | +N minutos [tarea] | --update | psf on|off|estado]
+description: "Imputación en Odoo — estado, buscar y vincular el proyecto (pgo <texto>), añadir minutos (pgo +N [tarea]), actualizar (--update) o PSF (psf on|off|estado)"
+argument-hint: "[texto de búsqueda | +N minutos [tarea] | --update | psf on|off|estado]"
 ---
 
 Argumento recibido: "$ARGUMENTS". Responde en español y de forma breve. La imputación de tiempo es automática (pgocode o, fuera de pgocode, los hooks): este comando solo hace lo que se pide aquí.
