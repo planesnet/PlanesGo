@@ -297,10 +297,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
               onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setArrastrando(true); } }}
               onDragLeave={() => setArrastrando(false)}
               onDrop={e => { e.preventDefault(); setArrastrando(false); adjunta(Array.from(e.dataTransfer.files)); }}>
-              <input ref={selector} type="file" multiple hidden onChange={e => { adjunta(Array.from(e.target.files || [])); e.target.value = ''; }} />
-              <button className="icono adjuntar" onClick={() => selector.current?.click()} title="Adjuntar ficheros (también puedes arrastrarlos o pegar una imagen)" aria-label="Adjuntar ficheros" disabled={!sesion.hosting}>
-                <Icono n="clip" t={17} />
-              </button>
+              {/* El agente, separado por una línea vertical de lo que es el mensaje (adjuntos y texto). */}
               <div className="selector-agente">
                 <button className="agente-actual" onClick={() => setVerAgentes(v => !v)} title={prov ? prov.nombre : 'Elegir agente'} aria-label="Agente" aria-haspopup="listbox" aria-expanded={verAgentes}>
                   <Agente id={sesion.agente} t={18} /><Icono n="bajar" t={12} />
@@ -318,6 +315,10 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                   </ul>
                 )}
               </div>
+              <input ref={selector} type="file" multiple hidden onChange={e => { adjunta(Array.from(e.target.files || [])); e.target.value = ''; }} />
+              <button className="icono adjuntar" onClick={() => selector.current?.click()} title="Adjuntar ficheros (también puedes arrastrarlos o pegar una imagen)" aria-label="Adjuntar ficheros" disabled={!sesion.hosting}>
+                <Icono n="clip" t={17} />
+              </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
                 placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'}

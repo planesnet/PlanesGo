@@ -243,8 +243,8 @@ textarea { resize: none; }
 .miga-item.rama select { border: none; background: transparent; padding: 2px 4px; font-size: 13px; color: var(--texto); }
 .miga-item.rama select:hover { background: var(--hover); }
 
-/* Selector de agente a la izquierda del cuadro de texto */
-.selector-agente { position: relative; align-self: flex-start; margin: -4px 0 0 -6px; }
+/* Selector de agente: lo primero del cuadro, separado del mensaje por una línea vertical */
+.selector-agente { position: relative; align-self: stretch; display: flex; align-items: flex-end; margin: -8px 2px -8px -6px; padding: 8px 8px 10px 0; border-right: 1px solid var(--linea); }
 .agente-actual { display: inline-flex; align-items: center; gap: 2px; padding: 4px 5px; border-radius: 8px; color: var(--suave); }
 .lista-agentes { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 15; list-style: none; margin: 0; padding: 4px; width: 240px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); }
 .lista-agentes button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; }
