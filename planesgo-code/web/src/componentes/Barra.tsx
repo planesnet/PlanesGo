@@ -101,7 +101,8 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
       </div>
       <span className="marca-barra">Planes <b>Go</b> Code</span>
       <span className="hueco" />
-      <Imputacion version={versionImputacion} sesion={sesion} />
+      {/* El reloj de imputación, centrado en la ventana. */}
+      <div className="centro-barra"><Imputacion version={versionImputacion} sesion={sesion} /></div>
       {etiqueta && (act!.estado === 'pendiente'
         ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
         : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}

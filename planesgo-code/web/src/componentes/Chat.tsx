@@ -194,7 +194,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
             {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
             <span className="sep">·</span>
             <button className="miga-item imputa" onClick={alAjustes} title="Tarea de Odoo a la que se imputa el tiempo de esta sesión (cámbiala en los ajustes)">
-              <Icono n="reloj" t={13} /> {sesion.tarea || 'pgocode - Sesión IA'}
+              <Icono n="reloj" t={13} /> {sesion.tarea || 'Desarrollo'}
             </button>
             {repo && repo.ramas.length > 0 && (
               <><span className="sep">/</span>

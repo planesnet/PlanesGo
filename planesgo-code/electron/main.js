@@ -116,8 +116,18 @@ function endurece(ses) {
 app.on('session-created', endurece);
 
 function ventana() {
+  // La ventana se abre donde y como estaba la última vez (si esa posición sigue cayendo en alguna pantalla).
+  const ficheroVentana = path.join(app.getPath('userData'), 'ventana.json');
+  let previa = {};
+  try { previa = JSON.parse(fs.readFileSync(ficheroVentana, 'utf8')); } catch { /* primera vez */ }
+  const { screen } = require('electron');
+  const visible = previa.x !== undefined && screen.getAllDisplays().some(d => {
+    const a = d.workArea;
+    return previa.x < a.x + a.width - 100 && previa.x + (previa.width || 0) > a.x + 100 && previa.y >= a.y - 10 && previa.y < a.y + a.height - 100;
+  });
   const w = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Planes Go Code', autoHideMenuBar: true,
+    width: previa.width || 1440, height: previa.height || 900, ...(visible ? { x: previa.x, y: previa.y } : {}),
+    minWidth: 900, minHeight: 600, title: 'Planes Go Code', autoHideMenuBar: true,
     icon: path.join(__dirname, 'icono', 'pgocode.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: true },
   });
@@ -127,7 +137,20 @@ function ventana() {
   const soloArnes = (e, url) => { if (!esArnes(url)) { e.preventDefault(); if (esWeb(url)) shell.openExternal(url); } };
   w.webContents.on('will-navigate', soloArnes);
   w.webContents.on('will-redirect', soloArnes);
-  w.on('close', () => console.error('[pgocode] ventana cerrada'));
+  if (previa.maximizada) w.maximize();
+  const guardaVentana = () => {
+    try {
+      const b = w.getNormalBounds();
+      fs.writeFileSync(ficheroVentana, JSON.stringify({ ...b, maximizada: w.isMaximized() }));
+    } catch { /* sin disco: la próxima vez, tamaño por defecto */ }
+  };
+  let espera;
+  const guardaLuego = () => { clearTimeout(espera); espera = setTimeout(guardaVentana, 500); };
+  w.on('resize', guardaLuego);
+  w.on('move', guardaLuego);
+  w.on('maximize', guardaVentana);
+  w.on('unmaximize', guardaVentana);
+  w.on('close', () => { guardaVentana(); console.error('[pgocode] ventana cerrada'); });
   w.webContents.on('did-fail-load', (_, c, d) => console.error('[pgocode] no carga la interfaz:', c, d));
   w.loadURL(URL_ARNES);
 }

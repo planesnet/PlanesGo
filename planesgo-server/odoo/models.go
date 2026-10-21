@@ -89,12 +89,20 @@ func (t *TimesheetEntry) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		CreateDateRaw interface{} `json:"create_date"`
 		WriteDateRaw  interface{} `json:"write_date"`
+		AIModelRaw    interface{} `json:"ai_model"`      // Odoo devuelve false si está vacío
+		AISessionRaw  interface{} `json:"ai_session_id"` // ídem
 		*Alias
 	}{
 		Alias: (*Alias)(t),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+	if str, ok := aux.AIModelRaw.(string); ok {
+		t.AIModel = str
+	}
+	if str, ok := aux.AISessionRaw.(string); ok {
+		t.AISessionID = str
 	}
 	if str, ok := aux.CreateDateRaw.(string); ok {
 		t.CreateDate = str
@@ -174,8 +182,11 @@ func (t *TimesheetEntry) CreateTimeLocal() string {
 // (p. ej. "Desarrollo"), así que la tarea acaba con las dos y no sirve para distinguir cada parte.
 func entryOrigin(aiModel, description string) string {
 	if m := strings.ToLower(strings.TrimSpace(aiModel)); m != "" {
-		if strings.Contains(m, "claude") {
+		switch {
+		case strings.Contains(m, "claude"):
 			return "claude"
+		case strings.Contains(m, "opencode"):
+			return "opencode"
 		}
 		return "antigravity"
 	}
@@ -189,8 +200,16 @@ func entryOrigin(aiModel, description string) string {
 	return ""
 }
 
+// EsPgocode: parte creado por pgocode (ai_session_id «pgocode-…»). pgocode separa cada sesión en una línea de
+// Hora Máquina (turnos del agente, con ai_model) y otra de Hora Hombre (sin ai_model), en la misma tarea: en sus
+// partes manda ai_model, no las etiquetas de la tarea.
+func (t *TimesheetEntry) EsPgocode() bool { return strings.HasPrefix(t.AISessionID, "pgocode-") }
+
 // IsAntigravity indica si la imputación o su tarea proviene del sistema Antigravity.
 func (t *TimesheetEntry) IsAntigravity() bool {
+	if t.EsPgocode() {
+		return entryOrigin(t.AIModel, "") == "antigravity"
+	}
 	if origin := entryOrigin(t.AIModel, t.Name); origin != "" {
 		return origin == "antigravity"
 	}
@@ -210,6 +229,9 @@ func (t *TimesheetEntry) IsAntigravity() bool {
 
 // IsClaude indica si la imputación o su tarea proviene del hook de Claude Code.
 func (t *TimesheetEntry) IsClaude() bool {
+	if t.EsPgocode() {
+		return entryOrigin(t.AIModel, "") == "claude"
+	}
 	if origin := entryOrigin(t.AIModel, t.Name); origin != "" {
 		return origin == "claude"
 	}
@@ -226,6 +248,12 @@ func (t *TimesheetEntry) IsClaude() bool {
 
 // IsHoraMaquina indica si la imputación tiene la etiqueta Hora Máquina o proviene de Antigravity/Claude.
 func (t *TimesheetEntry) IsHoraMaquina() bool {
+	if t.EsPgocode() {
+		return strings.TrimSpace(t.AIModel) != ""
+	}
+	if entryOrigin(t.AIModel, t.Name) == "opencode" {
+		return true
+	}
 	for _, tag := range t.Tags {
 		if strings.EqualFold(tag.Name, "Hora Máquina") || strings.EqualFold(tag.Name, "Hora Maquina") {
 			return true

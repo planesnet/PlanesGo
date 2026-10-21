@@ -123,9 +123,9 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
               const id = Number(e.target.value);
               cambia({ tareaId: id || undefined, tarea: id ? tareas?.find(t => t.id === id)?.nombre : undefined });
             }}>
-              <option value={0}>pgocode - Sesión IA (por defecto; se crea si no existe)</option>
+              <option value={0}>Desarrollo (por defecto; se crea si no existe)</option>
               {s.tareaId && !tareas?.some(t => t.id === s.tareaId) && <option value={s.tareaId}>{s.tarea}</option>}
-              {(tareas || []).filter(t => t.nombre !== 'pgocode - Sesión IA').map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+              {(tareas || []).filter(t => t.nombre !== 'Desarrollo').map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
             </select>
           </span>
           {!tareas && <span className="suave pequeno">Cargando tareas de Odoo…</span>}

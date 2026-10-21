@@ -6,7 +6,8 @@ import Icono from './Icono';
 // al pulsar, el panel con la regla, los partes de hoy y el interruptor «PlanesGo en los agentes».
 
 interface Parte {
-  sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string; linea_id: number;
+  sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string;
+  linea_maquina: number; linea_hombre: number; horas_maquina: number; horas_hombre: number;
   inicio: string; ultima: string; fin?: string; horas: number; tokens: number; coste: number; estado: 'trabajando' | 'activo' | 'en-espera' | 'cerrado' | 'pendiente' | 'error'; error?: string; desc: string;
 }
 interface Estado { abiertos: Parte[]; cerrados: Parte[]; gestor_pgocode: boolean }
@@ -59,7 +60,9 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
       {abierto && e && (
         <div className="panel-imputa" role="dialog" aria-label="Imputación de tiempo">
           <p className="suave pequeno regla">
-            Cada sesión imputa en Odoo a <b>su proyecto</b> y a <b>su tarea</b> (en los ajustes de la sesión; por defecto «pgocode - Sesión IA»).
+            Cada sesión imputa en Odoo a <b>su proyecto</b> y a <b>su tarea</b> (en los ajustes de la sesión; por defecto la canónica «Desarrollo»),
+            en dos líneas: <b>Hora Máquina</b> (los turnos del agente, con sus tokens) y <b>Hora Hombre</b> (tu trabajo y las esperas).
+            Las líneas están vivas en Odoo: sus horas se ponen al día cada 3 minutos.
             Hay trabajo cuando el agente está con un turno o cuando tú usas la sesión (teclado, ratón, con la ventana en primer plano).
             Tras el último trabajo hay una espera activa de 5 minutos que también cuenta; si no hay más, el parte se cierra con el tiempo
             del inicio al último trabajo + 5 min. Si pgocode se cierra mal, al volver se cierra con su último trabajo; si Odoo falla, se reintenta.
@@ -87,7 +90,7 @@ function Fila({ p, horas }: { p: Parte; horas: number }) {
       <span className={'punto-parte ' + p.estado} />
       <span className="parte-texto">
         <b className="recorta">{p.nombre_proyecto || 'Proyecto ' + p.proyecto} · {p.tarea}</b>
-        <span className="suave pequeno recorta">{p.titulo || 'Sesión sin nombre'}{p.linea_id ? ` · parte ${p.linea_id}` : ''}{p.tokens ? ` · ${k(p.tokens)} tokens` : ''}
+        <span className="suave pequeno recorta">{p.titulo || 'Sesión sin nombre'} · máquina {hm(p.horas_maquina || 0)} · hombre {hm(p.horas_hombre || 0)}{p.tokens ? ` · ${k(p.tokens)} tokens` : ''}
           {p.estado === 'activo' ? ' · trabajando tú' : p.estado === 'trabajando' ? ' · trabajando el agente' : p.estado === 'en-espera' ? ' · espera activa: cuenta; se cierra a los 5 min sin trabajo' : p.estado === 'pendiente' ? ' · Odoo no lo aceptó: se reintenta' : ''}{p.error ? ' · ⚠ ' + p.error : ''}</span>
       </span>
       <span className="parte-horas">{hm(horas)}</span>

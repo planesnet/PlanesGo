@@ -427,6 +427,10 @@ func (c *Client) GetTimesheets(ctx context.Context, domain []interface{}) ([]Tim
 	if c.HasField(ctx, "account.analytic.line", "ai_model") {
 		fields = append(fields, "ai_model")
 	}
+	// ai_session_id «pgocode-…» marca los partes de pgocode (Hora Máquina / Hora Hombre por línea)
+	if c.HasField(ctx, "account.analytic.line", "ai_session_id") {
+		fields = append(fields, "ai_session_id")
+	}
 
 	kwargs := map[string]interface{}{
 		"fields": fields,

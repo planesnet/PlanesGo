@@ -7,57 +7,82 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// odooFalso apunta las llamadas y responde como Odoo (o falla, si se pide).
+// odooFalso: un Odoo en memoria con sus líneas de parte.
 type odooFalso struct {
-	mu       sync.Mutex
-	llamadas []string
-	horas    []float64
-	ia       map[string]any
-	falla    bool
-	sig      int
-	cronos   []any // cronómetros en marcha que «tiene» Odoo
+	mu     sync.Mutex
+	lineas map[int]map[string]any
+	sig    int
+	falla  bool
 }
+
+func nuevoOdoo() *odooFalso { return &odooFalso{lineas: map[int]map[string]any{}, sig: 100} }
 
 func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []any, _ map[string]any, res any) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.llamadas = append(o.llamadas, modelo+"."+metodo)
-	if o.falla && metodo == "write" {
+	if o.falla && modelo == "account.analytic.line" && metodo != "search_read" {
 		return errors.New("Odoo caído")
 	}
 	var r any = true
 	switch modelo + "." + metodo {
 	case "project.task.search_read":
 		r = []any{}
-	case "account.analytic.line.search_read":
-		r = o.cronos
-		if r == nil {
-			r = []any{}
-		}
 	case "project.task.create":
 		r = 7
 	case "account.analytic.line.create":
 		o.sig++
-		r = 98 + o.sig
+		v := map[string]any{"create_date": time.Now().UTC().Format("2006-01-02 15:04:05")}
+		for k, x := range args[0].(map[string]any) {
+			v[k] = x
+		}
+		o.lineas[o.sig] = v
+		r = o.sig
 	case "account.analytic.line.write":
-		m := args[1].(map[string]any)
-		if h, ok := m["unit_amount"].(float64); ok {
-			o.horas = append(o.horas, h)
+		for _, id := range args[0].([]int) {
+			l := o.lineas[id]
+			if l == nil {
+				return errors.New("MissingError: Record does not exist")
+			}
+			for k, x := range args[1].(map[string]any) {
+				l[k] = x
+			}
 		}
-		if _, ok := m["ai_tokens_total"]; ok {
-			o.ia = m
+	case "account.analytic.line.search_read":
+		var l []any
+		for id, v := range o.lineas {
+			if s, _ := v["ai_session_id"].(string); strings.HasPrefix(s, marcaAbierta) {
+				x := map[string]any{"id": id, "project_id": []any{v["project_id"], "PROY"}, "task_id": []any{7, "Desarrollo"}}
+				for k, y := range v {
+					if k != "project_id" && k != "task_id" {
+						x[k] = y
+					}
+				}
+				l = append(l, x)
+			}
 		}
+		r = l
 	}
 	b, _ := json.Marshal(r)
 	return json.Unmarshal(b, res)
 }
 
-// Reloj de prueba.
+func (o *odooFalso) linea(clase string) map[string]any {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, v := range o.lineas {
+		if s, _ := v["ai_session_id"].(string); strings.HasSuffix(s, "-"+clase) {
+			return v
+		}
+	}
+	return nil
+}
+
 type reloj struct {
 	mu sync.Mutex
 	t  time.Time
@@ -67,82 +92,161 @@ func (r *reloj) ahora() time.Time     { r.mu.Lock(); defer r.mu.Unlock(); return
 func (r *reloj) pasa(d time.Duration) { r.mu.Lock(); r.t = r.t.Add(d); r.mu.Unlock() }
 
 func espera(t *testing.T, cond func() bool) {
-	for i := 0; i < 100 && !cond(); i++ {
-		time.Sleep(10 * time.Millisecond)
+	t.Helper()
+	for i := 0; i < 200 && !cond(); i++ {
+		time.Sleep(5 * time.Millisecond)
 	}
 	if !cond() {
 		t.Fatal("no se cumplió a tiempo")
 	}
 }
 
-func nuevo(o Odoo, r *reloj) *Gestor { return &Gestor{Odoo: o, Ahora: r.ahora} }
+var t0 = time.Date(2026, 10, 21, 9, 0, 0, 0, time.Local)
 
-// Turno del agente de 10 min + espera de 5 min sin nada: se imputan 15 minutos, con los datos de IA.
-func TestTurnoYEspera(t *testing.T) {
-	o := &odooFalso{}
-	r := &reloj{t: time.Date(2026, 10, 21, 9, 0, 0, 0, time.Local)}
-	g := nuevo(o, r)
-	fin := g.Empieza(Trabajo{Sesion: "s1", Proyecto: 447, UID: 2, Modelo: "Claude Code", Desc: "x"})
-	espera(t, func() bool { ab, _ := g.Estado(); return len(ab) == 1 && ab[0].LineaID > 0 })
+// Turno del agente de 10 min, la persona revisa 6 min más y 5 de espera: máquina 10 min (con IA) y hombre 11 min.
+func TestDosLineas(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	tr := Trabajo{Sesion: "s1", Proyecto: 447, UID: 2, Modelo: "Claude Code opus", Titulo: "Informe"}
+	fin := g.Empieza(tr)
+	espera(t, func() bool { return o.linea("m") != nil && o.linea("h") != nil })
+	if s := o.linea("m")["ai_session_id"]; s != "pgocode-abierto-s1-m" || o.linea("m")["ai_model"] != "Claude Code opus" {
+		t.Fatalf("línea de máquina al abrir: %v", o.linea("m"))
+	}
 	g.SumaUso("s1", 1000, 200, 0.05)
 	r.pasa(10 * time.Minute)
 	fin()
-	if ab, _ := g.Estado(); ab[0].Estado != "en-espera" {
-		t.Fatalf("estado %s", ab[0].Estado)
-	}
-	r.pasa(4 * time.Minute)
-	g.revisa()
-	if ab, _ := g.Estado(); len(ab) != 1 {
-		t.Fatal("a los 4 min sigue abierto")
-	}
-	r.pasa(2 * time.Minute)
-	g.revisa()
-	_, ce := g.Estado()
-	if len(ce) != 1 || ce[0].Horas != 0.25 || ce[0].Estado != "cerrado" {
-		t.Fatalf("cerrado: %+v", ce)
-	}
-	if fmt.Sprint(o.horas) != "[0.25]" || o.ia["ai_tokens_total"] != 1200 || o.ia["ai_session_id"] != "pgocode-s1" {
-		t.Errorf("Odoo: horas %v ia %v", o.horas, o.ia)
-	}
-}
-
-// La actividad humana abre el parte y lo mantiene: 20 min de uso (sin agente) + 5 de espera = 25 min.
-func TestActividadHumana(t *testing.T) {
-	o := &odooFalso{}
-	r := &reloj{t: time.Date(2026, 10, 21, 9, 0, 0, 0, time.Local)}
-	g := nuevo(o, r)
-	tr := Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5, Tarea: "A"}
-	g.Actividad(tr)
-	if ab, _ := g.Estado(); ab[0].Estado != "activo" {
-		t.Fatalf("estado %s", ab[0].Estado)
-	}
-	for i := 0; i < 5; i++ {
-		r.pasa(4 * time.Minute)
-		g.revisa()
+	for i := 0; i < 3; i++ {
+		r.pasa(2 * time.Minute)
 		g.Actividad(tr)
 	}
-	r.pasa(2 * time.Minute)
-	g.revisa()
-	if ab, _ := g.Estado(); ab[0].Estado != "en-espera" {
-		t.Fatalf("estado %s", ab[0].Estado)
-	}
-	r.pasa(4 * time.Minute)
+	r.pasa(5 * time.Minute)
 	g.revisa()
 	espera(t, func() bool { _, ce := g.Estado(); return len(ce) == 1 })
-	if _, ce := g.Estado(); ce[0].Horas != float64(25)/60 {
-		t.Errorf("horas %v", ce[0].Horas)
+	m, h := o.linea("m"), o.linea("h")
+	if m["unit_amount"] != float64(10)/60 || h["unit_amount"] != float64(11)/60 {
+		t.Errorf("horas: máquina %v hombre %v", m["unit_amount"], h["unit_amount"])
+	}
+	if m["ai_session_id"] != "pgocode-s1-m" || h["ai_session_id"] != "pgocode-s1-h" || fmt.Sprint(m["ai_tokens_total"]) != "1200" {
+		t.Errorf("cierre: m %v h %v", m, h)
+	}
+	if _, ok := h["ai_model"]; ok {
+		t.Error("la línea de hombre no debe llevar ai_model")
+	}
+	if !strings.Contains(h["name"].(string), "Informe") {
+		t.Errorf("descripción: %v", h["name"])
 	}
 }
 
-// Si Odoo falla al cerrar, el parte queda pendiente y se reintenta hasta que entra.
-func TestReintento(t *testing.T) {
-	o := &odooFalso{falla: true}
+// Solo uso humano: una línea de hombre, ninguna de máquina; tarea canónica por defecto.
+func TestSoloHumano(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Actividad(Trabajo{Sesion: "s1", Proyecto: 1})
+	espera(t, func() bool { return o.linea("h") != nil })
+	r.pasa(6 * time.Minute)
+	g.revisa()
+	espera(t, func() bool { _, ce := g.Estado(); return len(ce) == 1 })
+	_, ce := g.Estado()
+	if o.linea("m") != nil || ce[0].Tarea != "Desarrollo" || ce[0].HorasHombre != float64(5)/60 {
+		t.Errorf("solo humano: %+v", ce[0])
+	}
+}
+
+// Las horas de una línea viva se escriben cada 3 minutos (Odoo siempre al día).
+func TestLineaViva(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5})
+	espera(t, func() bool { return o.linea("m") != nil })
+	r.pasa(4 * time.Minute)
+	g.revisa()
+	espera(t, func() bool { l := o.linea("m"); return l != nil && l["unit_amount"] != float64(0) })
+	if v := o.linea("m")["unit_amount"]; v != float64(4)/60 {
+		t.Errorf("máquina a los 4 min: %v", v)
+	}
+}
+
+// Tras actualizarse, la versión nueva retoma las líneas abiertas que tiene Odoo (sin el fichero) y las cierra bien.
+func TestRetomaDesdeOdoo(t *testing.T) {
+	o := nuevoOdoo()
 	r := &reloj{t: time.Now()}
-	g := nuevo(o, r)
-	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5})()
-	espera(t, func() bool { ab, _ := g.Estado(); return len(ab) == 1 && ab[0].LineaID > 0 })
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	fin := g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 7, UID: 2, OdooSesion: "x"})
+	espera(t, func() bool { return o.linea("m") != nil && o.linea("h") != nil })
+	r.pasa(2 * time.Minute)
+	fin()
+	g.Suspende()
+	g2 := &Gestor{Odoo: o, Ahora: r.ahora}
+	g2.Sincroniza(context.Background(), 2, "x")
+	ab, _ := g2.Estado()
+	if len(ab) != 1 || ab[0].LineaMaquina == 0 || ab[0].LineaHombre == 0 || ab[0].Sesion != "s1" {
+		t.Fatalf("retomado: %+v", ab)
+	}
+	g2.CierraTodo()
+	if o.linea("m")["ai_session_id"] != "pgocode-s1-m" {
+		t.Errorf("cerrado: %v", o.linea("m"))
+	}
+}
+
+// Tras un cierre inesperado, al arrancar se retoma lo reciente (fichero) y no se duplican líneas.
+func TestRetomaFichero(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "partes.json")
+	o := nuevoOdoo()
+	r := &reloj{t: time.Now()}
+	g := &Gestor{Odoo: o, Ahora: r.ahora, FicheroEstado: f}
+	g.Actividad(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 7, UID: 2, OdooSesion: "x"})
+	espera(t, func() bool { return o.linea("h") != nil })
+	g.guarda()
+	g2 := &Gestor{Odoo: o, Ahora: r.ahora, FicheroEstado: f}
+	ctx, cancela := context.WithCancel(context.Background())
+	defer cancela()
+	g2.Arranca(ctx)
+	ab, _ := g2.Estado()
+	o.mu.Lock()
+	n := len(o.lineas)
+	o.mu.Unlock()
+	if len(ab) != 1 || n != 1 {
+		t.Fatalf("abiertos %+v, líneas en Odoo %d", ab, n)
+	}
+	if b, _ := os.ReadFile(f); len(b) == 0 {
+		t.Error("sin estado en disco")
+	}
+}
+
+// Si la línea ya no existe en Odoo (borrada o validada), no se reintenta sin fin: queda en error.
+func TestLineaBorrada(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Actividad(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 7})
+	espera(t, func() bool { return o.linea("h") != nil })
+	o.mu.Lock()
+	o.lineas = map[int]map[string]any{}
+	o.mu.Unlock()
 	g.Cierra("s1", "prueba")
-	if _, ce := g.Estado(); len(ce) != 1 || ce[0].Estado != "pendiente" {
+	_, ce := g.Estado()
+	if len(ce) != 1 || ce[0].Estado != "error" || len(g.pendientes) != 0 {
+		t.Fatalf("cerrado %+v pendientes %d", ce, len(g.pendientes))
+	}
+}
+
+// Si Odoo está caído al cerrar, queda pendiente y entra al reintentar.
+func TestReintento(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Actividad(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 7})
+	espera(t, func() bool { return o.linea("h") != nil })
+	o.mu.Lock()
+	o.falla = true
+	o.mu.Unlock()
+	g.Cierra("s1", "prueba")
+	if _, ce := g.Estado(); ce[0].Estado != "pendiente" {
 		t.Fatalf("debería quedar pendiente: %+v", ce)
 	}
 	o.mu.Lock()
@@ -150,78 +254,20 @@ func TestReintento(t *testing.T) {
 	o.mu.Unlock()
 	g.reintenta()
 	if _, ce := g.Estado(); len(ce) != 1 || ce[0].Estado != "cerrado" {
-		t.Fatalf("tras el reintento: %+v", ce)
+		t.Fatalf("tras reintentar: %+v", ce)
 	}
 }
 
-// Un parte abierto sobrevive a un cierre inesperado: al volver a arrancar se cierra con su último trabajo.
-func TestRecuperacion(t *testing.T) {
-	dir := t.TempDir()
-	f := filepath.Join(dir, "partes.json")
-	o := &odooFalso{}
-	r := &reloj{t: time.Now().Add(-time.Hour)}
-	g := &Gestor{Odoo: o, Ahora: r.ahora, FicheroEstado: f, Diario: filepath.Join(dir, "imputacion.log")}
-	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5})
-	espera(t, func() bool { ab, _ := g.Estado(); return len(ab) == 1 && ab[0].LineaID > 0 })
-	g.guarda()
-	// «Se cae» pgocode con el turno a medias: otro gestor arranca con el mismo fichero.
-	o2 := &odooFalso{}
-	g2 := &Gestor{Odoo: o2, FicheroEstado: f, Diario: filepath.Join(dir, "imputacion.log")}
-	ctx, cancela := context.WithCancel(context.Background())
-	defer cancela()
-	g2.Arranca(ctx)
-	_, ce := g2.Estado()
-	if len(ce) != 1 || ce[0].Estado != "cerrado" || ce[0].Horas != float64(5)/60 {
-		t.Fatalf("recuperado: %+v", ce)
-	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "imputacion.log")); len(b) == 0 {
-		t.Error("diario vacío")
-	}
-}
-
-// Cambiar de tarea en la sesión cierra el parte y abre otro.
-func TestCambioDeTarea(t *testing.T) {
-	o := &odooFalso{}
-	g := &Gestor{Odoo: o}
-	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5, Tarea: "A"})()
-	time.Sleep(30 * time.Millisecond)
-	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 6, Tarea: "B"})()
-	espera(t, func() bool { _, ce := g.Estado(); return len(ce) == 1 })
-	ab, ce := g.Estado()
-	if len(ab) != 1 || ab[0].TareaID != 6 || ce[0].TareaID != 5 {
-		t.Errorf("abiertos %+v cerrados %+v", ab, ce)
-	}
-}
-
-// Tras actualizarse (Suspende), la versión nueva retoma el parte: misma línea, mismo inicio, sin cerrarlo.
-func TestRetomaTrasActualizar(t *testing.T) {
-	dir := t.TempDir()
-	f := filepath.Join(dir, "partes.json")
-	o := &odooFalso{}
-	g := &Gestor{Odoo: o, FicheroEstado: f}
-	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5, UID: 2, OdooSesion: "x"})()
-	espera(t, func() bool { ab, _ := g.Estado(); return len(ab) == 1 && ab[0].LineaID > 0 })
-	ab, _ := g.Estado()
-	g.Suspende()
-	g2 := &Gestor{Odoo: &odooFalso{}, FicheroEstado: f}
-	ctx, cancela := context.WithCancel(context.Background())
-	defer cancela()
-	g2.Arranca(ctx)
-	ab2, ce2 := g2.Estado()
-	if len(ab2) != 1 || len(ce2) != 0 || ab2[0].LineaID != ab[0].LineaID || !ab2[0].Inicio.Equal(ab[0].Inicio) {
-		t.Fatalf("antes %+v; después abiertos %+v cerrados %+v", ab, ab2, ce2)
-	}
-}
-
-// Un cronómetro de pgocode en marcha en Odoo que pgocode no conoce (p. ej. fichero perdido) se retoma.
-func TestSincronizaDesdeOdoo(t *testing.T) {
-	o := &odooFalso{cronos: []any{map[string]any{"id": 321, "name": "Sesión de pgocode «A»: x", "ai_session_id": "pgocode-s9",
-		"timer_start": "2026-10-21 08:00:00", "project_id": []any{447, "MADERAS PLANES"}, "task_id": []any{7, "pgocode - Sesión IA"}}}}
-	g := &Gestor{Odoo: o}
-	g.Sincroniza(context.Background(), 2, "x")
-	ab, _ := g.Estado()
-	if len(ab) != 1 || ab[0].LineaID != 321 || ab[0].Sesion != "s9" || ab[0].Proyecto != 447 || ab[0].TareaID != 7 ||
-		!ab[0].Inicio.Equal(time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)) {
-		t.Fatalf("retomado: %+v", ab)
+// A medianoche el parte se cierra (los partes son de un día).
+func TestMedianoche(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: time.Date(2026, 10, 21, 23, 58, 0, 0, time.Local)}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 7})
+	espera(t, func() bool { return o.linea("m") != nil })
+	r.pasa(4 * time.Minute)
+	g.revisa()
+	if ab, _ := g.Estado(); len(ab) != 0 {
+		t.Fatal("a medianoche el parte se cierra")
 	}
 }
