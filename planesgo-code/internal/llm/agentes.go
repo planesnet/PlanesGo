@@ -14,6 +14,7 @@ import (
 
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/proceso"
+	"planesgo-code/internal/skills"
 )
 
 // sesionValida: los ids de sesión de los agentes son UUID o similares. Se valida porque el valor llega del
@@ -175,13 +176,20 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 
 // permisosOpenCode: la configuración de permisos de OpenCode para cada modo de pgocode.
 func permisosOpenCode(modo string) string {
+	// La imputación la hace pgocode: sus skills de imputación, denegadas.
+	sk := make([]string, 0, len(skills.Sustituidas)+1)
+	sk = append(sk, `"*":"allow"`)
+	for _, n := range skills.Sustituidas {
+		sk = append(sk, `"`+n+`":"deny"`)
+	}
+	skill := `,"skill":{` + strings.Join(sk, ",") + `}}`
 	switch modo {
 	case "auto":
-		return `{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}`
+		return `{"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"` + skill
 	case "editar":
-		return `{"edit":"allow","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"}`
+		return `{"edit":"allow","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"` + skill
 	default:
-		return `{"edit":"deny","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"}`
+		return `{"edit":"deny","bash":"deny","webfetch":"allow","external_directory":"deny","doom_loop":"deny"` + skill
 	}
 }
 
@@ -283,6 +291,10 @@ func Agentes() []Proveedor {
 			Modelos: []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
+				// La imputación la hace pgocode: sus skills de imputación no se pueden usar.
+				for _, sk := range skills.Sustituidas {
+					a = append(a, "--disallowedTools", "Skill("+sk+")")
+				}
 				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
 				switch p.Permisos {
 				case "editar":

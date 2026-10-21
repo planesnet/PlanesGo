@@ -74,7 +74,7 @@ func (s *Servidor) skillsElegir(w http.ResponseWriter, r *http.Request, ses *ses
 	var del []skills.Skill
 	vistos := map[string]bool{}
 	for _, k := range skills.Inventario(p.Carpeta) {
-		if k.Rota || vistos[k.Nombre] || (p.Agente != "" && !contiene(k.Agentes, p.Agente)) {
+		if k.Rota || k.Sustituida || vistos[k.Nombre] || (p.Agente != "" && !contiene(k.Agentes, p.Agente)) {
 			continue
 		}
 		vistos[k.Nombre] = true

@@ -27,8 +27,13 @@ type Skill struct {
 	Ficheros    int      `json:"ficheros"`    // otros ficheros de la skill (se leen solo si hacen falta)
 	Avisos      []string `json:"avisos"`
 	Plugin      string   `json:"plugin,omitempty"`
-	Rota        bool     `json:"rota,omitempty"` // enlace roto o carpeta sin SKILL.md: el agente no la ve
+	Rota        bool     `json:"rota,omitempty"`       // enlace roto o carpeta sin SKILL.md: el agente no la ve
+	Sustituida  bool     `json:"sustituida,omitempty"` // la hace pgocode: no se sugiere ni la usan sus agentes
 }
+
+// Sustituidas: skills cuyo trabajo hace pgocode por su cuenta (la imputación de horas en Odoo). Siguen
+// instaladas para las sesiones de los agentes fuera de pgocode.
+var Sustituidas = []string{"pgo-imputacion"}
 
 // tokens: estimación habitual (unos 4 caracteres por token).
 func tokens(s string) int { return (utf8.RuneCountInString(s) + 3) / 4 }
@@ -163,6 +168,10 @@ func Inventario(carpeta string) []Skill {
 		}
 	}
 	for i := range l {
+		if contiene(Sustituidas, l[i].Nombre) {
+			l[i].Sustituida = true
+			l[i].Avisos = append(l[i].Avisos, "La imputación la hace pgocode: no se sugiere ni la usan los agentes de pgocode")
+		}
 		if !l[i].Rota && nombres[l[i].Nombre] > 1 {
 			l[i].Avisos = append(l[i].Avisos, "Hay otra skill con el mismo nombre: el agente puede usar una u otra")
 		}
