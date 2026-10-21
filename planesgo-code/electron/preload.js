@@ -4,4 +4,5 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('psf', {
   escritorio: true,
   abrirFuera: url => ipcRenderer.invoke('abrir-fuera', String(url)),
+  elegirCarpeta: inicial => ipcRenderer.invoke('elegir-carpeta', inicial ? String(inicial) : ''),
 });

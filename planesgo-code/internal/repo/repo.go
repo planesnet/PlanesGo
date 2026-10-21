@@ -6,6 +6,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,4 +138,63 @@ func CarpetaDeRama(ctx context.Context, carpeta, rama, base string) (string, err
 		return "", errors.New("no se pudo preparar la copia de la rama " + rama)
 	}
 	return dir, nil
+}
+
+// Copias devuelve en qué carpeta está abierta cada rama (git worktree list): la principal y las copias de trabajo.
+func Copias(ctx context.Context, carpeta string) map[string]string {
+	m := map[string]string{}
+	out, err := git(ctx, carpeta, "worktree", "list", "--porcelain")
+	if err != nil {
+		return m
+	}
+	dir := ""
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(l, "worktree "):
+			dir = strings.TrimPrefix(l, "worktree ")
+		case strings.HasPrefix(l, "branch refs/heads/"):
+			m[strings.TrimPrefix(l, "branch refs/heads/")] = dir
+		}
+	}
+	return m
+}
+
+// PreparaRama deja lista la carpeta de una rama: si ya está abierta allí, nada; si no existe (o está vacía), crea
+// una copia de trabajo (git worktree) del repositorio en esa rama (local, remota o nueva desde la actual).
+// Nunca cambia de rama una carpeta que ya tenga otra.
+func PreparaRama(ctx context.Context, repoDir, rama, carpeta string) error {
+	if !ramaValida.MatchString(rama) || strings.Contains(rama, "..") || strings.HasPrefix(rama, "-") {
+		return errors.New("nombre de rama no válido")
+	}
+	if st, err := os.Stat(carpeta); err == nil {
+		if !st.IsDir() {
+			return errors.New("ya existe un fichero con ese nombre")
+		}
+		if _, err := git(ctx, carpeta, "rev-parse", "--is-inside-work-tree"); err == nil {
+			actual, _ := git(ctx, carpeta, "branch", "--show-current")
+			if actual != rama {
+				return fmt.Errorf("esa carpeta ya es un repositorio en la rama «%s»", actual)
+			}
+			return nil
+		}
+		if ents, _ := os.ReadDir(carpeta); len(ents) > 0 {
+			return errors.New("la carpeta no está vacía y no es un repositorio git")
+		}
+	} else if err := os.MkdirAll(filepath.Dir(carpeta), 0o755); err != nil {
+		return err
+	}
+	if donde, ok := Copias(ctx, repoDir)[rama]; ok {
+		return fmt.Errorf("la rama «%s» ya está abierta en %s", rama, donde)
+	}
+	git(ctx, repoDir, "fetch", "--quiet", "origin", rama)
+	if _, err := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+rama); err == nil {
+		_, err = git(ctx, repoDir, "worktree", "add", "--", carpeta, rama)
+		return err
+	}
+	if _, err := git(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+rama); err == nil {
+		_, err = git(ctx, repoDir, "worktree", "add", "--track", "-b", rama, "--", carpeta, "origin/"+rama)
+		return err
+	}
+	_, err := git(ctx, repoDir, "worktree", "add", "-b", rama, "--", carpeta)
+	return err
 }

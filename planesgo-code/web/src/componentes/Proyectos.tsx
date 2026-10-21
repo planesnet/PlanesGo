@@ -4,7 +4,7 @@ import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
 import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
-import { Agente, Hosting } from './Marca';
+import { Hosting } from './Marca';
 import './config-sesion.css';
 
 interface Props {
@@ -12,7 +12,8 @@ interface Props {
   repo: Repo | null; proveedores: Proveedor[];
   sesiones: Sesion[]; sesion: Sesion | null;
   alAjustes: (p: Proyecto, a: AjustesProyecto) => void;
-  alElegirSesion: (p: Proyecto, s: Sesion) => void; alNuevaSesion: (p: Proyecto) => void; alCambiarSesion: (s: Sesion) => void; alBorrarSesion: (s: Sesion) => void;
+  alElegirSesion: (p: Proyecto, s: Sesion) => void;
+  alAjustesSesion: (s: Sesion) => void; alNuevaSesion: (p: Proyecto) => void; alCambiarSesion: (s: Sesion) => void; alBorrarSesion: (s: Sesion) => void;
 }
 
 // Proyectos recientes de cada usuario (los últimos que ha abierto, el más reciente primero).
@@ -141,6 +142,36 @@ export default function Proyectos(props: Props) {
   );
 }
 
+// General: el directorio principal del proyecto, donde se crean las carpetas de las ramas de las sesiones
+// (directorio principal + rama). Por defecto, la carpeta que contiene el repositorio.
+function General({ p, a, alCambiar }: { p: Proyecto; a: AjustesProyecto; alCambiar: (c: Partial<AjustesProyecto>) => void }) {
+  const [sugerido, setSugerido] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => { get<{ principal: string }>(`/api/proyecto/ramas?proyecto=${p.id}`).then(r => setSugerido(r.principal)).catch(() => {}); }, [p.id]);
+  const elegir = async () => {
+    if (!window.psf?.elegirCarpeta) { setError('El diálogo de carpetas solo está en la aplicación de escritorio'); return; }
+    const c = await window.psf.elegirCarpeta(a.directorio || sugerido);
+    if (c) alCambiar({ directorio: c });
+  };
+  const actual = a.directorio || sugerido;
+  return <>
+    <h3>General</h3>
+    <div className="campo">
+      <span className="etiqueta-campo">Directorio principal del proyecto</span>
+      <div className="carpeta-elegida">
+        <code className="recorta" title={actual}>{actual || '—'}</code>
+        <button type="button" className="boton-secundario" onClick={elegir}><Icono n="carpeta" t={14} /> Elegir…</button>
+      </div>
+      <span className="suave pequeno">
+        Cada sesión trabaja en la carpeta de su rama: <code>{(actual || '…') + '/<rama>'}</code>.
+        {!a.directorio && sugerido && ' Ahora se usa el de por defecto (la carpeta que contiene el repositorio).'}
+      </span>
+      {a.directorio && <button className="enlace" onClick={() => alCambiar({ directorio: undefined })}>Volver al de por defecto</button>}
+      {error && <p className="error">{error}</p>}
+    </div>
+  </>;
+}
+
 // Alojamiento: tipo de hosting y sus datos de despliegue. Sin elegir, vale el que se deduce del repositorio.
 function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Partial<AjustesProyecto>) => void }) {
   const tipo = a.hosting?.tipo;
@@ -174,7 +205,7 @@ function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Part
 }
 
 // Ventana de propiedades del proyecto: secciones a la izquierda y su detalle a la derecha.
-const SECCIONES = [{ id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'skills', nombre: 'Skills', icono: 'skill' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
+const SECCIONES = [{ id: 'general', nombre: 'General', icono: 'carpeta' }, { id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'skills', nombre: 'Skills', icono: 'skill' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
 type Seccion = typeof SECCIONES[number]['id'];
 const SELECCION: { id: SeleccionSkills; nombre: string; ayuda: string }[] = [
   { id: 'agente', nombre: 'Decide el agente', ayuda: 'Como siempre: el modelo lee las descripciones de las skills y decide él. pgocode no interviene.' },
@@ -189,7 +220,7 @@ const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
 ];
 
 function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; login: string; alCerrar: () => void; alGuardar: (a: AjustesProyecto) => void }) {
-  const [seccion, setSeccion] = useState<Seccion>('conversacion');
+  const [seccion, setSeccion] = useState<Seccion>('general');
   const [a, setA] = useState<AjustesProyecto>(() => leeAjustes(login, p.id));
   const cambia = (c: Partial<AjustesProyecto>) => {
     const n = { ...a, ...c };
@@ -216,6 +247,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
             ))}
           </nav>
           <section className="propiedades-detalle">
+            {seccion === 'general' && <General p={p} a={a} alCambiar={cambia} />}
             {seccion === 'alojamiento' && <Alojamiento a={a} alCambiar={cambia} />}
             {seccion === 'skills' && <>
               <h3>Skills</h3>
@@ -252,12 +284,10 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
 }
 
 // Sesiones de un proyecto, como en Claude: icono del hosting, título, rama y menú ⋮ (renombrar, borrar, ajustes).
-function Sesiones({ hostingDe, proyecto, lista, actual, repo, proveedores, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion }: Props & { proyecto: Proyecto; lista: Sesion[]; hostingDe: (id: number) => string | undefined }) {
+function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion, alAjustesSesion }: Props & { proyecto: Proyecto; lista: Sesion[]; hostingDe: (id: number) => string | undefined }) {
   // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
-  const [ajustes, setAjustes] = useState<string | null>(null);
   const [renombrando, setRenombrando] = useState<string | null>(null);
-  const enAjustes = lista.find(s => s.id === ajustes);
   return (
     <div className="sesiones">
       {lista.length === 0 && <p className="sin-sesiones">Sin sesiones</p>}
@@ -267,7 +297,7 @@ function Sesiones({ hostingDe, proyecto, lista, actual, repo, proveedores, sesio
             <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
           ) : (
             <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
-              <Hosting tipo={hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
+              <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
               <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
               {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
             </button>
@@ -281,15 +311,11 @@ function Sesiones({ hostingDe, proyecto, lista, actual, repo, proveedores, sesio
               { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
               { icono: 'borrar', texto: 'Borrar', peligro: true, accion: () => { if (confirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`)) alBorrarSesion(s); } },
               null,
-              { icono: 'ajustes', texto: 'Ajustes', accion: () => setAjustes(s.id) },
+              { icono: 'ajustes', texto: 'Ajustes', accion: () => alAjustesSesion(s) },
             ]} />
           )}
         </div>
       ))}
-      {enAjustes && (
-        <AjustesSesion s={enAjustes} repo={actual?.id === proyecto.id && repo?.carpeta === enAjustes.carpeta ? repo : null}
-          carpetas={proyecto.carpetas} proveedores={proveedores} alCerrar={() => setAjustes(null)} alCambiar={alCambiarSesion} />
-      )}
     </div>
   );
 }
@@ -353,82 +379,3 @@ function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; opcione
   );
 }
 
-// Ventana de preferencias de la sesión (diálogo modal).
-function AjustesSesion({ s, repo, carpetas, proveedores, alCerrar, alCambiar }: {
-  s: Sesion; repo: Repo | null; carpetas: string[]; proveedores: Proveedor[]; alCerrar: () => void; alCambiar: (s: Sesion) => void;
-}) {
-  const [nombre, setNombre] = useState(s.nombre);
-  const cambia = (c: Partial<Sesion>) => alCambiar({ ...s, ...c });
-  const prov = proveedores.find(p => p.id === s.agente);
-  const modelos = prov?.modelos || [];
-
-  useEffect(() => {
-    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
-    document.addEventListener('keydown', tecla);
-    return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar]);
-
-  return createPortal(
-    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
-      <div className="modal ajustes-sesion" role="dialog" aria-modal="true" aria-label="Ajustes de la sesión">
-        <div className="modal-cabecera">
-          <h2>Ajustes de la sesión</h2>
-          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
-        </div>
-        <label>Nombre
-          <input value={nombre} placeholder="Se toma del primer mensaje" onChange={e => setNombre(e.target.value)}
-            onBlur={() => nombre.trim() !== s.nombre && cambia({ nombre: nombre.trim() })}
-            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-        </label>
-        {carpetas.length > 0 && (
-          <label>Carpeta
-            <select value={s.carpeta} onChange={e => cambia({ carpeta: e.target.value, sesionAgente: undefined })} disabled={carpetas.length < 2 && carpetas[0] === s.carpeta}>
-              {!carpetas.includes(s.carpeta) && s.carpeta && <option value={s.carpeta}>{s.carpeta}</option>}
-              {carpetas.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
-        )}
-        {repo && repo.ramas.length > 0 && (
-          <label>Rama
-            <select value={s.rama} onChange={e => cambia({ rama: e.target.value, sesionAgente: undefined })}>
-              {repo.ramas.map(r => <option key={r}>{r}</option>)}
-            </select>
-          </label>
-        )}
-        <label>Agente
-          <span className="con-icono"><Agente id={s.agente} t={15} />
-            <select value={s.agente} onChange={e => cambia({ agente: e.target.value, modelo: undefined, esfuerzo: undefined, sesionAgente: undefined })}>
-              {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
-            </select>
-          </span>
-        </label>
-        {prov?.modos && (
-          <label>Modo
-            <select value={s.permisos || 'lectura'} onChange={e => cambia({ permisos: e.target.value as Sesion['permisos'] })}>
-              <option value="lectura">Solo lectura</option>
-              <option value="editar">Editar ficheros</option>
-              <option value="auto">Auto: ejecuta comandos</option>
-            </select>
-          </label>
-        )}
-        {modelos.length > 1 && (
-          <label>Modelo
-            <select value={s.modelo || prov?.por_defecto} onChange={e => cambia({ modelo: e.target.value })}>
-              {modelos.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </label>
-        )}
-        {prov?.esfuerzos?.length ? (
-          <label>Esfuerzo
-            <select value={s.esfuerzo || ''} onChange={e => cambia({ esfuerzo: e.target.value || undefined })}>
-              <option value="">Por defecto</option>
-              {prov.esfuerzos.map(x => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </label>
-        ) : null}
-        <p className="suave pequeno">Cambiar la carpeta, la rama o el agente empieza una conversación nueva con el agente.</p>
-      </div>
-    </div>,
-    document.body,
-  );
-}

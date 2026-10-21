@@ -510,3 +510,19 @@ button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
 .sk-barra-fondo > span { display: block; height: 100%; border-radius: 4px; background: #8c959f; }
 .sk-barra.pasa .sk-barra-fondo > span { background: #8250df; }
 .sk-barra-fondo > i { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--texto); opacity: .5; }
+
+/* Ventana de la sesión */
+.ajustes-sesion .campo { display: grid; gap: 4px; }
+.etiqueta-campo { font-size: 12px; color: var(--suave); }
+.obligatorio { font-size: 10.5px; color: #9a6700; border: 1px solid #d4a72c; border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+.hosting-opciones { display: flex; flex-wrap: wrap; gap: 5px; }
+.hosting-opcion { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; border: 1px solid var(--linea); border-radius: 8px; padding: 4px 9px; color: var(--texto); }
+.hosting-opcion[aria-checked="true"] { border-color: var(--texto); background: var(--hover); font-weight: 600; }
+.carpeta-elegida { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.carpeta-elegida code { flex: 1; min-width: 0; font-size: 12px; background: var(--panel); border: 1px solid var(--linea); border-radius: 6px; padding: 6px 9px; }
+.boton-secundario { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; border: 1px solid var(--linea); border-radius: 6px; padding: 5px 10px; background: var(--superficie); white-space: nowrap; }
+.boton-secundario:hover { background: var(--hover); }
+.ajustes-sesion input + input, .ajustes-sesion .con-icono + input { margin-top: 4px; }
+.aviso-sesion { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #9a6700; background: #fff8c5; border: 1px solid #d4a72c; border-radius: 8px; padding: 6px 10px; }
+button.miga-item { border-radius: 6px; padding: 2px 4px; }
+button.miga-item:hover { background: var(--hover); }

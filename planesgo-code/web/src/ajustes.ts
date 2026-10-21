@@ -41,7 +41,7 @@ export const TIPOS_HOSTING: { id: TipoHosting; nombre: string; descripcion: stri
 // envía) o pgocode la elige con embeddings y se la indica al agente.
 export type SeleccionSkills = 'agente' | 'sugerir' | 'elegir';
 
-export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills }
+export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills; directorio?: string }
 
 export const AJUSTES_DEFECTO: AjustesProyecto = { detalle: 'normal', skills: 'sugerir' };
 

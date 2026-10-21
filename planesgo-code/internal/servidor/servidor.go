@@ -110,6 +110,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/yo", s.conSesion(s.yo))
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) { jsonOK(w, map[string]string{"version": s.Version}) })
 	mux.HandleFunc("GET /api/proyecto/repo", s.conSesion(s.repoProyecto))
+	mux.HandleFunc("GET /api/proyecto/ramas", s.conSesion(s.proyectoRamas))
+	mux.HandleFunc("POST /api/proyecto/carpeta", s.conSesion(s.proyectoCarpeta))
+	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
 	mux.HandleFunc("GET /api/qa/campanas", s.conSesion(s.qaCampanas))
 	mux.HandleFunc("GET /api/qa/casos", s.conSesion(s.qaCasos))

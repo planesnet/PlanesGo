@@ -6,6 +6,7 @@ package proyectos
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -26,9 +27,14 @@ type Indice struct {
 	Raices []string
 	Vida   time.Duration
 
-	mu       sync.Mutex
-	carpetas map[int][]string
-	hecho    time.Time
+	// Registro: carpetas que el usuario ha elegido para un proyecto (p. ej. la de la rama de una sesión), guardadas
+	// en este fichero. Cuentan como del proyecto igual que las que tienen .planesgo.json.
+	Registro string
+
+	mu          sync.Mutex
+	carpetas    map[int][]string
+	hecho       time.Time
+	registradas map[int][]string
 }
 
 // NuevoIndice crea un índice que busca bajo las raíces indicadas.
@@ -47,14 +53,69 @@ func (x *Indice) Carpetas(forzar bool) map[int][]string {
 	return x.carpetas
 }
 
-// Pertenece dice si la carpeta es una de las del proyecto.
+// Pertenece dice si la carpeta es una de las del proyecto (con .planesgo.json o registrada por el usuario).
 func (x *Indice) Pertenece(proyecto int, carpeta string) bool {
 	for _, c := range x.Carpetas(false)[proyecto] {
 		if c == carpeta {
 			return true
 		}
 	}
+	for _, c := range x.Registradas(proyecto) {
+		if c == carpeta {
+			return true
+		}
+	}
 	return false
+}
+
+// Registradas devuelve las carpetas que el usuario ha registrado para el proyecto.
+func (x *Indice) Registradas(proyecto int) []string {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.cargaRegistro()
+	return append([]string(nil), x.registradas[proyecto]...)
+}
+
+func (x *Indice) cargaRegistro() {
+	if x.registradas != nil {
+		return
+	}
+	x.registradas = map[int][]string{}
+	if x.Registro != "" {
+		if b, err := os.ReadFile(x.Registro); err == nil {
+			json.Unmarshal(b, &x.registradas)
+		}
+	}
+}
+
+// Registra una carpeta para el proyecto: tiene que ser una carpeta que exista dentro de la carpeta personal.
+func (x *Indice) Registra(proyecto int, carpeta string) error {
+	casa, _ := os.UserHomeDir()
+	c := filepath.Clean(carpeta)
+	if !filepath.IsAbs(c) || c == casa || !strings.HasPrefix(c, casa+string(filepath.Separator)) {
+		return errors.New("la carpeta tiene que estar dentro de " + casa)
+	}
+	if st, err := os.Stat(c); err != nil || !st.IsDir() {
+		return errors.New("la carpeta no existe")
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.cargaRegistro()
+	for _, y := range x.registradas[proyecto] {
+		if y == c {
+			return nil
+		}
+	}
+	x.registradas[proyecto] = append(x.registradas[proyecto], c)
+	if x.Registro == "" {
+		return nil
+	}
+	b, _ := json.MarshalIndent(x.registradas, "", " ")
+	tmp := x.Registro + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, x.Registro)
 }
 
 func busca(raices []string) map[int][]string {

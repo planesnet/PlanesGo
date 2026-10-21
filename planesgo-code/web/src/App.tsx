@@ -7,6 +7,7 @@ import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
 import Barra from './componentes/Barra';
+import DialogoSesion from './componentes/DialogoSesion';
 
 // El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
 // tras F5, cerrar la app o pulsar «Salir», se abre directamente.
@@ -114,9 +115,9 @@ export default function App() {
       }
       // Sin sesión por defecto: solo la que se pide (o una nueva, si se pide crearla).
       let s = l.find(x => x.id === quiere) || null;
+      // Nueva sesión pedida desde la lista: se abre su ventana (no se crea hasta confirmar).
       if (quiere === 'nueva' && proveedores.length) {
-        s = { ...S.nueva(proyecto.id, carpeta, r?.rama || '', agentePorDefecto()), tipo: r?.tipo };
-        l = S.guarda(usuario.login, s);
+        setDialogo({ sesion: S.nueva(proyecto.id, '', '', agentePorDefecto()), nueva: true });
       }
       setSesiones(l);
       setSesion(s);
@@ -159,23 +160,39 @@ export default function App() {
     setSesion(x => (x?.id === s.id ? s : x));
   }, [usuario, proyecto?.id]);
 
-  // Nueva sesión (cambiar de rama abre una sesión nueva en esa rama).
-  const nuevaSesion = useCallback((rama?: string, nombre?: string) => {
-    if (!usuario || !proyecto) return null;
-    const carpeta = sesion?.carpeta || proyecto.carpetas[0] || '';
-    const s = S.nueva(proyecto.id, carpeta, rama ?? (repo?.rama || ''), sesion?.agente || agentePorDefecto(), nombre);
-    s.permisos = sesion?.permisos;
-    s.tipo = repo?.tipo;
-    setSesiones(S.guarda(usuario.login, s));
-    setSesion(s);
-    return s;
-  }, [usuario, proyecto, repo, sesion, agentePorDefecto]);
-
-  // Resolver una issue desde Flujo: sesión nueva (en la misma carpeta y rama) y su petición se envía sola al agente.
+  // Ventana de la sesión: crear una (no existe hasta confirmar) o ajustar una existente. «envio»: mensaje que se
+  // manda solo al agente en cuanto se cree (p. ej. «Resuelve la issue…»).
+  const [dialogo, setDialogo] = useState<{ sesion: S.Sesion; nueva: boolean; envio?: string } | null>(null);
   const [envioPendiente, setEnvioPendiente] = useState<{ sesion: string; texto: string } | null>(null);
+
+  // Nueva sesión: se abre su ventana. Con rama (cambiar de rama en la cabecera) va ya elegida; si es la misma
+  // rama de la sesión abierta (resolver una issue), también su carpeta y su alojamiento.
+  const nuevaSesion = useCallback((rama?: string, nombre?: string, envio?: string) => {
+    if (!usuario || !proyecto) return;
+    const s = S.nueva(proyecto.id, '', rama ?? '', sesion?.agente || agentePorDefecto(), nombre);
+    s.permisos = sesion?.permisos;
+    if (sesion && rama && rama === sesion.rama) { s.carpeta = sesion.carpeta; s.hosting = sesion.hosting; }
+    setDialogo({ sesion: s, nueva: true, envio });
+  }, [usuario, proyecto, sesion, agentePorDefecto]);
+
+  const guardaDialogo = useCallback((s: S.Sesion, r: S.Repo | null) => {
+    if (!usuario || !dialogo) return;
+    const l = S.guarda(usuario.login, s);
+    if (s.proyecto === proyecto?.id) {
+      setSesiones(l);
+      if (dialogo.nueva || sesion?.id === s.id) {
+        carpetaRepo.current = s.carpeta;
+        setRepo(r);
+        setSesion(s);
+      }
+    }
+    if (dialogo.nueva && dialogo.envio) setEnvioPendiente({ sesion: s.id, texto: dialogo.envio });
+    setDialogo(null);
+  }, [usuario, dialogo, proyecto?.id, sesion?.id]);
+
+  // Resolver una issue desde Flujo: sesión nueva en la misma rama; su petición se envía sola al crearla.
   const resuelve = useCallback((p: { nombre: string; texto: string }) => {
-    const s = nuevaSesion(sesion?.rama, p.nombre.length > 70 ? p.nombre.slice(0, 67) + '…' : p.nombre);
-    if (s) setEnvioPendiente({ sesion: s.id, texto: p.texto });
+    nuevaSesion(sesion?.rama, p.nombre.length > 70 ? p.nombre.slice(0, 67) + '…' : p.nombre, p.texto);
   }, [nuevaSesion, sesion?.rama]);
 
   const borraSesion = useCallback((s: S.Sesion) => {
@@ -226,11 +243,14 @@ export default function App() {
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
-        alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion} />
+        alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
+        alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
       <Chat seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
-        alCambiarSesion={cambiaSesion} alNuevaSesion={nuevaSesion} />
+        alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
+    {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login}
+      proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} />}
     </div>
     </div>
   );

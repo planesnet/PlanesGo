@@ -14,7 +14,7 @@ interface Props {
   envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
   panelAbierto: boolean; alPanel: () => void;
-  alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void;
+  alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void; alAjustes: () => void;
 }
 
 const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
@@ -23,7 +23,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -83,7 +83,7 @@ export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente
 
   async function envia(forzado?: string) {
     const t = (forzado ?? texto).trim();
-    if (!t || !proyecto || !sesion || !prov || enCurso) return;
+    if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso) return;
     const id = sesion.id;
     const pon = (m: Mensaje[], final = false) => {
       if (idActual.current === id) setMensajes(m);
@@ -169,7 +169,7 @@ export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente
       <header className="cabecera">
         {proyecto && sesion ? (
           <nav className="miga" aria-label="Ubicación de la sesión">
-            <span className="miga-item" title={nombreHosting(hosting || repo?.tipo)}><Hosting tipo={hosting || repo?.tipo} t={16} /></span>
+            <button className="miga-item" onClick={alAjustes} title={nombreHosting(sesion.hosting || hosting || repo?.tipo) + ' · ajustes de la sesión'}><Hosting tipo={sesion.hosting || hosting || repo?.tipo} t={16} /></button>
             {repo?.repositorio && <><span className="sep">/</span><span className="miga-item" title={repo.remoto}><Icono n="repo" t={14} /> {repo.repositorio}</span></>}
             {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
             {repo && repo.ramas.length > 0 && (
@@ -233,6 +233,12 @@ export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente
             <div ref={fin} />
           </div>
           <div className="redactor">
+            {!sesion.hosting && (
+              <div className="aviso-sesion">
+                <Icono n="info" t={15} /> Falta elegir el alojamiento de la sesión.
+                <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
+              </div>
+            )}
             <div className="entrada">
               <div className="selector-agente">
                 <button className="agente-actual" onClick={() => setVerAgentes(v => !v)} title={prov ? prov.nombre : 'Elegir agente'} aria-label="Agente" aria-haspopup="listbox" aria-expanded={verAgentes}>
@@ -252,7 +258,8 @@ export default function Chat({ seleccionSkills, hosting, detalle, envioPendiente
                 )}
               </div>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
-                placeholder={prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'} disabled={!prov?.disponible} />
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : prov?.disponible ? 'Escribe…' : 'Elige un agente disponible'}
+                disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? <button className="redondo" onClick={() => enCurso.abort()} title="Parar" aria-label="Parar"><Icono n="parar" t={16} /></button>
                 : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}

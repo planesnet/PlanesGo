@@ -144,6 +144,16 @@ app.on('web-contents-created', (_, wc) => {
 });
 
 ipcMain.handle('abrir-fuera', (_, url) => { if (esWeb(url)) return shell.openExternal(url); throw new Error('solo http o https'); });
+// Diálogo de carpetas del sistema (carpeta de una sesión, directorio principal de un proyecto).
+ipcMain.handle('elegir-carpeta', async (e, inicial) => {
+  const ventana = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(ventana, {
+    title: 'Elegir carpeta',
+    defaultPath: typeof inicial === 'string' && inicial ? inicial : app.getPath('home'),
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+});
 
 app.whenReady().then(async () => {
   endurece(session.defaultSession);

@@ -1,6 +1,7 @@
 // Sesiones de trabajo de un proyecto: cada una con su rama, su carpeta y su agente por defecto.
 // De momento se guardan en la app (por usuario y proyecto); más adelante, en Odoo.
 import type { Mensaje } from './api';
+import type { TipoHosting } from './ajustes';
 
 export interface Sesion {
   id: string;
@@ -10,10 +11,11 @@ export interface Sesion {
   rama: string;
   agente: string;       // id del agente (claude-code, antigravity, opencode)
   modelo?: string;
-  esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   sesionAgente?: string; // sesión propia del agente (p. ej. claude --resume)
   permisos?: 'lectura' | 'editar' | 'auto'; // qué puede hacer un agente (Claude Code) en la sesión
-  tipo?: Repo['tipo'];   // hosting de su carpeta (para el icono de la lista)
+  tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
+  hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
+  esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   creada: number;
   ultima: number;
 }
