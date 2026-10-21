@@ -735,3 +735,9 @@ button.miga-item:hover { background: var(--hover); }
 /* Dirección que acaba de dar el agente, resaltada un momento en la barra de ejecución rápida */
 .lanzador-url.detectada { border-radius: 8px; animation: detectada 1.2s ease-in-out 3; background: color-mix(in srgb, var(--acento) 10%, transparent); }
 @keyframes detectada { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 35%, transparent); } }
+
+/* Copiar un mensaje: botón en su esquina al pasar el ratón (o con el foco del teclado) */
+.mensaje { position: relative; }
+.copiar-mensaje { position: absolute; top: -10px; right: 0; padding: 4px; border-radius: 6px; background: var(--superficie); border: 1px solid var(--linea); color: var(--suave); opacity: 0; transition: opacity .12s; z-index: 2; }
+.mensaje:hover > .copiar-mensaje, .copiar-mensaje:focus-visible { opacity: 1; }
+.mensajes { user-select: text; }

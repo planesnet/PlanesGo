@@ -1,6 +1,6 @@
 // Planes Go Code escritorio: arranca el backend Go (o usa uno que ya esté en marcha) y lo muestra en una ventana.
 // El panel de navegador usa <webview>, que puede cargar cualquier web (un iframe no).
-const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, session, shell } = require('electron');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
@@ -151,6 +151,21 @@ function ventana() {
   w.on('maximize', guardaVentana);
   w.on('unmaximize', guardaVentana);
   w.on('close', () => { guardaVentana(); console.error('[pgocode] ventana cerrada'); });
+  // Menú contextual (clic derecho): copiar lo seleccionado, cortar y pegar en los campos, copiar enlaces.
+  w.webContents.on('context-menu', (_, p) => {
+    const m = [];
+    if (p.isEditable) m.push({ role: 'cut', label: 'Cortar', enabled: p.editFlags.canCut });
+    if (p.selectionText || p.isEditable) m.push({ role: 'copy', label: 'Copiar', enabled: p.editFlags.canCopy });
+    if (p.isEditable) m.push({ role: 'paste', label: 'Pegar', enabled: p.editFlags.canPaste });
+    if (p.linkURL && esWeb(p.linkURL)) {
+      if (m.length) m.push({ type: 'separator' });
+      m.push({ label: 'Copiar el enlace', click: () => clipboard.writeText(p.linkURL) });
+      m.push({ label: 'Abrir el enlace en el navegador', click: () => shell.openExternal(p.linkURL) });
+    }
+    if (m.length) m.push({ type: 'separator' });
+    m.push({ role: 'selectAll', label: 'Seleccionar todo' });
+    Menu.buildFromTemplate(m).popup({ window: w });
+  });
   w.webContents.on('did-fail-load', (_, c, d) => console.error('[pgocode] no carga la interfaz:', c, d));
   w.loadURL(URL_ARNES);
 }

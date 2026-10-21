@@ -47,6 +47,19 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Modo plan: el plan abierto en el editor y la lista de planes del proyecto.
   const [planAbierto, setPlanAbierto] = useState<string | null>(null);
   const [verPlanes, setVerPlanes] = useState(false);
+  // Copiar: el mensaje entero (su texto, sin las herramientas) con su botón, o lo seleccionado con Ctrl+C / el menú,
+  // siempre como texto limpio (sin el HTML de las tarjetas de herramientas).
+  const [copiado, setCopiado] = useState<number | null>(null);
+  const copiaTexto = (t: string, i: number) => {
+    navigator.clipboard.writeText(t.trim()).then(() => { setCopiado(i); setTimeout(() => setCopiado(c => (c === i ? null : c)), 1500); }).catch(() => {});
+  };
+  const copiaSeleccion = (e: React.ClipboardEvent) => {
+    const t = window.getSelection()?.toString() || '';
+    if (!t.trim()) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', t.replace(/\n{3,}/g, '\n\n').trim());
+  };
+
   // Dirección local de la última respuesta del agente que la tenga: a la barra de ejecución rápida.
   const propuesta = useMemo(() => {
     for (let i = mensajes.length - 1; i >= 0; i--) {
@@ -368,7 +381,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       ) : (
         <>
           <ProyectoCapturas.Provider value={proyecto.id}>
-          <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar}>
+          <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar} onCopy={copiaSeleccion}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
                 <p><b>{titulo(sesion)}</b></p>
@@ -377,6 +390,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             )}
             {mensajes.map((m, i) => (
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
+                {m.texto && !(enCurso && i === mensajes.length - 1) && (
+                  <button className="icono copiar-mensaje" onClick={() => copiaTexto(m.texto, i)} title={copiado === i ? 'Copiado' : 'Copiar el mensaje'} aria-label="Copiar el mensaje">
+                    <Icono n={copiado === i ? 'hecho' : 'copiar'} t={13} />
+                  </button>
+                )}
                 {m.partes?.length
                   ? <Partes partes={m.partes} tareas={m.tareas} detalle={detalle} />
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
