@@ -44,8 +44,9 @@ export function Formato({ dispositivo, orientacion, alCambiar, desactivado }: {
   );
 }
 
-export default function Lanzador({ proyecto, carpeta, version, alAbrirWeb }: {
+export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbrirWeb }: {
   proyecto: Proyecto; carpeta: string; version: number; alAbrirWeb: AbreWeb;
+  propuesta?: string; // dirección local que acaba de dar el agente: se rellena (sin abrirla) para que el usuario la abra
 }) {
   const [p, setP] = useState<L.Prueba>(() => { try { return L.leePrueba(localStorage.getItem(clave(proyecto.id))); } catch { return { ...L.PRUEBA_DEFECTO }; } });
   useEffect(() => { try { setP(L.leePrueba(localStorage.getItem(clave(proyecto.id)))); } catch { /* sin almacenamiento */ } }, [proyecto.id]);
@@ -56,6 +57,15 @@ export default function Lanzador({ proyecto, carpeta, version, alAbrirWeb }: {
   });
   const [url, setUrl] = useState(p.url);
   useEffect(() => setUrl(p.url), [p.url]);
+  // Dirección que da el agente: rellena la barra (se resalta un momento); la abre el usuario.
+  const [detectada, setDetectada] = useState(false);
+  useEffect(() => {
+    if (!propuesta || propuesta === p.url) return;
+    cambia({ url: propuesta, ...(p.destino === 'programa' ? { destino: 'interno' as const } : {}) });
+    setDetectada(true);
+    const t = setTimeout(() => setDetectada(false), 6000);
+    return () => clearTimeout(t);
+  }, [propuesta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Programas del proyecto (los guardados y los que están en marcha) para proponer direcciones y ejecutarlos.
   const [procs, setProcs] = useState<Proceso[]>([]);
@@ -148,7 +158,7 @@ export default function Lanzador({ proyecto, carpeta, version, alAbrirWeb }: {
           ? <button className="icono" onClick={para} title="Parar" aria-label="Parar el programa"><Icono n="parar" t={14} /></button>
           : <button className="icono primario-suave" onClick={ejecuta} disabled={!programa || !carpeta} title="Ejecutar" aria-label="Ejecutar el programa"><Icono n="ejecutar" t={14} /></button>}
       </> : <>
-        <form className="lanzador-url" onSubmit={e => { e.preventDefault(); abre(); }}>
+        <form className={'lanzador-url' + (detectada ? ' detectada' : '')} title={detectada ? 'Dirección que acaba de dar el agente: pulsa abrir' : undefined} onSubmit={e => { e.preventDefault(); abre(); }}>
           <input value={url} onChange={e => setUrl(e.target.value)} list={'sug-prueba-' + proyecto.id} spellCheck={false}
             size={Math.min(48, Math.max(url ? url.length + 2 : 30, 12))}
             placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />

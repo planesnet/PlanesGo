@@ -5,6 +5,7 @@ import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Ses
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
+import { direccionesEn } from '../lanzador';
 import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas } from './Capturas';
 import Icono from './Icono';
@@ -46,6 +47,16 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Modo plan: el plan abierto en el editor y la lista de planes del proyecto.
   const [planAbierto, setPlanAbierto] = useState<string | null>(null);
   const [verPlanes, setVerPlanes] = useState(false);
+  // Dirección local de la última respuesta del agente que la tenga: a la barra de ejecución rápida.
+  const propuesta = useMemo(() => {
+    for (let i = mensajes.length - 1; i >= 0; i--) {
+      const m = mensajes[i];
+      if (m.rol !== 'assistant' || m.error || (enCurso && i === mensajes.length - 1)) continue; // la que se escribe, al acabar
+      const d = direccionesEn(m.texto || '');
+      if (d.length) return d[0];
+    }
+    return undefined;
+  }, [mensajes, enCurso]);
   // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
   const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
   const colaSesion = (sesion && colas[sesion.id]) || C.vacia<Adjunto>();
@@ -411,7 +422,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </div>
             )}
             {/* Barra de prueba: lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
-            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} />
+            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
             {cola.length > 0 && (
               <ol className="cola" aria-label="Mensajes en cola">
                 {cola.map((c, i) => (

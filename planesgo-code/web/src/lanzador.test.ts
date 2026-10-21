@@ -52,3 +52,11 @@ test('orientación por defecto del dispositivo', () => {
   assert.equal(L.orientacionDe('ordenador'), 'horizontal');
   assert.equal(L.orientacionDe('movil'), 'vertical');
 });
+
+test('direcciones del agente: locales, sin adornos ni repetidas; 0.0.0.0 como localhost', () => {
+  const t = 'El programa escucha en:\n* URL: `http://localhost:3005` (o `http://0.0.0.0:3005`).\n**URL**: http://127.0.0.1:8069/web, y la doc en https://go.dev/doc.\n' +
+    'Repite http://localhost:3005/. Mira [aquí](http://miapp.test/inicio).';
+  assert.deepEqual(L.direccionesEn(t), ['http://localhost:3005/', 'http://127.0.0.1:8069/web', 'http://miapp.test/inicio']);
+  assert.deepEqual(L.direccionesEn('sin direcciones; https://github.com/planesnet/intradema'), []);
+  assert.deepEqual(L.direccionesEn('**http://localhost:5173**'), ['http://localhost:5173/']);
+});

@@ -731,3 +731,7 @@ button.miga-item:hover { background: var(--hover); }
 .galeria-item { padding: 0; display: grid; gap: 3px; text-align: left; font-size: 11.5px; color: var(--suave); }
 .galeria-item img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 6px; border: 1px solid var(--linea); background: var(--panel); }
 .galeria-item:hover img { border-color: var(--acento); }
+
+/* Dirección que acaba de dar el agente, resaltada un momento en la barra de ejecución rápida */
+.lanzador-url.detectada { border-radius: 8px; animation: detectada 1.2s ease-in-out 3; background: color-mix(in srgb, var(--acento) 10%, transparent); }
+@keyframes detectada { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 35%, transparent); } }

@@ -79,3 +79,15 @@ export function leePrueba(crudo: string | null): Prueba {
 
 // La orientación por defecto al elegir un dispositivo: el ordenador en horizontal; tablet y móvil en vertical.
 export const orientacionDe = (d: Dispositivo): Orientacion => (d === 'ordenador' ? 'horizontal' : 'vertical');
+
+// direccionesEn: las direcciones locales (lo que se está desarrollando) que aparecen en un texto del agente, en
+// orden y sin repetir; 0.0.0.0 (escuchar en todas las interfaces) se abre como localhost.
+export function direccionesEn(texto: string): string[] {
+  const l: string[] = [];
+  const re = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\d{1,3}(?:\.\d{1,3}){3}|[\w-]+\.(?:localhost|test))(?::\d{2,5})?(?:\/[^\s`'"<>)\]*]*)?/gi;
+  for (const m of texto.matchAll(re)) {
+    const u = normalizaUrl(m[0].replace(/[.,;:!?]+$/, '').replace('//0.0.0.0', '//localhost'));
+    if (u && !l.includes(u)) l.push(u);
+  }
+  return l;
+}
