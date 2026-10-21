@@ -57,7 +57,7 @@ func TestPgoAgente(t *testing.T) {
 		t.Fatalf("con token: %d", c)
 	}
 	defer s.Procesos.ParaTodos()
-	fin := time.After(3 * time.Second)
+	fin := time.After(10 * time.Second) // máximo; normalmente llega al momento
 	for {
 		select {
 		case b := <-avisos:

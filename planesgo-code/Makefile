@@ -4,7 +4,8 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar instalar apparmor dist clean
+.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar instalar apparmor dist clean \
+	verifica formato prueba-rapida integracion web-verifica e2e arbol-limpio
 
 all: vet test web pgocode studio-tv
 
@@ -17,6 +18,43 @@ test:
 	go test -race ./...
 	cd studio-tv && go test -race ./...
 	cd web && npm test
+
+# ---- Control de calidad: nada se publica sin pasar «make verifica» ----
+
+# Todo lo que se exige antes de publicar: formato, vet, pruebas con -race (sin caché), tipos y pruebas de la
+# interfaz, y la prueba de humo de punta a punta (Odoo simulado, sin agentes ni tokens).
+verifica: formato vet
+	go test -race -count=1 ./...
+	cd studio-tv && go test -race -count=1 ./...
+	$(MAKE) web-verifica e2e
+
+# gofmt sin nada pendiente (go fmt ./... o gofmt -w lo arregla)
+GOFMT_DIRS := cmd internal web/embed.go studio-tv
+formato:
+	@f=$$(gofmt -l $(GOFMT_DIRS)); [ -z "$$f" ] || { echo "Ficheros sin gofmt (arréglalo con: gofmt -w $(GOFMT_DIRS)):"; echo "$$f"; exit 1; }
+
+# Tipos (tsc) y pruebas de la interfaz, sin compilarla
+web-verifica:
+	cd web && npx tsc --noEmit -p . && npm test
+
+# Prueba de humo de punta a punta (cmd/e2e): compila y arranca odoo-prueba y pgocode en puertos libres y con
+# datos temporales, recorre la API y lo para todo al acabar. Con más detalle: go run ./cmd/e2e -v
+e2e:
+	go run ./cmd/e2e
+
+# Lo rápido mientras se programa: vet y pruebas sin -race
+prueba-rapida: vet
+	go test ./...
+	cd studio-tv && go test ./...
+
+# Pruebas que dependen del entorno (~/cowork, python3, procesos y puertos reales): go test -tags integracion
+integracion:
+	go vet -tags integracion ./...
+	go test -race -count=1 -tags integracion ./...
+
+# Publicar exige el árbol sin cambios (lo publicado es exactamente lo que hay en git)
+arbol-limpio:
+	@c=$$(git status --porcelain -- . ':!web/node_modules'); [ -z "$$c" ] || { echo "Hay cambios sin commit: no se publica."; echo "$$c"; exit 1; }
 
 # Interfaz web (React + Vite) que se incluye en el binario pgocode
 web:
@@ -46,8 +84,9 @@ paquete: web
 
 # Publica la versión (VERSION) en PlanesGo sin reconstruirlo: las apps la ven en menos de un minuto y se
 # actualizan solas. Solo administradores: usa el token de PlanesGo ($PLANESGO_TOKEN o ~/.planesgo_auth.json).
+# Antes: árbol sin cambios y «make verifica» entero.
 PUBLICAR_EN ?= https://planesgo.autopyme.com/admin/pgocode/publicar
-publicar: paquete
+publicar: arbol-limpio verifica paquete
 	@tok="$${PLANESGO_TOKEN:-$$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token",""))' 2>/dev/null)}"; \
 	[ -n "$$tok" ] || { echo "Falta el token de PlanesGo (PLANESGO_TOKEN o ~/.planesgo_auth.json)"; exit 1; }; \
 	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) \

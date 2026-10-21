@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,9 +14,9 @@ import (
 
 // Con un embebedor de mentira: las skills se ordenan por parecido y los vectores se guardan en disco.
 func TestEligeYGuarda(t *testing.T) {
-	llamadas := 0
+	var llamadas atomic.Int32 // el selector embebe las skills en paralelo
 	falso := func(_ context.Context, texto, _ string) ([]float32, error) {
-		llamadas++
+		llamadas.Add(1)
 		v := make([]float32, 3)
 		if strings.Contains(texto, "saludo") {
 			v[0] = 1
@@ -30,13 +31,13 @@ func TestEligeYGuarda(t *testing.T) {
 	l := []skills.Skill{{Nombre: "saludo", Descripcion: "saludo formal", Ruta: "/a"}, {Nombre: "odoo", Descripcion: "odoo dev", Ruta: "/b"}}
 	s := &Selector{Fichero: f, Embebe: falso}
 	c, _, err := s.Elige(context.Background(), "un saludo", l)
-	if err != nil || c[0].Nombre != "saludo" || llamadas != 3 {
-		t.Fatalf("%v %v %d", c, err, llamadas)
+	if err != nil || c[0].Nombre != "saludo" || llamadas.Load() != 3 {
+		t.Fatalf("%v %v %d", c, err, llamadas.Load())
 	}
 	s2 := &Selector{Fichero: f, Embebe: falso}
 	s2.Elige(context.Background(), "odoo", l)
-	if llamadas != 4 { // solo la petición: los de las skills ya estaban guardados
-		t.Errorf("llamadas %d", llamadas)
+	if llamadas.Load() != 4 { // solo la petición: los de las skills ya estaban guardados
+		t.Errorf("llamadas %d", llamadas.Load())
 	}
 }
 

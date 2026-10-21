@@ -202,6 +202,10 @@ func main() {
 	studioAddr := flag.String("studio", entorno("PGO_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
 	urlAct := flag.String("actualizaciones", entorno("PGO_ACTUALIZACIONES", "https://planesgo.autopyme.com/install/pgocode"), "dónde se publican las actualizaciones (vacío: sin autoactualización)")
 	dirGrab := flag.String("grabaciones", entorno("PGO_GRABACIONES", "~/.local/share/pgocode/grabaciones"), "carpeta de las grabaciones del Studio TV local")
+	// -datos lleva a otra carpeta todo lo que pgocode guarda (sesiones, tiempos, imputación…; p. ej. las pruebas
+	// de punta a punta de cmd/e2e). Los datos van en la carpeta que contiene las grabaciones, así que equivale a
+	// -grabaciones <datos>/grabaciones; si se dan las dos, manda -grabaciones.
+	dirDatos := flag.String("datos", entorno("PGO_DATOS", ""), "carpeta de datos de pgocode (vacío: ~/.local/share/pgocode); equivale a -grabaciones <datos>/grabaciones")
 	navegador := flag.Bool("navegador", os.Getenv("PGO_NAVEGADOR") == "1", "permite abrir Planes Go Code también en el navegador (por defecto, solo desde la app de escritorio)")
 	verVersion := flag.Bool("version", false, "muestra la versión y sale")
 	validaTiempos := flag.String("valida-tiempos", "", "valida un registro de tiempos (…/pgocode/tiempos/AAAA-MM-DD.jsonl), muestra el informe y sale")
@@ -221,6 +225,13 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+	if *dirDatos != "" {
+		grabExplicito := false
+		flag.Visit(func(f *flag.Flag) { grabExplicito = grabExplicito || f.Name == "grabaciones" })
+		if !grabExplicito && os.Getenv("PGO_GRABACIONES") == "" {
+			*dirGrab = filepath.Join(expande(*dirDatos), "grabaciones")
+		}
 	}
 	*dirGrab = expande(*dirGrab)
 	if *verVersion {

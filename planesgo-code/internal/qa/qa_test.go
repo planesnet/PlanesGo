@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestCampanaYLanzar(t *testing.T) {
@@ -46,20 +45,9 @@ func TestCampanaYLanzar(t *testing.T) {
 	if c := Comentarios(d); len(c) != 1 || c[0].T != 3.5 {
 		t.Errorf("comentarios: %+v", c)
 	}
-
+	// La comprobación de la ruta del script no ejecuta nada (lanzar de verdad está en qa_integracion_test.go).
 	var e Ejecutor
 	if _, err := e.Lanza("0:madera", d, "../evil.py"); err == nil {
 		t.Error("script fuera de la campaña aceptado")
-	}
-	x, err := e.Lanza("0:madera", d, "prueba.py")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 50 && e.EnCurso() > 0; i++ {
-		time.Sleep(100 * time.Millisecond)
-	}
-	r := e.Lista("0:madera")[0]
-	if r.ID != x.ID || r.Estado != "ok" || len(r.Salida) == 0 || r.Salida[0] != "hola desde la prueba" {
-		t.Fatalf("ejecución: %+v", r)
 	}
 }
