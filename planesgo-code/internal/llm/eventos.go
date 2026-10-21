@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -126,7 +127,22 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			Subtype   string `json:"subtype"`
 			SessionID string `json:"session_id"`
 			Padre     string `json:"parent_tool_use_id"`
-			Message   struct {
+			// Tareas (system/task_*): subagentes y órdenes en segundo plano.
+			TaskID       string `json:"task_id"`
+			TaskToolUse  string `json:"tool_use_id"`
+			Descripcion  string `json:"description"`
+			SegundoPlano bool   `json:"is_backgrounded"`
+			TipoTarea    string `json:"task_type"`
+			Subagente    string `json:"subagent_type"`
+			TareaPadre   string `json:"parent_task_id"`
+			Estado       string `json:"status"`
+			Fichero      string `json:"output_file"`
+			Resumen      string `json:"summary"`
+			UltimaHerr   string `json:"last_tool_name"`
+			Patch        struct {
+				Status string `json:"status"`
+			} `json:"patch"`
+			Message struct {
 				Content []struct {
 					Type      string          `json:"type"`
 					Text      string          `json:"text"`
@@ -144,6 +160,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			Coste    float64 `json:"total_cost_usd"`
 			Duracion float64 `json:"duration_ms"`
 			Usage    struct {
+				Total         int `json:"total_tokens"` // task_progress
+				Herramientas  int `json:"tool_uses"`
 				Input         int `json:"input_tokens"`
 				CacheCreation int `json:"cache_creation_input_tokens"`
 				CacheRead     int `json:"cache_read_input_tokens"`
@@ -156,8 +174,30 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		if ev.SessionID != "" && ev.Type == "system" && ev.Subtype == "init" {
 			emite(Evento{SesionAgente: ev.SessionID})
 		}
-		// Lo que hacen los subagentes (Task) no se mezcla con la conversación principal.
+		if ev.Type == "system" && ev.TaskID != "" {
+			if t := tareaClaude(ev.Subtype, ev.TaskID, ev.TaskToolUse, ev.Descripcion, ev.TipoTarea, ev.Subagente, ev.TareaPadre,
+				ev.Estado, ev.Patch.Status, ev.Fichero, ev.Resumen, ev.UltimaHerr, ev.SegundoPlano, ev.Usage.Total, ev.Usage.Herramientas); t != nil {
+				emite(Evento{Tarea: t})
+			}
+			continue
+		}
+		// Lo que hacen los subagentes va dentro de su tarea: sus herramientas, con Padre (su texto no se muestra).
 		if ev.Padre != "" {
+			for _, c := range ev.Message.Content {
+				switch {
+				case ev.Type == "assistant" && c.Type == "tool_use":
+					nombres[c.ID] = c.Name
+					emite(Evento{Herramienta: &Herramienta{ID: c.ID, Nombre: c.Name, Resumen: resumen(c.Input),
+						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Padre: ev.Padre}})
+				case ev.Type == "user" && c.Type == "tool_result":
+					estado := "ok"
+					if c.IsError {
+						estado = "error"
+					}
+					emite(Evento{Herramienta: &Herramienta{ID: c.ToolUseID, Nombre: nombres[c.ToolUseID],
+						Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado, Padre: ev.Padre}})
+				}
+			}
 			continue
 		}
 		switch ev.Type {
@@ -229,6 +269,14 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 					Salida     string          `json:"output"`
 					Error      string          `json:"error"`
 				} `json:"tool_info"`
+				Sub struct {
+					Subagentes []struct {
+						Tipo string `json:"type_name"`
+						Rol  string `json:"role"`
+						Conv string `json:"conversation_id"`
+						Log  string `json:"log_uri"`
+					} `json:"subagents"`
+				} `json:"subagent_info"`
 			} `json:"step_update"`
 			Resultado struct {
 				Estado   string  `json:"status"`
@@ -262,6 +310,9 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 					empezadas[p.Indice] = p.Has
 					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Resumen: resumen(p.Info.Parametros),
 						Entrada: recorta(string(p.Info.Parametros), maxEntrada), Estado: "curso", Skill: skillDe(p.Has, p.Info.Parametros)}})
+				}
+				if t := tareaAntigravity(id, p.Has, p.Tipo, p.Estado, p.Sub.Subagentes); t != nil {
+					emite(Evento{Tarea: t})
 				}
 				if p.Estado == "DONE" || p.Estado == "ERROR" || p.Estado == "FAILED" {
 					delete(empezadas, p.Indice)
@@ -313,6 +364,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 					Output string          `json:"output"`
 					Title  string          `json:"title"`
 					Error  string          `json:"error"`
+					Meta   json.RawMessage `json:"metadata"`
 				} `json:"state"`
 				Cost   float64 `json:"cost"`
 				Tokens struct {
@@ -365,6 +417,9 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: ev.Part.Tool, Resumen: res,
 				Entrada: recorta(string(ev.Part.State.Input), maxEntrada), Salida: recorta(salida, maxSalida), Estado: estado,
 				Skill: skillDe(ev.Part.Tool, ev.Part.State.Input)}})
+			if t := tareaOpenCode(id, ev.Part.Tool, ev.Part.State.Input, ev.Part.State.Output, ev.Part.State.Meta, estado); t != nil {
+				emite(Evento{Tarea: t})
+			}
 		case "step_finish":
 			t := ev.Part.Tokens
 			uso.Entrada += t.Input + t.Cache.Read + t.Cache.Write
@@ -386,4 +441,131 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		return errors.New("OpenCode: " + strings.Join(errores, "; "))
 	}
 	return sc.Err()
+}
+
+// tareaClaude: los eventos system/task_* de Claude Code como Tarea.
+func tareaClaude(sub, id, herr, desc, tipo, subagente, padre, estado, patch, fichero, res, ultima string, fondo bool, tokens, usos int) *Tarea {
+	t := &Tarea{ID: id, Herramienta: herr, Padre: padre}
+	switch tipo {
+	case "local_bash", "monitor":
+		t.Tipo = "segundo_plano"
+	case "":
+	default: // local_agent, remote_agent, local_workflow
+		t.Tipo = "subagente"
+	}
+	fin := func(s string) string {
+		switch s {
+		case "completed":
+			return "ok"
+		case "failed":
+			return "error"
+		case "killed", "stopped", "cancelled":
+			return "parada"
+		}
+		return ""
+	}
+	switch sub {
+	case "task_started":
+		t.Titulo, t.Subtipo, t.SegundoPlano, t.Estado = desc, subagente, fondo, "curso"
+	case "task_progress":
+		p := strings.TrimPrefix(desc, "Running ")
+		if ultima != "" {
+			p += " · " + ultima
+		}
+		if usos > 0 {
+			p += fmt.Sprintf(" · %d herramientas", usos)
+		}
+		if tokens > 0 {
+			p += fmt.Sprintf(" · %d tokens", tokens)
+		}
+		t.Progreso, t.Estado = p, "curso"
+	case "task_updated":
+		t.Estado = fin(patch)
+		if t.Estado == "" {
+			return nil
+		}
+	case "task_notification":
+		t.Estado, t.Salida, t.Detalle = fin(estado), recorta(res, maxSalida), fichero
+	default:
+		return nil
+	}
+	return t
+}
+
+// tareaAntigravity: un paso de Antigravity que es un subagente (invoke_subagent) como Tarea. Sus órdenes
+// asíncronas no se distinguen en el stream (la marca no viaja en los parámetros): quedan como herramientas.
+func tareaAntigravity(id, herr, tipo, estado string, subs []struct {
+	Tipo string `json:"type_name"`
+	Rol  string `json:"role"`
+	Conv string `json:"conversation_id"`
+	Log  string `json:"log_uri"`
+}) *Tarea {
+	t := &Tarea{ID: id, Herramienta: id, Estado: "curso"}
+	switch estado {
+	case "DONE":
+		t.Estado = "ok"
+	case "ERROR", "FAILED":
+		t.Estado = "error"
+	}
+	switch {
+	case herr == "invoke_subagent" || tipo == "subagent":
+		t.Tipo = "subagente"
+		if len(subs) > 0 {
+			s := subs[0]
+			t.Titulo, t.Subtipo, t.SesionHija, t.Detalle = s.Rol, s.Tipo, s.Conv, strings.TrimPrefix(s.Log, "file://")
+		}
+	default:
+		return nil
+	}
+	return t
+}
+
+var estadoTaskOpenCode = regexp.MustCompile(`<task[^>]*state="([a-z]+)"`)
+var resultadoOpenCode = regexp.MustCompile(`(?s)<task_result>(.*?)</task_result>`)
+
+// tareaOpenCode: la herramienta «task» (subagente, con su subsesión) y «todowrite» (la lista de tareas) como Tarea.
+func tareaOpenCode(id, herr string, entrada json.RawMessage, salida string, meta json.RawMessage, estado string) *Tarea {
+	switch herr {
+	case "task":
+		var in struct {
+			Desc string `json:"description"`
+			Tipo string `json:"subagent_type"`
+		}
+		var md struct {
+			Sesion string `json:"sessionId"`
+		}
+		json.Unmarshal(entrada, &in)
+		json.Unmarshal(meta, &md)
+		t := &Tarea{ID: id, Tipo: "subagente", Herramienta: id, Titulo: in.Desc, Subtipo: in.Tipo, SesionHija: md.Sesion, Estado: estado}
+		if m := estadoTaskOpenCode.FindStringSubmatch(salida); m != nil && m[1] == "running" {
+			t.Estado, t.SegundoPlano = "curso", true // subagente en segundo plano (experimental)
+		}
+		if m := resultadoOpenCode.FindStringSubmatch(salida); m != nil {
+			t.Salida = recorta(strings.TrimSpace(m[1]), maxSalida)
+		}
+		return t
+	case "todowrite":
+		var md struct {
+			Todos []struct {
+				Contenido string `json:"content"`
+				Estado    string `json:"status"`
+			} `json:"todos"`
+		}
+		if json.Unmarshal(meta, &md) != nil || len(md.Todos) == 0 {
+			return nil
+		}
+		t := &Tarea{ID: "lista", Tipo: "lista", Titulo: "Lista de tareas", Estado: "ok"}
+		for _, x := range md.Todos {
+			e := "pendiente"
+			switch x.Estado {
+			case "in_progress":
+				e, t.Estado = "curso", "curso"
+			case "completed", "cancelled":
+				e = "hecho"
+			}
+			t.Elementos = append(t.Elementos, Elemento{Texto: x.Contenido, Estado: e})
+		}
+		return t
+	}
+	return nil
 }

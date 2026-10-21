@@ -660,7 +660,8 @@ button.miga-item:hover { background: var(--hover); }
 .v-avisos li.v-info { color: var(--suave); }
 
 /* Barra de prueba sobre el cuadro del chat: dónde, dirección (como un enlace), abrir y formato */
-.lanzador { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 2px; font-size: 12.5px; }
+/* Alineada a la derecha y solo del ancho que necesita (la dirección se ajusta a lo escrito). */
+.lanzador { justify-self: end; width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 2px; font-size: 12.5px; }
 .lanzador-destino { position: relative; flex: none; }
 .lanzador-elige { display: inline-flex; align-items: center; gap: 2px; padding: 4px 5px; border-radius: 8px; color: var(--suave); }
 .lanzador-elige:hover { background: var(--hover); }
@@ -668,11 +669,11 @@ button.miga-item:hover { background: var(--hover); }
 .menu-lanzador button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; min-width: 0; }
 .menu-lanzador button svg:last-child:not(:first-child) { margin-left: auto; color: var(--acento); }
 .menu-lanzador .menu-titulo { padding: 6px 8px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--tenue); }
-.lanzador-url { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
-.lanzador-url input { flex: 1; min-width: 0; border: none; background: transparent; padding: 3px 4px; color: var(--acento); text-decoration: underline; text-underline-offset: 3px; font-size: 12.5px; }
+.lanzador-url { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.lanzador-url input { flex: 0 1 auto; width: auto; min-width: 0; border: none; background: transparent; padding: 3px 4px; color: var(--acento); text-decoration: underline; text-underline-offset: 3px; font-size: 12.5px; }
 .lanzador-url input:focus { text-decoration: none; background: var(--panel); border-radius: 6px; outline: none; }
 .lanzador-url input::placeholder { color: var(--tenue); text-decoration: none; }
-.lanzador-orden { flex: 1; min-width: 0; color: var(--suave); }
+.lanzador-orden { flex: 0 1 auto; min-width: 0; max-width: 360px; color: var(--suave); }
 .lanzador-enlace { color: var(--acento); text-decoration: underline; text-underline-offset: 3px; max-width: 40%; padding: 0 4px; }
 .formato { display: inline-flex; align-items: center; gap: 0; padding-left: 4px; margin-left: 2px; border-left: 1px solid var(--linea); }
 .formato .icono { padding: 3px; color: var(--tenue); }
@@ -688,3 +689,23 @@ button.miga-item:hover { background: var(--hover); }
 .marco-dispositivo .vista { flex: 1; width: 100%; height: 100%; border: none; }
 .medida-dispositivo { font-size: 11px; color: var(--tenue); }
 .navegador .barra .formato { border-left: none; }
+
+/* Tareas de los agentes: subagentes, órdenes en segundo plano y lista de tareas */
+.tarea-agente { margin: 4px 0; border: 1px solid var(--linea); border-radius: 8px; background: var(--superficie); font-size: 13px; }
+.tarea-agente > summary { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; min-width: 0; list-style: none; }
+.tarea-agente > summary::-webkit-details-marker { display: none; }
+.tarea-tipo { flex: none; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--acento); }
+.tarea-agente.segundo_plano .tarea-tipo { background: var(--hover); color: var(--suave); }
+.tarea-progreso { margin-left: auto; max-width: 45%; }
+.tarea-internas { padding: 2px 8px 4px 22px; border-left: 2px solid var(--linea); margin-left: 12px; }
+.tarea-agente .salida-h { margin: 4px 8px 6px; }
+.tarea-detalle { margin: 0 8px 6px; overflow-wrap: anywhere; }
+.tarea-agente.parada { opacity: .75; }
+.lista-tareas-agente { margin: 4px 0; font-size: 13px; }
+.lista-tareas-agente summary { cursor: pointer; color: var(--suave); }
+.lista-tareas-agente ul { list-style: none; margin: 4px 0; padding: 0 0 0 4px; display: grid; gap: 2px; }
+.lista-tareas-agente li { display: flex; align-items: baseline; gap: 6px; }
+.lista-tareas-agente li.hecho { color: var(--suave); text-decoration: line-through; }
+.lista-tareas-agente li.curso { font-weight: 600; }
+.en-marcha { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; font-size: 12px; color: var(--suave); border: 1px dashed var(--linea); border-radius: 8px; overflow: hidden; }
+.en-marcha-tarea { min-width: 0; padding: 1px 8px; border-radius: 999px; background: var(--hover); }

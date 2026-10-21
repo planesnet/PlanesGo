@@ -150,6 +150,7 @@ export default function Lanzador({ proyecto, carpeta, version, alAbrirWeb }: {
       </> : <>
         <form className="lanzador-url" onSubmit={e => { e.preventDefault(); abre(); }}>
           <input value={url} onChange={e => setUrl(e.target.value)} list={'sug-prueba-' + proyecto.id} spellCheck={false}
+            size={Math.min(48, Math.max(url ? url.length + 2 : 30, 12))}
             placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />
           <datalist id={'sug-prueba-' + proyecto.id}>{sug.map(s => <option key={s} value={s} />)}</datalist>
           <button type="submit" className="icono" disabled={!url.trim()} title={p.destino === 'sistema' ? 'Abrir en el navegador del sistema' : 'Abrir en el navegador interno'} aria-label="Abrir">

@@ -42,6 +42,32 @@ type Evento struct {
 	Herramienta  *Herramienta `json:"herramienta,omitempty"`
 	Uso          *Uso         `json:"uso,omitempty"`
 	SesionAgente string       `json:"sesion_agente,omitempty"`
+	Tarea        *Tarea       `json:"tarea,omitempty"`
+}
+
+// Tarea: lo que un agente hace aparte de la conversación principal, con el mismo concepto en todos los agentes:
+// un subagente, una tarea en segundo plano (una orden que sigue corriendo) o su lista de tareas. Se emite varias
+// veces con el mismo ID según avanza (lo que llega de nuevo sustituye a lo anterior; lo vacío se conserva).
+type Tarea struct {
+	ID           string     `json:"id"`
+	Tipo         string     `json:"tipo,omitempty"`        // subagente | segundo_plano | lista
+	Herramienta  string     `json:"herramienta,omitempty"` // la herramienta que la creó: las suyas llevan Padre = esto
+	Padre        string     `json:"padre,omitempty"`       // tarea dentro de la que se lanzó (subagente que lanza otra)
+	Titulo       string     `json:"titulo,omitempty"`
+	Subtipo      string     `json:"subtipo,omitempty"` // general-purpose, explore, research…
+	Estado       string     `json:"estado,omitempty"`  // curso | ok | error | parada
+	SegundoPlano bool       `json:"segundo_plano,omitempty"`
+	Progreso     string     `json:"progreso,omitempty"` // qué está haciendo (última herramienta, tokens, duración)
+	Salida       string     `json:"salida,omitempty"`   // resumen final, recortado
+	Detalle      string     `json:"detalle,omitempty"`  // fichero con el detalle completo (salida, transcript)
+	SesionHija   string     `json:"sesion_hija,omitempty"`
+	Elementos    []Elemento `json:"elementos,omitempty"` // Tipo «lista»
+}
+
+// Elemento de una lista de tareas del agente.
+type Elemento struct {
+	Texto  string `json:"texto"`
+	Estado string `json:"estado"` // pendiente | curso | hecho
 }
 
 // Herramienta es una llamada del agente a una herramienta (leer, editar, ejecutar…).
@@ -53,6 +79,7 @@ type Herramienta struct {
 	Salida  string `json:"salida,omitempty"`  // el resultado, recortado
 	Estado  string `json:"estado"`            // curso | ok | error
 	Skill   string `json:"skill,omitempty"`   // la skill que el agente carga con esta herramienta
+	Padre   string `json:"padre,omitempty"`   // herramienta (de subagente) dentro de la que se usa
 }
 
 // Uso es el consumo de un turno.

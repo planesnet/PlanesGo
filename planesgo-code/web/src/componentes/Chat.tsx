@@ -4,6 +4,7 @@ import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
 import * as PL from '../plan';
+import * as T from '../tareas';
 import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import Icono from './Icono';
 import Lanzador, { type AbreWeb } from './Lanzador';
@@ -235,6 +236,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         if (e.texto) parte({ tipo: 'texto', texto: e.texto });
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta });
+        if (e.tarea) ultimo(m => ({ ...m, tareas: T.fusiona(m.tareas, e.tarea!) }));
         // Puede haber varios consumos en un turno (Claude con tareas en segundo plano hace más de un «result»).
         if (e.uso) ultimo(m => ({ ...m, uso: m.uso ? { entrada: m.uso.entrada + e.uso!.entrada, salida: m.uso.salida + e.uso!.salida,
           coste: (m.uso.coste || 0) + (e.uso!.coste || 0) || undefined, segundos: (m.uso.segundos || 0) + (e.uso!.segundos || 0) || undefined } : e.uso }));
@@ -259,6 +261,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       fallo = true;
       if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
     } finally {
+      // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
+      if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
       setEnCurso(c => (c === ac ? null : c));
@@ -361,7 +365,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {mensajes.map((m, i) => (
               <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
                 {m.partes?.length
-                  ? <Partes partes={m.partes} detalle={detalle} />
+                  ? <Partes partes={m.partes} tareas={m.tareas} detalle={detalle} />
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
@@ -389,6 +393,18 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <div className="aviso-sesion">
                 <Icono n="info" t={15} /> Falta elegir el alojamiento de la sesión.
                 <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
+              </div>
+            )}
+            {/* Lo que el agente tiene en marcha (subagentes, órdenes en segundo plano): explica por qué sigue ocupado. */}
+            {enCurso && T.vivas(mensajes[mensajes.length - 1]?.tareas).length > 0 && (
+              <div className="en-marcha" role="status">
+                <span className="punto-h curso" />
+                <b>En marcha:</b>
+                {T.vivas(mensajes[mensajes.length - 1]?.tareas).map(t => (
+                  <span key={t.id} className="en-marcha-tarea recorta" title={(t.progreso || '') + (t.detalle ? '\n' + t.detalle : '')}>
+                    {t.tipo === 'subagente' ? 'Subagente' : 'Segundo plano'}{t.subtipo ? ' ' + t.subtipo : ''}: {t.titulo}
+                  </span>
+                ))}
               </div>
             )}
             {/* Barra de prueba: lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
@@ -511,10 +527,26 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
 // Una parte de la respuesta: texto, razonamiento (plegado) o una herramienta (una línea que se despliega), como en Claude Code.
 // Las partes según el nivel de detalle del proyecto: conciso (solo texto y una línea con las acciones), normal
 // (cada acción plegada) o detallado (todo desplegado).
-function Partes({ partes, detalle }: { partes: Parte[]; detalle: Detalle }) {
-  if (detalle !== 'conciso') return <>{partes.map((p, j) => <ParteMensaje key={j} p={p} abierta={detalle === 'detallado'} />)}</>;
-  const acciones = partes.filter(p => p.tipo === 'herramienta' && !p.h.skill);
-  const skills = partes.filter(p => p.tipo === 'herramienta' && p.h.skill);
+function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
+  // Las herramientas de un subagente van dentro de su tarea; la herramienta que crea una tarea se pinta como tarea.
+  const dentro = (id: string) => partes.filter(p => p.tipo === 'herramienta' && p.h.padre === id);
+  const sueltas = partes.filter(p => p.tipo !== 'herramienta' || !p.h.padre);
+  const pinta = (p: Parte, j: number | string, abierta: boolean) => {
+    const t = p.tipo === 'herramienta' ? T.deHerramienta(tareas, p.h.id) : undefined;
+    return t ? <BloqueTarea key={j} t={t} h={p.tipo === 'herramienta' ? p.h : undefined} internas={dentro(t.herramienta!)} abierta={abierta} />
+      : <ParteMensaje key={j} p={p} abierta={abierta} />;
+  };
+  const lista = tareas?.find(t => t.tipo === 'lista');
+  // Tareas sin herramienta en la conversación (p. ej. lanzadas por un subagente): al final.
+  const huerfanas = (tareas || []).filter(t => t.tipo !== 'lista' && !partes.some(p => p.tipo === 'herramienta' && p.h.id === t.herramienta));
+  const extra = <>
+    {lista && <ListaTareas t={lista} />}
+    {huerfanas.map(t => <BloqueTarea key={t.id} t={t} internas={t.herramienta ? dentro(t.herramienta) : []} abierta={false} />)}
+  </>;
+  if (detalle !== 'conciso') return <>{lista && <ListaTareas t={lista} />}{sueltas.map((p, j) => pinta(p, j, detalle === 'detallado'))}{huerfanas.map(t => <BloqueTarea key={t.id} t={t} internas={t.herramienta ? dentro(t.herramienta) : []} abierta={false} />)}</>;
+  const acciones = sueltas.filter(p => p.tipo === 'herramienta' && !p.h.skill && !T.deHerramienta(tareas, p.h.id));
+  const conTarea = sueltas.filter(p => p.tipo === 'herramienta' && T.deHerramienta(tareas, p.h.id));
+  const skills = sueltas.filter(p => p.tipo === 'herramienta' && p.h.skill);
   const enCurso = acciones.some(p => p.tipo === 'herramienta' && p.h.estado === 'curso');
   return <>
     {skills.map((p, j) => <ParteMensaje key={'s' + j} p={p} abierta={false} />)}
@@ -524,8 +556,42 @@ function Partes({ partes, detalle }: { partes: Parte[]; detalle: Detalle }) {
         {acciones.map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
       </details>
     )}
-    {partes.filter(p => p.tipo === 'texto').map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
+    {conTarea.map((p, j) => pinta(p, 't' + j, false))}
+    {extra}
+    {sueltas.filter(p => p.tipo === 'texto').map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
   </>;
+}
+
+// Un subagente o una orden en segundo plano: estado, título, progreso y, dentro, sus herramientas y su resultado.
+function BloqueTarea({ t, h, internas, abierta }: { t: T.Tarea; h?: Herramienta; internas: Parte[]; abierta: boolean }) {
+  const estado = t.estado || h?.estado || 'curso';
+  return (
+    <details className={'tarea-agente ' + estado} open={abierta}>
+      <summary>
+        <span className="punto-h" aria-label={estado} />
+        <span className="tarea-tipo">{T.NOMBRES[t.tipo || ''] || 'Tarea'}{t.subtipo ? ' · ' + t.subtipo : ''}{t.segundo_plano && t.tipo === 'subagente' ? ' · en segundo plano' : ''}</span>
+        <span className="recorta">{t.titulo || h?.resumen || h?.nombre}</span>
+        {estado === 'curso' && t.progreso && <span className="tarea-progreso recorta suave pequeno">{t.progreso}</span>}
+        {estado === 'parada' && <span className="suave pequeno">parada</span>}
+      </summary>
+      {internas.length > 0 && <div className="tarea-internas">{internas.map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}</div>}
+      {(t.salida || h?.salida) && <pre className="salida-h">{t.salida || h?.salida}</pre>}
+      {(t.detalle || t.sesion_hija) && <p className="suave pequeno tarea-detalle" title={t.detalle}>{t.detalle ? 'Detalle: ' + t.detalle : 'Sesión: ' + t.sesion_hija}</p>}
+    </details>
+  );
+}
+
+// La lista de tareas del agente, con casillas.
+function ListaTareas({ t }: { t: T.Tarea }) {
+  const hechas = (t.elementos || []).filter(e => e.estado === 'hecho').length;
+  return (
+    <details className="lista-tareas-agente" open>
+      <summary>Lista de tareas · {hechas}/{t.elementos?.length || 0}</summary>
+      <ul>{(t.elementos || []).map((e, i) => (
+        <li key={i} className={e.estado}><span className="casilla" aria-hidden>{e.estado === 'hecho' ? '☑' : e.estado === 'curso' ? '◐' : '☐'}</span> {e.texto}</li>
+      ))}</ul>
+    </details>
+  );
 }
 
 function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {

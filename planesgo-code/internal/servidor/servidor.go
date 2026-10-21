@@ -664,6 +664,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			}
 			s.Imputacion.AnotaAgente(sesionImp, "herramienta", c)
 		}
+		if t := e.Tarea; t != nil && s.Imputacion != nil {
+			s.Imputacion.AnotaAgente(sesionImp, "tarea", map[string]any{"id": t.ID, "tipo": t.Tipo, "estado": t.Estado,
+				"titulo": recortaTexto(t.Titulo, 120), "subtipo": t.Subtipo, "segundo_plano": t.SegundoPlano})
+		}
 		envia(e)
 	})
 	if s.Imputacion != nil {
