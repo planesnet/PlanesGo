@@ -112,6 +112,17 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		}
 	}
 	err := a.chat(ctx, p, emiteOC)
+	// Pregunta aparte en OpenCode: su copia de la sesión (o la nueva) se borra; nada de reparar ni reintentar.
+	if a.Clave == "opencode" && p.Aparte {
+		if sesionOC != "" && sesionOC != p.SesionAgente {
+			c, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancela()
+			if e := borraOpenCode(c, a, p, sesionOC); e != nil {
+				depuracion.Log(a.Clave, "borrar la copia %s de la pregunta aparte: %v", sesionOC, e)
+			}
+		}
+		return err
+	}
 	if a.Clave == "opencode" && sesionOC != "" {
 		switch {
 		case ctx.Err() != nil:
@@ -409,6 +420,13 @@ func Agentes() []Proveedor {
 				if p.SesionAgente != "" {
 					a = append(a, "--resume", p.SesionAgente)
 				}
+				// Pregunta aparte: sobre una copia de la conversación que no se guarda (la original no se entera).
+				if p.Aparte {
+					if p.SesionAgente != "" {
+						a = append(a, "--fork-session")
+					}
+					a = append(a, "--no-session-persistence")
+				}
 				// «--» antes del mensaje: un texto que empiece por «-» no se toma como opción.
 				return append(a, "--", msg)
 			}},
@@ -459,6 +477,9 @@ func Agentes() []Proveedor {
 				a = append(a, "--model", modelo)
 				if p.SesionAgente != "" {
 					a = append(a, "--session", p.SesionAgente)
+					if p.Aparte {
+						a = append(a, "--fork") // pregunta aparte: una copia, que se borra al acabar
+					}
 				}
 				// La carpeta de la sesión, explícita: OpenCode guarda con ella su «dentro» y su «fuera».
 				if p.Carpeta != "" {
@@ -606,6 +627,23 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 		}
+	}
+	return nil
+}
+
+// borraOpenCode borra una sesión de OpenCode (la copia de una pregunta aparte).
+func borraOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) error {
+	if !idSesionOC.MatchString(sesion) {
+		return errors.New("sesión no válida")
+	}
+	cmd := exec.CommandContext(ctx, "opencode", "session", "delete", sesion)
+	cmd.Dir = p.Carpeta
+	cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+	if a.EntornoPara != nil {
+		cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

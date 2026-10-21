@@ -145,6 +145,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("GET /api/agentes/mcp", s.conSesion(s.servidoresMCP))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
+	mux.HandleFunc("POST /api/chat/clasifica", s.conSesion(s.clasifica))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
 	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
 	mux.HandleFunc("GET /api/evidencias", s.conSesion(s.evidencias))
@@ -559,9 +560,17 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Tarea        string        `json:"tarea"`
 		Adjuntos     []string      `json:"adjuntos"` // rutas de ficheros adjuntos (en la carpeta de la sesión)
 		Mensajes     []llm.Mensaje `json:"mensajes"`
+		// Pregunta aparte (no entra en la conversación): «suelta» (sin contexto, con un modelo barato) o «contexto»
+		// (sobre una copia de la sesión del agente; si el agente no las permite, con el resumen de Contexto).
+		Aparte   string `json:"aparte"`
+		Contexto string `json:"contexto"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
+		return
+	}
+	if p.Aparte != "" && p.Aparte != "suelta" && p.Aparte != "contexto" {
+		jsonError(w, http.StatusBadRequest, "pregunta aparte no válida")
 		return
 	}
 	if len(p.Mensajes) == 0 {
@@ -630,7 +639,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			sesionImp = fmt.Sprintf("%d-%s", p.Proyecto, filepath.Base(p.Carpeta))
 		}
 		pedido := ""
-		if len(p.Mensajes) > 0 {
+		if len(p.Mensajes) > 0 && p.Aparte == "" { // una pregunta aparte no cambia la descripción de la línea
 			pedido = p.Mensajes[len(p.Mensajes)-1].Texto
 		}
 		fin := s.Imputacion.Empieza(imputacion.Trabajo{Sesion: sesionImp, Titulo: p.Titulo, Proyecto: p.Proyecto, NombreProy: nombre,
@@ -659,6 +668,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	if p.Permisos != "" && p.Permisos != "lectura" && p.Permisos != "editar" && p.Permisos != "auto" {
 		p.Permisos = "lectura"
+	}
+	if p.Aparte != "" {
+		s.aparte(r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
+			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
+			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true}, sesionImp, p.Proveedor, envia)
+		return
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
 	inicioTurno := time.Now()

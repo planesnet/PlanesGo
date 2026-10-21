@@ -19,6 +19,7 @@ export interface Sesion {
   autorizadas?: string[]; // carpetas de fuera del proyecto a las que el agente puede acceder (si no, solo la suya)
   avisos?: Avisos;        // avisos y límites de coste de la sesión (lo que falte, los del agente)
   mcp?: string[];         // servidores MCP de Claude Code además de «pgo» (por defecto ninguno: ahorran tokens y procesos)
+  decideAparte?: boolean; // pgocode decide qué va a la conversación y qué aparte (por defecto, sí)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)

@@ -22,7 +22,7 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
   sesion?: Sesion | null; directorio?: string;
   pedidoWeb: PedidoWeb | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
-  const [pestana, setPestana] = useState<Pestana>('flujo');
+  const [pestana, setPestana] = useState<Pestana>('actividad');
   // Al pedir abrir una URL (programa que arranca, «pgo abrir»), se pasa al navegador.
   useEffect(() => { if (pedidoWeb) setPestana('navegador'); }, [pedidoWeb?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [vista, setVista] = useState<VistaTV>(() => {

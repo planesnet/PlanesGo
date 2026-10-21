@@ -190,6 +190,12 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
         )}
 
         <fieldset className="notificaciones">
+          <legend>Preguntas aparte</legend>
+          <label className="casilla"><input type="checkbox" checked={s.decideAparte !== false} onChange={e => cambia({ decideAparte: e.target.checked })} /> Decidir automáticamente qué va al contexto</label>
+          <span className="suave pequeno">Con el agente trabajando, pgocode responde aparte (sin que entre en la conversación) lo que no es para el agente: «¿cómo va?» en local y sin tokens; las preguntas sueltas, con un modelo barato. En la duda, va a la conversación. Siempre puedes forzarlo: «?» estado, «//» aparte.</span>
+        </fieldset>
+
+        <fieldset className="notificaciones">
           <legend>Notificaciones</legend>
           <span className="suave pequeno">{CO.PLANES[s.agente] || 'Avisos de gasto de esta sesión.'} Son avisos sin interrupciones: el gasto del pie del chat cambia de color. Vacío: el valor por defecto del agente (en gris).</span>
           <div className="rejilla-avisos">

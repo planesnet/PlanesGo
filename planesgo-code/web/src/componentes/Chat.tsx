@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo } from '../api';
+import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
+import * as AP from '../aparte';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas } from './Capturas';
@@ -35,6 +36,18 @@ const modoDe = (s: Sesion) => (s.permisos === 'plan' ? s.modoPrevio || 'lectura'
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
+// Una pregunta aparte: no entra en la conversación (ni en lo que se guarda); desaparece al recargar.
+interface Aparte {
+  id: string; pregunta: string; destino: Exclude<AP.Destino, 'conversacion'>; texto: string; acciones: number; uso?: Uso;
+  curso: boolean; error?: boolean; motivo: string; auto: boolean; incorporada?: boolean; ac?: AbortController;
+}
+const SITIOS_APARTE: Exclude<AP.Destino, 'conversacion'>[] = ['estado', 'suelta', 'contexto'];
+// Lo aprendido de las correcciones, por proyecto; y el gasto aparte, por sesión (se suma al de la conversación).
+const leeLS = <T,>(k: string, d: T): T => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
+const ponLS = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
+const claveAprendidas = (proyecto: number) => 'pgo:aparte:' + proyecto;
+const claveGastoAparte = (sesion: string) => 'pgo:aparte-gasto:' + sesion;
+
 export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -42,6 +55,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // volver se ve su progreso). «enCurso» es el de la sesión abierta.
   const [enCursos, setEnCursos] = useState<Record<string, AbortController>>({});
   const enCurso: AbortController | null = (sesion && enCursos[sesion.id]) || null;
+  const enCursosRef = useRef(enCursos);
+  enCursosRef.current = enCursos;
+  const inicioTurno = useRef<Record<string, number>>({});
+  // Preguntas aparte por sesión, y las que el usuario quiere que el agente conozca (van con su próximo mensaje).
+  const [apartes, setApartes] = useState<Record<string, Aparte[]>>({});
+  const apartesSesion = (sesion && apartes[sesion.id]) || [];
+  const incorporar = useRef<Record<string, { pregunta: string; respuesta: string }[]>>({});
+  const [usoAparte, setUsoAparte] = useState<Uso | undefined>(undefined);
+  useEffect(() => { setUsoAparte(sesion ? leeLS<Uso | undefined>(claveGastoAparte(sesion.id), undefined) : undefined); }, [sesion?.id]);
   // La conversación de cada turno en curso, para verla al volver a su sesión (se guarda al acabar).
   const vivas = useRef<Record<string, Mensaje[]>>({});
   const [verAgentes, setVerAgentes] = useState(false);
@@ -92,7 +114,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   });
 
   // Gasto de la sesión y sus avisos (los de la sesión o, si no tiene, los del plan de su agente).
-  const gastoSesion = useMemo(() => CO.gasto(mensajes), [mensajes]);
+  const gastoSesion = useMemo(() => {
+    const g = CO.gasto(mensajes);
+    return usoAparte ? { ...g, coste: g.coste + (usoAparte.coste || 0), entrada: g.entrada + usoAparte.entrada, salida: g.salida + usoAparte.salida } : g;
+  }, [mensajes, usoAparte]);
   const avisos = sesion ? CO.efectivos(sesion.agente, sesion.avisos) : {};
   const nivelGasto = CO.nivel(gastoSesion, avisos);
   // Avisos de la sesión: solo se anotan (sin interrumpir) y se ven en el indicador del pie, junto al modelo.
@@ -207,6 +232,99 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setAdjuntos([]);
   }
 
+  // Lo último que ha dicho el agente (para decidir si lo que se escribe es su respuesta).
+  const ultimoDelAgente = (ms: Mensaje[]) => {
+    const m = [...ms].reverse().find(x => x.rol === 'assistant');
+    const ts = (m?.partes || []).filter(p => p.tipo === 'texto');
+    const u = ts[ts.length - 1];
+    return (u && u.tipo === 'texto' ? u.texto : m?.texto || '').slice(-600);
+  };
+
+  // Intro: pgocode decide antes de enviar si va a la conversación (ahora o a la cola) o aparte (ver aparte.ts).
+  async function decideYEnvia() {
+    const t = texto.trim();
+    if (!t || !sesion || !proyecto || subiendo) return;
+    const ses = sesion;
+    const listos = adjuntos.filter(a => !a.subiendo && !a.error);
+    const ultimo = ultimoDelAgente(mensajes);
+    const d = AP.decide(t, { ocupado: Boolean(enCurso), ultimo, hayConversacion: mensajes.length > 0, adjuntos: listos.length, aprendidas: leeLS(claveAprendidas(proyecto.id), {}),
+      activo: ses.decideAparte !== false, ordenPlan: PL.interpreta(t) !== null });
+    if (d.destino === 'conversacion' && !d.duda) { if (enCurso) encola(); else envia(); return; }
+    setTexto(''); setAdjuntos([]);
+    let destino: AP.Destino = d.destino, motivo = d.motivo;
+    if (d.duda) {
+      // Solo con el agente ocupado: un modelo barato con el mensaje y lo último del agente (unos 200 tokens).
+      const r = await Promise.race([post<{ tipo: AP.Destino }>('/api/chat/clasifica', { texto: t, ultimo, sesion: ses.id }).catch(() => null),
+        new Promise<null>(res => setTimeout(() => res(null), 5000))]);
+      destino = r?.tipo || 'conversacion';
+      motivo = r ? 'lo ha decidido el clasificador (modelo barato)' : 'el clasificador no ha respondido';
+    }
+    if (destino === 'conversacion') { aConversacion(ses.id, t, listos); return; }
+    pregunta(ses, d.texto || t, destino, motivo, !d.forzado);
+  }
+
+  // A la conversación: a la cola si el agente está ocupado (la cola sale sola al acabar), si no, se envía.
+  function aConversacion(id: string, t: string, adj: Adjunto[] = []) {
+    if (enCursosRef.current[id] || idActual.current !== id) ponCola(id, c => C.encola(c, t, adj));
+    else envia(t, adj, { aCola: true });
+  }
+
+  // Responde una pregunta aparte: el estado, en local; el resto, con /api/chat en modo aparte.
+  async function pregunta(ses: Sesion, q: string, destino: Exclude<AP.Destino, 'conversacion'>, motivo: string, auto: boolean, sustituye?: string) {
+    const idA = Math.random().toString(36).slice(2);
+    const pon = (f: (l: Aparte[]) => Aparte[]) => setApartes(x => ({ ...x, [ses.id]: f(x[ses.id] || []) }));
+    const cambia = (c: Partial<Aparte>) => pon(l => l.map(a => a.id === idA ? { ...a, ...c } : a));
+    const base: Aparte = { id: idA, pregunta: q || '¿Cómo va?', destino, texto: '', acciones: 0, curso: destino !== 'estado', motivo, auto };
+    const ms = vivas.current[ses.id] || (idActual.current === ses.id ? mensajes : conversacion(ses.id));
+    if (destino === 'estado') {
+      const trabajando = Boolean(enCursosRef.current[ses.id]);
+      const ult = [...ms].reverse().find(m => m.rol === 'assistant');
+      base.texto = AP.resumenEstado(ult, { trabajando, segundos: (Date.now() - (inicioTurno.current[ses.id] || Date.now())) / 1000, enCola: (colas[ses.id]?.mensajes.length) || 0 });
+    }
+    pon(l => sustituye ? l.map(a => a.id === sustituye ? base : a) : [...l, base]);
+    if (destino === 'estado' || !proyecto) return;
+    const p = proveedores.find(x => x.id === ses.agente);
+    if (!p) { cambia({ curso: false, error: true, texto: '⚠ Elige un agente' }); return; }
+    const ac = new AbortController();
+    cambia({ ac });
+    let texto = '', acciones = 0, uso: Uso | undefined;
+    // Sin copia de la sesión del agente (Antigravity, o aún sin sesión): un resumen de la conversación.
+    const sinCopia = destino === 'contexto' && (ses.agente === 'antigravity' || !ses.sesionAgente || p.tipo !== 'agente');
+    try {
+      await chat({
+        proyecto: proyecto.id, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
+        sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '', sesion: ses.id, titulo: ses.nombre, autorizadas: ses.autorizadas || [],
+        mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '', mensajes: [{ rol: 'user', texto: q }],
+        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '',
+      }, e => {
+        if (e.texto) texto += e.texto;
+        if (e.herramienta && e.herramienta.estado === 'curso') acciones++;
+        if (e.uso) {
+          uso = AP.sumaUso(uso, e.uso);
+          const g = AP.sumaUso(leeLS<Uso | undefined>(claveGastoAparte(ses.id), undefined), e.uso);
+          ponLS(claveGastoAparte(ses.id), g);
+          if (idActual.current === ses.id) setUsoAparte(g);
+        }
+        if (e.error) texto += (texto ? '\n\n' : '') + '⚠ ' + e.error;
+        cambia({ texto, acciones, uso, error: Boolean(e.error) || undefined });
+      }, ac.signal);
+    } catch (err) {
+      if (!ac.signal.aborted) cambia({ texto: (texto ? texto + '\n\n' : '') + '⚠ ' + (err as Error).message, error: true });
+    } finally {
+      cambia({ curso: false, ac: undefined });
+    }
+  }
+
+  // Correcciones del usuario sobre una pregunta aparte (pgocode aprende de las que decidió él).
+  const aprendeDe = (a: { pregunta: string; auto: boolean }, destino: AP.Destino) => {
+    if (!proyecto || !a.auto) return;
+    ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), a.pregunta, destino));
+  };
+  const quitaAparte = (id: string, a: Aparte) => {
+    a.ac?.abort();
+    setApartes(x => ({ ...x, [id]: (x[id] || []).filter(y => y.id !== a.id) }));
+  };
+
   // Parar: el turno se corta y lo que había en la cola vuelve al cuadro de texto, para revisarlo.
   function para() {
     if (!enCurso || !sesion) return;
@@ -221,7 +339,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
   // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
-  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string } = {}) {
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean } = {}) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const ses: Sesion = sesion;
@@ -262,6 +380,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
     const ac = new AbortController();
     setEnCursos(x => ({ ...x, [id]: ac }));
+    inicioTurno.current[id] = Date.now();
     let sesionAgente = ses.sesionAgente;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
@@ -286,6 +405,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       } else {
         pide.then(r => { if (r.elegida && idActual.current === id) marcaSkill({ nombre: r.elegida.nombre, puntuacion: r.elegida.puntuacion, modo: 'sugerida' }); }).catch(() => {});
       }
+    }
+    // Preguntas aparte que el usuario ha incorporado: van al final de este mensaje (el agente no gasta otro turno).
+    if (!orden && prov.tipo === 'agente' && incorporar.current[id]?.length) {
+      aEnviar += AP.incorporacion(incorporar.current[id]);
+      incorporar.current[id] = [];
+      setApartes(x => ({ ...x, [id]: (x[id] || []).filter(a => !a.incorporada) }));
     }
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     // Añade un trozo a las partes del mensaje: el texto seguido se junta; la herramienta se actualiza por su id.
@@ -422,7 +547,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (enCurso) encola(); else envia(); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); decideYEnvia(); }
   };
 
   const eligeAgente = (p: Proveedor) => {
@@ -516,6 +641,34 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 )}
               </div>
             ))}
+            {apartesSesion.map(a => (
+              <div key={a.id} className="mensaje aparte" role="note" aria-label="Pregunta aparte">
+                <div className="aparte-cabecera">
+                  <span className="aparte-etiqueta">Aparte · {AP.NOMBRES[a.destino]}</span>
+                  <span className="suave pequeno recorta" title={a.motivo}>no queda en la conversación{a.auto ? ' · lo ha decidido pgocode' : ''}</span>
+                  <span className="hueco" />
+                  <button className="icono" onClick={() => quitaAparte(sesion.id, a)} title={a.curso ? 'Parar y quitar' : 'Quitar'} aria-label="Quitar la pregunta aparte"><Icono n="cerrar" t={13} /></button>
+                </div>
+                <div className="aparte-pregunta">{a.pregunta}</div>
+                {a.texto ? (a.error ? <p className="con-error">{a.texto}</p> : <Texto md={a.texto} />) : a.curso ? <span className="pensando">Pensando…</span> : null}
+                {(a.uso || a.acciones > 0) && <div className="uso">{[a.acciones ? `${a.acciones} ${a.acciones === 1 ? 'acción' : 'acciones'} (solo lectura)` : '', a.uso ? usoTexto(a.uso) : ''].filter(Boolean).join(' · ')}</div>}
+                <div className="aparte-acciones">
+                  <button className="enlace" title="Enviarla al agente como un mensaje más (a la cola si está trabajando)"
+                    onClick={() => { aprendeDe(a, 'conversacion'); quitaAparte(sesion.id, a); aConversacion(sesion.id, a.pregunta); }}>Llevar a la conversación</button>
+                  {SITIOS_APARTE.filter(x => x !== a.destino && !(x === 'estado' && a.auto === false && a.pregunta === '¿Cómo va?')).map(x => (
+                    <button key={x} className="enlace" title={x === 'estado' ? 'Responder con el estado del trabajo (sin tokens)' : x === 'suelta' ? 'Responder sin contexto, con un modelo barato' : 'Responder con el contexto de la conversación (copia de la sesión)'}
+                      onClick={() => { aprendeDe(a, x); a.ac?.abort(); pregunta(sesion, a.pregunta, x, 'lo has cambiado tú', false, a.id); }}>{AP.NOMBRES[x]}</button>
+                  ))}
+                  {!a.curso && !a.error && a.texto && a.destino !== 'estado' && (a.incorporada
+                    ? <span className="suave pequeno">Irá con tu próximo mensaje al agente</span>
+                    : <button className="enlace" title="El agente la conocerá: se añade a tu próximo mensaje (sin gastar un turno solo para ella)"
+                      onClick={() => {
+                        (incorporar.current[sesion.id] ||= []).push({ pregunta: a.pregunta, respuesta: a.texto });
+                        setApartes(x => ({ ...x, [sesion.id]: (x[sesion.id] || []).map(y => y.id === a.id ? { ...y, incorporada: true } : y) }));
+                      }}>Incorporar</button>)}
+                </div>
+              </div>
+            ))}
             <div ref={fin} />
           </div>
           </ProyectoCapturas.Provider>
@@ -554,6 +707,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                       setAdjuntos(d.adjuntos);
                       area.current?.focus();
                     }}><Icono n="lapiz" t={13} /></button>
+                    {c.adjuntos.length === 0 && (
+                      <button className="enlace aparte-boton" title="Preguntarlo aparte, sin que entre en la conversación" onClick={() => {
+                        ponCola(sesion.id, k => C.quita(k, i));
+                        if (proyecto) ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), c.texto, 'contexto'));
+                        pregunta(sesion, c.texto, 'contexto', 'lo has llevado aparte', false);
+                      }}>Aparte</button>
+                    )}
                     <button className="quita-adjunto" title="Quitar de la cola" aria-label="Quitar mensaje de la cola" onClick={() => ponCola(sesion.id, k => C.quita(k, i))}>×</button>
                   </li>
                 ))}
@@ -603,14 +763,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; se enviará cuando termine el agente…'
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; irá a la cola… («?» estado, «//» pregunta aparte)'
                   : 'Escribe… (/plan para crear un plan)'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? (texto.trim()
-                  ? <button className="redondo primario" onClick={encola} disabled={subiendo} title="Poner en cola (Intro): se enviará cuando termine el agente" aria-label="Poner en cola"><Icono n="enviar" t={16} /></button>
+                  ? <button className="redondo primario" onClick={decideYEnvia} disabled={subiendo} title="Intro: a la cola (se enviará cuando termine el agente) o, si no es para el agente, aparte" aria-label="Poner en cola"><Icono n="enviar" t={16} /></button>
                   : <button className="redondo" onClick={para} title={cola.length ? 'Parar (la cola vuelve al cuadro de texto)' : 'Parar'} aria-label="Parar"><Icono n="parar" t={16} /></button>)
-                : <button className="redondo primario" onClick={() => envia()} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
+                : <button className="redondo primario" onClick={decideYEnvia} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
             <div className="pie-redactor">
