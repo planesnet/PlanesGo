@@ -709,3 +709,25 @@ button.miga-item:hover { background: var(--hover); }
 .lista-tareas-agente li.curso { font-weight: 600; }
 .en-marcha { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; font-size: 12px; color: var(--suave); border: 1px dashed var(--linea); border-radius: 8px; overflow: hidden; }
 .en-marcha-tarea { min-width: 0; padding: 1px 8px; border-radius: 999px; background: var(--hover); }
+
+/* Capturas de evidencia: miniaturas en el chat, visor y galería de la TV */
+.miniaturas { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.miniatura { padding: 0; width: 44px; height: 30px; border-radius: 5px; overflow: hidden; border: 1px solid var(--linea); background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.miniatura img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.miniatura:hover { border-color: var(--acento); }
+.mas-miniaturas { font-size: 11px; color: var(--suave); cursor: pointer; }
+.acciones > summary, .herramienta > summary { display: flex; align-items: center; gap: 6px; }
+.fondo-modal.visor-capturas { display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; background: rgba(0,0,0,.72); }
+.visor-capturas figure { margin: 0; max-width: 96vw; display: grid; gap: 8px; justify-items: center; }
+.visor-capturas img { max-width: 96vw; max-height: calc(96vh - 48px); object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.visor-capturas figcaption { display: flex; align-items: center; gap: 8px; justify-content: center; color: #fff; font-size: 13px; min-width: 0; }
+.visor-capturas figcaption .icono { color: #fff; }
+.galeria-capturas { display: grid; gap: 14px; padding: 10px 12px 16px; align-content: start; }
+.galeria-cabecera { display: flex; align-items: center; justify-content: space-between; }
+.galeria-capturas h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; }
+.galeria-capturas h4 span { display: inline-block; color: var(--suave); font-weight: 500; }
+.galeria-capturas h4 span::first-letter { text-transform: uppercase; }
+.galeria-rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.galeria-item { padding: 0; display: grid; gap: 3px; text-align: left; font-size: 11.5px; color: var(--suave); }
+.galeria-item img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 6px; border: 1px solid var(--linea); background: var(--panel); }
+.galeria-item:hover img { border-color: var(--acento); }

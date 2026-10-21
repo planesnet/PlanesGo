@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,6 +113,35 @@ func textoDe(c json.RawMessage) string {
 	return string(c)
 }
 
+// imagenesDe: las imágenes (base64) del resultado de una herramienta, también dentro de bloques anidados
+// (los resultados de herramientas MCP llevan su contenido como lista de bloques).
+func imagenesDe(c json.RawMessage) []Imagen {
+	var bloques []struct {
+		Type   string `json:"type"`
+		Source struct {
+			Type      string `json:"type"`
+			MediaType string `json:"media_type"`
+			Data      string `json:"data"`
+		} `json:"source"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(c, &bloques) != nil {
+		return nil
+	}
+	var l []Imagen
+	for _, b := range bloques {
+		switch {
+		case b.Type == "image" && b.Source.Type == "base64" && strings.HasPrefix(b.Source.MediaType, "image/"):
+			if d, err := base64.StdEncoding.DecodeString(b.Source.Data); err == nil && len(d) > 0 {
+				l = append(l, Imagen{Tipo: b.Source.MediaType, Datos: d})
+			}
+		case len(b.Content) > 0:
+			l = append(l, imagenesDe(b.Content)...)
+		}
+	}
+	return l
+}
+
 // leeClaudeCode interpreta la salida stream-json de `claude -p`: texto, razonamiento, herramientas con su
 // entrada y su resultado, consumo del turno y el id de sesión para continuar con --resume.
 func leeClaudeCode(r io.Reader, emite func(Evento)) error {
@@ -195,7 +225,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 						estado = "error"
 					}
 					emite(Evento{Herramienta: &Herramienta{ID: c.ToolUseID, Nombre: nombres[c.ToolUseID],
-						Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado, Padre: ev.Padre}})
+						Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado, Padre: ev.Padre, Imagenes: imagenesDe(c.Content)}})
 				}
 			}
 			continue
@@ -226,7 +256,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					estado = "error"
 				}
 				emite(Evento{Herramienta: &Herramienta{ID: c.ToolUseID, Nombre: nombres[c.ToolUseID],
-					Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado}})
+					Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado, Imagenes: imagenesDe(c.Content)}})
 			}
 		case "result":
 			coste := max(ev.Coste-costeAntes, 0)

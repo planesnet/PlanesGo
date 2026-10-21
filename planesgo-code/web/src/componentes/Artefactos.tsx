@@ -1,5 +1,6 @@
 import { useEffect, useState, type PointerEvent as EventoPuntero } from 'react';
 import type { Proyecto } from '../api';
+import { Galeria } from './Capturas';
 import Navegador, { type PedidoWeb } from './Navegador';
 import StudioTV from './StudioTV';
 import Pruebas from './Pruebas';
@@ -10,7 +11,7 @@ import type { Sesion } from '../sesiones';
 import Icono from './Icono';
 
 type Pestana = 'flujo' | 'studio' | 'programas' | 'skills' | 'navegador';
-type VistaTV = 'pruebas' | 'directo';
+type VistaTV = 'pruebas' | 'directo' | 'capturas';
 
 const ANCHO_MIN = 320;
 
@@ -62,6 +63,7 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
           <span className="subpestanas">
             <button aria-pressed={vista === 'pruebas'} onClick={() => eligeVista('pruebas')}>Pruebas</button>
             <button aria-pressed={vista === 'directo'} onClick={() => eligeVista('directo')}>Directo</button>
+            <button aria-pressed={vista === 'capturas'} onClick={() => eligeVista('capturas')} title="Capturas de evidencia que devuelven los agentes al probar">Capturas</button>
           </span>
         )}
       </div>
@@ -71,7 +73,8 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
           : <>
             {pestana === 'studio' && (vista === 'pruebas'
               ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
-              : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
+              : vista === 'capturas' ? <Galeria key={proyecto.id} proyecto={proyecto.id} />
+                : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
             {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} alResolver={alResolver} />}
             {pestana === 'skills' && <Skills key={proyecto.id} proyecto={proyecto} carpeta={carpeta} agente={agente} sesiones={sesiones} />}
             {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}

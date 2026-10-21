@@ -80,6 +80,16 @@ type Herramienta struct {
 	Estado  string `json:"estado"`            // curso | ok | error
 	Skill   string `json:"skill,omitempty"`   // la skill que el agente carga con esta herramienta
 	Padre   string `json:"padre,omitempty"`   // herramienta (de subagente) dentro de la que se usa
+	// Imágenes que devuelve la herramienta (capturas del navegador, imágenes leídas): las guarda el servidor como
+	// evidencias y por el chat solo viajan sus rutas (Capturas).
+	Imagenes []Imagen `json:"-"`
+	Capturas []string `json:"capturas,omitempty"`
+}
+
+// Imagen devuelta por una herramienta.
+type Imagen struct {
+	Tipo  string // image/png, image/jpeg…
+	Datos []byte
 }
 
 // Uso es el consumo de un turno.

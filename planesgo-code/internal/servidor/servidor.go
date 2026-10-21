@@ -142,6 +142,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
+	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
+	mux.HandleFunc("GET /api/evidencias", s.conSesion(s.evidencias))
 	mux.HandleFunc("GET /api/planes", s.conSesion(s.planesLista))
 	mux.HandleFunc("GET /api/planes/leer", s.conSesion(s.planesLee))
 	mux.HandleFunc("POST /api/planes", s.conSesion(s.planesGuarda))
@@ -655,6 +657,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
+		}
+		// Capturas de la herramienta: a disco, como evidencias; por el chat, solo sus rutas.
+		if h := e.Herramienta; h != nil && len(h.Imagenes) > 0 {
+			guardaCapturas(p.Carpeta, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)
 		}
 		if h := e.Herramienta; h != nil && s.Imputacion != nil {
 			c := map[string]any{"id": h.ID, "nombre": h.Nombre, "estado": h.Estado}

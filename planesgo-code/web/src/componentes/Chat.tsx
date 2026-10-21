@@ -6,6 +6,7 @@ import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
+import { Miniaturas, ProyectoCapturas } from './Capturas';
 import Icono from './Icono';
 import Lanzador, { type AbreWeb } from './Lanzador';
 import Texto from './Texto';
@@ -355,6 +356,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         </div>
       ) : (
         <>
+          <ProyectoCapturas.Provider value={proyecto.id}>
           <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
@@ -388,6 +390,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             ))}
             <div ref={fin} />
           </div>
+          </ProyectoCapturas.Provider>
           <div className="redactor">
             {!sesion.hosting && (
               <div className="aviso-sesion">
@@ -552,7 +555,8 @@ function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea
     {skills.map((p, j) => <ParteMensaje key={'s' + j} p={p} abierta={false} />)}
     {acciones.length > 0 && (
       <details className="acciones">
-        <summary><span className={'punto-h' + (enCurso ? ' curso' : '')} /> {acciones.length} {acciones.length === 1 ? 'acción' : 'acciones'}</summary>
+        <summary><span className={'punto-h' + (enCurso ? ' curso' : '')} /> {acciones.length} {acciones.length === 1 ? 'acción' : 'acciones'}
+          <Miniaturas rutas={acciones.flatMap(p => (p.tipo === 'herramienta' && p.h.capturas) || [])} /></summary>
         {acciones.map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
       </details>
     )}
@@ -573,6 +577,7 @@ function BloqueTarea({ t, h, internas, abierta }: { t: T.Tarea; h?: Herramienta;
         <span className="recorta">{t.titulo || h?.resumen || h?.nombre}</span>
         {estado === 'curso' && t.progreso && <span className="tarea-progreso recorta suave pequeno">{t.progreso}</span>}
         {estado === 'parada' && <span className="suave pequeno">parada</span>}
+        <Miniaturas rutas={[...(h?.capturas || []), ...internas.flatMap(p => (p.tipo === 'herramienta' && p.h.capturas) || [])]} />
       </summary>
       {internas.length > 0 && <div className="tarea-internas">{internas.map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}</div>}
       {(t.salida || h?.salida) && <pre className="salida-h">{t.salida || h?.salida}</pre>}
@@ -609,6 +614,7 @@ function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
       <summary>
         <span className="punto-h" aria-label={h.estado} />
         <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}
+        <Miniaturas rutas={h.capturas} />
       </summary>
       {h.entrada && <pre className="entrada-h">{h.entrada}</pre>}
       {h.salida && <pre className="salida-h">{h.salida}</pre>}

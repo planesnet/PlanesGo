@@ -10,7 +10,7 @@ export interface Proveedor {
   esfuerzos?: string[]; modos?: boolean;
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
-export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string }
+export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[] }
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number }
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
