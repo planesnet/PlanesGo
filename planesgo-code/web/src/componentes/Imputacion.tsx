@@ -117,21 +117,18 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
   const tareaID = res?.tarea_id || tareaPedida;
   const pendTarea = (clase: 'h' | 'm') => hoy.filter(l => l.proyecto === proyecto && l.tarea_id === tareaID && l.clase === clase).reduce((t, l) => t + pendiente(l), 0);
   const pendProy = (clase: 'h' | 'm') => hoy.filter(l => l.proyecto === proyecto && l.clase === clase).reduce((t, l) => t + pendiente(l), 0);
-  // Cada tiempo, desglosado en horas hombre (H) y horas máquina (M).
+  // Cada tiempo suma hombre y máquina; el desglose se lleva por dentro (líneas de Odoo y registro de tiempos),
+  // no en la etiqueta (Luis: «no queda claro»).
   const hoyH = (res?.hoy_h || 0) + pendTarea('h');
   const hoyM = (res?.hoy_m || 0) + pendTarea('m');
   const hoyTarea = hoyH + hoyM;
   const totalH = (res?.total_h || 0) + pendProy('h');
   const totalM = (res?.total_m || 0) + pendProy('m');
-  // Cronómetro: el periodo de trabajo actual de la sesión (con su espera activa); máquina mientras el agente
-  // está con un turno, hombre el resto.
+  // Cronómetro: el periodo de trabajo actual de la sesión (con su espera activa).
   const crono = mia ? (Math.min(Date.now(), mia.agente ? Date.now() : new Date(mia.ultima).getTime() + 5 * 60000) - new Date(mia.inicio).getTime()) / 3600000 : 0;
-  const cronoM = mia ? Math.min(crono, mia.maquina + (mia.agente ? Math.max(0, Date.now() - new Date(mia.calculado).getTime()) / 3600000 : 0)) : 0;
-  const cronoH = Math.max(0, crono - cronoM);
   const estado = mia ? (mia.estado === 'activo' ? 'trabajando' : mia.estado) : 'parado';
   const nombreProy = mia?.nombre_proyecto || sesion?.nombreProyecto || '';
   const pctHoy = Math.min(100, (hoyTarea / JORNADA) * 100);
-  const pctH = totalH + totalM > 0 ? (totalH / (totalH + totalM)) * 100 : 0;
 
   // Agrupado por proyecto y tarea para el panel.
   const grupos = new Map<string, Linea[]>();
@@ -144,16 +141,15 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     <div className="imputacion" ref={caja}>
       {proyecto ? (
         <button className={'marcador ' + estado} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
-          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)} — hombre ${reloj(cronoH)} · máquina ${reloj(cronoM)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} — hombre ${hm(hoyH)} · máquina ${hm(hoyM)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Esta semana en el proyecto: ${hm(totalH + totalM)} — hombre ${hm(totalH)} · máquina ${hm(totalM)}`}>
+          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Esta semana en el proyecto: ${hm(totalH + totalM)}`}>
           <span className="m-tarea recorta"><b>{nombreProy}</b> / {nombreTarea}</span>
           <span className="m-seg m-crono"><i className="m-punto" />
-            <span className="m-cifras"><span>{reloj(crono)}</span><Desglose h={cronoH} m={cronoM} f={reloj} /></span></span>
+            <span className="m-cifras"><span>{reloj(crono)}</span></span></span>
           <span className="m-seg m-hoy"><span className="m-icono">☀</span>
-            <span className="m-cifras"><span>{hm(hoyTarea)}</span><Desglose h={hoyH} m={hoyM} f={hm} /></span>
+            <span className="m-cifras"><span>{hm(hoyTarea)}</span></span>
             <span className="m-barra"><span style={{ width: pctHoy + '%' }} /></span></span>
           <span className="m-seg m-total" ><span className="m-icono" title="Esta semana en el proyecto">Σ</span>
-            <span className="m-cifras"><span>{hm(totalH + totalM)}</span><Desglose h={totalH} m={totalM} f={hm} /></span>
-            <span className="m-barra doble"><span className="h" style={{ width: pctH + '%' }} /><span className="m" style={{ width: (100 - pctH) + '%' }} /></span></span>
+            <span className="m-cifras"><span>{hm(totalH + totalM)}</span></span></span>
         </button>
       ) : (
         <button className="chip-imputa" onClick={() => setAbierto(a => !a)} aria-expanded={abierto} title="Tiempo de hoy imputado por pgocode">
@@ -245,7 +241,3 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
   );
 }
 
-// Desglose de un tiempo en horas hombre (H) y horas máquina (M).
-function Desglose({ h, m, f }: { h: number; m: number; f: (x: number) => string }) {
-  return <span className="m-desglose"><span className="m-h">H {f(h)}</span><span className="m-m">M {f(m)}</span></span>;
-}
