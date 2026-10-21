@@ -171,7 +171,7 @@ func TestOpenCodePermiso(t *testing.T) {
 		t.Errorf("error: %v", err)
 	}
 	a := Agentes()[2].(*Agente)
-	if e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"}); len(e) != 1 || !strings.Contains(e[0], `"bash":"allow"`) {
+	if e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"}); len(e) != 2 || !strings.Contains(e[0], `"bash":"allow"`) || !strings.Contains(e[1], `"planesgo":{"enabled":false}`) {
 		t.Errorf("auto: %v", e)
 	}
 	if e := a.EntornoPara(Peticion{}); !strings.Contains(e[0], `"edit":"deny"`) || strings.Contains(e[0], "ask") {

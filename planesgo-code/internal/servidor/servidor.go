@@ -20,6 +20,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/github"
+	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proceso"
@@ -82,6 +84,8 @@ type Servidor struct {
 	Eventos  Eventos
 	// Selector: elige la skill de cada petición con embeddings (vectores guardados en disco).
 	Selector *selector.Selector
+	// Imputacion: el tiempo de las sesiones en PlanesGo (latidos y cierre del parte), sin pasar por el agente.
+	Imputacion *imputacion.Gestor
 	// GitHub: issues y pull requests del repositorio (con la sesión de «gh» del usuario).
 	GitHub github.Lector
 	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
@@ -505,6 +509,8 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Rama         string        `json:"rama"`
 		Permisos     string        `json:"permisos"`
 		Esfuerzo     string        `json:"esfuerzo"`
+		Sesion       string        `json:"sesion"` // id de la sesión de pgocode (para imputar su tiempo)
+		Titulo       string        `json:"titulo"`
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
 	if err := lee(r, &p); err != nil {
@@ -566,6 +572,21 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			return
 		}
 		p.Carpeta = dir
+	}
+
+	// PlanesGo: pgocode sabe el proyecto, así que vincula la carpeta y lleva él el tiempo (el agente no tiene que
+	// hacer nada: sin set_project ni latidos desde el agente).
+	if info.NecesitaDir && p.Carpeta != "" && p.Proyecto > 0 && s.Imputacion != nil {
+		if err := imputacion.Vincula(p.Carpeta, p.Proyecto, nombre); err != nil {
+			log.Printf("vincular %s con PlanesGo: %v", p.Carpeta, err)
+		}
+		sesion := p.Sesion
+		if sesion == "" {
+			sesion = fmt.Sprintf("%d-%s", p.Proyecto, filepath.Base(p.Carpeta))
+		}
+		fin := s.Imputacion.Empieza(imputacion.Trabajo{Sesion: sesion, Proyecto: p.Proyecto, Nombre: nombre, Carpeta: p.Carpeta,
+			Modelo: strings.TrimSpace(info.Nombre + " " + strings.TrimPrefix(p.Modelo, "por defecto")), Desc: descripcionTrabajo(p.Titulo, p.Mensajes)})
+		defer fin()
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -919,4 +940,19 @@ func (s *Servidor) qaComenta(w http.ResponseWriter, r *http.Request, ses *sesion
 		return
 	}
 	jsonOK(w, c)
+}
+
+// descripcionTrabajo: lo que se imputa en Odoo (en español): la sesión y lo último que se ha pedido.
+func descripcionTrabajo(titulo string, m []llm.Mensaje) string {
+	pedido := ""
+	if len(m) > 0 {
+		pedido = strings.Join(strings.Fields(m[len(m)-1].Texto), " ")
+	}
+	if r := []rune(pedido); len(r) > 200 {
+		pedido = string(r[:197]) + "…"
+	}
+	if titulo == "" {
+		return "Sesión de pgocode: " + pedido
+	}
+	return "Sesión de pgocode «" + titulo + "»: " + pedido
 }

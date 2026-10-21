@@ -260,7 +260,9 @@ func Agentes() []Proveedor {
 		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode, Modos: true,
 			Modelos: []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
-				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
+				// Sin las herramientas de PlanesGo: pgocode vincula el proyecto y lleva el tiempo (y no se cargan sus
+				// descripciones en cada conversación).
+				a := []string{"-p", "--output-format", "stream-json", "--verbose", "--disallowedTools", "mcp__planesgo,mcp__planesgo-mcp"}
 				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
 				switch p.Permisos {
 				case "editar":

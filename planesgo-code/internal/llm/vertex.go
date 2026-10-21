@@ -17,40 +17,38 @@ const (
 	modeloDeepSeekVertex    = proveedorDeepSeekVertex + "/deepseek-ai/deepseek-v3.2-maas"
 )
 
-// configDeepSeekVertex: la configuración de OpenCode con el proveedor de DeepSeek en Vertex AI.
-func configDeepSeekVertex() (string, error) {
+// proveedorDeepSeek: el proveedor de DeepSeek en Vertex AI para OpenCode, con el token de Google del usuario.
+func proveedorDeepSeek() (map[string]any, error) {
 	t, err := google.Token()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	proyecto := google.Proyecto()
-	c := map[string]any{"provider": map[string]any{proveedorDeepSeekVertex: map[string]any{
+	return map[string]any{
 		"npm":  "@ai-sdk/openai-compatible",
 		"name": "DeepSeek (Vertex AI)",
 		"options": map[string]any{
-			"baseURL": "https://aiplatform.googleapis.com/v1/projects/" + proyecto + "/locations/global/endpoints/openapi",
+			"baseURL": "https://aiplatform.googleapis.com/v1/projects/" + google.Proyecto() + "/locations/global/endpoints/openapi",
 			"apiKey":  t,
 		},
 		"models": map[string]any{"deepseek-ai/deepseek-v3.2-maas": map[string]any{
 			"name": "DeepSeek V3.2", "tool_call": true, "limit": map[string]int{"context": 163840, "output": 32768},
 		}},
-	}}}
-	b, _ := json.Marshal(c)
-	return string(b), nil
+	}, nil
 }
 
-// entornoOpenCode: permisos según el modo y, con DeepSeek en Vertex, su proveedor.
+// entornoOpenCode: permisos según el modo y una configuración añadida (OPENCODE_CONFIG_CONTENT) sin el MCP de
+// PlanesGo (pgocode lleva el proyecto y el tiempo) y, con DeepSeek en Vertex, su proveedor.
 func entornoOpenCode(p Peticion) []string {
-	e := []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos)}
+	c := map[string]any{"mcp": map[string]any{"planesgo": map[string]any{"enabled": false}}}
 	if strings.HasPrefix(p.Modelo, proveedorDeepSeekVertex+"/") {
-		c, err := configDeepSeekVertex()
-		if err != nil {
+		if prov, err := proveedorDeepSeek(); err != nil {
 			depuracion.Log("opencode", "sin token de Google para DeepSeek en Vertex: %v", err)
 		} else {
-			e = append(e, "OPENCODE_CONFIG_CONTENT="+c)
+			c["provider"] = map[string]any{proveedorDeepSeekVertex: prov}
 		}
 	}
-	return e
+	b, _ := json.Marshal(c)
+	return []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos), "OPENCODE_CONFIG_CONTENT=" + string(b)}
 }
 
 // modelosOpenCode: Gemini y DeepSeek en Vertex AI; y los de la API de DeepSeek si hay clave.

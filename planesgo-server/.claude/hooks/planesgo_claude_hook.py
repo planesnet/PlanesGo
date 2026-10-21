@@ -743,6 +743,10 @@ def shadowed_by_global_hook():
 
 
 def main():
+    # Agentes lanzados por pgocode: pgocode ya sabe el proyecto, vincula la carpeta y envía él los latidos.
+    # El hook no inyecta contexto (sin tokens), no bloquea y no imputa.
+    if os.environ.get("PLANESGO_GESTOR") == "pgocode":
+        return
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if shadowed_by_global_hook():
         sys.exit(0)

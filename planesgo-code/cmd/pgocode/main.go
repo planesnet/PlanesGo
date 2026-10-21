@@ -27,6 +27,7 @@ import (
 
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/depuracion"
+	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/procesos"
@@ -281,6 +282,7 @@ func main() {
 	s.Indice.Registro = filepath.Join(filepath.Dir(*dirGrab), "carpetas-proyectos.json")
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
+	s.Imputacion = &imputacion.Gestor{}
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()
@@ -349,7 +351,8 @@ func main() {
 		<-ctx.Done()
 		log.Print("cerrando Planes Go Code…")
 		cancelaBase()
-		s.Procesos.ParaTodos() // los programas lanzados se cierran con la app
+		s.Procesos.ParaTodos()    // los programas lanzados se cierran con la app
+		s.Imputacion.CierraTodo() // y los partes abiertos se imputan
 		if estudio != nil {
 			estudio.Cierra() // cierra bien los vídeos que se estén grabando
 		}
