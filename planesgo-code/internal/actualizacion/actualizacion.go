@@ -5,19 +5,28 @@
 // (sin chats ni agentes en curso, sin directo ni grabación en el estudio local), llama a AlAplicar: el backend
 // guarda las sesiones y sale con el código SalidaActualizar, y la app de escritorio cambia los ficheros y se
 // vuelve a abrir. Si la app no está instalada desde un paquete (desarrollo), no hace nada.
+//
+// version.json va firmado con ed25519 (campo «firma», sobre MensajeFirmado) por quien publica, con la clave
+// privada que solo tiene él (make publicar). La app solo acepta lo firmado con la clave pública que lleva dentro,
+// así que quien controle el servidor no puede colar un paquete. El servidor tiene que ser https (salvo
+// 127.0.0.1/localhost, para las pruebas).
 package actualizacion
 
 import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +43,21 @@ const (
 	quietoAntes = 30 * time.Second // tiempo seguido sin actividad antes de actualizar
 )
 
+// clavePublica es la clave pública ed25519 (base64) con la que se comprueba version.json. Su clave privada no
+// está en el repositorio: está en ~/.config/pgocode/pgocode-update-signing-key.pem de quien publica (ver
+// «make clave-firma» en el Makefile). Si se cambia, las apps instaladas solo aceptarán la clave nueva después
+// de reinstalarlas a mano.
+const clavePublica = "beoZeZAUiHu7Vx7aRnIkNx/cH7Tga3WBrWtxLUwueCw="
+
+// ClavePublica es la clave pública con la que la app comprueba las versiones publicadas.
+func ClavePublica() ed25519.PublicKey {
+	b, err := base64.StdEncoding.DecodeString(clavePublica)
+	if err != nil || len(b) != ed25519.PublicKeySize {
+		panic("actualizacion: clavePublica no válida")
+	}
+	return ed25519.PublicKey(b)
+}
+
 // Publicada es lo que anuncia PlanesGo en version.json.
 type Publicada struct {
 	Version  string `json:"version"`
@@ -41,6 +65,41 @@ type Publicada struct {
 	Bytes    int64  `json:"bytes"`
 	Archivo  string `json:"archivo"`
 	Electron string `json:"electron"`
+	Firma    string `json:"firma"` // ed25519 (base64) de MensajeFirmado
+}
+
+// MensajeFirmado es lo que se firma de version.json: todos sus campos menos la firma, en un orden fijo.
+func MensajeFirmado(p Publicada) []byte {
+	return []byte(fmt.Sprintf("pgocode-version-v1\nversion=%s\nsha256=%s\nbytes=%d\narchivo=%s\nelectron=%s\n",
+		p.Version, p.SHA256, p.Bytes, p.Archivo, p.Electron))
+}
+
+// Verifica comprueba la firma de p con la clave pública pub.
+func Verifica(p Publicada, pub ed25519.PublicKey) error {
+	if p.Firma == "" {
+		return errors.New("version.json sin firma: no se instala")
+	}
+	firma, err := base64.StdEncoding.DecodeString(p.Firma)
+	if err != nil || len(firma) != ed25519.SignatureSize || !ed25519.Verify(pub, MensajeFirmado(p), firma) {
+		return errors.New("la firma de version.json no es válida: no se instala")
+	}
+	return nil
+}
+
+// URLSegura exige https salvo para 127.0.0.1, ::1 y localhost (pruebas).
+func URLSegura(u string) error {
+	p, err := url.Parse(u)
+	if err != nil || p.Host == "" {
+		return fmt.Errorf("servidor de actualizaciones no válido: %q", u)
+	}
+	if p.Scheme == "https" {
+		return nil
+	}
+	h := p.Hostname()
+	if ip := net.ParseIP(h); p.Scheme == "http" && (h == "localhost" || ip != nil && ip.IsLoopback()) {
+		return nil
+	}
+	return fmt.Errorf("el servidor de actualizaciones tiene que ser https: %s", u)
 }
 
 // Estado es lo que ve la interfaz.
@@ -55,13 +114,14 @@ type Estado struct {
 
 // Actualizador revisa, descarga y aplica las actualizaciones.
 type Actualizador struct {
-	URL          string        // p. ej. https://planesgo.autopyme.com/install/pgocode
-	DirApp       string        // carpeta de la app instalada (donde está pgocode-backend)
-	DirPreparado string        // dónde se deja la versión nueva (…/actualizacion)
-	Electron     string        // versión de Electron en marcha (si el paquete pide otra, hay que reinstalar)
-	Intervalo    time.Duration // cada cuánto se revisa (15 min; «Buscar ahora» lo adelanta)
-	Ocupado      func() bool   // ¿hay algo en curso?
-	AlAplicar    func()        // guarda el estado y sale con SalidaActualizar
+	URL          string            // p. ej. https://planesgo.autopyme.com/install/pgocode
+	DirApp       string            // carpeta de la app instalada (donde está pgocode-backend)
+	DirPreparado string            // dónde se deja la versión nueva (…/actualizacion)
+	Electron     string            // versión de Electron en marcha (si el paquete pide otra, hay que reinstalar)
+	Intervalo    time.Duration     // cada cuánto se revisa (15 min; «Buscar ahora» lo adelanta)
+	ClavePub     ed25519.PublicKey // con la que se comprueba version.json (ClavePublica; otra en las pruebas)
+	Ocupado      func() bool       // ¿hay algo en curso?
+	AlAplicar    func()            // guarda el estado y sale con SalidaActualizar
 	HTTP         *http.Client
 
 	mu        sync.Mutex
@@ -73,14 +133,22 @@ type Actualizador struct {
 
 // Nuevo prepara el actualizador leyendo la versión y la huella instaladas en dirApp.
 func Nuevo(url, dirApp, dirPreparado, version string) *Actualizador {
-	a := &Actualizador{URL: strings.TrimRight(url, "/"), DirApp: dirApp, DirPreparado: dirPreparado,
-		Intervalo: 15 * time.Minute, HTTP: &http.Client{Timeout: 5 * time.Minute}, buscar: make(chan struct{}, 1), aplicar: make(chan struct{}, 1)}
+	a := &Actualizador{URL: strings.TrimRight(url, "/"), DirApp: dirApp, DirPreparado: dirPreparado, ClavePub: ClavePublica(),
+		Intervalo: 15 * time.Minute, buscar: make(chan struct{}, 1), aplicar: make(chan struct{}, 1)}
+	a.HTTP = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("demasiadas redirecciones")
+		}
+		return URLSegura(req.URL.String()) // una redirección tampoco puede bajar a http
+	}}
 	a.estado.Version = version
 	b, err := os.ReadFile(filepath.Join(dirApp, "paquete.sha256"))
 	a.instalado = strings.TrimSpace(string(b))
 	switch {
 	case a.URL == "":
 		a.estado.Estado, a.estado.Error = "desactivada", "sin servidor de actualizaciones"
+	case URLSegura(a.URL) != nil:
+		a.estado.Estado, a.estado.Error = "desactivada", URLSegura(a.URL).Error()
 	case err != nil || a.instalado == "" || a.instalado == "desarrollo":
 		a.estado.Estado, a.estado.Error = "desactivada", "versión de desarrollo (no instalada desde un paquete)"
 	default:
@@ -240,6 +308,9 @@ func (a *Actualizador) publicada(ctx context.Context) (Publicada, error) {
 	}
 	if len(p.SHA256) != 64 || p.Archivo == "" || strings.ContainsAny(p.Archivo, "/\\") {
 		return p, errors.New("version.json incompleto")
+	}
+	if err := Verifica(p, a.ClavePub); err != nil {
+		return p, err
 	}
 	return p, nil
 }

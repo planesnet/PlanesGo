@@ -4,7 +4,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar instalar apparmor dist clean \
+.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar clave-firma instalar apparmor dist clean \
 	verifica formato prueba-rapida integracion web-verifica e2e arbol-limpio
 
 all: vet test web pgocode studio-tv
@@ -85,12 +85,26 @@ paquete: web
 # Publica la versión (VERSION) en PlanesGo sin reconstruirlo: las apps la ven en menos de un minuto y se
 # actualizan solas. Solo administradores: usa el token de PlanesGo ($PLANESGO_TOKEN o ~/.planesgo_auth.json).
 # Antes: árbol sin cambios y «make verifica» entero.
+# version.json va firmado (ed25519) con la clave privada PGO_CLAVE_FIRMA, que nunca entra en el repositorio; las
+# apps solo instalan lo firmado con la clave pública que llevan (internal/actualizacion/actualizacion.go).
 PUBLICAR_EN ?= https://planesgo.autopyme.com/admin/pgocode/publicar
+PGO_CLAVE_FIRMA ?= $(HOME)/.config/pgocode/pgocode-update-signing-key.pem
 publicar: arbol-limpio verifica paquete
 	@tok="$${PLANESGO_TOKEN:-$$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token",""))' 2>/dev/null)}"; \
 	[ -n "$$tok" ] || { echo "Falta el token de PlanesGo (PLANESGO_TOKEN o ~/.planesgo_auth.json)"; exit 1; }; \
-	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) \
+	firma=$$(go run ./cmd/firmar-version -clave "$(PGO_CLAVE_FIRMA)" $(DIST)/version.json) || { \
+		echo "No se pudo firmar la versión (clave: $(PGO_CLAVE_FIRMA); ver «make clave-firma»)"; exit 1; }; \
+	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) -F "firma=$$firma" \
 		-F paquete=@$(DIST)/pgocode-linux-amd64.tar.gz $(PUBLICAR_EN) && echo && echo "Publicada la versión $(VERSION)."
+
+# Clave de firma de las versiones (una sola vez; guarda una copia del fichero en el gestor de contraseñas: si se
+# pierde, las apps instaladas no aceptarán ninguna versión nueva hasta reinstalarlas a mano).
+#   make clave-firma            crea $(PGO_CLAVE_FIRMA) (0600) si no existe y muestra la clave pública
+# La pública va en la constante clavePublica de internal/actualizacion/actualizacion.go. Equivale a:
+#   openssl genpkey -algorithm ed25519 -out <fichero>
+clave-firma:
+	@if [ -f "$(PGO_CLAVE_FIRMA)" ]; then go run ./cmd/firmar-version -publica -clave "$(PGO_CLAVE_FIRMA)"; \
+	else go run ./cmd/firmar-version -generar -clave "$(PGO_CLAVE_FIRMA)"; fi
 
 # Instala en ~/.local/share/pgocode lo que hay en este repositorio (versión de desarrollo: sin autoactualización).
 # Para instalar la versión publicada (con autoactualización):

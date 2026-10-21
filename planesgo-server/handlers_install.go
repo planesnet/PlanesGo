@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -159,8 +160,9 @@ func handleInstallPgocode(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path.Join(dir, nombre))
 }
 
-// handlePublicarPgocode recibe una versión nueva de Planes Go Code (multipart: version, electron y paquete),
-// calcula su huella y la publica. Solo administradores (token de PlanesGo o sesión de administrador).
+// handlePublicarPgocode recibe una versión nueva de Planes Go Code (multipart: version, electron, firma y paquete),
+// calcula su huella y la publica. La firma (ed25519 en base64, de make publicar) se guarda tal cual en
+// version.json: la comprueban las apps con su clave pública; sin ella no instalan la versión. Solo administradores (token de PlanesGo o sesión de administrador).
 func (state *AppState) handlePublicarPgocode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -185,6 +187,12 @@ func (state *AppState) handlePublicarPgocode(w http.ResponseWriter, r *http.Requ
 	if !valido.MatchString(version) || !valido.MatchString(electron) {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "version o electron no válidos"})
+		return
+	}
+	firma := strings.TrimSpace(r.FormValue("firma"))
+	if b, err := base64.StdEncoding.DecodeString(firma); err != nil || len(b) != 64 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "falta la firma de la versión o no es válida (make publicar la añade)"})
 		return
 	}
 	f, _, err := r.FormFile("paquete")
@@ -220,7 +228,7 @@ func (state *AppState) handlePublicarPgocode(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	pub := map[string]any{"version": version, "sha256": hex.EncodeToString(h.Sum(nil)), "bytes": n,
-		"archivo": paquetePgocode, "electron": electron}
+		"archivo": paquetePgocode, "electron": electron, "firma": firma}
 	b, _ := json.Marshal(pub)
 	// Primero el paquete y después version.json: una app nunca ve una huella sin su paquete.
 	if err := os.Rename(tmp.Name(), path.Join(dirPgocodePublicado, paquetePgocode)); err != nil {

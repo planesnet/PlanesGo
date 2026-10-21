@@ -13,6 +13,13 @@ BIN="$HOME/.local/bin"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# Solo https (salvo 127.0.0.1/localhost, para pruebas)
+case "$URL" in
+  *@*) echo "Planes Go Code: servidor de actualizaciones no válido ($URL)"; exit 1 ;;
+  https://*|http://127.0.0.1|http://127.0.0.1[:/]*|http://localhost|http://localhost[:/]*|http://\[::1\]*) ;;
+  *) echo "Planes Go Code: el servidor de actualizaciones tiene que ser https ($URL)"; exit 1 ;;
+esac
+
 falta() { command -v "$1" >/dev/null 2>&1 || { echo "Planes Go Code: falta «$1»"; exit 1; }; }
 falta tar; falta sha256sum
 trae() { # trae <fichero> <destino>
@@ -34,7 +41,14 @@ if [ "$(cat "$D/motor/.version" 2>/dev/null)" != "$ELECTRON" ]; then
   else
     falta curl; falta unzip
     echo "Descargando el motor (Electron $ELECTRON)…"
-    curl -fL# "https://github.com/electron/electron/releases/download/v$ELECTRON/electron-v$ELECTRON-linux-x64.zip" -o "$TMP/electron.zip"
+    ZIP="electron-v$ELECTRON-linux-x64.zip"
+    REL="https://github.com/electron/electron/releases/download/v$ELECTRON"
+    curl -fL# "$REL/$ZIP" -o "$TMP/$ZIP"
+    curl -fsSL "$REL/SHASUMS256.txt" -o "$TMP/SHASUMS256.txt"
+    SUMA=$(awk -v f="*$ZIP" -v g="$ZIP" '$2 == f || $2 == g { print $1 }' "$TMP/SHASUMS256.txt")
+    [ -n "$SUMA" ] && echo "$SUMA  $TMP/$ZIP" | sha256sum -c --quiet - || {
+      echo "La huella del motor (Electron $ELECTRON) no coincide con su SHASUMS256.txt: no se instala"; exit 1; }
+    mv "$TMP/$ZIP" "$TMP/electron.zip"
     mkdir -p "$D/motor.nuevo" && unzip -q "$TMP/electron.zip" -d "$D/motor.nuevo"
   fi
   mv "$D/motor.nuevo/electron" "$D/motor.nuevo/pgocode"
