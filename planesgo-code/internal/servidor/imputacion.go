@@ -13,9 +13,10 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
-// Interruptor «PlanesGo en los agentes»: con ~/.planesgo/gestor = «pgocode», PlanesGo (hooks, plugins y
-// planesgo-mcp) se queda dormido también en las sesiones que los agentes ejecutan por su cuenta; la imputación
-// la hace pgocode. Al activarlo se cierran los partes que esas sesiones tuvieran abiertos.
+// Los agentes que lanza pgocode llevan PLANESGO_GESTOR=pgocode y PlanesGo no imputa en ellos: lo hace pgocode.
+// Las sesiones de los agentes fuera de pgocode (en el mismo equipo) imputan por su cuenta, salvo que se marque
+// este interruptor opcional: con ~/.planesgo/gestor = «pgocode» PlanesGo se duerme también en ellas y se cierran
+// los partes que tuvieran abiertos.
 
 func ficheroGestor() string {
 	casa, _ := os.UserHomeDir()

@@ -128,14 +128,14 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     <div className="imputacion" ref={caja}>
       {proyecto ? (
         <button className={'marcador ' + estado} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
-          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)} — hombre ${reloj(cronoH)} · máquina ${reloj(cronoM)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} — hombre ${hm(hoyH)} · máquina ${hm(hoyM)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Total tuyo en el proyecto: ${hm(totalH + totalM)} — hombre ${hm(totalH)} · máquina ${hm(totalM)}`}>
+          title={`${nombreProy} / ${nombreTarea}\n⏱ Cronómetro de esta sesión: ${reloj(crono)} — hombre ${reloj(cronoH)} · máquina ${reloj(cronoM)}${mia ? (estado === 'trabajando' ? ' (trabajando)' : ' (espera activa: cuenta)') : ' (sin trabajo ahora)'}\n☀ Hoy en la tarea: ${hm(hoyTarea)} — hombre ${hm(hoyH)} · máquina ${hm(hoyM)} (Odoo ${hm(res ? res.hoy_h + res.hoy_m : 0)} + pendiente ${hm(pendTarea('h') + pendTarea('m'))})\nΣ Esta semana en el proyecto: ${hm(totalH + totalM)} — hombre ${hm(totalH)} · máquina ${hm(totalM)}`}>
           <span className="m-tarea recorta"><b>{nombreProy}</b> / {nombreTarea}</span>
           <span className="m-seg m-crono"><i className="m-punto" />
             <span className="m-cifras"><span>{reloj(crono)}</span><Desglose h={cronoH} m={cronoM} f={reloj} /></span></span>
           <span className="m-seg m-hoy"><span className="m-icono">☀</span>
             <span className="m-cifras"><span>{hm(hoyTarea)}</span><Desglose h={hoyH} m={hoyM} f={hm} /></span>
             <span className="m-barra"><span style={{ width: pctHoy + '%' }} /></span></span>
-          <span className="m-seg m-total"><span className="m-icono">Σ</span>
+          <span className="m-seg m-total" ><span className="m-icono" title="Esta semana en el proyecto">Σ</span>
             <span className="m-cifras"><span>{hm(totalH + totalM)}</span><Desglose h={totalH} m={totalM} f={hm} /></span>
             <span className="m-barra doble"><span className="h" style={{ width: pctH + '%' }} /><span className="m" style={{ width: (100 - pctH) + '%' }} /></span></span>
         </button>
@@ -195,8 +195,8 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
           </div>
           <label className="gestor">
             <input type="checkbox" checked={e.gestor_pgocode} onChange={ev => cambiaGestor(ev.target.checked)} />
-            <span><b>PlanesGo dormido en los agentes</b>
-              <span className="suave pequeno">pgocode lleva la imputación. Los agentes que se usen fuera de pgocode (terminal, Antigravity, OpenCode Desktop) no imputan ni piden vincular el proyecto. Desmárcalo para que vuelvan a hacerlo.</span></span>
+            <span><b>Dormir también las sesiones externas</b>
+              <span className="suave pequeno">Las sesiones de pgocode las imputa siempre pgocode. Las que abras fuera de pgocode en este equipo (Claude Code en terminal, Antigravity, OpenCode Desktop) imputan por su cuenta; márcalo solo si quieres que dejen de hacerlo.</span></span>
           </label>
         </div>
       )}

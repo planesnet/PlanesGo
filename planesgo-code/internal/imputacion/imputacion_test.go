@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ type odooFalso struct {
 	lineas map[int]map[string]any
 	sig    int
 	falla  bool
+	sinSes bool // Odoo sin el campo ai_session_id (como el de Planes)
 }
 
 func nuevoOdoo() *odooFalso { return &odooFalso{lineas: map[int]map[string]any{}, sig: 100} }
@@ -29,11 +31,21 @@ func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []a
 	}
 	var r any = true
 	switch modelo + "." + metodo {
+	case "account.analytic.line.fields_get":
+		m := map[string]any{"ai_model": map[string]any{}, "ai_session_id": map[string]any{}, "ai_tokens_input": map[string]any{},
+			"ai_tokens_output": map[string]any{}, "ai_tokens_total": map[string]any{}, "ai_cost": map[string]any{}}
+		if o.sinSes {
+			delete(m, "ai_session_id")
+		}
+		r = m
 	case "project.task.search_read":
 		r = []any{}
 	case "project.task.create":
 		r = 7
 	case "account.analytic.line.create":
+		if _, ok := args[0].(map[string]any)["ai_session_id"]; ok && o.sinSes {
+			return errors.New("Invalid field 'ai_session_id' on model 'account.analytic.line'")
+		}
 		o.sig++
 		v := map[string]any{}
 		for k, x := range args[0].(map[string]any) {
@@ -55,6 +67,9 @@ func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []a
 		cumple := func(v map[string]any) bool { // solo las condiciones «=» del dominio
 			for _, c := range args[0].([]any) {
 				if x, ok := c.([]any); ok && len(x) == 3 && x[1] == "=" && fmt.Sprint(v[x[0].(string)]) != fmt.Sprint(x[2]) {
+					return false
+				}
+				if x, ok := c.([]any); ok && len(x) == 3 && x[1] == "=like" && !strings.HasPrefix(fmt.Sprint(v[x[0].(string)]), strings.TrimSuffix(fmt.Sprint(x[2]), "%")) {
 					return false
 				}
 			}
@@ -150,7 +165,12 @@ func TestUnaLineaPorDia(t *testing.T) {
 		r.pasa(6 * time.Minute) // y la espera de 5 min, que cierra el periodo
 		g.revisa()
 	}
-	espera(t, func() bool { return o.n() == 2 })
+	// Máquina: 10 × 2 min = 20 min → 20 min. Hombre: 10 × 5 min = 50 min → 60 min (bloques de 15).
+	g.revisa()
+	espera(t, func() bool {
+		m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
+		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == float64(20)/60 && h[0]["unit_amount"] == 1.0
+	})
 	m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
 	if len(m) != 1 || len(h) != 1 {
 		t.Fatalf("líneas: %d máquina, %d hombre (total %d)", len(m), len(h), o.n())
@@ -269,5 +289,43 @@ func TestUnificaSueltas(t *testing.T) {
 	// 17 min de hombre → 30 min (bloques de 15); 2 min de máquina → 5 min.
 	if h[0]["unit_amount"] != 0.5 || m[0]["unit_amount"] != 5.0/60 || fmt.Sprint(h[0]["task_id"]) != "9" {
 		t.Errorf("hombre %v máquina %v", h[0], m[0])
+	}
+}
+
+// Odoo sin ai_session_id: la línea de máquina lleva igualmente ai_model y tokens, y la del día se reconoce por su
+// descripción (no se duplica tras perder el fichero local).
+func TestOdooSinSesion(t *testing.T) {
+	o := nuevoOdoo()
+	o.sinSes = true
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	fin := g.Empieza(tr("s1"))
+	r.pasa(3 * time.Minute)
+	fin()
+	g.revisa()
+	maquina := func() map[string]any {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		for _, v := range o.lineas {
+			if strings.HasPrefix(fmt.Sprint(v["name"]), "pgocode (agente Claude Code)") {
+				return v
+			}
+		}
+		return nil
+	}
+	espera(t, func() bool { return maquina() != nil })
+	o.mu.Lock()
+	var m map[string]any
+	for _, v := range o.lineas {
+		if strings.HasPrefix(fmt.Sprint(v["name"]), "pgocode (agente Claude Code)") {
+			m = v
+		}
+	}
+	o.mu.Unlock()
+	if m == nil || m["ai_model"] != "Claude Code opus" {
+		t.Fatalf("línea de máquina: %v", o.lineas)
+	}
+	if _, ok := m["ai_session_id"]; ok {
+		t.Error("no debe enviar ai_session_id a un Odoo que no lo tiene")
 	}
 }

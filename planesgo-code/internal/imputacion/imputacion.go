@@ -148,10 +148,11 @@ type Gestor struct {
 	mu        sync.Mutex
 	periodos  map[string]*Periodo
 	dias      map[string]*Dia
-	tareas    map[string]int // tareas ya resueltas en Odoo (proyecto|nombre → id)
-	sinTarea  []*Periodo     // periodos cerrados antes de resolver su tarea: se suman al resolverla
-	unificado map[int]bool   // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
-	escribe   sync.Mutex     // una escritura en Odoo a la vez
+	tareas    map[string]int  // tareas ya resueltas en Odoo (proyecto|nombre → id)
+	sinTarea  []*Periodo      // periodos cerrados antes de resolver su tarea: se suman al resolverla
+	unificado map[int]bool    // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
+	campos    map[string]bool // campos de IA que tiene account.analytic.line en este Odoo (nil: sin consultar)
+	escribe   sync.Mutex      // una escritura en Odoo a la vez
 	arrancado bool
 }
 
@@ -415,10 +416,7 @@ func (g *Gestor) unificaUnaVez(uid int, ses string) {
 	defer cancela()
 	r, err := g.UnificaSueltas(ctx, uid, ses)
 	if err != nil {
-		depuracion.Log("imputacion", "unificar las líneas sueltas: %v", err)
-		g.mu.Lock()
-		g.unificado[uid] = false
-		g.mu.Unlock()
+		depuracion.Log("imputacion", "unificar las líneas sueltas: %v", err) // se puede repetir con el botón del panel
 		return
 	}
 	if marca != "" && r.Fallos == 0 {
@@ -692,6 +690,14 @@ func (g *Gestor) totales(d *Dia) (seg float64, ent, sal int, coste float64, ritm
 	return
 }
 
+// prefijo de la descripción de la línea del día (la identifica).
+func (d *Dia) prefijo() string {
+	if d.Clase == "m" {
+		return "pgocode (agente " + d.Agente + ")"
+	}
+	return "pgocode (trabajo)"
+}
+
 // descripción de la línea del día.
 func (d *Dia) descripcion() string {
 	tipo := "trabajo"
@@ -790,8 +796,10 @@ func (g *Gestor) buscaLinea(ctx context.Context, d *Dia) int {
 		ID    int     `json:"id"`
 		Horas float64 `json:"unit_amount"`
 	}
+	// La línea del día se reconoce por el principio de su descripción («pgocode (trabajo)…», «pgocode (agente X)…»),
+	// que existe en cualquier Odoo (ai_session_id no siempre).
 	dominio := []any{[]any{"date", "=", d.Fecha}, []any{"project_id", "=", d.Proyecto}, []any{"task_id", "=", d.TareaID},
-		[]any{"ai_session_id", "=", d.marca()}}
+		[]any{"name", "=like", d.prefijo() + "%"}}
 	if d.UID > 0 {
 		dominio = append(dominio, []any{"user_id", "=", d.UID})
 	}
@@ -813,6 +821,45 @@ func (g *Gestor) buscaLinea(ctx context.Context, d *Dia) int {
 	return l[0].ID
 }
 
+// CamposIA: los campos ai_* que existen en account.analytic.line (se pregunta a Odoo una vez). No todos los Odoo
+// los tienen todos: p. ej. ai_model sí y ai_session_id no.
+func (g *Gestor) CamposIA(ctx context.Context, ses string) map[string]bool {
+	g.mu.Lock()
+	c := g.campos
+	g.mu.Unlock()
+	if c != nil {
+		return c
+	}
+	var r map[string]any
+	c = map[string]bool{}
+	if err := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "fields_get", []any{}, map[string]any{"attributes": []string{"type"}}, &r); err != nil {
+		depuracion.Log("imputacion", "fields_get: %v", err)
+		return c // sin saberlo, no se envía ningún campo de IA (y se vuelve a preguntar la próxima vez)
+	}
+	for k := range r {
+		if strings.HasPrefix(k, "ai_") {
+			c[k] = true
+		}
+	}
+	g.mu.Lock()
+	g.campos = c
+	g.mu.Unlock()
+	depuracion.Log("imputacion", "campos de IA en Odoo: %v", c)
+	return c
+}
+
+// soloExistentes quita de vals los campos de IA que este Odoo no tiene.
+func (g *Gestor) soloExistentes(ctx context.Context, ses string, v map[string]any) map[string]any {
+	c := g.CamposIA(ctx, ses)
+	x := map[string]any{}
+	for k, val := range v {
+		if !strings.HasPrefix(k, "ai_") || c[k] {
+			x[k] = val
+		}
+	}
+	return x
+}
+
 func sinIA(v map[string]any) map[string]any {
 	x := map[string]any{}
 	for k, val := range v {
@@ -824,6 +871,7 @@ func sinIA(v map[string]any) map[string]any {
 }
 
 func (g *Gestor) crea(ctx context.Context, ses string, v map[string]any) (int, error) {
+	v = g.soloExistentes(ctx, ses, v)
 	var id int
 	err := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "create", []any{v}, nil, &id)
 	if err != nil {
@@ -836,6 +884,7 @@ func (g *Gestor) crea(ctx context.Context, ses string, v map[string]any) (int, e
 }
 
 func (g *Gestor) escribeLinea(ctx context.Context, ses string, id int, v map[string]any) error {
+	v = g.soloExistentes(ctx, ses, v)
 	var nada any
 	err := g.Odoo.CallKW(ctx, ses, "account.analytic.line", "write", []any{[]int{id}, v}, nil, &nada)
 	if err != nil && !definitivo(err) {
@@ -1054,10 +1103,19 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 		Coste     any     `json:"ai_cost"`
 		Name      string  `json:"name"`
 	}
-	dominio := []any{[]any{"user_id", "=", uid}, []any{"unit_amount", "<", UmbralSueltas.Hours()},
-		"|", []any{"ai_session_id", "=like", "pgocode-%"}, []any{"name", "=like", "Sesión de pgocode%"}}
-	campos := map[string]any{"fields": []string{"id", "date", "unit_amount", "project_id", "task_id", "ai_session_id", "ai_model",
-		"ai_tokens_input", "ai_tokens_output", "ai_cost", "name"}, "limit": 2000}
+	ci := g.CamposIA(ctx, sesionOdoo)
+	dominio := []any{[]any{"user_id", "=", uid}, []any{"unit_amount", "<", UmbralSueltas.Hours()}, []any{"name", "=like", "Sesión de pgocode%"}}
+	if ci["ai_session_id"] {
+		dominio = []any{[]any{"user_id", "=", uid}, []any{"unit_amount", "<", UmbralSueltas.Hours()},
+			"|", []any{"ai_session_id", "=like", "pgocode-%"}, []any{"name", "=like", "Sesión de pgocode%"}}
+	}
+	nombres := []string{"id", "date", "unit_amount", "project_id", "task_id", "name"}
+	for _, k := range []string{"ai_session_id", "ai_model", "ai_tokens_input", "ai_tokens_output", "ai_cost"} {
+		if ci[k] {
+			nombres = append(nombres, k)
+		}
+	}
+	campos := map[string]any{"fields": nombres, "limit": 2000}
 	if err := g.Odoo.CallKW(ctx, sesionOdoo, "account.analytic.line", "search_read", []any{dominio}, campos, &l); err != nil {
 		return r, err
 	}
@@ -1065,7 +1123,7 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 	texto := func(v any) string { s, _ := v.(string); return s }
 	for _, x := range l {
 		marca := texto(x.Sesion)
-		if marca == "pgocode-h" || strings.HasPrefix(marca, "pgocode-m-") || len(x.Project) < 2 {
+		if marca == "pgocode-h" || strings.HasPrefix(marca, "pgocode-m-") || strings.HasPrefix(x.Name, "pgocode (") || len(x.Project) < 2 {
 			continue // ya es una línea del día
 		}
 		t, ok := x.Task.([]any)

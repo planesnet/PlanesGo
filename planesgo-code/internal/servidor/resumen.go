@@ -19,7 +19,7 @@ type resumenImputacion struct {
 	TareaID   int     `json:"tarea_id"`
 	HoyH      float64 `json:"hoy_h"` // hoy en la tarea (Odoo)
 	HoyM      float64 `json:"hoy_m"`
-	TotalH    float64 `json:"total_h"` // total en el proyecto (Odoo)
+	TotalH    float64 `json:"total_h"` // total del proyecto en la semana actual (Odoo)
 	TotalM    float64 `json:"total_m"`
 	Calculado string  `json:"calculado"`
 }
@@ -71,9 +71,15 @@ func (s *Servidor) imputacionResumen(w http.ResponseWriter, r *http.Request, ses
 		Fecha  string  `json:"date"`
 		Task   any     `json:"task_id"`
 	}
-	campos := []string{"unit_amount", "ai_model", "ai_session_id", "date", "task_id"}
+	campos := []string{"unit_amount", "date", "task_id"}
+	if s.Imputacion != nil && s.Imputacion.CamposIA(ctx, ses.OdooSesion)["ai_model"] {
+		campos = append(campos, "ai_model") // máquina = con modelo de IA
+	}
 	var l []linea
-	dom := []any{[]any{"user_id", "=", ses.UID}, []any{"project_id", "=", proyecto}}
+	// El total es el de la semana actual (de lunes a hoy).
+	hoyT := time.Now()
+	lunes := hoyT.AddDate(0, 0, -((int(hoyT.Weekday()) + 6) % 7)).Format("2006-01-02")
+	dom := []any{[]any{"user_id", "=", ses.UID}, []any{"project_id", "=", proyecto}, []any{"date", ">=", lunes}}
 	err := s.Odoo.CallKW(ctx, ses.OdooSesion, "account.analytic.line", "search_read", []any{dom}, map[string]any{"fields": campos}, &l)
 	if err != nil { // Odoo sin los campos de IA: solo horas
 		var l2 []struct {

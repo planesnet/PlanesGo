@@ -282,16 +282,12 @@ func main() {
 	s.Indice.Registro = filepath.Join(filepath.Dir(*dirGrab), "carpetas-proyectos.json")
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
-	// Imputación directa en Odoo; y PlanesGo dormido en los agentes (la primera vez se activa el interruptor).
+	// Imputación directa en Odoo. PlanesGo se duerme solo en los agentes que lanza pgocode (PLANESGO_GESTOR);
+	// las sesiones de los agentes fuera de pgocode siguen imputando por su cuenta en el mismo equipo.
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
 		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log")}
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
-	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".planesgo", "gestor")); os.IsNotExist(err) {
-		if err := servidor.PonGestor(true); err != nil {
-			log.Printf("interruptor de PlanesGo: %v", err)
-		}
-	}
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()
