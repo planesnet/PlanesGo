@@ -1,0 +1,48 @@
+# Control de calidad de pgocode (planesgo-code): lo mismo que «make verifica», en cada push y pull request.
+name: verifica
+
+on:
+  push:
+    paths: ["planesgo-code/**", ".github/workflows/verifica.yml"]
+  pull_request:
+    paths: ["planesgo-code/**", ".github/workflows/verifica.yml"]
+
+jobs:
+  verifica:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: planesgo-code
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: planesgo-code/go.mod
+          cache-dependency-path: planesgo-code/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: planesgo-code/web/package-lock.json
+
+      - name: gofmt
+        run: make formato
+
+      - name: go vet
+        run: make vet
+
+      - name: go test -race
+        run: |
+          go test -race -count=1 ./...
+          cd studio-tv && go test -race -count=1 ./...
+
+      - name: web (npm ci, tsc y pruebas)
+        run: |
+          cd web && npm ci --no-fund --no-audit
+          cd .. && make web-verifica
+
+      - name: prueba de humo e2e (Odoo simulado, sin agentes)
+        run: make e2e

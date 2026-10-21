@@ -1,18 +1,8 @@
 package servidor
 
-import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"syscall"
-	"testing"
-	"time"
+import "testing"
 
-	"planesgo-code/internal/proceso"
-	"planesgo-code/internal/procesos"
-	"planesgo-code/internal/proyectos"
-)
-
+// Las pruebas con procesos reales (python3 y ~/cowork) están en externos_integracion_test.go.
 func TestDentro(t *testing.T) {
 	c := []string{"/home/luis/cowork/intradema"}
 	if !dentro("/home/luis/cowork/intradema/web", c) || !dentro("/home/luis/cowork/intradema", c) || dentro("/home/luis/cowork/intradema2", c) {
@@ -20,88 +10,5 @@ func TestDentro(t *testing.T) {
 	}
 	if !ordenEn("python /home/luis/cowork/intradema/app.py", c) || ordenEn("python /home/luis/cowork/intradema2/app.py", c) {
 		t.Error("ordenEn")
-	}
-}
-
-// Un servidor de una carpeta de trabajo sale entre los externos y se para con su grupo.
-func TestExternosReal(t *testing.T) {
-	casa, _ := os.UserHomeDir()
-	raiz := filepath.Join(casa, "cowork")
-	if _, err := os.Stat(raiz); err != nil {
-		t.Skip("sin ~/cowork")
-	}
-	d, err := os.MkdirTemp(raiz, ".pgocode-prueba-")
-	if err != nil {
-		t.Skip(err)
-	}
-	defer os.RemoveAll(d)
-	cmd := exec.Command("python3", "-m", "http.server", "8979", "--bind", "127.0.0.1")
-	cmd.Dir = d
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Skip(err)
-	}
-	defer cmd.Process.Kill()
-	s := &Servidor{Indice: &proyectos.Indice{Raices: []string{raiz}, Registro: filepath.Join(d, "registro.json")}}
-	var grupo int
-	for i := 0; i < 30 && grupo == 0; i++ {
-		time.Sleep(100 * time.Millisecond)
-		_, otros := s.externos(1)
-		for _, x := range otros {
-			if x.Carpeta == d {
-				grupo = x.Grupo
-			}
-		}
-	}
-	if grupo != cmd.Process.Pid {
-		t.Fatalf("no aparece (grupo %d, pid %d)", grupo, cmd.Process.Pid)
-	}
-	proceso.SenalGrupo(grupo, false)
-	cmd.Wait()
-	if proceso.GrupoVivo(grupo) {
-		t.Error("sigue vivo")
-	}
-}
-
-// Un programa de pgocode que arranca un servidor en otro grupo (como «odt run» con Odoo): el servidor no sale
-// como externo, su puerto pasa a ser la dirección del programa, y parar el programa lo para también.
-func TestProgramaConHijoEnOtroGrupo(t *testing.T) {
-	casa, _ := os.UserHomeDir()
-	raiz := filepath.Join(casa, "cowork")
-	if _, err := os.Stat(raiz); err != nil {
-		t.Skip("sin ~/cowork")
-	}
-	d, err := os.MkdirTemp(raiz, ".pgocode-prueba-")
-	if err != nil {
-		t.Skip(err)
-	}
-	defer os.RemoveAll(d)
-	s := &Servidor{Indice: &proyectos.Indice{Raices: []string{raiz}, Registro: filepath.Join(d, "registro.json")}, Procesos: procesos.Nuevo()}
-	if _, err := s.Procesos.Lanza("web", 1, d, "setsid python3 -m http.server 8981 --bind 127.0.0.1 & sleep 60", "usuario", nil); err != nil {
-		t.Fatal(err)
-	}
-	var url string
-	for i := 0; i < 40 && url == ""; i++ {
-		time.Sleep(100 * time.Millisecond)
-		_, otros := s.externos(1)
-		for _, x := range otros {
-			if x.Carpeta == d {
-				t.Fatalf("sale como externo: %+v", x)
-			}
-		}
-		p, _ := s.Procesos.Busca("web")
-		url = p.URL
-	}
-	if url != "http://localhost:8981/" {
-		t.Fatalf("dirección: %q", url)
-	}
-	s.Procesos.Para("web")
-	time.Sleep(6 * time.Second)
-	if len(proceso.Escuchando()) > 0 {
-		for _, x := range proceso.Escuchando() {
-			if x.Carpeta == d {
-				t.Errorf("el servidor sigue vivo: %+v", x)
-			}
-		}
 	}
 }
