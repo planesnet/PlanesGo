@@ -798,3 +798,7 @@ button.miga-item:hover { background: var(--hover); }
 .aviso-campo { display: grid; gap: 2px; font-size: 12px; }
 .con-unidad { display: flex; align-items: center; gap: 4px; }
 .con-unidad input { width: 100%; min-width: 0; }
+
+/* Duplicar una pestaña del navegador interno (al pasar el ratón por la pestaña) */
+.pestana-web .duplicar-pestana { opacity: 0; }
+.pestana-web:hover .duplicar-pestana, .pestana-web.activa .duplicar-pestana { opacity: 1; }

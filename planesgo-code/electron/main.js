@@ -106,14 +106,34 @@ const esWeb = u => { try { return ['http:', 'https:'].includes(new URL(u).protoc
 const ORIGEN_ARNES = new URL(URL_ARNES).origin;
 const esArnes = u => { try { return new URL(u).origin === ORIGEN_ARNES; } catch { return false; } };
 
-// Permisos: todo denegado por defecto. Solo la interfaz del arnés puede escribir en el portapapeles
-// (botón «Copiar»); las webs del panel Navegador no reciben cámara, micrófono, ubicación, notificaciones…
+// Permisos: todo denegado por defecto, salvo escribir en el portapapeles (el botón «Copiar» de la interfaz y de
+// las webs que se prueban en el navegador interno, p. ej. copiar la dirección con token de una pantalla de Odoo;
+// el navegador solo lo deja tras un clic). Leerlo, cámara, micrófono, ubicación, notificaciones…: no.
 function endurece(ses) {
-  const permitido = (wc, permiso, origen) => permiso === 'clipboard-sanitized-write' && esArnes(origen || (wc && wc.getURL()) || '');
+  const permitido = (wc, permiso, origen) => {
+    const o = origen || (wc && wc.getURL()) || '';
+    return permiso === 'clipboard-sanitized-write' && (esArnes(o) || esWeb(o));
+  };
   ses.setPermissionRequestHandler((wc, permiso, cb, detalles) => cb(permitido(wc, permiso, detalles && detalles.requestingUrl)));
   ses.setPermissionCheckHandler((wc, permiso, origen) => permitido(wc, permiso, origen));
 }
 app.on('session-created', endurece);
+
+// Menú contextual de la interfaz y de las webs del navegador interno.
+function menuContextual(p, w) {
+  const m = [];
+  if (p.isEditable) m.push({ role: 'cut', label: 'Cortar', enabled: p.editFlags.canCut });
+  if (p.selectionText || p.isEditable) m.push({ role: 'copy', label: 'Copiar', enabled: p.editFlags.canCopy });
+  if (p.isEditable) m.push({ role: 'paste', label: 'Pegar', enabled: p.editFlags.canPaste });
+  if (p.linkURL && esWeb(p.linkURL)) {
+    if (m.length) m.push({ type: 'separator' });
+    m.push({ label: 'Copiar el enlace', click: () => clipboard.writeText(p.linkURL) });
+    m.push({ label: 'Abrir el enlace en el navegador', click: () => shell.openExternal(p.linkURL) });
+  }
+  if (m.length) m.push({ type: 'separator' });
+  m.push({ role: 'selectAll', label: 'Seleccionar todo' });
+  Menu.buildFromTemplate(m).popup(w ? { window: w } : {});
+}
 
 function ventana() {
   // La ventana se abre donde y como estaba la última vez (si esa posición sigue cayendo en alguna pantalla).
@@ -152,20 +172,7 @@ function ventana() {
   w.on('unmaximize', guardaVentana);
   w.on('close', () => { guardaVentana(); console.error('[pgocode] ventana cerrada'); });
   // Menú contextual (clic derecho): copiar lo seleccionado, cortar y pegar en los campos, copiar enlaces.
-  w.webContents.on('context-menu', (_, p) => {
-    const m = [];
-    if (p.isEditable) m.push({ role: 'cut', label: 'Cortar', enabled: p.editFlags.canCut });
-    if (p.selectionText || p.isEditable) m.push({ role: 'copy', label: 'Copiar', enabled: p.editFlags.canCopy });
-    if (p.isEditable) m.push({ role: 'paste', label: 'Pegar', enabled: p.editFlags.canPaste });
-    if (p.linkURL && esWeb(p.linkURL)) {
-      if (m.length) m.push({ type: 'separator' });
-      m.push({ label: 'Copiar el enlace', click: () => clipboard.writeText(p.linkURL) });
-      m.push({ label: 'Abrir el enlace en el navegador', click: () => shell.openExternal(p.linkURL) });
-    }
-    if (m.length) m.push({ type: 'separator' });
-    m.push({ role: 'selectAll', label: 'Seleccionar todo' });
-    Menu.buildFromTemplate(m).popup({ window: w });
-  });
+  w.webContents.on('context-menu', (_, p) => menuContextual(p, w));
   w.webContents.on('did-fail-load', (_, c, d) => console.error('[pgocode] no carga la interfaz:', c, d));
   w.loadURL(URL_ARNES);
 }
@@ -179,6 +186,8 @@ app.on('web-contents-created', (_, wc) => {
     if (!esWeb(params.src)) e.preventDefault();
   });
   wc.setWindowOpenHandler(({ url }) => { if (esWeb(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // Las webs del navegador interno también tienen menú contextual (copiar, pegar, copiar enlaces).
+  if (wc.getType() === 'webview') wc.on('context-menu', (_, p) => menuContextual(p, BrowserWindow.fromWebContents(wc.hostWebContents)));
 });
 
 ipcMain.handle('abrir-fuera', (_, url) => { if (esWeb(url)) return shell.openExternal(url); throw new Error('solo http o https'); });

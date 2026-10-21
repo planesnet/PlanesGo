@@ -101,6 +101,16 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
   };
 
   const nueva = () => { const p = pestanaNueva(); setPestanas(l => [...l, p]); setActiva(p.id); };
+  // Duplicar: otra pestaña con la misma dirección y el mismo formato, justo a su derecha.
+  const duplica = (id: number) => {
+    const o = pestanas.find(p => p.id === id);
+    if (!o) return;
+    let url = o.url;
+    try { const v = vistas.current.get(id); if (v && escritorio) url = v.getURL() || url; } catch { /* aún sin cargar */ }
+    const d = { ...pestanaNueva(), url, titulo: o.titulo, dispositivo: o.dispositivo, orientacion: o.orientacion };
+    setPestanas(l => { const i = l.findIndex(p => p.id === id); return [...l.slice(0, i + 1), d, ...l.slice(i + 1)]; });
+    setActiva(d.id);
+  };
 
   // URL pedida desde fuera (un programa que arranca, el agente con «pgo abrir»): si ya está abierta en una
   // pestaña, se recarga; si la activa está vacía, se usa; si no, pestaña nueva.
@@ -147,10 +157,12 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
     <div className="navegador">
       <div className="pestanas-web" role="tablist">
         {pestanas.map(p => (
-          <div key={p.id} className={'pestana-web' + (p.id === activa ? ' activa' : '')} role="tab" aria-selected={p.id === activa}>
+          <div key={p.id} className={'pestana-web' + (p.id === activa ? ' activa' : '')} role="tab" aria-selected={p.id === activa}
+            onContextMenu={e => { e.preventDefault(); if (p.url) duplica(p.id); }} title={p.url ? 'Clic derecho: duplicar la pestaña' : undefined}>
             <button className="titulo-pestana" onClick={() => setActiva(p.id)} title={p.url || p.titulo}>
               <Icono n="web" t={13} /> <span className="recorta">{p.titulo || p.url}</span>
             </button>
+            {p.url && <button className="cerrar-pestana duplicar-pestana" onClick={() => duplica(p.id)} title="Duplicar la pestaña" aria-label="Duplicar la pestaña"><Icono n="copiar" t={11} /></button>}
             <button className="cerrar-pestana" onClick={() => cierra(p.id)} title="Cerrar pestaña" aria-label="Cerrar pestaña"><Icono n="cerrar" t={12} /></button>
           </div>
         ))}
