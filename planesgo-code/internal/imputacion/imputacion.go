@@ -158,7 +158,7 @@ type Gestor struct {
 	escribe   sync.Mutex      // una escritura en Odoo a la vez
 	// humanos: los tramos de tiempo humano ya imputados por usuario y día (uid|fecha). Una persona solo está en un
 	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
-	humanos map[string][]Tramo
+	humanos   map[string][]Tramo
 	arrancado bool
 }
 
@@ -1266,7 +1266,9 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 // Tramo de tiempo.
 type Tramo struct{ Ini, Fin time.Time }
 
-func claveHumano(p *Periodo) string { return fmt.Sprintf("%d|%s", p.T.UID, p.Inicio.Format("2006-01-02")) }
+func claveHumano(p *Periodo) string {
+	return fmt.Sprintf("%d|%s", p.T.UID, p.Inicio.Format("2006-01-02"))
+}
 
 // solape: los segundos de [ini, fin] que caen dentro de alguno de los tramos (contando cada instante una vez).
 func solape(tramos []Tramo, ini, fin time.Time) float64 {

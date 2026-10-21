@@ -148,7 +148,7 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 	}
 	var humanos []intervalo
 	solapados := map[string]float64{} // tiempo humano solapado que ya se descontó, por sesión
-	turnos := map[string]int{} // turnos vivos por sesión
+	turnos := map[string]int{}        // turnos vivos por sesión
 	turnoDesde := map[string]time.Time{}
 	var ultimo time.Time
 
