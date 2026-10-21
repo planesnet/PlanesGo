@@ -122,6 +122,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/imputacion/resumen", s.conSesion(s.imputacionResumen))
 	mux.HandleFunc("GET /api/imputacion/validar", s.conSesion(s.imputacionValidar))
 	mux.HandleFunc("POST /api/proyecto/carpeta", s.conSesion(s.proyectoCarpeta))
+	mux.HandleFunc("GET /api/proyecto/info-carpeta", s.conSesion(s.proyectoInfoCarpeta))
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
 	mux.HandleFunc("GET /api/qa/campanas", s.conSesion(s.qaCampanas))

@@ -44,6 +44,23 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   const sugerida = rama ? (info?.copias[rama] || (directorio ? unir(directorio, rama) : '')) : '';
   useEffect(() => { if (!carpetaElegida && sugerida) cambia({ carpeta: sugerida }); }, [sugerida, carpetaElegida]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // El repositorio de la carpeta elegida: la carpeta de la sesión manda (si ya es un repositorio, el suyo; si no
+  // lo es, se puede indicar uno en SSH para clonarlo en ella).
+  const [local, setLocal] = useState<{ git: boolean; repositorio?: string; remoto?: string; rama?: string; ramas: string[]; existe: boolean } | null>(null);
+  const [remoto, setRemoto] = useState('');
+  useEffect(() => {
+    if (!s.carpeta) { setLocal(null); return; }
+    let vale = true;
+    get<NonNullable<typeof local>>(`/api/proyecto/info-carpeta?proyecto=${s.proyecto}&carpeta=${encodeURIComponent(s.carpeta)}`)
+      .then(i => { if (!vale) return; setLocal(i); if (carpetaElegida && i.git && i.rama) cambia({ rama: i.rama }); })
+      .catch(() => { if (vale) setLocal(null); });
+    return () => { vale = false; };
+  }, [s.carpeta, s.proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
+  const conRepo = Boolean(local?.git);
+  // Pedir el repositorio: carpeta sin él, elegida a mano (o sin repositorio en el proyecto del que sacar la rama).
+  const pideRemoto = Boolean(local && !local.git && (carpetaElegida || !info?.repo));
+  const ramas = conRepo ? local!.ramas : info?.ramas || [];
+
   const elegir = async () => {
     if (!window.psf?.elegirCarpeta) { setError('El diálogo de carpetas solo está en la aplicación de escritorio'); return; }
     const c = await window.psf.elegirCarpeta(s.carpeta || directorio);
@@ -53,8 +70,11 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   const falta = !rama ? 'Elige la rama' : !s.hosting ? 'Elige el alojamiento' : !s.carpeta ? 'Elige la carpeta' : !s.agente ? 'Elige el agente' : '';
   const guarda = async () => {
     if (falta || guardando) return;
-    // Si la rama no está ya en esa carpeta, se pide confirmación antes de crearla o descargarla.
-    if (info?.copias[rama] !== s.carpeta) {
+    if (pideRemoto && !remoto.trim() && !info?.repo) { setError('Esa carpeta no tiene repositorio: indica el repositorio (SSH) para clonarlo en ella'); return; }
+    // Si la rama no está ya en esa carpeta, se pide confirmación antes de crearla, descargarla o clonar.
+    if (pideRemoto && remoto.trim()) {
+      if (!confirm(`Se clonará ${remoto.trim()} en:\n${s.carpeta}\n\ncon la rama «${rama}» (la del repositorio si existe; si no, nueva). ¿Continuar?`)) return;
+    } else if (!conRepo && info?.copias[rama] !== s.carpeta) {
       const aviso = s.rama === NUEVA
         ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y se descargará en:\n${s.carpeta}\n\n¿Continuar?`
         : `La rama «${rama}» no está descargada en local. Se descargará en:\n${s.carpeta}\n\n¿Continuar?`;
@@ -63,7 +83,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
     setGuardando(true);
     setError('');
     try {
-      const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, rama, carpeta: s.carpeta });
+      const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, rama, carpeta: s.carpeta, remoto: pideRemoto ? remoto.trim() : '' });
       const cambioDeContexto = !nueva && (rama !== sesion.rama || s.carpeta !== sesion.carpeta || s.agente !== sesion.agente);
       alGuardar({ ...s, rama, tipo: repo.tipo, sesionAgente: cambioDeContexto ? undefined : s.sesionAgente }, repo);
     } catch (e) { setError((e as Error).message); setGuardando(false); }
@@ -84,11 +104,12 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
           <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
         </div>
 
-        <label>Rama del repositorio{info?.repositorio && <span className="suave"> · {info.repositorio}</span>}
+        <label>Rama del repositorio{(local?.repositorio || info?.repositorio) && <span className="suave"> · {local?.git ? local.repositorio : info?.repositorio}</span>}
           <span className="con-icono"><Icono n="rama" t={15} />
             <select value={s.rama} onChange={e => { cambia({ rama: e.target.value }); }} autoFocus={nueva}>
               <option value="" disabled>Elige la rama…</option>
-              {(info?.ramas || []).map(r => <option key={r} value={r}>{r}</option>)}
+              {s.rama && s.rama !== NUEVA && !ramas.includes(s.rama) && <option value={s.rama}>{s.rama}</option>}
+              {ramas.map(r => <option key={r} value={r}>{r}</option>)}
               <option value={NUEVA}>Rama nueva…</option>
             </select>
           </span>
@@ -117,8 +138,15 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
             <code className="recorta" title={s.carpeta}>{s.carpeta || '—'}</code>
             <button type="button" className="boton-secundario" onClick={elegir}><Icono n="carpeta" t={14} /> Elegir…</button>
           </div>
+          {conRepo && <span className="suave pequeno">Repositorio de la carpeta: <b>{local!.repositorio}</b>{local!.rama ? <> · rama <b>{local!.rama}</b></> : null}</span>}
+          {pideRemoto && (
+            <label className="campo-remoto">Repositorio (SSH) para clonar en esta carpeta
+              <input value={remoto} onChange={e => setRemoto(e.target.value)} placeholder="git@github.com:organizacion/repositorio.git" spellCheck={false} />
+              <span className="suave pequeno">{info?.repo ? 'La carpeta no tiene repositorio. Vacío: copia de trabajo del repositorio del proyecto.' : 'La carpeta no tiene repositorio: se clona en ella (tiene que estar vacía o no existir).'}</span>
+            </label>
+          )}
           <span className="suave pequeno">
-            {info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como copia de trabajo del repositorio en esa rama.
+            {!conRepo && !pideRemoto && info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como copia de trabajo del repositorio en esa rama.
               {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}</>}
           </span>
         </div>

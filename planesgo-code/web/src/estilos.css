@@ -75,7 +75,7 @@ textarea { resize: none; }
 
 /* Proyectos */
 /* El panel de proyectos se ajusta a lo más largo (proyectos y nombres de sesión), entre 248 px y el 40 % de la ventana. */
-.proyectos { width: max-content; min-width: 248px; max-width: 40vw; background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
+.proyectos { width: max-content; min-width: 248px; max-width: 40vw; background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
 .marca { font-weight: 700; font-size: 14px; padding: 14px 14px 10px; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
 .busca input { flex: 1; background: transparent; }

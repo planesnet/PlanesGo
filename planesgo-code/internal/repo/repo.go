@@ -31,6 +31,7 @@ type Info struct {
 	Carpeta     string   `json:"carpeta"`
 	Rama        string   `json:"rama,omitempty"`
 	Ramas       []string `json:"ramas"`
+	Git         bool     `json:"git"` // la carpeta es (o está dentro de) un repositorio git
 }
 
 var ramaValida = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
@@ -50,6 +51,7 @@ func Lee(ctx context.Context, carpeta string) Info {
 	if _, err := git(ctx, carpeta, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return i
 	}
+	i.Git = true
 	i.Rama, _ = git(ctx, carpeta, "branch", "--show-current")
 	if r, err := git(ctx, carpeta, "remote", "get-url", "origin"); err == nil && r != "" {
 		i.Remoto = r
@@ -196,5 +198,49 @@ func PreparaRama(ctx context.Context, repoDir, rama, carpeta string) error {
 		return err
 	}
 	_, err := git(ctx, repoDir, "worktree", "add", "-b", rama, "--", carpeta)
+	return err
+}
+
+// RemotoSSH: un repositorio en formato SSH (git@servidor:organizacion/repositorio.git o ssh://…).
+var RemotoSSH = regexp.MustCompile(`^(git@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+|ssh://[A-Za-z0-9._@-]+(:[0-9]+)?/[A-Za-z0-9._/-]+)$`)
+
+// Clona el repositorio (SSH) en la carpeta, que tiene que no existir o estar vacía (nunca pisa ficheros), y deja
+// la rama pedida: la del remoto si existe; si no, una nueva desde la principal. Sin preguntas por terminal: si la
+// clave SSH no vale, falla con el mensaje de git.
+func Clona(ctx context.Context, remoto, rama, carpeta string) error {
+	if !RemotoSSH.MatchString(remoto) || strings.Contains(remoto, "..") {
+		return errors.New("el repositorio tiene que ir en formato SSH, p. ej. git@github.com:organizacion/repositorio.git")
+	}
+	if rama != "" && (!ramaValida.MatchString(rama) || strings.Contains(rama, "..") || strings.HasPrefix(rama, "-")) {
+		return errors.New("nombre de rama no válido")
+	}
+	if st, err := os.Stat(carpeta); err == nil {
+		if !st.IsDir() {
+			return errors.New("ya existe un fichero con ese nombre")
+		}
+		if ents, _ := os.ReadDir(carpeta); len(ents) > 0 {
+			return errors.New("la carpeta tiene ficheros y no es un repositorio: para clonar, elige una carpeta nueva o vacía")
+		}
+	} else if err := os.MkdirAll(filepath.Dir(carpeta), 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "clone", "--", remoto, carpeta)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("no se ha podido clonar %s: %s", remoto, strings.TrimSpace(string(out)))
+	}
+	if rama == "" {
+		return nil
+	}
+	if actual, _ := git(ctx, carpeta, "branch", "--show-current"); actual == rama {
+		return nil
+	}
+	if _, err := git(ctx, carpeta, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+rama); err == nil {
+		_, err = git(ctx, carpeta, "checkout", "--track", "-b", rama, "origin/"+rama)
+		return err
+	}
+	_, err := git(ctx, carpeta, "checkout", "-b", rama)
 	return err
 }

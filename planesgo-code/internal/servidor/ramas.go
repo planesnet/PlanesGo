@@ -1,9 +1,12 @@
 package servidor
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
@@ -36,6 +39,22 @@ func (s *Servidor) proyectoRamas(w http.ResponseWriter, r *http.Request, ses *se
 		"copias": repo.Copias(r.Context(), dir), "principal": filepath.Dir(dir), "tipo": i.Tipo})
 }
 
+// proyectoInfoCarpeta: el repositorio de una carpeta (sin registrarla), para el diálogo de la sesión.
+func (s *Servidor) proyectoInfoCarpeta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	id, _ := strconv.Atoi(r.URL.Query().Get("proyecto"))
+	if _, ok := s.proyecto(w, r, ses, id); !ok {
+		return
+	}
+	c := filepath.Clean(r.URL.Query().Get("carpeta"))
+	if !filepath.IsAbs(c) {
+		jsonError(w, http.StatusBadRequest, "la carpeta tiene que ser una ruta completa")
+		return
+	}
+	i := repo.Lee(r.Context(), c)
+	_, err := os.Stat(c)
+	jsonOK(w, map[string]any{"git": i.Git, "repositorio": i.Repositorio, "remoto": i.Remoto, "rama": i.Rama, "ramas": i.Ramas, "tipo": i.Tipo, "existe": err == nil})
+}
+
 // proyectoCarpeta: registra para el proyecto una carpeta elegida con el diálogo del sistema.
 func (s *Servidor) proyectoCarpeta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	var p struct {
@@ -63,6 +82,7 @@ func (s *Servidor) proyectoPreparar(w http.ResponseWriter, r *http.Request, ses 
 		Proyecto int    `json:"proyecto"`
 		Rama     string `json:"rama"`
 		Carpeta  string `json:"carpeta"`
+		Remoto   string `json:"remoto"` // carpeta sin repositorio: el que se clona en ella (SSH)
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -76,14 +96,29 @@ func (s *Servidor) proyectoPreparar(w http.ResponseWriter, r *http.Request, ses 
 		jsonError(w, http.StatusBadRequest, "la carpeta tiene que ser una ruta completa")
 		return
 	}
-	dir := s.repoProyectoDir(r, p.Proyecto)
-	if dir == "" {
-		jsonError(w, http.StatusBadRequest, "el proyecto no tiene repositorio local del que sacar la rama")
-		return
-	}
-	if err := repo.PreparaRama(r.Context(), dir, p.Rama, c); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
+	// La carpeta de la sesión manda: si ya es un repositorio, el suyo; si no, el que se indique (se clona en ella);
+	// si no se indica ninguno, una copia de trabajo del repositorio del proyecto en esa rama.
+	switch info := repo.Lee(r.Context(), c); {
+	case info.Git:
+		if p.Rama != "" && info.Rama != p.Rama {
+			jsonError(w, http.StatusBadRequest, fmt.Sprintf("esa carpeta es un repositorio en la rama «%s»: elige esa rama o otra carpeta", info.Rama))
+			return
+		}
+	case p.Remoto != "":
+		if err := repo.Clona(r.Context(), strings.TrimSpace(p.Remoto), p.Rama, c); err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	default:
+		dir := s.repoProyectoDir(r, p.Proyecto)
+		if dir == "" {
+			jsonError(w, http.StatusBadRequest, "esa carpeta no tiene repositorio y el proyecto tampoco: indica el repositorio (SSH) para clonarlo en ella")
+			return
+		}
+		if err := repo.PreparaRama(r.Context(), dir, p.Rama, c); err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if err := s.Indice.Registra(p.Proyecto, c); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
