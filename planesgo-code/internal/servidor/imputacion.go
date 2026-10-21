@@ -30,20 +30,20 @@ func GestorPgocode() bool {
 
 // PonGestor activa (pgocode lleva la imputación) o desactiva el interruptor.
 func PonGestor(pgocode bool) error {
-	if !pgocode {
-		err := os.Remove(ficheroGestor())
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
+	// Desactivado se guarda como «agentes» (no se borra): así pgocode no lo vuelve a activar al arrancar.
+	valor := "agentes\n"
+	if pgocode {
+		valor = "pgocode\n"
 	}
 	if err := os.MkdirAll(filepath.Dir(ficheroGestor()), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(ficheroGestor(), []byte("pgocode\n"), 0o644); err != nil {
+	if err := os.WriteFile(ficheroGestor(), []byte(valor), 0o644); err != nil {
 		return err
 	}
-	go cierraPartesAgentes()
+	if pgocode {
+		go cierraPartesAgentes()
+	}
 	return nil
 }
 

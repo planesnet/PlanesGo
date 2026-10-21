@@ -7,7 +7,7 @@ import Icono from './Icono';
 
 interface Parte {
   sesion: string; titulo: string; proyecto: number; nombre_proyecto: string; tarea_id: number; tarea: string; linea_id: number;
-  inicio: string; ultima: string; fin?: string; horas: number; tokens: number; coste: number; estado: 'trabajando' | 'en-espera' | 'cerrado' | 'error'; error?: string; desc: string;
+  inicio: string; ultima: string; fin?: string; horas: number; tokens: number; coste: number; estado: 'trabajando' | 'activo' | 'en-espera' | 'cerrado' | 'pendiente' | 'error'; error?: string; desc: string;
 }
 interface Estado { abiertos: Parte[]; cerrados: Parte[]; gestor_pgocode: boolean }
 
@@ -36,19 +36,19 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     carga();
   };
 
-  // Lo que se está imputando: desde el inicio del parte hasta ahora (la espera activa también cuenta).
-  const duracion = (p: Parte) => (Date.now() - new Date(p.inicio).getTime()) / 3600000;
+  // Lo que se está imputando: desde el inicio hasta ahora, sin pasar del último trabajo + 5 min (la espera cuenta).
+  const duracion = (p: Parte) => (Math.min(Date.now(), new Date(p.ultima).getTime() + 5 * 60000) - new Date(p.inicio).getTime()) / 3600000;
   const ab = e?.abiertos || [];
   const hoy = (e?.cerrados || []).reduce((t, p) => t + p.horas, 0) + ab.reduce((t, p) => t + duracion(p), 0);
   // La etiqueta es la de la sesión abierta: verde (imputando), amarillo (espera activa, cuenta), gris (sin parte:
   // no se imputa, a cero) o rojo (error). Sin sesión abierta, el parte que esté trabajando o el total de hoy.
-  const principal = sesion ? ab.find(p => p.sesion === sesion) : (ab.find(p => p.estado === 'trabajando') || ab[0]);
+  const principal = sesion ? ab.find(p => p.sesion === sesion) : (ab.find(p => p.estado === 'trabajando' || p.estado === 'activo') || ab[0]);
   // Para la etiqueta, al segundo: h:mm:ss.
   const reloj = (h: number) => { const s = Math.max(0, Math.round(h * 3600)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
   return (
     <div className="imputacion" ref={caja}>
-      <button className={'chip-imputa' + (principal ? ' ' + principal.estado : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
+      <button className={'chip-imputa' + (principal ? ' ' + (principal.estado === 'activo' ? 'trabajando' : principal.estado) : '')} onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
         title="Tiempo imputado en Odoo por pgocode">
         <Icono n="reloj" t={14} />
         {principal
@@ -60,9 +60,10 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
         <div className="panel-imputa" role="dialog" aria-label="Imputación de tiempo">
           <p className="suave pequeno regla">
             Cada sesión imputa en Odoo a <b>su proyecto</b> y a <b>su tarea</b> (en los ajustes de la sesión; por defecto «pgocode - Sesión IA»).
-            Un parte se abre con el primer turno del agente. Tras cada turno hay una espera activa de 5 minutos que también cuenta;
-            si no llega otro turno, se cierra con el tiempo desde el inicio hasta el cierre y los tokens. Mientras se trabaja no se envía nada a Odoo.
-            <br /><span className="leyenda"><i className="trabajando" /> imputando <i className="en-espera" /> espera activa (cuenta) <i className="gris" /> sin imputar <i className="error" /> error</span>
+            Hay trabajo cuando el agente está con un turno o cuando tú usas la sesión (teclado, ratón, con la ventana en primer plano).
+            Tras el último trabajo hay una espera activa de 5 minutos que también cuenta; si no hay más, el parte se cierra con el tiempo
+            del inicio al último trabajo + 5 min. Si pgocode se cierra mal, al volver se cierra con su último trabajo; si Odoo falla, se reintenta.
+            <br /><span className="leyenda"><i className="trabajando" /> imputando (agente o tú) <i className="en-espera" /> espera activa (cuenta) <i className="gris" /> sin imputar <i className="error" /> error</span>
           </p>
           <p className="titulo-lista">Abiertos <span className="gh-cuenta">{ab.length}</span></p>
           {ab.length === 0 && <p className="suave pequeno">Ninguno: se abre uno al hablar con un agente.</p>}
@@ -87,7 +88,7 @@ function Fila({ p, horas }: { p: Parte; horas: number }) {
       <span className="parte-texto">
         <b className="recorta">{p.nombre_proyecto || 'Proyecto ' + p.proyecto} · {p.tarea}</b>
         <span className="suave pequeno recorta">{p.titulo || 'Sesión sin nombre'}{p.linea_id ? ` · parte ${p.linea_id}` : ''}{p.tokens ? ` · ${k(p.tokens)} tokens` : ''}
-          {p.estado === 'en-espera' ? ' · espera activa: cuenta; se cierra a los 5 min sin turnos' : ''}{p.error ? ' · ⚠ ' + p.error : ''}</span>
+          {p.estado === 'activo' ? ' · trabajando tú' : p.estado === 'trabajando' ? ' · trabajando el agente' : p.estado === 'en-espera' ? ' · espera activa: cuenta; se cierra a los 5 min sin trabajo' : p.estado === 'pendiente' ? ' · Odoo no lo aceptó: se reintenta' : ''}{p.error ? ' · ⚠ ' + p.error : ''}</span>
       </span>
       <span className="parte-horas">{hm(horas)}</span>
     </div>

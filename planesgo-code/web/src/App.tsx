@@ -64,16 +64,23 @@ export default function App() {
 
   // Uso de la app: mientras el usuario teclea, mueve el ratón o tiene algo a medio escribir (un mensaje, una
   // issue…), el backend no se actualiza solo. Se avisa como mucho cada 20 s.
+  // Además, la actividad humana (con la ventana en primer plano) en la sesión abierta se imputa a esa sesión.
+  const sesionActividad = useRef<S.Sesion | null>(null);
+  sesionActividad.current = sesion;
   useEffect(() => {
     if (!usuario) return;
     let usado = true;
-    const marca = () => { usado = true; };
+    let humana = false;
+    const marca = () => { usado = true; if (document.hasFocus()) humana = true; };
     const borrador = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, .gh-nueva input, .nuevo-programa input'))
       .some(e => e.value.trim() !== '');
     const avisa = () => {
       if (!usado && !borrador()) return;
+      const s = sesionActividad.current;
+      const cuerpo = s && humana ? { humana: true, sesion: s.id, titulo: s.nombre, proyecto: s.proyecto, tarea_id: s.tareaId || 0, tarea: s.tarea || '' } : {};
       usado = false;
-      post('/api/actividad', {}).catch(() => {});
+      humana = false;
+      post('/api/actividad', cuerpo).catch(() => {});
     };
     const eventos = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'focus'] as const;
     eventos.forEach(ev => window.addEventListener(ev, marca, { passive: true }));

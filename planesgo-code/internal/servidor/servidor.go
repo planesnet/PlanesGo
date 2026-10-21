@@ -354,6 +354,9 @@ func (s *Servidor) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ses, err := s.Sesiones.Crea(u.UID, u.Nombre, u.Login, u.Sesion)
+	if err == nil && s.Imputacion != nil {
+		s.Imputacion.ActualizaSesionOdoo(u.UID, u.Sesion) // partes y cierres pendientes con la sesión nueva
+	}
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -411,9 +414,27 @@ func (s *Servidor) usandose() bool {
 	return t != 0 && time.Since(time.Unix(0, t)) < sinUsoAntes
 }
 
-// marcaActividad: la interfaz avisa de que el usuario está usando la app o tiene un borrador.
+// marcaActividad: la interfaz avisa de que el usuario está usando la app o tiene un borrador. Si además dice en
+// qué sesión trabaja (con la ventana en primer plano), es trabajo humano de esa sesión y se imputa.
 func (s *Servidor) marcaActividad(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	s.actividad.Store(time.Now().UnixNano())
+	var p struct {
+		Sesion   string `json:"sesion"`
+		Titulo   string `json:"titulo"`
+		Proyecto int    `json:"proyecto"`
+		TareaID  int    `json:"tarea_id"`
+		Tarea    string `json:"tarea"`
+		Humana   bool   `json:"humana"` // hubo teclado, ratón o desplazamiento en la sesión
+	}
+	if lee(r, &p) == nil && p.Humana && p.Sesion != "" && p.Proyecto > 0 && s.Imputacion != nil {
+		if nombre, ok := s.proyecto(w, r, ses, p.Proyecto); ok {
+			s.Imputacion.Actividad(imputacion.Trabajo{Sesion: p.Sesion, Titulo: p.Titulo, Proyecto: p.Proyecto, NombreProy: nombre,
+				TareaID: p.TareaID, Tarea: p.Tarea, UID: ses.UID, OdooSesion: ses.OdooSesion,
+				Desc: imputacion.Descripcion(p.Titulo, "trabajo en la sesión")})
+		} else {
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

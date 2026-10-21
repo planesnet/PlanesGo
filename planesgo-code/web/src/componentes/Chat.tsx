@@ -68,11 +68,30 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     return () => { setEnCurso(ac => { ac?.abort(); return null; }); };
   }, [sesion?.id]);
 
-  // Solo se baja al final si el usuario ya estaba abajo.
+  // Desplazamiento: al entrar en una sesión, a lo más reciente; mientras llega la respuesta, siempre abajo,
+  // salvo que el usuario haya subido a leer (se respeta hasta que vuelva abajo).
+  const pegado = useRef(true);
+  const alDesplazar = () => {
+    const l = lista.current;
+    if (l) pegado.current = l.scrollHeight - l.scrollTop - l.clientHeight < 80;
+  };
+  const baja = () => { const l = lista.current; if (l) l.scrollTop = l.scrollHeight; };
+  useLayoutEffect(() => {
+    pegado.current = true;
+    baja();
+    // Otra vez tras pintar el texto enriquecido y las herramientas (cambian la altura).
+    const t = requestAnimationFrame(baja);
+    return () => cancelAnimationFrame(t);
+  }, [sesion?.id]);
+  useLayoutEffect(() => { if (pegado.current) baja(); }, [mensajes]);
+  // También al crecer el contenido sin mensajes nuevos (desplegar una herramienta, imágenes, bloques de código).
   useEffect(() => {
     const l = lista.current;
-    if (!l || l.scrollHeight - l.scrollTop - l.clientHeight < 120) fin.current?.scrollIntoView({ block: 'end' });
-  }, [mensajes]);
+    if (!l) return;
+    const ro = new ResizeObserver(() => { if (pegado.current) baja(); });
+    Array.from(l.children).forEach(c => ro.observe(c));
+    return () => ro.disconnect();
+  }, [mensajes.length, sesion?.id]);
 
   // Envío automático pedido desde fuera, cuando su sesión ya es la abierta y no hay nada en curso.
   useEffect(() => {
@@ -212,7 +231,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
         </div>
       ) : (
         <>
-          <div className="mensajes" aria-live="polite" ref={lista}>
+          <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
                 <p><b>{titulo(sesion)}</b></p>
