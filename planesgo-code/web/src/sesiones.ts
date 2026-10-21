@@ -1,6 +1,7 @@
 // Sesiones de trabajo de un proyecto: cada una con su rama, su carpeta y su agente por defecto.
 // De momento se guardan en la app (por usuario y proyecto); más adelante, en Odoo.
 import type { Mensaje } from './api';
+import type { Avisos } from './costes';
 import type { TipoHosting } from './ajustes';
 
 export interface Sesion {
@@ -16,6 +17,7 @@ export interface Sesion {
   modoPrevio?: 'lectura' | 'editar' | 'auto'; // el modo de antes de pasar a «plan» (con el que se ejecuta el plan)
   plan?: string;         // ruta del plan en revisión de la sesión (modo plan)
   autorizadas?: string[]; // carpetas de fuera del proyecto a las que el agente puede acceder (si no, solo la suya)
+  avisos?: Avisos;        // avisos y límites de coste de la sesión (lo que falte, los del agente)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)

@@ -5,6 +5,7 @@ import { leeAjustes, TIPOS_HOSTING, type TipoHosting } from '../ajustes';
 import type { Repo, Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
+import * as CO from '../costes';
 
 // Ventana de la sesión (crear o ajustar). Lo primero, la rama del repositorio; después el nombre, el alojamiento
 // (obligatorio) y la carpeta local donde vive esa rama: por defecto, el directorio principal del proyecto + el
@@ -172,6 +173,26 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
           <button type="button" className="boton-secundario autorizar" onClick={autoriza}><Icono n="nuevo" t={13} /> Autorizar una carpeta…</button>
           <span className="suave pequeno">El agente solo trabaja en la carpeta de la sesión. Si necesita leer otra (p. ej. un proyecto de referencia), autorízala aquí.</span>
         </div>
+
+        <fieldset className="notificaciones">
+          <legend>Notificaciones</legend>
+          <span className="suave pequeno">{CO.PLANES[s.agente] || 'Avisos de gasto de esta sesión.'} Vacío: el valor por defecto del agente (en gris).</span>
+          <div className="rejilla-avisos">
+            {([['avisoCoste', 'Aviso a partir de', '$'], ['limiteCoste', 'Límite (pide confirmar)', '$'], ['avisoTurno', 'Aviso si un turno pasa de', '$'],
+              ['avisoTokens', 'Aviso a partir de', 'tokens'], ['limiteTokens', 'Límite (pide confirmar)', 'tokens']] as const).map(([k, texto, unidad]) => (
+              <label key={k} className="aviso-campo">{texto}
+                <span className="con-unidad">
+                  <input type="number" min={0} step={unidad === '$' ? 0.1 : 100000} value={s.avisos?.[k] ?? ''}
+                    placeholder={CO.DEFECTO[s.agente]?.[k] !== undefined ? String(CO.DEFECTO[s.agente]?.[k]) : '—'}
+                    onChange={e => cambia({ avisos: { ...s.avisos, [k]: e.target.value === '' ? undefined : Number(e.target.value) } })} />
+                  <span className="suave">{unidad}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <label className="casilla"><input type="checkbox" checked={CO.efectivos(s.agente, s.avisos).escritorio ?? false}
+            onChange={e => cambia({ avisos: { ...s.avisos, escritorio: e.target.checked } })} /> Notificación de escritorio además del aviso en el chat</label>
+        </fieldset>
 
         <label>Tarea de Odoo a la que se imputa
           <span className="con-icono"><Icono n="reloj" t={15} />

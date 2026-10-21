@@ -5,6 +5,7 @@ import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Ses
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
+import * as CO from '../costes';
 import { direccionesEn } from '../lanzador';
 import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas } from './Capturas';
@@ -82,6 +83,22 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     window.addEventListener('pgo:ejecutar-plan', pide);
     return () => window.removeEventListener('pgo:ejecutar-plan', pide);
   });
+
+  // Gasto de la sesión y sus avisos (los de la sesión o, si no tiene, los del plan de su agente).
+  const gastoSesion = useMemo(() => CO.gasto(mensajes), [mensajes]);
+  const avisos = sesion ? CO.efectivos(sesion.agente, sesion.avisos) : {};
+  const nivelGasto = CO.nivel(gastoSesion, avisos);
+  const [alertas, setAlertas] = useState<{ nivel: 'aviso' | 'limite'; texto: string }[]>([]);
+  useEffect(() => setAlertas([]), [sesion?.id]);
+  const avisa = (l: { nivel: 'aviso' | 'limite'; texto: string }[], escritorio?: boolean) => {
+    if (!l.length) return;
+    setAlertas(x => [...x, ...l]);
+    if (escritorio && 'Notification' in window) {
+      const manda = () => l.forEach(x => new Notification(x.nivel === 'limite' ? 'pgocode · límite de coste' : 'pgocode · aviso de coste', { body: x.texto }));
+      if (Notification.permission === 'granted') manda();
+      else if (Notification.permission !== 'denied') Notification.requestPermission().then(p => { if (p === 'granted') manda(); });
+    }
+  };
 
   // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
   const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
@@ -207,6 +224,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const ses: Sesion = cambios ? { ...sesion, ...cambios } : sesion;
+    // Límite de coste de la sesión: se pide confirmación antes de seguir gastando.
+    const gAntes = CO.gasto(forzado !== undefined ? conversacion(sesion.id) : mensajes);
+    const aSes = CO.efectivos(ses.agente, ses.avisos);
+    if (CO.nivel(gAntes, aSes) === 'limite' && !confirm(`La sesión ha llegado a su límite de gasto (lleva ${CO.dinero(gAntes.coste)} · ${CO.tokens(gAntes.entrada + gAntes.salida)} tokens). ¿Enviar de todos modos?`)) return;
     const modoPlan = ses.permisos === 'plan';
     let rutaPlan: string | undefined;
     const id = ses.id;
@@ -303,6 +324,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
+      avisa(CO.nuevos(gAntes, CO.gasto(actual), aSes), aSes.escritorio);
       setEnCurso(c => (c === ac ? null : c));
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now(), ...(rutaPlan ? { plan: rutaPlan } : {}) });
     }
@@ -369,6 +391,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
           </nav>
         ) : <span className="suave titulo">{proyecto ? proyecto.nombre : 'Elige un proyecto de Odoo'}</span>}
         <span className="hueco" />
+        {sesion && gastoSesion.turnos > 0 && (
+          <button className={'gasto gasto-' + nivelGasto} onClick={alAjustes}
+            title={`Gasto de esta sesión: ${CO.dinero(gastoSesion.coste)} · ${CO.tokens(gastoSesion.entrada)} de entrada y ${CO.tokens(gastoSesion.salida)} de salida en ${gastoSesion.turnos} turnos.\n${CO.PLANES[sesion.agente] || ''}\n` +
+              `Aviso: ${avisos.avisoCoste ? CO.dinero(avisos.avisoCoste) : '—'} · límite: ${avisos.limiteCoste ? CO.dinero(avisos.limiteCoste) : '—'}${avisos.avisoTokens ? ' · aviso ' + CO.tokens(avisos.avisoTokens) + ' tokens' : ''} (cámbialos en los ajustes de la sesión, «Notificaciones»)`}>
+            {CO.dinero(gastoSesion.coste)} · {CO.tokens(gastoSesion.entrada + gastoSesion.salida)}
+          </button>
+        )}
         {skillsSesion.length > 0 && (
           <span className="skills-sesion" title="Skills usadas en esta sesión">
             {skillsSesion.map(n => <span key={n} className={'sk-marca' + (enCurso && n === skillActiva ? ' en-uso' : '')} title={enCurso && n === skillActiva ? 'En uso ahora' : 'Usada en esta sesión'}>✦ {n}</span>)}
@@ -438,6 +467,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <div className="aviso-sesion">
                 <Icono n="info" t={15} /> Falta elegir el alojamiento de la sesión.
                 <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
+              </div>
+            )}
+            {alertas.length > 0 && (
+              <div className={'alertas-coste ' + (alertas.some(x => x.nivel === 'limite') ? 'limite' : 'aviso')} role="alert">
+                <span>{alertas.map((x, i) => <span key={i} className="alerta-texto">{x.texto}</span>)}</span>
+                <button className="enlace" onClick={alAjustes}>Ajustar avisos</button>
+                <button className="icono" onClick={() => setAlertas([])} aria-label="Cerrar el aviso"><Icono n="cerrar" t={13} /></button>
               </div>
             )}
             {/* Lo que el agente tiene en marcha (subagentes, órdenes en segundo plano): explica por qué sigue ocupado. */}
