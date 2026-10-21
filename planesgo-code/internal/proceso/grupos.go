@@ -16,11 +16,12 @@ func Vigila(pid int) {
 	muGrupos.Unlock()
 }
 
-// GruposVivos cuenta los grupos vigilados que aún tienen algún proceso (y olvida los que ya no).
+// GruposVivos cuenta los grupos vigilados que aún tienen algún proceso (y olvida los que ya no), más las
+// ejecuciones de agentes con algún proceso marcado vivo (aunque esté en otro grupo).
 func GruposVivos() int {
+	n := marcasVivas()
 	muGrupos.Lock()
 	defer muGrupos.Unlock()
-	n := 0
 	for g := range grupos {
 		if grupoVivo(g) {
 			n++

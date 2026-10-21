@@ -100,10 +100,18 @@ Los mensajes internos de un subagente (sus herramientas y su texto) van **dentro
 ### Fase 4 — Listas de tareas en Claude
 - Activar `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` en las sesiones de pgocode, para que Claude lleve su lista como en modo interactivo, y leer `TaskCreate/TaskUpdate`.
 
-## Decisiones pendientes
-1. **Claude con stdin en stream-json (fase 3)**: además de parar tareas, permitiría enviar los mensajes de la cola *durante* el turno, como hace Claude Code interactivo, en vez de esperar a que acabe. ¿Lo queremos así o la cola sigue esperando al final del turno?
-2. **OpenCode con `serve`**: más control y eventos en vivo a cambio de un proceso servidor por sesión. ¿Merece la pena ya, o basta con la fase 1 para OpenCode?
-3. **Listas de tareas de Claude (fase 4)**: consumen algo de tokens por turno. ¿Las activamos?
+## Decisiones (Luis, 2026-10-21)
+1. **La cola la lleva pgocode, igual para todos los agentes.** No se usa el stdin de Claude para meter mensajes durante el turno.
+2. **Prioridad: no crear procesos sin control ni gastar tokens de más.** Por eso:
+   - **sin `opencode serve`:** sería otro proceso local vivo por sesión;
+   - **sin listas de tareas de Claude:** gastan tokens en cada turno;
+   - **fase 3 solo si hace falta:** parar una tarea concreta en Claude exige mantener su stdin abierto.
+3. **Fase 0 hecha:**
+   - el coste de Claude ya no se cuenta dos veces;
+   - los pasos de Antigravity no se quedan colgados;
+   - cada ejecución de un agente lleva la marca `PGO_EJECUCION` en el entorno, que heredan todos sus descendientes. Al cancelar se manda SIGTERM al agente y, tras 5 s, SIGKILL a todo lo marcado. El bloqueo de actualizaciones también cuenta esos procesos.
+
+Pendiente de valorar para ahorrar tokens: con tareas vivas, `claude -p` hace **otro turno completo** cuando cada una termina, y eso son tokens. Se podría avisar en la interfaz o limitar el segundo plano en las sesiones de pgocode.
 
 ## Verificación
 - Pruebas de los lectores con las muestras reales de los tres agentes.

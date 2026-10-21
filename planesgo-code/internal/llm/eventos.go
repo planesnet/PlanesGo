@@ -117,6 +117,9 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	nombres := map[string]string{}
+	// total_cost_usd es lo acumulado por el proceso: con tareas en segundo plano hay varios «result» y cada uno
+	// lleva el total hasta entonces; se emite solo la diferencia para no contar dos veces.
+	costeAntes := 0.0
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -186,8 +189,10 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado}})
 			}
 		case "result":
+			coste := max(ev.Coste-costeAntes, 0)
+			costeAntes = max(ev.Coste, costeAntes)
 			emite(Evento{Uso: &Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
-				Coste: ev.Coste, Segundos: ev.Duracion / 1000}})
+				Coste: coste, Segundos: ev.Duracion / 1000}})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -201,7 +206,14 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
-	empezadas := map[int]bool{}
+	empezadas := map[int]string{} // paso → herramienta, mientras no acaba
+	// Al acabar, lo que no llegó a cerrarse (p. ej. una orden bloqueada) no se queda «en curso» para siempre.
+	defer func() {
+		for i, n := range empezadas {
+			emite(Evento{Herramienta: &Herramienta{ID: fmt.Sprintf("paso-%d", i), Nombre: n, Salida: "Sin terminar: el agente acabó antes", Estado: "error"}})
+		}
+	}()
+	vistas := map[int]bool{}
 	for sc.Scan() {
 		var ev struct {
 			Event          string `json:"event"`
@@ -242,14 +254,17 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			switch {
 			case p.Tipo == "agent_response" && p.Texto != "":
 				emite(Evento{Texto: p.Texto})
-			case p.Tipo == "tool" && p.Has != "":
+			// Un subagente puede empezar como «tool» y acabar como «subagent» (o al revés): el mismo paso.
+			case (p.Tipo == "tool" || p.Tipo == "subagent") && p.Has != "":
 				id := fmt.Sprintf("paso-%d", p.Indice)
-				if !empezadas[p.Indice] {
-					empezadas[p.Indice] = true
+				if !vistas[p.Indice] {
+					vistas[p.Indice] = true
+					empezadas[p.Indice] = p.Has
 					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Resumen: resumen(p.Info.Parametros),
 						Entrada: recorta(string(p.Info.Parametros), maxEntrada), Estado: "curso", Skill: skillDe(p.Has, p.Info.Parametros)}})
 				}
 				if p.Estado == "DONE" || p.Estado == "ERROR" || p.Estado == "FAILED" {
+					delete(empezadas, p.Indice)
 					estado, salida := "ok", p.Info.Salida
 					if p.Estado != "DONE" || p.Info.Error != "" {
 						estado = "error"

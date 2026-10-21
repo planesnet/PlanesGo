@@ -121,9 +121,10 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if len(entorno) > 0 {
 		cmd.Env = append(os.Environ(), entorno...)
 	}
-	// El agente va en su propio grupo de procesos: al cancelar se matan también sus hijos (servidores MCP,
-	// shells…), y WaitDelay evita quedarse esperando a un nieto que conserve la salida abierta.
-	proceso.GrupoPropio(cmd)
+	// El agente va en su propio grupo y con una marca en el entorno que heredan todos sus descendientes: al
+	// cancelar se le pide que termine (cierra sus tareas) y, tras unos segundos, se mata todo lo marcado, también
+	// lo que lanzó en otro grupo (Bash en segundo plano). WaitDelay evita esperar a un nieto con la salida abierta.
+	proceso.Agente(cmd, fmt.Sprintf("%d-%s", os.Getpid(), id))
 	cmd.WaitDelay = 5 * time.Second
 	var errSalida strings.Builder
 	cmd.Stderr = io.MultiWriter(&limitado{b: &errSalida, max: 8 << 10}, &lineasLog{id: id, flujo: "stderr"})

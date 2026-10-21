@@ -233,7 +233,9 @@ export default function Chat({ directorio, alAjustes, seleccionSkills, hosting, 
         if (e.texto) parte({ tipo: 'texto', texto: e.texto });
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta });
-        if (e.uso) ultimo(m => ({ ...m, uso: e.uso }));
+        // Puede haber varios consumos en un turno (Claude con tareas en segundo plano hace más de un «result»).
+        if (e.uso) ultimo(m => ({ ...m, uso: m.uso ? { entrada: m.uso.entrada + e.uso!.entrada, salida: m.uso.salida + e.uso!.salida,
+          coste: (m.uso.coste || 0) + (e.uso!.coste || 0) || undefined, segundos: (m.uso.segundos || 0) + (e.uso!.segundos || 0) || undefined } : e.uso }));
         if (e.sesion_agente) sesionAgente = e.sesion_agente;
         if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
