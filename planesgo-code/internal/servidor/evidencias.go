@@ -91,7 +91,15 @@ func (s *Servidor) rutaEvidencia(proyecto int, ruta string) (string, bool) {
 	if !filepath.IsAbs(r) || i < 0 || extImagen[mimeDe(r)] == "" || strings.Contains(r[i+len(marca):], "..") {
 		return "", false
 	}
-	return r, s.Indice.Pertenece(proyecto, r[:i])
+	// Ni la evidencia ni la carpeta .pgocode pueden ser enlaces que lleven fuera del proyecto.
+	return r, s.Indice.Pertenece(proyecto, r[:i]) && sinSalir(r[:i], r)
+}
+
+// sinSalir: la ruta, con los enlaces simbólicos resueltos, sigue dentro de base (también resuelta).
+func sinSalir(base, ruta string) bool {
+	rb, e1 := filepath.EvalSymlinks(base)
+	rr, e2 := filepath.EvalSymlinks(ruta)
+	return e1 == nil && e2 == nil && dentroDe(rb, rr)
 }
 
 func mimeDe(f string) string {

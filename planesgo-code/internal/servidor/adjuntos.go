@@ -98,7 +98,7 @@ func adjuntosValidos(carpeta string, l []string) []string {
 	var v []string
 	for _, p := range l {
 		p = filepath.Clean(p)
-		if strings.HasPrefix(p, base) {
+		if strings.HasPrefix(p, base) && sinSalir(base, p) {
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
 				v = append(v, p)
 			}

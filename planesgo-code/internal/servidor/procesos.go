@@ -1,7 +1,10 @@
 package servidor
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -186,7 +189,7 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 			return
 		}
 	}
-	x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "usuario", s.entornoAgente(p.Proyecto))
+	x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "usuario", s.entornoPrograma(p.Proyecto))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -277,28 +280,68 @@ func (s *Servidor) procesosSalida(w http.ResponseWriter, r *http.Request, ses *s
 
 // ---- desde el agente (orden pgo) ----
 
-// entornoAgente: lo que reciben los agentes y los programas para usar «pgo».
+// entornoAgente: lo que reciben los agentes para usar «pgo»: su token vale solo para su proyecto.
 func (s *Servidor) entornoAgente(proyecto int) []string {
-	// PLANESGO_GESTOR: PlanesGo (hooks, plugins y planesgo-mcp) se queda dormido en los agentes de pgocode, que
-	// imputa él directamente en Odoo.
-	e := []string{"PGO_API=http://127.0.0.1:" + s.Puerto, "PGO_TOKEN=" + s.TokenAgente, "PGO_PROYECTO=" + strconv.Itoa(proyecto), "PLANESGO_GESTOR=pgocode"}
+	return append(s.entornoPrograma(proyecto), "PGO_TOKEN="+s.tokenProyecto(proyecto))
+}
+
+// entornoPrograma: lo que reciben los programas que se lanzan (sin token: un programa o sus dependencias no
+// pueden dar órdenes a pgocode). PLANESGO_GESTOR: PlanesGo (hooks, plugins y planesgo-mcp) se queda dormido,
+// porque imputa pgocode directamente en Odoo.
+func (s *Servidor) entornoPrograma(proyecto int) []string {
+	e := []string{"PGO_API=http://127.0.0.1:" + s.Puerto, "PGO_PROYECTO=" + strconv.Itoa(proyecto), "PLANESGO_GESTOR=pgocode"}
 	if s.DirBin != "" {
 		e = append(e, "PATH="+s.DirBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	return e
 }
 
-func (s *Servidor) esAgente(r *http.Request) bool {
+// tokenProyecto: el token de los agentes de un proyecto (derivado del secreto de esta ejecución).
+func (s *Servidor) tokenProyecto(proyecto int) string {
+	m := hmac.New(sha256.New, []byte(s.TokenAgente))
+	fmt.Fprintf(m, "pgo-proyecto:%d", proyecto)
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// esAgente: el token es el del proyecto que dice la orden.
+func (s *Servidor) esAgente(r *http.Request, proyecto int) bool {
 	t := r.Header.Get("X-PGO-Agente")
-	return s.TokenAgente != "" && t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(s.TokenAgente)) == 1
+	return s.TokenAgente != "" && t != "" && proyecto > 0 && subtle.ConstantTimeCompare([]byte(t), []byte(s.tokenProyecto(proyecto))) == 1
+}
+
+// dentroDelProyecto: la carpeta está en una de las del proyecto (o en una copia de rama de pgocode), también
+// tras resolver los enlaces simbólicos.
+func (s *Servidor) dentroDelProyecto(proyecto int, carpeta string) bool {
+	real, err := filepath.EvalSymlinks(carpeta)
+	if err != nil {
+		return false
+	}
+	bases := append(s.Indice.Carpetas(false)[proyecto], s.Indice.Registradas(proyecto)...)
+	if s.DirRamas != "" {
+		bases = append(bases, s.DirRamas)
+	}
+	for _, b := range bases {
+		if rb, err := filepath.EvalSymlinks(b); err == nil && dentroDe(rb, real) {
+			return true
+		}
+	}
+	return false
+}
+
+// dentroDe: ruta está en base (o es base).
+func dentroDe(base, ruta string) bool {
+	rel, err := filepath.Rel(base, ruta)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// delProyecto: el programa existe y es del proyecto.
+func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
+	p, ok := s.Procesos.Busca(nombre)
+	return ok && p.Proyecto == proyecto
 }
 
 // pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida y abrir.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
-	if !s.esAgente(r) {
-		jsonError(w, http.StatusForbidden, "token de agente no válido")
-		return
-	}
 	var p struct {
 		Proyecto int    `json:"proyecto"`
 		Carpeta  string `json:"carpeta"`
@@ -318,13 +361,25 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		p.Proyecto, _ = strconv.Atoi(q.Get("proyecto"))
 		p.N, _ = strconv.Atoi(q.Get("n"))
 	}
+	// El token es el del proyecto: el agente solo actúa en su proyecto, sus carpetas y sus programas.
+	if !s.esAgente(r, p.Proyecto) {
+		jsonError(w, http.StatusForbidden, "token de agente no válido para este proyecto")
+		return
+	}
 	switch r.PathValue("orden") {
-	case "ejecutar":
-		if !filepath.IsAbs(p.Carpeta) {
-			jsonError(w, http.StatusBadRequest, "la carpeta tiene que ser absoluta")
+	case "parar", "salida":
+		if !s.delProyecto(p.Nombre, p.Proyecto) {
+			jsonError(w, http.StatusNotFound, procesos.ErrNoHay.Error())
 			return
 		}
-		x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "agente", s.entornoAgente(p.Proyecto))
+	}
+	switch r.PathValue("orden") {
+	case "ejecutar":
+		if !filepath.IsAbs(p.Carpeta) || !s.dentroDelProyecto(p.Proyecto, p.Carpeta) {
+			jsonError(w, http.StatusForbidden, "la carpeta tiene que ser una del proyecto")
+			return
+		}
+		x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "agente", s.entornoPrograma(p.Proyecto))
 		if err != nil {
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return

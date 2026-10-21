@@ -8,7 +8,9 @@ package servidor
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +34,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/github"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
@@ -141,6 +144,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actualizacion/aplicar", s.conSesion(s.aplicaActualizacion))
 	mux.HandleFunc("POST /api/actualizacion/pausa", s.conSesion(s.pausaActualizacion))
 	mux.HandleFunc("POST /api/actividad", s.conSesion(s.marcaActividad))
+	mux.HandleFunc("POST /api/diagnostico", s.conSesion(s.diagnostico))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("GET /api/agentes/mcp", s.conSesion(s.servidoresMCP))
@@ -213,11 +217,16 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		// Solo los scripts del propio arnés (un texto del agente o de un programa no puede colar uno) y nunca dentro
+		// de otra página.
+		w.Header().Set("Content-Security-Policy", "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		if !s.hostLocal(r.Host) {
 			jsonError(w, http.StatusMisdirectedRequest, "host no permitido")
 			return
 		}
-		agente := esRutaAgente(r.URL.Path) && s.esAgente(r)
+		// Las órdenes del agente llevan su token (que /api/pgo comprueba contra el proyecto de la orden).
+		agente := esRutaAgente(r.URL.Path) && r.Header.Get("X-PGO-Agente") != ""
 		if r.URL.Path != "/healthz" && !agente && !s.desdeEscritorio(r) {
 			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -669,8 +678,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Permisos != "" && p.Permisos != "lectura" && p.Permisos != "editar" && p.Permisos != "auto" {
 		p.Permisos = "lectura"
 	}
+	// Id del turno: enlaza en el registro de tiempos la petición, sus herramientas, sus tareas y su fin.
+	turno := idTurno()
 	if p.Aparte != "" {
-		s.aparte(r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
+		s.aparte(turno, r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
 			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true}, sesionImp, p.Proveedor, envia)
 		return
@@ -679,7 +690,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	inicioTurno := time.Now()
 	vivosTurno := 0 // procesos de este agente que siguen vivos al acabar (en segundo plano)
 	if s.Imputacion != nil {
-		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
+		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP}, func(e llm.Evento) {
@@ -695,7 +706,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			guardaCapturas(p.Carpeta, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)
 		}
 		if h := e.Herramienta; h != nil && s.Imputacion != nil {
-			c := map[string]any{"id": h.ID, "nombre": h.Nombre, "estado": h.Estado}
+			c := map[string]any{"turno": turno, "id": h.ID, "nombre": h.Nombre, "estado": h.Estado}
 			if h.Entrada != "" {
 				c["tipo"] = imputacion.TipoHerramienta(h.Nombre, h.Entrada)
 				c["resumen"] = recortaTexto(h.Resumen, 120)
@@ -710,20 +721,20 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			if _, err := s.Procesos.Adopta(ad.Nombre, p.Proyecto, p.Carpeta, ad.Orden, ad.Grupo, ad.Fichero, ad.Marca); err != nil {
 				log.Printf("adoptar %s: %v", ad.Nombre, err)
 			} else if s.Imputacion != nil {
-				s.Imputacion.AnotaAgente(sesionImp, "adoptado", map[string]any{"nombre": ad.Nombre, "orden": recortaTexto(ad.Orden, 160)})
+				s.Imputacion.AnotaAgente(sesionImp, "adoptado", map[string]any{"turno": turno, "nombre": ad.Nombre, "orden": recortaTexto(ad.Orden, 160)})
 			}
 		}
 		if t := e.Tarea; t != nil && s.Imputacion != nil {
-			s.Imputacion.AnotaAgente(sesionImp, "tarea", map[string]any{"id": t.ID, "tipo": t.Tipo, "estado": t.Estado,
+			s.Imputacion.AnotaAgente(sesionImp, "tarea", map[string]any{"turno": turno, "id": t.ID, "tipo": t.Tipo, "estado": t.Estado,
 				"titulo": recortaTexto(t.Titulo, 120), "subtipo": t.Subtipo, "segundo_plano": t.SegundoPlano})
 		}
 		envia(e)
 	})
 	if s.Imputacion != nil {
-		fin := map[string]any{"turno_s": time.Since(inicioTurno).Seconds(), "cancelada": r.Context().Err() != nil,
+		fin := map[string]any{"turno": turno, "turno_s": time.Since(inicioTurno).Seconds(), "cancelada": r.Context().Err() != nil,
 			"procesos_vivos": vivosTurno}
 		if err != nil {
-			fin["error"] = err.Error()
+			fin["error"] = recortaTexto(depuracion.Tapa(err.Error()), 600)
 		}
 		s.Imputacion.AnotaAgente(sesionImp, "agente-fin", fin)
 	}
@@ -1061,10 +1072,28 @@ func (s *Servidor) qaComenta(w http.ResponseWriter, r *http.Request, ses *sesion
 // carpetas que existen (y nunca la raíz ni la carpeta personal entera, que equivaldría a no restringir nada).
 func carpetasAutorizadas(l []string) []string {
 	casa, _ := os.UserHomeDir()
+	casa = filepath.Clean(casa)
+	// Nunca: la raíz, el sistema, la carpeta personal entera ni sus padres, ni las de credenciales y ajustes.
+	prohibida := func(c string) bool {
+		if c == "/" || c == casa || dentroDe(c, casa) {
+			return true
+		}
+		for _, x := range []string{"/etc", "/root", "/proc", "/sys", "/dev", "/boot", "/var", "/usr", "/bin", "/sbin", "/lib",
+			filepath.Join(casa, ".ssh"), filepath.Join(casa, ".gnupg"), filepath.Join(casa, ".config"), filepath.Join(casa, ".aws"),
+			filepath.Join(casa, ".local", "share", "pgocode"), filepath.Join(casa, ".claude")} {
+			if dentroDe(x, c) {
+				return true
+			}
+		}
+		return false
+	}
 	var out []string
 	for _, c := range l {
 		c = filepath.Clean(strings.TrimSpace(c))
-		if !filepath.IsAbs(c) || c == "/" || c == filepath.Clean(casa) || slices.Contains(out, c) {
+		if r, err := filepath.EvalSymlinks(c); err == nil {
+			c = r
+		}
+		if !filepath.IsAbs(c) || prohibida(c) || slices.Contains(out, c) {
 			continue
 		}
 		if st, err := os.Stat(c); err == nil && st.IsDir() {
@@ -1088,4 +1117,26 @@ func (s *Servidor) servidoresMCP(w http.ResponseWriter, r *http.Request, ses *se
 	}
 	sort.Strings(l)
 	jsonOK(w, l)
+}
+
+// idTurno: un identificador corto y aleatorio para un turno.
+func idTurno() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// diagnostico: un error de la interfaz (excepción o promesa sin atender) va al registro de depuración.
+func (s *Servidor) diagnostico(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Mensaje string `json:"mensaje"`
+		Pila    string `json:"pila"`
+		URL     string `json:"url"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	depuracion.Log("interfaz", "%s %s: %s\n%s", s.Version, recortaTexto(p.URL, 200), recortaTexto(p.Mensaje, 500), recortaTexto(p.Pila, 2000))
+	w.WriteHeader(http.StatusNoContent)
 }

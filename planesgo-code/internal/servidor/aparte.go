@@ -22,7 +22,7 @@ const sistemaAparte = "El usuario te hace una pregunta aparte mientras trabaja c
 // bifurcables: los agentes que pueden copiar su sesión para una pregunta aparte.
 var bifurcables = map[string]bool{"claude-code": true, "opencode": true}
 
-func (s *Servidor) aparte(r *http.Request, tipo, contexto string, prov llm.Proveedor, info llm.Info, pet llm.Peticion, sesionImp, proveedor string, envia func(any)) {
+func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto string, prov llm.Proveedor, info llm.Info, pet llm.Peticion, sesionImp, proveedor string, envia func(any)) {
 	inicio := time.Now()
 	pregunta := pet.Mensajes[0].Texto
 	via := "modelo"
@@ -55,7 +55,7 @@ func (s *Servidor) aparte(r *http.Request, tipo, contexto string, prov llm.Prove
 		}
 	}
 	if s.Imputacion != nil {
-		c := map[string]any{"tipo": tipo, "via": via, "proveedor": proveedor, "turno_s": time.Since(inicio).Seconds()}
+		c := map[string]any{"turno": turno, "tipo": tipo, "via": via, "proveedor": proveedor, "turno_s": time.Since(inicio).Seconds()}
 		if err != nil {
 			c["error"] = err.Error()
 		}
@@ -79,9 +79,10 @@ func (s *Servidor) clasifica(w http.ResponseWriter, r *http.Request, ses *sesion
 		jsonError(w, http.StatusBadRequest, "petición no válida")
 		return
 	}
+	inicio := time.Now()
 	tipo, u, err := clasificaMensaje(r.Context(), p.Texto, p.Ultimo)
 	if s.Imputacion != nil && p.Sesion != "" {
-		c := map[string]any{"tipo": tipo, "entrada": u.Entrada, "salida": u.Salida, "coste": u.Coste}
+		c := map[string]any{"tipo": tipo, "modelo": llm.ModeloClasifica, "ms": time.Since(inicio).Milliseconds(), "entrada": u.Entrada, "salida": u.Salida, "coste": u.Coste}
 		if err != nil {
 			c["error"] = err.Error()
 		}

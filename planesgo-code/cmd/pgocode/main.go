@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -279,9 +280,13 @@ func main() {
 		Studio:      studio,
 		Version:     version,
 	}
-	_, puerto, err := net.SplitHostPort(*addr)
+	host, puerto, err := net.SplitHostPort(*addr)
 	if err != nil {
 		log.Fatalf("dirección no válida %q: %v", *addr, err)
+	}
+	// Solo en el propio equipo: la interfaz y la API no tienen más defensa que estar en local.
+	if ip := net.ParseIP(host); !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		log.Fatalf("pgocode solo escucha en local (127.0.0.1, ::1 o localhost), no en %q", *addr)
 	}
 	s.Puerto = puerto
 	// La app de escritorio pasa su secreto por entorno (no por argumento: se vería en la lista de procesos).
@@ -292,6 +297,9 @@ func main() {
 	if err := depuracion.Activa(filepath.Join(filepath.Dir(*dirGrab), "depuracion.log")); err != nil {
 		log.Printf("depuración: %v", err)
 	}
+	// El log del backend (inicios de sesión, programas lanzados, actualizaciones…) también al registro: en la app
+	// de escritorio su salida se pierde.
+	log.SetOutput(io.MultiWriter(os.Stderr, depuracion.Escritor("backend")))
 	depuracion.Log("inicio", "pgocode %s; variables del shell añadidas: %s; PATH=%s", version, strings.Join(nuevasShell, ","), os.Getenv("PATH"))
 
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
@@ -304,7 +312,7 @@ func main() {
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
 		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log"),
 		// Registro detallado de tiempos (un JSONL por día) para validar la imputación: Imputación → Validar.
-		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos")}}
+		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos"), Version: version}}
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
 	s.Procesos = procesos.Nuevo()

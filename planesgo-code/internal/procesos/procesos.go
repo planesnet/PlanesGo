@@ -166,8 +166,9 @@ func urlDe(l string) string {
 func (g *Gestor) Para(nombre string) bool {
 	g.mu.Lock()
 	p := g.ps[nombre]
+	enCurso := p != nil && p.Estado == "curso"
 	g.mu.Unlock()
-	if p == nil || p.Estado != "curso" {
+	if !enCurso {
 		return false
 	}
 	// Lo que el programa lanzó en otros grupos (lleva su marca) también se para: primero que termine.

@@ -3,18 +3,26 @@ package servidor
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"planesgo-code/internal/procesos"
+	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/sesiones"
 )
 
-// El agente usa /api/pgo/* con su token (sin la cookie de la app); sin token, nada. La URL del programa llega
-// a la interfaz como aviso «abrir».
+// El agente usa /api/pgo/* con el token de su proyecto (sin la cookie de la app); sin token, con el de otro
+// proyecto o fuera de las carpetas del proyecto, nada. La URL del programa llega a la interfaz como aviso «abrir».
 func TestPgoAgente(t *testing.T) {
-	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(), Procesos: procesos.Nuevo()}
+	raiz := t.TempDir()
+	dir := filepath.Join(raiz, "proyecto7")
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".planesgo.json"), []byte(`{"odoo_project_id": 7}`), 0o644)
+	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(), Procesos: procesos.Nuevo(),
+		Indice: proyectos.NuevoIndice([]string{raiz})}
 	s.AvisaProcesos()
 	h := s.Handler()
 	avisos := s.Eventos.alta()
@@ -28,15 +36,24 @@ func TestPgoAgente(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w.Code
 	}
-	dir := t.TempDir()
-	cuerpo := `{"proyecto":7,"nombre":"web","carpeta":"` + dir + `","orden":"echo en http://localhost:8123/; sleep 30"}`
+	cuerpo := `{"proyecto":7,"nombre":"web","carpeta":"` + filepath.Join(dir, "sub") + `","orden":"echo en http://localhost:8123/; sleep 30"}`
 	if c := pide("", cuerpo); c != http.StatusForbidden {
 		t.Fatalf("sin token: %d", c)
 	}
 	if c := pide("otro", cuerpo); c != http.StatusForbidden {
 		t.Fatalf("token malo: %d", c)
 	}
-	if c := pide("agente", cuerpo); c != http.StatusOK {
+	if c := pide("agente", cuerpo); c != http.StatusForbidden {
+		t.Fatalf("con el secreto en vez del token del proyecto: %d", c)
+	}
+	if c := pide(s.tokenProyecto(8), cuerpo); c != http.StatusForbidden {
+		t.Fatalf("con el token de otro proyecto: %d", c)
+	}
+	fuera := `{"proyecto":7,"nombre":"web","carpeta":"` + t.TempDir() + `","orden":"true"}`
+	if c := pide(s.tokenProyecto(7), fuera); c != http.StatusForbidden {
+		t.Fatalf("carpeta fuera del proyecto: %d", c)
+	}
+	if c := pide(s.tokenProyecto(7), cuerpo); c != http.StatusOK {
 		t.Fatalf("con token: %d", c)
 	}
 	defer s.Procesos.ParaTodos()

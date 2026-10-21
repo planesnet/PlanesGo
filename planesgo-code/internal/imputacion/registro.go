@@ -21,9 +21,30 @@ const IntervaloHumano = 30 * time.Second
 type Registro struct {
 	Dir   string
 	Ahora func() time.Time
+	// Version del programa: va en cada suceso (con el pid) para saber qué versión hizo cada cosa.
+	Version string
+	// Dias: cuántos días de registros se guardan (0: 90).
+	Dias int
 
 	mu     sync.Mutex
 	humano map[string]time.Time // última actividad humana anotada por sesión
+
+	limpiado string // día en que se borraron los registros viejos
+}
+
+// limpia (con el cerrojo): borra los registros de hace más de Dias días.
+func (r *Registro) limpia(ahora time.Time) {
+	dias := r.Dias
+	if dias <= 0 {
+		dias = 90
+	}
+	limite := ahora.AddDate(0, 0, -dias).Format("2006-01-02")
+	l, _ := filepath.Glob(filepath.Join(r.Dir, "????-??-??.jsonl"))
+	for _, f := range l {
+		if strings.TrimSuffix(filepath.Base(f), ".jsonl") < limite {
+			os.Remove(f)
+		}
+	}
 }
 
 func (r *Registro) ahora() time.Time {
@@ -42,7 +63,10 @@ func (r *Registro) Anota(ev string, campos map[string]any) {
 		return
 	}
 	ahora := r.ahora()
-	l := map[string]any{"t": ahora.Format(time.RFC3339Nano), "ev": ev}
+	l := map[string]any{"t": ahora.Format(time.RFC3339Nano), "ev": ev, "pid": os.Getpid()}
+	if r.Version != "" {
+		l["v"] = r.Version
+	}
 	for k, v := range campos {
 		if v != nil && v != "" {
 			l[k] = v
@@ -56,6 +80,10 @@ func (r *Registro) Anota(ev string, campos map[string]any) {
 	defer r.mu.Unlock()
 	if err := os.MkdirAll(r.Dir, 0o700); err != nil {
 		return
+	}
+	if dia := ahora.Format("2006-01-02"); dia != r.limpiado {
+		r.limpiado = dia
+		r.limpia(ahora)
 	}
 	if f, err := os.OpenFile(r.Fichero(ahora.Format("2006-01-02")), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		f.Write(append(b, '\n'))
