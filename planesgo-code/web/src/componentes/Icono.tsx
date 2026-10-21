@@ -32,6 +32,7 @@ const trazos: Record<string, JSX.Element> = {
   tablet: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M11 18h2" /></>,
   movil: <><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M11 18h2" /></>,
   girar: <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5" /><path d="M20 4v4.5h-4.5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5" /><path d="M4 20v-4.5h4.5" /></>,
+  actividad: <path d="M3 12h4l3-8 4 16 3-8h4" />,
   clip: <path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7-7L13 4.5a3.4 3.4 0 0 1 4.8 4.8l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4L15 7.3" />,
   reloj: <><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2.5M9 3h6" /></>,
   skill: <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />,

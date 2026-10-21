@@ -1,5 +1,6 @@
 import { useEffect, useState, type PointerEvent as EventoPuntero } from 'react';
 import type { Proyecto } from '../api';
+import Actividad from './Actividad';
 import { Galeria } from './Capturas';
 import Navegador, { type PedidoWeb } from './Navegador';
 import StudioTV from './StudioTV';
@@ -10,14 +11,15 @@ import Skills from './Skills';
 import type { Sesion } from '../sesiones';
 import Icono from './Icono';
 
-type Pestana = 'flujo' | 'studio' | 'programas' | 'skills' | 'navegador';
+type Pestana = 'actividad' | 'flujo' | 'studio' | 'programas' | 'skills' | 'navegador';
 type VistaTV = 'pruebas' | 'directo' | 'capturas';
 
 const ANCHO_MIN = 320;
 
 // Panel derecho: TV (pruebas de la campaña y directo) y navegador. Se redimensiona arrastrando su borde izquierdo.
-export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
+export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, sesion, directorio, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
   proyecto: Proyecto | null; carpeta: string; rama: string; agente?: string; sesiones: Sesion[]; alAncho: (px: number) => void;
+  sesion?: Sesion | null; directorio?: string;
   pedidoWeb: PedidoWeb | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
   const [pestana, setPestana] = useState<Pestana>('flujo');
@@ -54,6 +56,7 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
       {/* Durante el arrastre, una capa encima de todo para que el navegador integrado no se quede los eventos. */}
       {arrastrando && <div className="capa-arrastre" />}
       <div className="pestanas" role="tablist">
+        <button role="tab" aria-selected={pestana === 'actividad'} onClick={() => setPestana('actividad')} title="Actividad: agente, subagentes, tareas, programas y planes"><Icono n="actividad" t={16} /> Actividad</button>
         <button role="tab" aria-selected={pestana === 'flujo'} onClick={() => setPestana('flujo')} title="Flujo del repositorio: issues y pull requests"><Icono n="flujo" t={16} /> Flujo</button>
         <button role="tab" aria-selected={pestana === 'studio'} onClick={() => setPestana('studio')} title="Studio TV"><Icono n="tv" t={16} /> TV</button>
         <button role="tab" aria-selected={pestana === 'programas'} onClick={() => setPestana('programas')} title="Programas en local"><Icono n="terminal" t={16} /> Programas</button>
@@ -75,6 +78,7 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
               ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
               : vista === 'capturas' ? <Galeria key={proyecto.id} proyecto={proyecto.id} />
                 : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
+            {pestana === 'actividad' && <Actividad key={proyecto.id} proyecto={proyecto} carpeta={carpeta} sesion={sesion} directorio={directorio} versionProcesos={versionProcesos} alAbrir={alAbrir} />}
             {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} alResolver={alResolver} />}
             {pestana === 'skills' && <Skills key={proyecto.id} proyecto={proyecto} carpeta={carpeta} agente={agente} sesiones={sesiones} />}
             {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}

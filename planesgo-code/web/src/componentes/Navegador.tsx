@@ -2,7 +2,7 @@ import { createElement, useEffect, useRef, useState, type FormEvent } from 'reac
 import { enEscritorio, post, type Proyecto } from '../api';
 import * as L from '../lanzador';
 import Icono from './Icono';
-import { Formato } from './Lanzador';
+import { SelectorFormato } from './Lanzador';
 
 // Navegador integrado, como el de Claude: pestañas, atrás/adelante/recargar y dirección, ocupando todo el panel.
 // La página se dibuja con ancho de escritorio y se escala al ancho del panel (se ve más pequeña, pero entera).
@@ -165,7 +165,7 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
         </button>
         <input value={entrada} onChange={e => setEntrada(e.target.value)} onFocus={e => e.target.select()}
           placeholder="Busca o escribe una dirección" aria-label="Dirección" spellCheck={false} />
-        <Formato dispositivo={actual.dispositivo || 'ordenador'} orientacion={actual.orientacion || 'horizontal'}
+        <SelectorFormato dispositivo={actual.dispositivo || 'ordenador'} orientacion={actual.orientacion || 'horizontal'}
           alCambiar={(d, o) => pon(actual.id, { dispositivo: d, orientacion: o })} />
         <button type="button" className="icono" disabled={!actual.url} onClick={fuera} title="Abrir en el navegador del sistema" aria-label="Abrir en el navegador del sistema">
           <Icono n="externo" t={15} />

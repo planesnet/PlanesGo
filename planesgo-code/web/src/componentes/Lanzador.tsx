@@ -16,30 +16,43 @@ const DESTINOS: Record<'interno' | 'sistema', { icono: string; nombre: string }>
   interno: { icono: 'web', nombre: 'Navegador interno' },
   sistema: { icono: 'externo', nombre: 'Navegador del sistema' },
 };
-const DISPOSITIVOS: { id: L.Dispositivo; nombre: string }[] = [
-  { id: 'ordenador', nombre: 'Ordenador' }, { id: 'tablet', nombre: 'Tablet' }, { id: 'movil', nombre: 'Móvil' },
+
+// Formato de la página en el navegador interno: un solo selector (ordenador; tablet o móvil, en vertical u
+// horizontal), con el icono del formato elegido.
+const FORMATOS: { d: L.Dispositivo; o: L.Orientacion; nombre: string }[] = [
+  { d: 'ordenador', o: 'horizontal', nombre: 'Ordenador' },
+  { d: 'tablet', o: 'vertical', nombre: 'Tablet vertical' }, { d: 'tablet', o: 'horizontal', nombre: 'Tablet horizontal' },
+  { d: 'movil', o: 'vertical', nombre: 'Móvil vertical' }, { d: 'movil', o: 'horizontal', nombre: 'Móvil horizontal' },
 ];
 
-// Formato de la página: ordenador, tablet o móvil, y su orientación (también lo usa el navegador interno).
-export function Formato({ dispositivo, orientacion, alCambiar, desactivado }: {
-  dispositivo: L.Dispositivo; orientacion: L.Orientacion; desactivado?: boolean;
-  alCambiar: (d: L.Dispositivo, o: L.Orientacion) => void;
+export function SelectorFormato({ dispositivo, orientacion, alCambiar }: {
+  dispositivo: L.Dispositivo; orientacion: L.Orientacion; alCambiar: (d: L.Dispositivo, o: L.Orientacion) => void;
 }) {
+  const [abierto, setAbierto] = useState(false);
+  const caja = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => { if (!caja.current?.contains(e.target as Node)) setAbierto(false); };
+    document.addEventListener('mousedown', fuera);
+    return () => document.removeEventListener('mousedown', fuera);
+  }, [abierto]);
+  const o = dispositivo === 'ordenador' ? 'horizontal' : orientacion;
+  const actual = FORMATOS.find(f => f.d === dispositivo && f.o === o) || FORMATOS[0];
+  const icono = (f: { d: L.Dispositivo; o: L.Orientacion }) => <span className={'icono-formato' + (f.d !== 'ordenador' && f.o === 'horizontal' ? ' girado' : '')}><Icono n={f.d} t={15} /></span>;
   return (
-    <span className="formato" role="group" aria-label="Formato de la página">
-      {DISPOSITIVOS.map(d => (
-        <button key={d.id} type="button" className="icono" aria-pressed={dispositivo === d.id} disabled={desactivado}
-          onClick={() => alCambiar(d.id, d.id === dispositivo ? orientacion : L.orientacionDe(d.id))}
-          title={desactivado ? 'El formato solo se aplica en el navegador interno' : d.nombre} aria-label={d.nombre}>
-          <Icono n={d.id} t={15} />
-        </button>
-      ))}
-      <button type="button" className={'icono girar' + (orientacion === 'horizontal' ? ' horizontal' : '')} disabled={desactivado || dispositivo === 'ordenador'}
-        onClick={() => alCambiar(dispositivo, orientacion === 'horizontal' ? 'vertical' : 'horizontal')}
-        title={dispositivo === 'ordenador' ? 'La orientación es para tablet y móvil' : orientacion === 'horizontal' ? 'Horizontal (pasar a vertical)' : 'Vertical (pasar a horizontal)'}
-        aria-label={'Orientación ' + orientacion}>
-        <Icono n="girar" t={14} />
+    <span className="selector-formato" ref={caja}>
+      <button type="button" className="lanzador-elige" onClick={() => setAbierto(a => !a)} title={'Formato: ' + actual.nombre} aria-label={'Formato: ' + actual.nombre} aria-haspopup="listbox" aria-expanded={abierto}>
+        {icono(actual)}<Icono n="bajar" t={10} />
       </button>
+      {abierto && (
+        <ul className="menu-lanzador" role="listbox" aria-label="Formato de la página">
+          {FORMATOS.map(f => (
+            <li key={f.nombre}><button role="option" aria-selected={f === actual} onClick={() => { alCambiar(f.d, f.o); setAbierto(false); }}>
+              {icono(f)} {f.nombre}{f === actual && <Icono n="hecho" t={13} />}
+            </button></li>
+          ))}
+        </ul>
+      )}
     </span>
   );
 }
@@ -167,6 +180,8 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
         </div>
         <span className="lanzador-sep" />
       </>}
+      {destino === 'interno' && <SelectorFormato dispositivo={p.dispositivo} orientacion={p.orientacion}
+        alCambiar={(d, o) => { cambia({ dispositivo: d, orientacion: o }); if (L.normalizaUrl(url)) alAbrirWeb(L.normalizaUrl(url), { dispositivo: d, orientacion: o }); }} />}
       <div className="lanzador-destino">
         <button type="button" className="lanzador-elige" onClick={() => setMenu(m => !m)} title={DESTINOS[destino].nombre + ' (cambiar)'} aria-label={'Abrir en: ' + DESTINOS[destino].nombre} aria-haspopup="listbox" aria-expanded={menu}>
           <Icono n={DESTINOS[destino].icono} t={15} /><Icono n="bajar" t={10} />
@@ -187,11 +202,9 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
           placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />
         <datalist id={'sug-prueba-' + proyecto.id}>{sug.map(s => <option key={s} value={s} />)}</datalist>
         <button type="submit" className="icono" disabled={!url.trim()} title={destino === 'sistema' ? 'Abrir en el navegador del sistema' : 'Abrir en el navegador interno'} aria-label="Abrir">
-          <Icono n="externo" t={14} />
+          <Icono n="ejecutar" t={14} />
         </button>
       </form>
-      <Formato dispositivo={p.dispositivo} orientacion={p.orientacion} desactivado={destino === 'sistema'}
-        alCambiar={(d, o) => { cambia({ dispositivo: d, orientacion: o }); if (destino === 'interno' && L.normalizaUrl(url)) alAbrirWeb(L.normalizaUrl(url), { dispositivo: d, orientacion: o }); }} />
       {error && <span className="error pequeno">{error}</span>}
     </div>
   );

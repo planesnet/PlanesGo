@@ -763,3 +763,20 @@ button.miga-item:hover { background: var(--hover); }
 .programa-lanzador-texto code { font-size: 11px; color: var(--suave); }
 .programa-lanzador .etiqueta { margin-left: 6px; }
 .menu-programas .programa-lanzador button { width: auto; flex: none; padding: 3px; }
+
+/* Pestaña Actividad: agente, subagentes y tareas, programas y planes */
+.actividad { display: grid; gap: 16px; padding: 10px 12px 18px; align-content: start; }
+.actividad section { display: grid; gap: 4px; }
+.actividad h4 { margin: 0 0 2px; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.act-agente { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.act-tarea { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; font-size: 12.5px; }
+.act-tarea:hover { background: var(--hover); }
+.act-tarea-texto { flex: 1; min-width: 0; display: grid; }
+.act-tarea.parada { opacity: .7; }
+.act-hechas summary { cursor: pointer; }
+
+/* Selector único de formato (ordenador, tablet, móvil; vertical u horizontal) */
+.selector-formato { position: relative; flex: none; }
+.icono-formato { display: inline-flex; }
+.icono-formato.girado svg { transform: rotate(90deg); }
+.selector-formato .menu-lanzador { width: 200px; }

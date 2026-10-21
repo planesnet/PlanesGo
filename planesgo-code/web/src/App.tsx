@@ -263,7 +263,7 @@ export default function App() {
         alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
       <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
-      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} alAncho={cambiaAncho}
+      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
     {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login}
       proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} />}

@@ -70,6 +70,19 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     }
     return undefined;
   }, [mensajes, enCurso]);
+  // Actividad (pestaña del panel): el chat avisa de las tareas de su sesión y de si el agente está trabajando.
+  useEffect(() => {
+    if (!sesion) return;
+    const tareas = mensajes.flatMap(m => m.tareas || []);
+    window.dispatchEvent(new CustomEvent('pgo:actividad', { detail: { sesion: sesion.id, tareas, trabajando: Boolean(enCurso) } }));
+  }, [mensajes, enCurso, sesion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // La pestaña Actividad puede pedir ejecutar un plan (lo hace el chat, que tiene la sesión).
+  useEffect(() => {
+    const pide = (e: Event) => { const p = (e as CustomEvent<Plan>).detail; if (p) ejecutaPlan(p); };
+    window.addEventListener('pgo:ejecutar-plan', pide);
+    return () => window.removeEventListener('pgo:ejecutar-plan', pide);
+  });
+
   // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
   const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
   const colaSesion = (sesion && colas[sesion.id]) || C.vacia<Adjunto>();
