@@ -1,6 +1,6 @@
 import { useEffect, useState, type PointerEvent as EventoPuntero } from 'react';
 import type { Proyecto } from '../api';
-import Navegador from './Navegador';
+import Navegador, { type PedidoWeb } from './Navegador';
 import StudioTV from './StudioTV';
 import Pruebas from './Pruebas';
 import Programas from './Programas';
@@ -17,7 +17,7 @@ const ANCHO_MIN = 320;
 // Panel derecho: TV (pruebas de la campaña y directo) y navegador. Se redimensiona arrastrando su borde izquierdo.
 export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
   proyecto: Proyecto | null; carpeta: string; rama: string; agente?: string; sesiones: Sesion[]; alAncho: (px: number) => void;
-  pedidoWeb: { url: string; n: number } | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
+  pedidoWeb: PedidoWeb | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
   const [pestana, setPestana] = useState<Pestana>('flujo');
   // Al pedir abrir una URL (programa que arranca, «pgo abrir»), se pasa al navegador.

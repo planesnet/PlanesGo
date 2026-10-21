@@ -1,6 +1,8 @@
 import { createElement, useEffect, useRef, useState, type FormEvent } from 'react';
 import { enEscritorio, post, type Proyecto } from '../api';
+import * as L from '../lanzador';
 import Icono from './Icono';
+import { Formato } from './Lanzador';
 
 // Navegador integrado, como el de Claude: pestañas, atrás/adelante/recargar y dirección, ocupando todo el panel.
 // La página se dibuja con ancho de escritorio y se escala al ancho del panel (se ve más pequeña, pero entera).
@@ -8,7 +10,9 @@ import Icono from './Icono';
 
 const ANCHO_PAGINA = 1280;
 
-interface Pestana { id: number; url: string; titulo: string }
+// Cada pestaña con su formato: ordenador (la página a ANCHO_PAGINA, reducida al panel) o tablet/móvil emulados.
+interface Pestana { id: number; url: string; titulo: string; dispositivo?: L.Dispositivo; orientacion?: L.Orientacion }
+export type PedidoWeb = { url: string; n: number; formato?: { dispositivo: L.Dispositivo; orientacion: L.Orientacion } };
 
 interface WebView extends HTMLElement {
   src: string;
@@ -31,7 +35,7 @@ const normaliza = (s: string) => {
 let siguiente = 1;
 const pestanaNueva = (): Pestana => ({ id: siguiente++, url: '', titulo: 'Nueva pestaña' });
 
-export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pedido?: { url: string; n: number } | null }) {
+export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pedido?: PedidoWeb | null }) {
   const [pestanas, setPestanas] = useState<Pestana[]>(() => [pestanaNueva()]);
   const [activa, setActiva] = useState(pestanas[0].id);
   const [entrada, setEntrada] = useState('');
@@ -47,10 +51,14 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
   const vista = () => vistas.current.get(activaRef.current);
 
   // Escala: la página se dibuja a ANCHO_PAGINA y se reduce al ancho del panel.
+  // Las emuladas (tablet, móvil) van a su tamaño real dentro de un marco que se reduce con CSS.
+  const emuladas = useRef(new Set<number>());
   const escala = () => {
     const f = Math.min(1, (caja.current?.clientWidth || ANCHO_PAGINA) / ANCHO_PAGINA);
-    vistas.current.forEach(v => { try { v.setZoomFactor(f); } catch { /* aún sin cargar */ } });
+    vistas.current.forEach((v, id) => { try { v.setZoomFactor(emuladas.current.has(id) ? 1 : f); } catch { /* aún sin cargar */ } });
+    if (caja.current) setHueco({ ancho: caja.current.clientWidth, alto: caja.current.clientHeight });
   };
+  const [hueco, setHueco] = useState({ ancho: 0, alto: 0 });
   useEffect(() => {
     const ro = new ResizeObserver(escala);
     if (caja.current) ro.observe(caja.current);
@@ -100,17 +108,19 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
     if (!pedido) return;
     const u = normaliza(pedido.url);
     if (!u) return;
+    const fmt = pedido.formato ? { dispositivo: pedido.formato.dispositivo, orientacion: pedido.formato.orientacion } : {};
     const ya = pestanas.find(p => p.url && new URL(p.url).origin === new URL(u).origin);
     if (ya) {
       setActiva(ya.id);
       const v = vistas.current.get(ya.id);
-      if (v && escritorio) v.src = u;
-      pon(ya.id, { url: u });
+      const mismo = !pedido.formato || (pedido.formato.dispositivo === (ya.dispositivo || 'ordenador') && pedido.formato.orientacion === (ya.orientacion || 'horizontal'));
+      if (v && escritorio && mismo) v.src = u; // con otro formato la vista se vuelve a crear (otro agente de usuario)
+      pon(ya.id, { url: u, ...fmt });
       return;
     }
     const vacia = pestanas.find(p => p.id === activaRef.current && !p.url);
-    if (vacia) { pon(vacia.id, { url: u, titulo: u.replace(/^https?:\/\//, '') }); setEntrada(u); const v = vistas.current.get(vacia.id); if (v && escritorio) v.src = u; return; }
-    const p = { ...pestanaNueva(), url: u, titulo: u.replace(/^https?:\/\//, '') };
+    if (vacia) { pon(vacia.id, { url: u, titulo: u.replace(/^https?:\/\//, ''), ...fmt }); setEntrada(u); const v = vistas.current.get(vacia.id); if (v && escritorio) v.src = u; return; }
+    const p = { ...pestanaNueva(), url: u, titulo: u.replace(/^https?:\/\//, ''), ...fmt };
     setPestanas(l => [...l, p]);
     setActiva(p.id);
   }, [pedido?.n]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -155,20 +165,34 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
         </button>
         <input value={entrada} onChange={e => setEntrada(e.target.value)} onFocus={e => e.target.select()}
           placeholder="Busca o escribe una dirección" aria-label="Dirección" spellCheck={false} />
+        <Formato dispositivo={actual.dispositivo || 'ordenador'} orientacion={actual.orientacion || 'horizontal'}
+          alCambiar={(d, o) => pon(actual.id, { dispositivo: d, orientacion: o })} />
         <button type="button" className="icono" disabled={!actual.url} onClick={fuera} title="Abrir en el navegador del sistema" aria-label="Abrir en el navegador del sistema">
           <Icono n="externo" t={15} />
         </button>
       </form>
       <div className="vistas" ref={caja}>
-        {pestanas.map(p => (
-          <div key={p.id} className="vista-pestana" hidden={p.id !== activa}>
-            {!p.url
-              ? <p className="suave relleno">Escribe una dirección o una búsqueda.</p>
-              : escritorio
-                ? createElement('webview', { ref: engancha(p.id), src: p.url, className: 'vista', partition: 'persist:navegador-' + proyecto.id })
-                : <iframe className="vista" src={p.url} title={p.titulo} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />}
-          </div>
-        ))}
+        {pestanas.map(p => {
+          const d = p.dispositivo || 'ordenador';
+          const t = L.tamano(d, p.orientacion || 'horizontal');
+          if (t) emuladas.current.add(p.id); else emuladas.current.delete(p.id);
+          // Con otro formato, otra vista (key): el agente de usuario solo se fija al crearla.
+          const vista = !p.url
+            ? <p className="suave relleno">Escribe una dirección o una búsqueda.</p>
+            : escritorio
+              ? createElement('webview', { key: d, ref: engancha(p.id), src: p.url, className: 'vista', partition: 'persist:navegador-' + proyecto.id, useragent: L.agenteUsuario(d) })
+              : <iframe key={d} className="vista" src={p.url} title={p.titulo} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />;
+          if (!t || !p.url) return <div key={p.id} className="vista-pestana" hidden={p.id !== activa}>{vista}</div>;
+          const f = L.escalaMarco(t, hueco, 48); // margen: el marco del dispositivo y la medida de debajo
+          return (
+            <div key={p.id} className="vista-pestana emulada" hidden={p.id !== activa}>
+              <div className="hueco-dispositivo" style={{ width: t.ancho * f, height: t.alto * f }}>
+                <div className={'marco-dispositivo ' + d} style={{ width: t.ancho, height: t.alto, transform: `scale(${f})` }}>{vista}</div>
+              </div>
+              <span className="medida-dispositivo">{t.ancho} × {t.alto}{f < 1 ? ` · ${Math.round(f * 100)} %` : ''}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import * as C from '../cola';
 import * as PL from '../plan';
 import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import Icono from './Icono';
+import Lanzador, { type AbreWeb } from './Lanzador';
 import Texto from './Texto';
 import { Agente, Hosting, nombreHosting } from './Marca';
 
@@ -14,6 +15,7 @@ interface Props {
   seleccionSkills: SeleccionSkills;
   hosting?: string; // alojamiento elegido en las propiedades del proyecto (si no, el del repositorio)
   directorio?: string; // directorio local del proyecto (sus ajustes); ahí se guardan los planes
+  versionProcesos: number; alAbrirWeb: AbreWeb; // barra de prueba: programas del proyecto y abrir la web
   // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
   envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
@@ -27,7 +29,7 @@ const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto:
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ directorio, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -389,6 +391,8 @@ export default function Chat({ directorio, alAjustes, seleccionSkills, hosting, 
                 <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
               </div>
             )}
+            {/* Barra de prueba: lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
+            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} />
             {cola.length > 0 && (
               <ol className="cola" aria-label="Mensajes en cola">
                 {cola.map((c, i) => (

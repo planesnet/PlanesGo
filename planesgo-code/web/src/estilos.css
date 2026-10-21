@@ -658,3 +658,33 @@ button.miga-item:hover { background: var(--hover); }
 .v-avisos li { padding: 3px 6px; border-radius: 6px; background: var(--hover); }
 .v-avisos li.v-error, .v-error { color: #c0392b; }
 .v-avisos li.v-info { color: var(--suave); }
+
+/* Barra de prueba sobre el cuadro del chat: dónde, dirección (como un enlace), abrir y formato */
+.lanzador { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 2px; font-size: 12.5px; }
+.lanzador-destino { position: relative; flex: none; }
+.lanzador-elige { display: inline-flex; align-items: center; gap: 2px; padding: 4px 5px; border-radius: 8px; color: var(--suave); }
+.lanzador-elige:hover { background: var(--hover); }
+.menu-lanzador { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 15; list-style: none; margin: 0; padding: 4px; width: 260px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); }
+.menu-lanzador button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; min-width: 0; }
+.menu-lanzador button svg:last-child:not(:first-child) { margin-left: auto; color: var(--acento); }
+.menu-lanzador .menu-titulo { padding: 6px 8px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--tenue); }
+.lanzador-url { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.lanzador-url input { flex: 1; min-width: 0; border: none; background: transparent; padding: 3px 4px; color: var(--acento); text-decoration: underline; text-underline-offset: 3px; font-size: 12.5px; }
+.lanzador-url input:focus { text-decoration: none; background: var(--panel); border-radius: 6px; outline: none; }
+.lanzador-url input::placeholder { color: var(--tenue); text-decoration: none; }
+.lanzador-orden { flex: 1; min-width: 0; color: var(--suave); }
+.lanzador-enlace { color: var(--acento); text-decoration: underline; text-underline-offset: 3px; max-width: 40%; padding: 0 4px; }
+.formato { display: inline-flex; align-items: center; gap: 0; padding-left: 4px; margin-left: 2px; border-left: 1px solid var(--linea); }
+.formato .icono { padding: 3px; color: var(--tenue); }
+.formato .icono[aria-pressed="true"] { color: var(--acento); background: color-mix(in srgb, var(--acento) 12%, transparent); }
+.formato .girar.horizontal svg { transform: rotate(90deg); }
+.lanzador .punto { flex: none; }
+
+/* Navegador interno: tablet y móvil emulados, a su tamaño real dentro de un marco reducido */
+.vista-pestana.emulada { flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: var(--panel); }
+.hueco-dispositivo { position: relative; flex: none; }
+.marco-dispositivo { position: absolute; top: 0; left: 0; transform-origin: top left; display: flex; background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 8px #222, 0 10px 30px rgba(0,0,0,.25); }
+.marco-dispositivo.tablet { border-radius: 14px; }
+.marco-dispositivo .vista { flex: 1; width: 100%; height: 100%; border: none; }
+.medida-dispositivo { font-size: 11px; color: var(--tenue); }
+.navegador .barra .formato { border-left: none; }

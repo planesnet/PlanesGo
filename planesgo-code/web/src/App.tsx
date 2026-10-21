@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { escuchaAvisos, get, post, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
+import type { PedidoWeb } from './componentes/Navegador';
 import { leeAjustes, AJUSTES_DEFECTO, type AjustesProyecto } from './ajustes';
 import Acceso from './componentes/Acceso';
 import Proyectos from './componentes/Proyectos';
@@ -47,12 +48,12 @@ export default function App() {
   const carpetaRepo = useRef('');
 
   // Avisos del backend: programas que cambian y URL que abrir en el navegador integrado.
-  const [pedidoWeb, setPedidoWeb] = useState<{ url: string; n: number } | null>(null);
+  const [pedidoWeb, setPedidoWeb] = useState<PedidoWeb | null>(null);
   const [versionProcesos, setVersionProcesos] = useState(0);
   const [versionImputacion, setVersionImputacion] = useState(0);
   const proyectoId = useRef(0);
   proyectoId.current = proyecto?.id || 0;
-  const abreWeb = useCallback((url: string) => { setPanel(true); setPedidoWeb({ url, n: Date.now() }); }, []);
+  const abreWeb = useCallback((url: string, formato?: PedidoWeb['formato']) => { setPanel(true); setPedidoWeb({ url, n: Date.now(), formato }); }, []);
   useEffect(() => {
     if (!usuario) return;
     return escuchaAvisos(a => {
@@ -255,7 +256,7 @@ export default function App() {
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
         alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
-      <Chat directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+      <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
