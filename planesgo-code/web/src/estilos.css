@@ -624,3 +624,25 @@ button.miga-item:hover { background: var(--hover); }
 .cola-num { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; background: var(--hover); color: var(--suave); }
 .cola-texto { flex: 1; min-width: 0; white-space: nowrap; }
 .cola-parada { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
+
+/* Modo plan: tarjeta en el chat, editor y lista de planes del proyecto */
+.tarjeta-plan { margin-top: 10px; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--linea); border-left: 3px solid var(--acento); border-radius: 10px; background: var(--superficie); min-width: 0; }
+.tarjeta-plan-cabecera { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tarjeta-plan-acciones { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plan-estado { flex: none; font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--hover); color: var(--suave); }
+.plan-estado.borrador { background: color-mix(in srgb, #d4a017 18%, transparent); color: #9a7200; }
+.plan-estado.ejecutado { background: color-mix(in srgb, #2e9d57 18%, transparent); color: #24804a; }
+.plan-estado.descartado { text-decoration: line-through; }
+.modal.editor-plan { width: min(900px, 100%); height: min(760px, calc(100vh - 32px)); display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; gap: 8px; }
+.modal.editor-plan h2 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.editor-plan-pestanas { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--linea); }
+.editor-plan-pestanas button { padding: 5px 10px; border-radius: 6px 6px 0 0; color: var(--suave); }
+.editor-plan-pestanas button[aria-selected="true"] { color: var(--texto); font-weight: 600; box-shadow: inset 0 -2px 0 var(--acento); }
+.editor-plan-pestanas .pequeno { margin-left: auto; }
+.editor-plan-texto { width: 100%; height: 100%; resize: none; font: 13px/1.5 ui-monospace, monospace; padding: 10px; border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo, var(--superficie)); }
+.editor-plan-vista { overflow: auto; padding: 4px 10px; border: 1px solid var(--linea); border-radius: 8px; }
+.editor-plan-acciones { display: flex; align-items: center; gap: 8px; }
+.modal.lista-planes { width: min(620px, 100%); }
+.planes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.planes button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 8px; text-align: left; border-radius: 8px; }
+.planes button:hover { background: var(--hover); }

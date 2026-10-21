@@ -12,7 +12,9 @@ export interface Sesion {
   agente: string;       // id del agente (claude-code, antigravity, opencode)
   modelo?: string;
   sesionAgente?: string; // sesión propia del agente (p. ej. claude --resume)
-  permisos?: 'lectura' | 'editar' | 'auto'; // qué puede hacer un agente (Claude Code) en la sesión
+  permisos?: 'lectura' | 'editar' | 'auto' | 'plan'; // qué puede hacer el agente; «plan»: redacta un plan sin tocar nada
+  modoPrevio?: 'lectura' | 'editar' | 'auto'; // el modo de antes de pasar a «plan» (con el que se ejecuta el plan)
+  plan?: string;         // ruta del plan en revisión de la sesión (modo plan)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)

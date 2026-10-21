@@ -3,6 +3,8 @@ import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta,
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
+import * as PL from '../plan';
+import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import Icono from './Icono';
 import Texto from './Texto';
 import { Agente, Hosting, nombreHosting } from './Marca';
@@ -11,6 +13,7 @@ interface Props {
   detalle: Detalle;
   seleccionSkills: SeleccionSkills;
   hosting?: string; // alojamiento elegido en las propiedades del proyecto (si no, el del repositorio)
+  directorio?: string; // directorio local del proyecto (sus ajustes); ahí se guardan los planes
   // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
   envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
@@ -20,11 +23,11 @@ interface Props {
 
 const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
 
-const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos' } as const;
+const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos', plan: 'Plan: propone sin tocar nada' } as const;
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
-export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ directorio, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [enCurso, setEnCurso] = useState<AbortController | null>(null);
@@ -36,6 +39,9 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
   // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
   const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
+  // Modo plan: el plan abierto en el editor y la lista de planes del proyecto.
+  const [planAbierto, setPlanAbierto] = useState<string | null>(null);
+  const [verPlanes, setVerPlanes] = useState(false);
   // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
   const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
   const colaSesion = (sesion && colas[sesion.id]) || C.vacia<Adjunto>();
@@ -155,10 +161,14 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     enCurso.abort();
   }
 
-  async function envia(forzado?: string, adjCola?: Adjunto[]) {
+  // cambios: ajustes de la sesión para este envío (p. ej. el modo con el que se ejecuta un plan).
+  async function envia(forzado?: string, adjCola?: Adjunto[], cambios?: Partial<Sesion>) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
-    const id = sesion.id;
+    const ses: Sesion = cambios ? { ...sesion, ...cambios } : sesion;
+    const modoPlan = ses.permisos === 'plan';
+    let rutaPlan: string | undefined;
+    const id = ses.id;
     ponCola(id, C.empieza);
     let fallo = false;
     const pon = (m: Mensaje[], final = false) => {
@@ -174,7 +184,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
     const ac = new AbortController();
     setEnCurso(ac);
-    let sesionAgente = sesion.sesionAgente;
+    let sesionAgente = ses.sesionAgente;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
     let aEnviar = t;
@@ -182,13 +192,17 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
       actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k } : m);
       pon(actual, true);
     };
-    if (seleccionSkills !== 'agente' && prov.tipo === 'agente') {
-      const pide = post<Eleccion>('/api/skills/elegir', { proyecto: proyecto.id, carpeta: sesion.carpeta, agente: sesion.agente, texto: t });
+    // Modo plan: sin skills; el agente recibe la petición de plan (con el plan en revisión, ya editado, si lo hay).
+    if (modoPlan) {
+      const actualPlan = ses.plan ? await leePlan(proyecto.id, directorio, ses.plan).then(p => p.estado === 'borrador' ? p.texto : undefined).catch(() => undefined) : undefined;
+      aEnviar = PL.peticionPlan(t, actualPlan);
+    } else if (seleccionSkills !== 'agente' && prov.tipo === 'agente') {
+      const pide = post<Eleccion>('/api/skills/elegir', { proyecto: proyecto.id, carpeta: ses.carpeta, agente: ses.agente, texto: t });
       if (seleccionSkills === 'elegir') {
         const r = await Promise.race([pide.catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 1500))]);
         if (r?.elegida) {
           const n = r.elegida.nombre;
-          aEnviar = sesion.agente === 'claude-code' ? `/${n} ${t}` : `Usa la skill «${n}».\n\n${t}`;
+          aEnviar = ses.agente === 'claude-code' ? `/${n} ${t}` : `Usa la skill «${n}».\n\n${t}`;
           marcaSkill({ nombre: n, puntuacion: r.elegida.puntuacion, modo: 'elegida' });
         }
       } else {
@@ -210,9 +224,9 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
     });
     try {
       await chat({
-        proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
-        permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
-        sesion: sesion.id, titulo: sesion.nombre, adjuntos: listos.map(a => a.ruta), tarea_id: sesion.tareaId || 0, tarea: sesion.tarea || '',
+        proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
+        permisos: modoPlan ? 'lectura' : ses.permisos || 'lectura', sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
+        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
@@ -224,6 +238,19 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
         if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
+      // Modo plan: la respuesta se guarda como plan (el mismo fichero si se está revisando uno) y sale su tarjeta.
+      if (modoPlan && !fallo && !ac.signal.aborted) {
+        const txt = PL.textoDelPlan(actual[actual.length - 1]);
+        if (txt) {
+          try {
+            const p = await guardaPlan(proyecto.id, directorio, { ruta: ses.plan, titulo: PL.tituloPlan(txt, t), sesion: ses.id, agente: ses.agente, texto: txt, estado: 'borrador' });
+            rutaPlan = p.ruta;
+            ultimo(m => ({ ...m, plan: { ruta: p.ruta, titulo: p.titulo, estado: 'borrador' } }));
+          } catch (e) {
+            ultimo(m => ({ ...m, texto: m.texto + '\n\n⚠ No se ha podido guardar el plan: ' + (e as Error).message }));
+          }
+        }
+      }
     } catch (err) {
       fallo = true;
       if (!ac.signal.aborted) ultimo(m => ({ ...m, texto: '⚠ ' + (err as Error).message, error: true }));
@@ -231,8 +258,35 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
       setEnCurso(c => (c === ac ? null : c));
-      alCambiarSesion({ ...sesion, nombre: sesion.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
+      alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now(), ...(rutaPlan ? { plan: rutaPlan } : {}) });
     }
+  }
+
+  // Estado del plan en las tarjetas de la conversación (se guarda con ella).
+  function marcaPlan(ruta: string, estado: EstadoPlan, titulo?: string) {
+    if (!sesion) return;
+    const m = (idActual.current === sesion.id ? mensajes : conversacion(sesion.id))
+      .map(x => x.plan?.ruta === ruta ? { ...x, plan: { ...x.plan, estado, titulo: titulo || x.plan.titulo } } : x);
+    setMensajes(m);
+    guardaConversacion(sesion.id, m);
+  }
+
+  // Ejecutar: el plan pasa a «ejecutado», la sesión vuelve a su modo de trabajo y el agente recibe el plan.
+  async function ejecutaPlan(p: Plan) {
+    if (!sesion || !proyecto || enCurso) return;
+    const texto = p.texto ?? (await leePlan(proyecto.id, directorio, p.ruta)).texto ?? '';
+    await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'ejecutado' });
+    marcaPlan(p.ruta, 'ejecutado', p.titulo);
+    setPlanAbierto(null);
+    const modo = sesion.modoPrevio || (sesion.permisos !== 'plan' && sesion.permisos) || 'editar';
+    envia(PL.peticionEjecucion(p.ruta, texto), [], { permisos: modo, plan: undefined });
+  }
+
+  async function descartaPlan(ruta: string) {
+    if (!sesion || !proyecto) return;
+    await guardaPlan(proyecto.id, directorio, { ruta, estado: 'descartado' }).catch(() => {});
+    marcaPlan(ruta, 'descartado');
+    if (sesion.plan === ruta) alCambiarSesion({ ...sesion, plan: undefined });
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -277,6 +331,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
         {sesion && mensajes.length > 0 && !enCurso && (
           <button className="icono" onClick={() => alNuevaSesion(sesion.rama)} title="Nueva sesión" aria-label="Nueva sesión"><Icono n="nuevo" /></button>
         )}
+        {proyecto && <button className="icono" onClick={() => setVerPlanes(true)} title="Planes del proyecto" aria-label="Planes del proyecto"><Icono n="plan" /></button>}
         <button className="icono" onClick={alPanel} title={panelAbierto ? 'Ocultar artefactos' : 'Mostrar artefactos'} aria-label="Artefactos" aria-pressed={panelAbierto}><Icono n="panel" /></button>
       </header>
 
@@ -296,7 +351,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
                 <p><b>{titulo(sesion)}</b></p>
-                <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos' }[sesion.permisos || 'lectura']}` : ''}</p>
+                <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos', plan: 'modo plan: propone sin tocar nada' }[sesion.permisos || 'lectura']}` : ''}</p>
               </div>
             )}
             {mensajes.map((m, i) => (
@@ -310,6 +365,11 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
                 {m.uso && detalle !== 'conciso' && <div className="uso">{usoTexto(m.uso)}</div>}
                 {m.adjuntos && m.adjuntos.length > 0 && (
                   <div className="adjuntos-mensaje">{m.adjuntos.map(a => <span key={a.ruta} className="ficha-adjunto" title={a.ruta}><Icono n="clip" t={12} /> {a.nombre}</span>)}</div>
+                )}
+                {m.plan && (
+                  <TarjetaPlan titulo={m.plan.titulo} ruta={m.plan.ruta} estado={m.plan.estado || 'borrador'} ocupado={Boolean(enCurso)}
+                    alAbrir={() => setPlanAbierto(m.plan!.ruta)} alEjecutar={() => ejecutaPlan({ ruta: m.plan!.ruta, titulo: m.plan!.titulo, proyecto: proyecto.id, estado: 'borrador' })}
+                    alDescartar={() => descartaPlan(m.plan!.ruta)} />
                 )}
                 {m.skill && (
                   <span className={'sk-marca sk-pgo ' + m.skill.modo} title={m.skill.modo === 'elegida' ? 'pgocode eligió esta skill (embeddings) y se la indicó al agente' : 'pgocode cree que encaja esta skill (embeddings); el agente decide'}>
@@ -390,7 +450,8 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; se enviará cuando termine el agente…' : 'Escribe…'}
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; se enviará cuando termine el agente…'
+                  : sesion.permisos === 'plan' ? (sesion.plan ? 'Pide cambios al plan en revisión…' : 'Describe lo que quieres planificar…') : 'Escribe…'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? (texto.trim()
@@ -402,7 +463,11 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
             <div className="pie-redactor">
               {prov?.modos && (
                 <select className="pie-select" value={sesion.permisos || 'lectura'} aria-label="Modo"
-                  onChange={e => alCambiarSesion({ ...sesion, permisos: e.target.value as Sesion['permisos'] })}>
+                  onChange={e => {
+                    const v = e.target.value as NonNullable<Sesion['permisos']>;
+                    const previo = sesion.permisos && sesion.permisos !== 'plan' ? sesion.permisos : sesion.modoPrevio;
+                    alCambiarSesion({ ...sesion, permisos: v, modoPrevio: v === 'plan' ? previo : undefined });
+                  }}>
                   {Object.entries(MODOS).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
                 </select>
               )}
@@ -425,6 +490,10 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
           </div>
         </>
       )}
+      {proyecto && planAbierto && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={planAbierto} ocupado={Boolean(enCurso)}
+        alCerrar={() => setPlanAbierto(null)} alCambio={p => marcaPlan(p.ruta, p.estado, p.titulo)} alEjecutar={ejecutaPlan} />}
+      {proyecto && verPlanes && <ListaPlanes proyecto={proyecto.id} directorio={directorio}
+        alAbrir={r => { setVerPlanes(false); setPlanAbierto(r); }} alCerrar={() => setVerPlanes(false)} />}
     </main>
   );
 }
