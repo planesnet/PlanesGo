@@ -125,7 +125,8 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	// El agente va en su propio grupo y con una marca en el entorno que heredan todos sus descendientes: al
 	// cancelar se le pide que termine (cierra sus tareas) y, tras unos segundos, se mata todo lo marcado, también
 	// lo que lanzó en otro grupo (Bash en segundo plano). WaitDelay evita esperar a un nieto con la salida abierta.
-	proceso.Agente(cmd, fmt.Sprintf("%d-%s", os.Getpid(), id))
+	marca := fmt.Sprintf("%d-%s", os.Getpid(), id)
+	proceso.Agente(cmd, marca)
 	cmd.WaitDelay = 5 * time.Second
 	var errSalida strings.Builder
 	cmd.Stderr = io.MultiWriter(&limitado{b: &errSalida, max: 8 << 10}, &lineasLog{id: id, flujo: "stderr"})
@@ -150,6 +151,18 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		}
 		emite(e)
 	})
+	// Respuesta acabada y el agente solo espera a sus órdenes en segundo plano (el programa que se prueba): se
+	// termina el agente con lo de su grupo (servidores MCP…) y pgocode se queda esas órdenes, que van en otros grupos.
+	var fin *FinConFondo
+	if errors.As(errLee, &fin) {
+		proceso.SenalGrupo(cmd.Process.Pid, true)
+		cmd.Wait()
+		if ad := adopta(marca, cmd.Process.Pid, fin.Ordenes); len(ad) > 0 {
+			emite(Evento{Adoptados: ad})
+		}
+		depuracion.Log(id, "fin de la respuesta en %s; órdenes en segundo plano adoptadas: %d de %d", time.Since(inicio).Round(time.Millisecond), len(fin.Ordenes), len(fin.Ordenes))
+		return nil
+	}
 	// Si la lectura acaba con error (p. ej. el agente se ha quedado esperando una respuesta que no puede
 	// recibir), se para el agente: si no, Wait esperaría para siempre.
 	if errLee != nil && cmd.Cancel != nil {
@@ -380,4 +393,59 @@ func Agentes() []Proveedor {
 				return append(a, "--", msg)
 			}},
 	}
+}
+
+// adopta: empareja cada orden en segundo plano con su grupo de procesos (los que siguen vivos con la marca del
+// agente) por su línea de órdenes; si solo hay una de cada, van juntas.
+func adopta(marca string, agente int, ordenes []Fondo) []Adoptado {
+	grupos := proceso.GruposConMarca(marca)
+	delete(grupos, agente)
+	var l []Adoptado
+	usados := map[int]bool{}
+	for i, o := range ordenes {
+		g := 0
+		for pg, pids := range grupos {
+			if usados[pg] {
+				continue
+			}
+			for _, pid := range pids {
+				if o.Orden != "" && strings.Contains(proceso.Orden(pid), primeraLinea(o.Orden)) {
+					g = pg
+				}
+			}
+		}
+		if g == 0 && len(ordenes) == 1 && len(grupos) == 1 {
+			for pg := range grupos {
+				g = pg
+			}
+		}
+		if g == 0 {
+			continue
+		}
+		usados[g] = true
+		nombre := "agente-" + nombreDe(o.Titulo, o.Orden)
+		if i > 0 {
+			nombre += fmt.Sprintf("-%d", i+1)
+		}
+		l = append(l, Adoptado{Nombre: nombre, Orden: o.Orden, Fichero: o.Fichero, Grupo: g, Tarea: o.ID})
+	}
+	return l
+}
+
+var noNombre = regexp.MustCompile(`[^a-z0-9]+`)
+
+// nombreDe: un nombre corto de programa a partir de su descripción u orden.
+func nombreDe(titulo, orden string) string {
+	t := titulo
+	if t == "" {
+		t = orden
+	}
+	n := strings.Trim(noNombre.ReplaceAllString(strings.ToLower(t), "-"), "-")
+	if len(n) > 40 {
+		n = strings.Trim(n[:40], "-")
+	}
+	if n == "" {
+		n = "programa"
+	}
+	return n
 }

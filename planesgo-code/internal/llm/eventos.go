@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -151,6 +153,13 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	// total_cost_usd es lo acumulado por el proceso: con tareas en segundo plano hay varios «result» y cada uno
 	// lleva el total hasta entonces; se emite solo la diferencia para no contar dos veces.
 	costeAntes := 0.0
+	// Órdenes en segundo plano: la orden de cada Bash lanzado así y las tareas que siguen vivas.
+	ordenes := map[string]string{}
+	type viva struct {
+		tipo string
+		f    Fondo
+	}
+	vivas := map[string]viva{}
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -205,6 +214,16 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			emite(Evento{SesionAgente: ev.SessionID})
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
+			switch {
+			case ev.Subtype == "task_started":
+				tipo := "subagente"
+				if ev.TipoTarea == "local_bash" {
+					tipo = "segundo_plano"
+				}
+				vivas[ev.TaskID] = viva{tipo, Fondo{ID: ev.TaskID, Orden: ordenes[ev.TaskToolUse], Titulo: ev.Descripcion}}
+			case ev.Subtype == "task_notification" || (ev.Subtype == "task_updated" && ev.Patch.Status != "" && ev.Patch.Status != "running" && ev.Patch.Status != "pending"):
+				delete(vivas, ev.TaskID)
+			}
 			if t := tareaClaude(ev.Subtype, ev.TaskID, ev.TaskToolUse, ev.Descripcion, ev.TipoTarea, ev.Subagente, ev.TareaPadre,
 				ev.Estado, ev.Patch.Status, ev.Fichero, ev.Resumen, ev.UltimaHerr, ev.SegundoPlano, ev.Usage.Total, ev.Usage.Herramientas); t != nil {
 				emite(Evento{Tarea: t})
@@ -242,6 +261,13 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					}
 				case "tool_use":
 					nombres[c.ID] = c.Name
+					var in struct {
+						Orden string `json:"command"`
+						Fondo bool   `json:"run_in_background"`
+					}
+					if c.Name == "Bash" && json.Unmarshal(c.Input, &in) == nil && in.Fondo {
+						ordenes[c.ID] = in.Orden
+					}
 					emite(Evento{Herramienta: &Herramienta{ID: c.ID, Nombre: c.Name, Resumen: resumen(c.Input),
 						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Skill: skillDe(c.Name, c.Input)}})
 				}
@@ -265,6 +291,21 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				Coste: coste, Segundos: ev.Duracion / 1000}})
 			if ev.IsError {
 				return errors.New(ev.Result)
+			}
+			// Respuesta acabada y solo quedan órdenes en segundo plano: no se esperan (ni su turno extra).
+			if len(vivas) > 0 {
+				fin := &FinConFondo{}
+				for _, v := range vivas {
+					if v.tipo != "segundo_plano" {
+						fin = nil
+						break
+					}
+					v.f.Fichero = salidaTareaClaude(v.f.ID)
+					fin.Ordenes = append(fin.Ordenes, v.f)
+				}
+				if fin != nil {
+					return fin
+				}
 			}
 		}
 	}
@@ -598,4 +639,15 @@ func tareaOpenCode(id, herr string, entrada json.RawMessage, salida string, meta
 		return t
 	}
 	return nil
+}
+
+// salidaTareaClaude: el fichero donde Claude Code guarda la salida de una tarea en segundo plano
+// (<tmp>/claude-<uid>/<carpeta>/<sesión>/tasks/<id>.output).
+func salidaTareaClaude(id string) string {
+	for _, base := range []string{os.TempDir(), "/tmp"} {
+		if l, _ := filepath.Glob(filepath.Join(base, "claude-*", "*", "*", "tasks", id+".output")); len(l) > 0 {
+			return l[0]
+		}
+	}
+	return ""
 }

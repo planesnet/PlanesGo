@@ -46,7 +46,30 @@ type Evento struct {
 	Uso          *Uso         `json:"uso,omitempty"`
 	SesionAgente string       `json:"sesion_agente,omitempty"`
 	Tarea        *Tarea       `json:"tarea,omitempty"`
+	// Adoptados: programas que el agente dejó en marcha (en segundo plano) y que pgocode se queda al acabar
+	// su respuesta, para no esperarlos ni gastar otro turno (siguen en Programas y en la barra de ejecución).
+	Adoptados []Adoptado `json:"adoptados,omitempty"`
 }
+
+// Adoptado: un programa del agente que sigue en marcha en pgocode.
+type Adoptado struct {
+	Nombre  string `json:"nombre"`
+	Orden   string `json:"orden"`
+	Fichero string `json:"-"` // donde escribe su salida
+	Grupo   int    `json:"-"` // su grupo de procesos
+	Tarea   string `json:"tarea,omitempty"`
+}
+
+// Fondo: una orden que el agente tiene en segundo plano.
+type Fondo struct {
+	ID, Orden, Titulo, Fichero string
+}
+
+// FinConFondo: el agente ha acabado su respuesta y solo espera a órdenes en segundo plano (p. ej. el programa
+// que se está desarrollando, en marcha para probarlo). pgocode termina el turno y se queda esas órdenes.
+type FinConFondo struct{ Ordenes []Fondo }
+
+func (f *FinConFondo) Error() string { return "fin del turno con órdenes en segundo plano" }
 
 // Tarea: lo que un agente hace aparte de la conversación principal, con el mismo concepto en todos los agentes:
 // un subagente, una tarea en segundo plano (una orden que sigue corriendo) o su lista de tareas. Se emite varias

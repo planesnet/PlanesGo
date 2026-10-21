@@ -750,3 +750,16 @@ button.miga-item:hover { background: var(--hover); }
 /* Menú ⋮ de cada issue o PR (acciones de GitHub) */
 .gh-menu { flex: none; margin: 3px 2px 0 0; opacity: 0; }
 .gh-fila-caja:hover .gh-menu, .gh-menu:focus-visible, .gh-menu[aria-expanded="true"] { opacity: 1; }
+
+/* Barra de ejecución rápida: programas del proyecto (fuera del agente) antes de la dirección */
+.lanzador-programas { position: relative; display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.lanzador-cuenta { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 8px; color: var(--suave); font-size: 12px; }
+.lanzador-cuenta:hover { background: var(--hover); }
+.lanzador-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--linea); }
+.menu-programas { width: 360px; left: 0; }
+.programa-lanzador { display: flex; align-items: center; gap: 6px; padding: 4px 6px; min-width: 0; }
+.programa-lanzador-texto { flex: 1; min-width: 0; display: grid; }
+.programa-lanzador-texto b { font-size: 12.5px; font-weight: 600; }
+.programa-lanzador-texto code { font-size: 11px; color: var(--suave); }
+.programa-lanzador .etiqueta { margin-left: 6px; }
+.menu-programas .programa-lanzador button { width: auto; flex: none; padding: 3px; }

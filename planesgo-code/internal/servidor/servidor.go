@@ -161,6 +161,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
+	mux.HandleFunc("POST /api/procesos/guardar", s.conSesion(s.procesosGuarda))
 	mux.HandleFunc("GET /api/procesos/salida", s.conSesion(s.procesosSalida))
 	mux.HandleFunc("GET /api/pgo/{orden}", s.pgo)
 	mux.HandleFunc("POST /api/pgo/{orden}", s.pgo)
@@ -674,6 +675,17 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 				c["resumen"] = recortaTexto(h.Resumen, 120)
 			}
 			s.Imputacion.AnotaAgente(sesionImp, "herramienta", c)
+		}
+		// Programas que el agente dejó en marcha: pgocode se los queda (siguen en Programas y en la barra).
+		for _, ad := range e.Adoptados {
+			if s.Procesos == nil {
+				break
+			}
+			if _, err := s.Procesos.Adopta(ad.Nombre, p.Proyecto, p.Carpeta, ad.Orden, ad.Grupo, ad.Fichero); err != nil {
+				log.Printf("adoptar %s: %v", ad.Nombre, err)
+			} else if s.Imputacion != nil {
+				s.Imputacion.AnotaAgente(sesionImp, "adoptado", map[string]any{"nombre": ad.Nombre, "orden": recortaTexto(ad.Orden, 160)})
+			}
 		}
 		if t := e.Tarea; t != nil && s.Imputacion != nil {
 			s.Imputacion.AnotaAgente(sesionImp, "tarea", map[string]any{"id": t.ID, "tipo": t.Tipo, "estado": t.Estado,

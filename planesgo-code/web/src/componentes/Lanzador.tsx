@@ -80,18 +80,25 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
 
   const [menu, setMenu] = useState(false);
   const caja = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const fuera = (e: MouseEvent) => { if (!caja.current?.contains(e.target as Node)) setMenu(false); };
-    document.addEventListener('mousedown', fuera);
-    return () => document.removeEventListener('mousedown', fuera);
-  }, [menu]);
+
 
   const enMarcha = procs.filter(x => x.estado === 'curso');
   const sug = L.sugerencias(enMarcha.map(x => x.url), cfg.map(c => c.url), p.url);
-  const programa = p.destino === 'programa' ? cfg.find(c => c.nombre === p.programa) || procs.find(x => x.nombre === p.programa) : undefined;
-  const proc = programa ? procs.find(x => x.nombre === programa.nombre) : undefined;
-  const corriendo = proc?.estado === 'curso';
+  const destino = p.destino === 'sistema' ? 'sistema' : 'interno';
+
+  // La ejecución del proyecto: sus programas (los guardados y los que están en marcha, también los que dejó el
+  // agente y adoptó pgocode), que pgocode arranca y para fuera del agente, sin tokens; y la dirección que se abre.
+  const programas = [...cfg.map(c => ({ ...c, guardado: true })),
+    ...procs.filter(x => !cfg.some(c => c.nombre === x.nombre)).map(x => ({ nombre: x.nombre, orden: x.orden, url: x.url, guardado: false }))];
+  const estadoDe = (n: string) => procs.find(x => x.nombre === n);
+  const vivos = programas.filter(c => estadoDe(c.nombre)?.estado === 'curso').length;
+  const [verProgramas, setVerProgramas] = useState(false);
+  useEffect(() => {
+    if (!menu && !verProgramas) return;
+    const fuera = (e: MouseEvent) => { if (!caja.current?.contains(e.target as Node)) { setMenu(false); setVerProgramas(false); } };
+    document.addEventListener('mousedown', fuera);
+    return () => document.removeEventListener('mousedown', fuera);
+  }, [menu, verProgramas]);
 
   const abre = async (u = url) => {
     const n = L.normalizaUrl(u);
@@ -99,7 +106,7 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
     setError('');
     if (n !== p.url) cambia({ url: n });
     setUrl(n);
-    if (p.destino === 'sistema') {
+    if (destino === 'sistema') {
       try {
         if (window.psf) await window.psf.abrirFuera(n);
         else await post('/api/abrir', { proyecto: proyecto.id, url: n });
@@ -109,67 +116,82 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
     }
   };
 
-  const ejecuta = async () => {
-    if (!programa) return;
+  const lanza = async (c: { nombre: string; orden: string; url?: string }) => {
+    await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, nombre: c.nombre, orden: c.orden, url: c.url });
+  };
+  const para = async (nombre: string) => { await post('/api/procesos/parar', { nombre }); };
+  const haz = async (f: () => Promise<unknown>) => {
     setError('');
-    try {
-      await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, nombre: programa.nombre, orden: programa.orden, url: programa.url });
-      carga();
-    } catch (e) { setError((e as Error).message); }
+    try { await f(); } catch (e) { setError((e as Error).message); }
+    carga();
   };
-  const para = async () => {
-    if (!programa) return;
-    try { await post('/api/procesos/parar', { nombre: programa.nombre }); carga(); } catch (e) { setError((e as Error).message); }
-  };
-
-  const icono = p.destino === 'programa' ? 'ejecutar' : DESTINOS[p.destino].icono;
-  const titulo = p.destino === 'programa' ? 'Programa: ' + (programa?.nombre || 'elige uno') : DESTINOS[p.destino].nombre;
-  const programas = [...cfg, ...procs.filter(x => !cfg.some(c => c.nombre === x.nombre)).map(x => ({ nombre: x.nombre, orden: x.orden, url: x.url }))];
+  // Ejecutar: arranca los programas guardados que no estén en marcha (cada uno abre su dirección si la tiene).
+  const ejecutaTodo = () => haz(async () => { for (const c of cfg) if (estadoDe(c.nombre)?.estado !== 'curso') await lanza(c); });
+  const paraTodo = () => haz(async () => { for (const c of programas) if (estadoDe(c.nombre)?.estado === 'curso') await para(c.nombre); });
+  const guarda = (c: { nombre: string; orden: string; url?: string }) =>
+    haz(() => post('/api/procesos/guardar', { proyecto: proyecto.id, carpeta, nombre: c.nombre.replace(/^agente-/, ''), orden: c.orden, url: c.url || '' }));
 
   return (
     <div className="lanzador" ref={caja}>
+      {programas.length > 0 && <>
+        <div className="lanzador-programas">
+          {vivos > 0
+            ? <button className="icono" onClick={paraTodo} title={`Parar los programas en marcha (${vivos})`} aria-label="Parar los programas"><Icono n="parar" t={13} /></button>
+            : <button className="icono" onClick={ejecutaTodo} disabled={!cfg.length || !carpeta} title={cfg.length ? 'Ejecutar los programas del proyecto' : 'Guarda antes algún programa'} aria-label="Ejecutar los programas"><Icono n="ejecutar" t={13} /></button>}
+          <button className="lanzador-cuenta" onClick={() => setVerProgramas(v => !v)} aria-expanded={verProgramas} title="Programas del proyecto">
+            <span className={'punto ' + (vivos ? 'ok' : '')} /> {vivos}/{programas.length}<Icono n="bajar" t={10} />
+          </button>
+          {verProgramas && (
+            <ul className="menu-lanzador menu-programas" aria-label="Programas del proyecto">
+              <li className="menu-titulo">Programas del proyecto (fuera del agente, sin tokens)</li>
+              {programas.map(c => {
+                const x = estadoDe(c.nombre);
+                const vivo = x?.estado === 'curso';
+                return (
+                  <li key={c.nombre} className="programa-lanzador">
+                    <span className={'punto ' + (vivo ? 'ok' : x?.estado === 'error' ? 'fallo' : '')} title={x?.estado || 'parado'} />
+                    <span className="programa-lanzador-texto">
+                      <b className="recorta">{c.nombre}{x?.lanzado === 'agente' && <span className="etiqueta">agente</span>}</b>
+                      <code className="recorta" title={c.orden}>{c.orden}</code>
+                    </span>
+                    {vivo && x?.url && <button className="icono" onClick={() => abre(x.url)} title={'Abrir ' + x.url} aria-label="Abrir su dirección"><Icono n="web" t={13} /></button>}
+                    {!c.guardado && <button className="enlace pequeno" onClick={() => guarda(c)} title="Guardarlo en el proyecto (.psf/ejecutar.json): la próxima vez lo arranca pgocode, sin el agente">Guardar</button>}
+                    {vivo
+                      ? <button className="icono" onClick={() => haz(() => para(c.nombre))} title="Parar" aria-label={'Parar ' + c.nombre}><Icono n="parar" t={12} /></button>
+                      : <button className="icono" onClick={() => haz(() => lanza(c))} disabled={!carpeta} title="Ejecutar" aria-label={'Ejecutar ' + c.nombre}><Icono n="ejecutar" t={12} /></button>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+        <span className="lanzador-sep" />
+      </>}
       <div className="lanzador-destino">
-        <button type="button" className="lanzador-elige" onClick={() => setMenu(m => !m)} title={titulo + ' (cambiar)'} aria-label={'Probar en: ' + titulo} aria-haspopup="listbox" aria-expanded={menu}>
-          <Icono n={icono} t={15} /><Icono n="bajar" t={10} />
+        <button type="button" className="lanzador-elige" onClick={() => setMenu(m => !m)} title={DESTINOS[destino].nombre + ' (cambiar)'} aria-label={'Abrir en: ' + DESTINOS[destino].nombre} aria-haspopup="listbox" aria-expanded={menu}>
+          <Icono n={DESTINOS[destino].icono} t={15} /><Icono n="bajar" t={10} />
         </button>
         {menu && (
-          <ul className="menu-lanzador" role="listbox" aria-label="Dónde probar">
+          <ul className="menu-lanzador" role="listbox" aria-label="Dónde abrir">
             {(['interno', 'sistema'] as const).map(d => (
-              <li key={d}><button role="option" aria-selected={p.destino === d} onClick={() => { cambia({ destino: d }); setMenu(false); }}>
-                <Icono n={DESTINOS[d].icono} t={15} /> {DESTINOS[d].nombre}{p.destino === d && <Icono n="hecho" t={13} />}
+              <li key={d}><button role="option" aria-selected={destino === d} onClick={() => { cambia({ destino: d }); setMenu(false); }}>
+                <Icono n={DESTINOS[d].icono} t={15} /> {DESTINOS[d].nombre}{destino === d && <Icono n="hecho" t={13} />}
               </button></li>
             ))}
-            {programas.length > 0 && <li className="menu-titulo">Programas del proyecto</li>}
-            {programas.map(c => (
-              <li key={c.nombre}><button role="option" aria-selected={p.destino === 'programa' && p.programa === c.nombre} title={c.orden}
-                onClick={() => { cambia({ destino: 'programa', programa: c.nombre }); setMenu(false); }}>
-                <Icono n="ejecutar" t={14} /> <span className="recorta">{c.nombre}</span>{p.destino === 'programa' && p.programa === c.nombre && <Icono n="hecho" t={13} />}
-              </button></li>
-            ))}
-            {programas.length === 0 && <li className="menu-titulo suave">Sin programas guardados (pestaña Programas)</li>}
           </ul>
         )}
       </div>
-      {p.destino === 'programa' ? <>
-        <span className={'punto ' + (corriendo ? 'ok' : proc?.estado === 'error' ? 'fallo' : '')} title={proc?.estado || 'parado'} />
-        <code className="lanzador-orden recorta" title={programa?.orden}>{programa ? programa.orden : 'Elige un programa del proyecto'}</code>
-        {corriendo && proc?.url && <button className="lanzador-enlace recorta" onClick={() => alAbrirWeb(proc.url!, { dispositivo: p.dispositivo, orientacion: p.orientacion })} title={'Abrir ' + proc.url}>{proc.url}</button>}
-        {corriendo
-          ? <button className="icono" onClick={para} title="Parar" aria-label="Parar el programa"><Icono n="parar" t={14} /></button>
-          : <button className="icono primario-suave" onClick={ejecuta} disabled={!programa || !carpeta} title="Ejecutar" aria-label="Ejecutar el programa"><Icono n="ejecutar" t={14} /></button>}
-      </> : <>
-        <form className={'lanzador-url' + (detectada ? ' detectada' : '')} title={detectada ? 'Dirección que acaba de dar el agente: pulsa abrir' : undefined} onSubmit={e => { e.preventDefault(); abre(); }}>
-          <input value={url} onChange={e => setUrl(e.target.value)} list={'sug-prueba-' + proyecto.id} spellCheck={false}
-            size={Math.min(48, Math.max(url ? url.length + 2 : 30, 12))}
-            placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />
-          <datalist id={'sug-prueba-' + proyecto.id}>{sug.map(s => <option key={s} value={s} />)}</datalist>
-          <button type="submit" className="icono" disabled={!url.trim()} title={p.destino === 'sistema' ? 'Abrir en el navegador del sistema' : 'Abrir en el navegador interno'} aria-label="Abrir">
-            <Icono n="externo" t={14} />
-          </button>
-        </form>
-        <Formato dispositivo={p.dispositivo} orientacion={p.orientacion} desactivado={p.destino === 'sistema'}
-          alCambiar={(d, o) => { cambia({ dispositivo: d, orientacion: o }); if (p.destino === 'interno' && L.normalizaUrl(url)) alAbrirWeb(L.normalizaUrl(url), { dispositivo: d, orientacion: o }); }} />
-      </>}
+      <form className={'lanzador-url' + (detectada ? ' detectada' : '')} title={detectada ? 'Dirección que acaba de dar el agente: pulsa abrir' : undefined} onSubmit={e => { e.preventDefault(); abre(); }}>
+        <input value={url} onChange={e => setUrl(e.target.value)} list={'sug-prueba-' + proyecto.id} spellCheck={false}
+          size={Math.min(48, Math.max(url ? url.length + 2 : 30, 12))}
+          placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />
+        <datalist id={'sug-prueba-' + proyecto.id}>{sug.map(s => <option key={s} value={s} />)}</datalist>
+        <button type="submit" className="icono" disabled={!url.trim()} title={destino === 'sistema' ? 'Abrir en el navegador del sistema' : 'Abrir en el navegador interno'} aria-label="Abrir">
+          <Icono n="externo" t={14} />
+        </button>
+      </form>
+      <Formato dispositivo={p.dispositivo} orientacion={p.orientacion} desactivado={destino === 'sistema'}
+        alCambiar={(d, o) => { cambia({ dispositivo: d, orientacion: o }); if (destino === 'interno' && L.normalizaUrl(url)) alAbrirWeb(L.normalizaUrl(url), { dispositivo: d, orientacion: o }); }} />
       {error && <span className="error pequeno">{error}</span>}
     </div>
   );

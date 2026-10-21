@@ -41,3 +41,20 @@ func mata(pid int) {
 	}
 	syscall.Kill(pid, syscall.SIGKILL)
 }
+
+// GruposConMarca: los grupos de procesos con algún proceso marcado (grupo → sus procesos marcados).
+func GruposConMarca(marca string) map[int][]int {
+	m := map[int][]int{}
+	for _, pid := range ConMarca(marca) {
+		if pg, err := syscall.Getpgid(pid); err == nil {
+			m[pg] = append(m[pg], pid)
+		}
+	}
+	return m
+}
+
+// Orden: la línea de órdenes de un proceso (los argumentos separados por espacios).
+func Orden(pid int) string {
+	b, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	return string(bytes.TrimSpace(bytes.ReplaceAll(b, []byte{0}, []byte{' '})))
+}

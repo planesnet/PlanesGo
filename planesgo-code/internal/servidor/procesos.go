@@ -198,6 +198,43 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 	jsonOK(w, x)
 }
 
+// procesosGuarda: guarda un programa en el proyecto (.psf/ejecutar.json) sin lanzarlo, p. ej. uno que el agente
+// dejó en marcha y pgocode adoptó: la próxima vez lo arranca pgocode, sin el agente ni tokens.
+func (s *Servidor) procesosGuarda(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Carpeta  string `json:"carpeta"`
+		Nombre   string `json:"nombre"`
+		Orden    string `json:"orden"`
+		URL      string `json:"url"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
+		return
+	}
+	if !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
+		jsonError(w, http.StatusForbidden, "esa carpeta no pertenece al proyecto")
+		return
+	}
+	if p.URL != "" && !urlWeb(p.URL) {
+		jsonError(w, http.StatusBadRequest, "URL no válida")
+		return
+	}
+	if strings.TrimSpace(p.Nombre) == "" || strings.TrimSpace(p.Orden) == "" {
+		jsonError(w, http.StatusBadRequest, "faltan el nombre o la orden")
+		return
+	}
+	if err := guardaConfiguracion(p.Carpeta, Configuracion{Nombre: p.Nombre, Orden: p.Orden, URL: p.URL}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.AvisaProcesos()
+	jsonOK(w, map[string]bool{"ok": true})
+}
+
 // del proyecto: el proceso tiene que ser de un proyecto al que el usuario tenga acceso.
 func (s *Servidor) procesoDelUsuario(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion, nombre string) bool {
 	p, ok := s.Procesos.Busca(nombre)

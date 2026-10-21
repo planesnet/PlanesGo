@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"math"
 	"os"
 	"strings"
@@ -20,22 +21,39 @@ func lee(t *testing.T, f string, lector func(r *os.File, emite func(Evento)) err
 	return l
 }
 
-// Con tareas en segundo plano Claude emite varios «result», cada uno con el coste acumulado: la suma de lo
-// emitido tiene que ser el coste total, no la suma de los acumulados.
-func TestCosteClaudeAcumulado(t *testing.T) {
-	ev := lee(t, "claude-1.jsonl", func(r *os.File, e func(Evento)) error { return leeClaudeCode(r, e) })
-	n, total := 0, 0.0
-	for _, e := range ev {
+// Al acabar la respuesta con solo una orden en segundo plano (muestra real: «sleep 20; echo FIN-BG»), el lector
+// termina ahí (FinConFondo) con esa orden, en vez de esperarla y gastar el turno extra que haría Claude.
+func TestClaudeFinConFondo(t *testing.T) {
+	fh, _ := os.Open("testdata/agentes/claude-1.jsonl")
+	defer fh.Close()
+	usos := 0
+	err := leeClaudeCode(fh, func(e Evento) {
 		if e.Uso != nil {
-			n++
+			usos++
+		}
+	})
+	var fin *FinConFondo
+	if !errors.As(err, &fin) || len(fin.Ordenes) != 1 || !strings.Contains(fin.Ordenes[0].Orden, "sleep 20") || fin.Ordenes[0].ID != "b7zdr3wrl" {
+		t.Fatalf("fin: %v %+v", err, fin)
+	}
+	if usos != 1 {
+		t.Errorf("consumos: %d (solo el de la respuesta)", usos)
+	}
+}
+
+// total_cost_usd es acumulado: con varios «result» se emite solo la diferencia.
+func TestCosteClaudeAcumulado(t *testing.T) {
+	l := `{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":1}}
+{"type":"result","total_cost_usd":0.025,"usage":{"input_tokens":1,"output_tokens":1}}
+`
+	total := 0.0
+	leeClaudeCode(strings.NewReader(l), func(e Evento) {
+		if e.Uso != nil {
 			total += e.Uso.Coste
 		}
-	}
-	if n < 2 {
-		t.Fatalf("la muestra debería tener varios result: %d", n)
-	}
-	if math.Abs(total-0.00933) > 0.00001 {
-		t.Errorf("coste total %.5f, quiero 0.00933", total)
+	})
+	if math.Abs(total-0.025) > 1e-9 {
+		t.Errorf("coste %.4f, quiero 0.025", total)
 	}
 }
 
@@ -108,7 +126,8 @@ func TestTareasClaude(t *testing.T) {
 	if sub == nil || sub.Estado != "ok" || sub.Subtipo != "general-purpose" || sub.Herramienta == "" || sub.Detalle == "" {
 		t.Errorf("subagente: %+v", sub)
 	}
-	if bg == nil || bg.Estado != "ok" || !bg.SegundoPlano || bg.Titulo == "" {
+	// La orden en segundo plano sigue en marcha al acabar la respuesta: la adopta pgocode.
+	if bg == nil || bg.Estado != "curso" || !bg.SegundoPlano || bg.Titulo == "" {
 		t.Errorf("segundo plano: %+v", bg)
 	}
 	// Las herramientas del subagente van dentro de él (Padre = la herramienta que lo lanzó).

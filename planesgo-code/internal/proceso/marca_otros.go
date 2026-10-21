@@ -14,3 +14,7 @@ func termina(pid int) {
 }
 
 func mata(int) {}
+
+func GruposConMarca(string) map[int][]int { return nil }
+
+func Orden(int) string { return "" }
