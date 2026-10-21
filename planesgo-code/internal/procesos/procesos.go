@@ -44,7 +44,8 @@ type Proceso struct {
 	Fin      time.Time `json:"fin,omitzero"`
 	Lanzado  string    `json:"lanzado"` // usuario | agente
 
-	grupo   int // su grupo de procesos
+	grupo   int    // su grupo de procesos
+	marca   string // PGO_EJECUCION de sus procesos (también los que se van a otro grupo, p. ej. el Odoo de «odt run»)
 	lineas  []string
 	total   int
 	cancela context.CancelFunc
@@ -81,13 +82,14 @@ func (g *Gestor) Lanza(nombre string, proyecto int, carpeta, orden, lanzado stri
 	ctx, cancela := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "bash", "-c", orden)
 	cmd.Dir = carpeta
-	cmd.Env = append(os.Environ(), entorno...)
+	marca := fmt.Sprintf("prog-%d-%s-%d", os.Getpid(), nombre, time.Now().UnixNano()%1e9)
+	cmd.Env = append(append(os.Environ(), entorno...), proceso.VarMarca+"="+marca)
 	proceso.GrupoPropio(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	p := &Proceso{Nombre: nombre, Proyecto: proyecto, Carpeta: carpeta, Orden: orden, Estado: "curso", Inicio: time.Now(),
-		Lanzado: lanzado, cancela: cancela, hecho: make(chan struct{})}
+		Lanzado: lanzado, cancela: cancela, hecho: make(chan struct{}), marca: marca}
 	if err := cmd.Start(); err != nil {
 		cancela()
 		return nil, err
@@ -168,12 +170,68 @@ func (g *Gestor) Para(nombre string) bool {
 	if p == nil || p.Estado != "curso" {
 		return false
 	}
+	// Lo que el programa lanzó en otros grupos (lleva su marca) también se para: primero que termine.
+	otros := gruposDe(p)
+	for _, g := range otros {
+		proceso.SenalGrupo(g, false)
+	}
 	p.cancela()
 	select {
 	case <-p.hecho:
 	case <-time.After(15 * time.Second):
 	}
+	go func() {
+		time.Sleep(5 * time.Second)
+		for _, g := range otros {
+			if proceso.GrupoVivo(g) {
+				proceso.SenalGrupo(g, true)
+			}
+		}
+	}()
 	return true
+}
+
+// gruposDe: los otros grupos de procesos con la marca del programa (no el suyo ni el de pgocode).
+func gruposDe(p *Proceso) []int {
+	if p.marca == "" {
+		return nil
+	}
+	var l []int
+	for g := range proceso.GruposConMarca(p.marca) {
+		if g != p.grupo && g != proceso.MiGrupo() && g > 1 {
+			l = append(l, g)
+		}
+	}
+	return l
+}
+
+// DeMarca: el programa en marcha al que pertenece una marca (PGO_EJECUCION), si lo hay.
+func (g *Gestor) DeMarca(marca string) (string, bool) {
+	if marca == "" {
+		return "", false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for n, p := range g.ps {
+		if p.Estado == "curso" && p.marca == marca {
+			return n, true
+		}
+	}
+	return "", false
+}
+
+// PonURL: la dirección de un programa, si aún no la tiene (p. ej. el puerto de su proceso en otro grupo).
+func (g *Gestor) PonURL(nombre, url string) {
+	g.mu.Lock()
+	p := g.ps[nombre]
+	nueva := p != nil && p.URL == ""
+	if nueva {
+		p.URL = url
+	}
+	g.mu.Unlock()
+	if nueva {
+		g.avisa()
+	}
 }
 
 // Quita un proceso terminado de la lista.

@@ -176,10 +176,10 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
 
         <fieldset className="notificaciones">
           <legend>Notificaciones</legend>
-          <span className="suave pequeno">{CO.PLANES[s.agente] || 'Avisos de gasto de esta sesión.'} Vacío: el valor por defecto del agente (en gris).</span>
+          <span className="suave pequeno">{CO.PLANES[s.agente] || 'Avisos de gasto de esta sesión.'} Son avisos sin interrupciones: el gasto del pie del chat cambia de color. Vacío: el valor por defecto del agente (en gris).</span>
           <div className="rejilla-avisos">
-            {([['avisoCoste', 'Aviso a partir de', '$'], ['limiteCoste', 'Límite (pide confirmar)', '$'], ['avisoTurno', 'Aviso si un turno pasa de', '$'],
-              ['avisoTokens', 'Aviso a partir de', 'tokens'], ['limiteTokens', 'Límite (pide confirmar)', 'tokens']] as const).map(([k, texto, unidad]) => (
+            {([['avisoCoste', 'Aviso a partir de', '$'], ['limiteCoste', 'Límite', '$'], ['avisoTurno', 'Aviso si un turno pasa de', '$'],
+              ['avisoTokens', 'Aviso a partir de', 'tokens'], ['limiteTokens', 'Límite', 'tokens']] as const).map(([k, texto, unidad]) => (
               <label key={k} className="aviso-campo">{texto}
                 <span className="con-unidad">
                   <input type="number" min={0} step={unidad === '$' ? 0.1 : 100000} value={s.avisos?.[k] ?? ''}
@@ -190,8 +190,6 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
               </label>
             ))}
           </div>
-          <label className="casilla"><input type="checkbox" checked={CO.efectivos(s.agente, s.avisos).escritorio ?? false}
-            onChange={e => cambia({ avisos: { ...s.avisos, escritorio: e.target.checked } })} /> Notificación de escritorio además del aviso en el chat</label>
         </fieldset>
 
         <label>Tarea de Odoo a la que se imputa

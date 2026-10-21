@@ -88,7 +88,7 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
       </section>
 
       {plan && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={plan} ocupado={trabajando}
-        alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()}
+        alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()} alBorrar={() => cargaPlanes()}
         alEjecutar={p => { window.dispatchEvent(new CustomEvent('pgo:ejecutar-plan', { detail: p })); setPlan(null); cargaPlanes(); }} />}
     </div>
   );

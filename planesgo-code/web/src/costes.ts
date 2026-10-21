@@ -1,22 +1,21 @@
-// Avisos y límites de coste por sesión: ser consciente de lo que gasta cada conversación (en $ y en tokens) y
-// avisar o frenar al pasar los umbrales. Funciones puras para poder probarlas: node --test src/costes.test.ts
+// Avisos y límites de coste por sesión: ser consciente de lo que gasta cada conversación (en $ y en tokens) con
+// avisos que no interrumpen (el indicador del pie del chat cambia de color). Funciones puras para poder probarlas: node --test src/costes.test.ts
 import type { Mensaje } from './api';
 
 export interface Avisos {
   avisoCoste?: number;    // $ acumulados en la sesión: aviso
-  limiteCoste?: number;   // $ acumulados: se pide confirmación antes de seguir
+  limiteCoste?: number;   // $ acumulados: límite (aviso en rojo)
   avisoTurno?: number;    // $ de un solo turno: aviso
   avisoTokens?: number;   // tokens acumulados (entrada + salida): aviso
-  limiteTokens?: number;  // tokens acumulados: se pide confirmación
-  escritorio?: boolean;   // además, notificación de escritorio
+  limiteTokens?: number;  // tokens acumulados: límite (aviso en rojo)
 }
 
 // Por defecto, según el plan de cada agente: Claude con suscripción (su coste es el equivalente de la API,
 // orientativo), OpenCode con Vertex (pago real por uso), Antigravity (no informa del coste: por tokens).
 export const DEFECTO: Record<string, Avisos> = {
-  'claude-code': { avisoCoste: 5, limiteCoste: 20, avisoTurno: 2, escritorio: true },
-  opencode: { avisoCoste: 1, limiteCoste: 3, avisoTurno: 0.5, escritorio: true },
-  antigravity: { avisoTokens: 2_000_000, limiteTokens: 6_000_000, escritorio: true },
+  'claude-code': { avisoCoste: 5, limiteCoste: 20, avisoTurno: 2 },
+  opencode: { avisoCoste: 1, limiteCoste: 3, avisoTurno: 0.5 },
+  antigravity: { avisoTokens: 2_000_000, limiteTokens: 6_000_000 },
 };
 export const PLANES: Record<string, string> = {
   'claude-code': 'Suscripción de Claude: el coste es el equivalente de la API (orientativo).',

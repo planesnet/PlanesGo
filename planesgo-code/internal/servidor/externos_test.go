@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/proceso"
+	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
 )
 
@@ -59,5 +60,48 @@ func TestExternosReal(t *testing.T) {
 	cmd.Wait()
 	if proceso.GrupoVivo(grupo) {
 		t.Error("sigue vivo")
+	}
+}
+
+// Un programa de pgocode que arranca un servidor en otro grupo (como «odt run» con Odoo): el servidor no sale
+// como externo, su puerto pasa a ser la dirección del programa, y parar el programa lo para también.
+func TestProgramaConHijoEnOtroGrupo(t *testing.T) {
+	casa, _ := os.UserHomeDir()
+	raiz := filepath.Join(casa, "cowork")
+	if _, err := os.Stat(raiz); err != nil {
+		t.Skip("sin ~/cowork")
+	}
+	d, err := os.MkdirTemp(raiz, ".pgocode-prueba-")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer os.RemoveAll(d)
+	s := &Servidor{Indice: &proyectos.Indice{Raices: []string{raiz}, Registro: filepath.Join(d, "registro.json")}, Procesos: procesos.Nuevo()}
+	if _, err := s.Procesos.Lanza("web", 1, d, "setsid python3 -m http.server 8981 --bind 127.0.0.1 & sleep 60", "usuario", nil); err != nil {
+		t.Fatal(err)
+	}
+	var url string
+	for i := 0; i < 40 && url == ""; i++ {
+		time.Sleep(100 * time.Millisecond)
+		_, otros := s.externos(1)
+		for _, x := range otros {
+			if x.Carpeta == d {
+				t.Fatalf("sale como externo: %+v", x)
+			}
+		}
+		p, _ := s.Procesos.Busca("web")
+		url = p.URL
+	}
+	if url != "http://localhost:8981/" {
+		t.Fatalf("dirección: %q", url)
+	}
+	s.Procesos.Para("web")
+	time.Sleep(6 * time.Second)
+	if len(proceso.Escuchando()) > 0 {
+		for _, x := range proceso.Escuchando() {
+			if x.Carpeta == d {
+				t.Errorf("el servidor sigue vivo: %+v", x)
+			}
+		}
 	}
 }

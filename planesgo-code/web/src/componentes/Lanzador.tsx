@@ -197,7 +197,8 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
         )}
       </div>
       <form className={'lanzador-url' + (detectada ? ' detectada' : '')} title={detectada ? 'Dirección que acaba de dar el agente: pulsa abrir' : undefined} onSubmit={e => { e.preventDefault(); abre(); }}>
-        <input value={url} onChange={e => setUrl(e.target.value)} list={'sug-prueba-' + proyecto.id} spellCheck={false}
+        {/* Sugerencias solo si hay otra dirección que elegir (si no, sin la flecha del desplegable). */}
+        <input value={url} onChange={e => setUrl(e.target.value)} list={sug.some(x => x !== L.normalizaUrl(url)) ? 'sug-prueba-' + proyecto.id : undefined} spellCheck={false}
           size={Math.min(48, Math.max(url ? url.length + 2 : 30, 12))}
           placeholder="Dirección de la prueba (p. ej. localhost:8888)" aria-label="Dirección de la prueba" />
         <datalist id={'sug-prueba-' + proyecto.id}>{sug.map(s => <option key={s} value={s} />)}</datalist>

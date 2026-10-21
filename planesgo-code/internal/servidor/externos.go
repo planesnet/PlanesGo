@@ -42,6 +42,14 @@ func (s *Servidor) externos(proyecto int) (delProyecto, otros []proceso.EnRed) {
 		if propios[x.Grupo] {
 			continue
 		}
+		// Parte de un programa de pgocode (lleva su marca, aunque esté en otro grupo): su puerto es la dirección
+		// de ese programa, y no es externo.
+		if s.Procesos != nil && len(x.Puertos) > 0 {
+			if n, ok := s.Procesos.DeMarca(proceso.MarcaDe(x.Pid)); ok {
+				s.Procesos.PonURL(n, "http://localhost:"+strconv.Itoa(x.Puertos[0])+"/")
+				continue
+			}
+		}
 		switch {
 		case len(carpetas) > 0 && (dentro(x.Carpeta, carpetas) || ordenEn(x.Orden, carpetas)):
 			delProyecto = append(delProyecto, x)

@@ -16,6 +16,9 @@ export const leePlan = (proyecto: number, directorio: string | undefined, ruta: 
 export const listaPlanes = (proyecto: number, directorio?: string) => get<Plan[]>(`/api/planes?${q(proyecto, directorio)}`);
 export const guardaPlan = (proyecto: number, directorio: string | undefined, p: Partial<Plan>) =>
   post<Plan>('/api/planes', { ...p, proyecto, directorio: directorio || '' });
+// Solo los descartados se pueden borrar.
+export const borraPlan = (proyecto: number, directorio: string | undefined, ruta: string) =>
+  post('/api/planes/borrar', { proyecto, directorio: directorio || '', ruta });
 
 const ESTADOS: Record<EstadoPlan, string> = { borrador: 'Por decidir', ejecutado: 'Ejecutado', descartado: 'Descartado' };
 const nombre = (ruta: string) => ruta.split('/').pop() || ruta;
@@ -50,9 +53,9 @@ export function TarjetaPlan({ titulo, ruta, estado, ocupado, alAbrir, alEjecutar
 }
 
 // Editor del plan: Markdown a la izquierda (o arriba) y la vista previa.
-export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCambio, alEjecutar }: {
+export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCambio, alEjecutar, alBorrar }: {
   proyecto: number; directorio?: string; ruta: string; ocupado: boolean;
-  alCerrar: () => void; alCambio: (p: Plan) => void; alEjecutar: (p: Plan) => void;
+  alCerrar: () => void; alCambio: (p: Plan) => void; alEjecutar: (p: Plan) => void; alBorrar?: (ruta: string) => void;
 }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [texto, setTexto] = useState('');
@@ -102,6 +105,12 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
         <div className="editor-plan-acciones">
           {plan?.estado === 'borrador' && <button className="enlace" onClick={() => guarda('descartado')} disabled={guardando}>Descartar plan</button>}
           {plan && plan.estado !== 'borrador' && <button className="enlace" onClick={() => guarda('borrador')} disabled={guardando}>Volver a «Por decidir»</button>}
+          {plan?.estado === 'descartado' && (
+            <button className="enlace peligro" disabled={guardando} onClick={async () => {
+              if (!confirm(`¿Borrar el plan «${plan.titulo}»? Se borra su fichero y no se puede deshacer.`)) return;
+              try { await borraPlan(proyecto, directorio, plan.ruta); alBorrar?.(plan.ruta); alCerrar(); } catch (e) { setError((e as Error).message); }
+            }}>Borrar el plan</button>
+          )}
           <span className="hueco" />
           <button className="boton-secundario" onClick={() => guarda()} disabled={!cambiado || guardando}>Guardar</button>
           {plan?.estado === 'borrador' && (

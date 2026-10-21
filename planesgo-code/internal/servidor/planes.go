@@ -292,3 +292,43 @@ func (s *Servidor) planesLee(w http.ResponseWriter, r *http.Request, ses *sesion
 	}
 	jsonOK(w, p)
 }
+
+// planesBorra: borra un plan, solo si está descartado (los demás se descartan antes).
+func (s *Servidor) planesBorra(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto   int    `json:"proyecto"`
+		Directorio string `json:"directorio"`
+		Ruta       string `json:"ruta"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
+		return
+	}
+	dir, ok := s.dirPlanes(r, p.Proyecto, p.Directorio)
+	if !ok {
+		jsonError(w, http.StatusBadRequest, "ese directorio no es del proyecto")
+		return
+	}
+	ruta, err := rutaPlan(dir, p.Ruta)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	b, err := os.ReadFile(ruta)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "no existe ese plan")
+		return
+	}
+	if leePlan(string(b)).Estado != "descartado" {
+		jsonError(w, http.StatusBadRequest, "solo se pueden borrar los planes descartados")
+		return
+	}
+	if err := os.Remove(ruta); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonOK(w, map[string]bool{"ok": true})
+}

@@ -13,7 +13,7 @@ test('gasto: suma los consumos de las respuestas', () => {
 });
 
 test('efectivos: lo de la sesión y, si falta, lo del agente', () => {
-  assert.deepEqual(C.efectivos('opencode', { avisoCoste: 0.2 }), { avisoCoste: 0.2, limiteCoste: 3, avisoTurno: 0.5, escritorio: true });
+  assert.deepEqual(C.efectivos('opencode', { avisoCoste: 0.2 }), { avisoCoste: 0.2, limiteCoste: 3, avisoTurno: 0.5 });
   assert.deepEqual(C.efectivos('otro', undefined), {});
   assert.equal(C.efectivos('opencode', { limiteCoste: undefined }).limiteCoste, 3, 'vacío no pisa el del agente');
 });

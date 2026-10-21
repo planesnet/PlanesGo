@@ -149,6 +149,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/planes", s.conSesion(s.planesLista))
 	mux.HandleFunc("GET /api/planes/leer", s.conSesion(s.planesLee))
 	mux.HandleFunc("POST /api/planes", s.conSesion(s.planesGuarda))
+	mux.HandleFunc("POST /api/planes/borrar", s.conSesion(s.planesBorra))
 	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
 	mux.HandleFunc("GET /api/skills", s.conSesion(s.skillsInventario))
@@ -683,7 +684,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			if s.Procesos == nil {
 				break
 			}
-			if _, err := s.Procesos.Adopta(ad.Nombre, p.Proyecto, p.Carpeta, ad.Orden, ad.Grupo, ad.Fichero); err != nil {
+			if _, err := s.Procesos.Adopta(ad.Nombre, p.Proyecto, p.Carpeta, ad.Orden, ad.Grupo, ad.Fichero, ad.Marca); err != nil {
 				log.Printf("adoptar %s: %v", ad.Nombre, err)
 			} else if s.Imputacion != nil {
 				s.Imputacion.AnotaAgente(sesionImp, "adoptado", map[string]any{"nombre": ad.Nombre, "orden": recortaTexto(ad.Orden, 160)})

@@ -13,7 +13,7 @@ import (
 // Adopta un programa que ya está en marcha (p. ej. el que el agente dejó en segundo plano: el programa que se
 // está desarrollando) para que siga como cualquier otro de pgocode, sin el agente: su salida se lee del fichero
 // donde escribe y se puede parar. Así el turno del agente acaba (no hay que esperarlo) y no gasta más tokens.
-func (g *Gestor) Adopta(nombre string, proyecto int, carpeta, orden string, grupo int, fichero string) (*Proceso, error) {
+func (g *Gestor) Adopta(nombre string, proyecto int, carpeta, orden string, grupo int, fichero, marca string) (*Proceso, error) {
 	if !nombreValido.MatchString(nombre) {
 		return nil, ErrNombre
 	}
@@ -23,7 +23,7 @@ func (g *Gestor) Adopta(nombre string, proyecto int, carpeta, orden string, grup
 	g.Para(nombre)
 	ctx, cancela := context.WithCancel(context.Background())
 	p := &Proceso{Nombre: nombre, Proyecto: proyecto, Carpeta: carpeta, Orden: orden, Estado: "curso", Inicio: time.Now(),
-		Lanzado: "agente", cancela: cancela, hecho: make(chan struct{}), grupo: grupo}
+		Lanzado: "agente", cancela: cancela, hecho: make(chan struct{}), grupo: grupo, marca: marca}
 	g.mu.Lock()
 	g.ps[nombre] = p
 	g.mu.Unlock()

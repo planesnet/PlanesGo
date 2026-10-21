@@ -57,6 +57,7 @@ type Adoptado struct {
 	Orden   string `json:"orden"`
 	Fichero string `json:"-"` // donde escribe su salida
 	Grupo   int    `json:"-"` // su grupo de procesos
+	Marca   string `json:"-"` // PGO_EJECUCION de la ejecución del agente (la heredan sus procesos)
 	Tarea   string `json:"tarea,omitempty"`
 }
 

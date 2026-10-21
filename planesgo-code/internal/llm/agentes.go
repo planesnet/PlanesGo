@@ -444,7 +444,7 @@ func adopta(marca string, agente int, ordenes []Fondo) []Adoptado {
 		if i > 0 {
 			nombre += fmt.Sprintf("-%d", i+1)
 		}
-		l = append(l, Adoptado{Nombre: nombre, Orden: o.Orden, Fichero: o.Fichero, Grupo: g, Tarea: o.ID})
+		l = append(l, Adoptado{Nombre: nombre, Orden: o.Orden, Fichero: o.Fichero, Grupo: g, Tarea: o.ID, Marca: marca})
 	}
 	return l
 }

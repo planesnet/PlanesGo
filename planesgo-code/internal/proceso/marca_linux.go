@@ -58,3 +58,17 @@ func Orden(pid int) string {
 	b, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
 	return string(bytes.TrimSpace(bytes.ReplaceAll(b, []byte{0}, []byte{' '})))
 }
+
+// MarcaDe: la marca (PGO_EJECUCION) del entorno de un proceso, si la tiene.
+func MarcaDe(pid int) string {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+	if err != nil {
+		return ""
+	}
+	for _, kv := range bytes.Split(b, []byte{0}) {
+		if v, ok := bytes.CutPrefix(kv, []byte(VarMarca+"=")); ok {
+			return string(v)
+		}
+	}
+	return ""
+}
