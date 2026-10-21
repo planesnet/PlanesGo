@@ -295,7 +295,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         proyecto: proyecto.id, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '', sesion: ses.id, titulo: ses.nombre, autorizadas: ses.autorizadas || [],
         mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '', mensajes: [{ rol: 'user', texto: q }],
-        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '',
+        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language,
       }, e => {
         if (e.texto) texto += e.texto;
         if (e.herramienta && e.herramienta.estado === 'curso') acciones++;
@@ -430,6 +430,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
+        idioma: navigator.language,
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {

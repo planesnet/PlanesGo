@@ -37,6 +37,8 @@ type Peticion struct {
 	// MCP: servidores MCP de Claude Code que la sesión quiere además de «pgo» (por defecto, ninguno: cada uno
 	// arranca su proceso y añade sus herramientas a cada turno).
 	MCP []string
+	// Idioma del usuario (su nombre, p. ej. «español»): el agente responde en él.
+	Idioma string
 	// Aparte: una pregunta que no entra en la conversación. Va a una copia de la sesión del agente (Claude:
 	// --fork-session sin guardarla; OpenCode: --fork y se borra al acabar), en solo lectura.
 	Aparte bool

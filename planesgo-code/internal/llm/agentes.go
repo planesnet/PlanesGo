@@ -172,6 +172,11 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		return errors.New("identificador de sesión del agente no válido")
 	}
 	msg := p.Mensajes[len(p.Mensajes)-1].Texto
+	// Idioma: Claude Code lo recibe como instrucción de sistema (--append-system-prompt); los demás no tienen
+	// cómo, así que va al principio del primer mensaje de la conversación (queda en su historial, sin repetirlo).
+	if p.Idioma != "" && a.Clave != "claude-code" && p.SesionAgente == "" {
+		msg = InstruccionIdioma(p.Idioma) + "\n\n" + msg
+	}
 	if len(p.Adjuntos) > 0 {
 		msg += "\n\nFicheros adjuntos (léelos con tus herramientas):"
 		for _, f := range p.Adjuntos {
@@ -419,6 +424,9 @@ func Agentes() []Proveedor {
 				}
 				if p.Esfuerzo != "" {
 					a = append(a, "--effort", p.Esfuerzo)
+				}
+				if p.Idioma != "" {
+					a = append(a, "--append-system-prompt", InstruccionIdioma(p.Idioma))
 				}
 				if p.SesionAgente != "" {
 					a = append(a, "--resume", p.SesionAgente)
@@ -763,3 +771,29 @@ func configMCP(carpeta string, pedidos []string) string {
 }
 
 var unaVezMCP sync.Once
+
+// InstruccionIdioma: lo que se le dice al agente para que responda en el idioma del usuario.
+func InstruccionIdioma(idioma string) string {
+	// Probado con Claude: «el idioma del usuario» lo entiende como el del mensaje; así obedece al configurado.
+	return "Idioma de las respuestas: " + idioma + ". Escribe siempre en " + idioma + " todo lo que respondas (explicaciones, " +
+		"resúmenes, preguntas y planes), aunque el mensaje, el código, los ficheros o las herramientas estén en otro idioma, " +
+		"salvo que el usuario te pida expresamente otro idioma."
+}
+
+// idiomas: el nombre de cada idioma por su código (BCP 47, el del navegador).
+var idiomas = map[string]string{"es": "español", "en": "English", "ca": "català", "gl": "galego", "eu": "euskara",
+	"fr": "français", "pt": "português", "it": "italiano", "de": "Deutsch", "nl": "Nederlands"}
+
+var codigoIdioma = regexp.MustCompile(`^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+
+// NombreIdioma: el nombre del idioma de un código del navegador («es-ES» → «español»); vacío o raro: español.
+func NombreIdioma(codigo string) string {
+	if !codigoIdioma.MatchString(codigo) {
+		return "español"
+	}
+	base, _, _ := strings.Cut(strings.ToLower(codigo), "-")
+	if n, ok := idiomas[base]; ok {
+		return n
+	}
+	return codigo
+}

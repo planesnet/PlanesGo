@@ -577,6 +577,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// (sobre una copia de la sesión del agente; si el agente no las permite, con el resumen de Contexto).
 		Aparte   string `json:"aparte"`
 		Contexto string `json:"contexto"`
+		Idioma   string `json:"idioma"` // del navegador (es-ES, en-GB…): el agente responde en él
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -676,8 +677,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		}
 		mu.Unlock()
 	}
-	sistema := fmt.Sprintf("Trabajas para %s en el proyecto de Odoo «%s» (id %d) de Planes Software Factory. Responde en español.",
-		ses.Nombre, nombre, p.Proyecto)
+	idioma := llm.NombreIdioma(p.Idioma)
+	sistema := fmt.Sprintf("Trabajas para %s en el proyecto de Odoo «%s» (id %d) de Planes Software Factory. %s",
+		ses.Nombre, nombre, p.Proyecto, llm.InstruccionIdioma(idioma))
 	if p.Carpeta != "" {
 		sistema += " Carpeta local del proyecto: " + p.Carpeta + "."
 	}
@@ -689,7 +691,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Aparte != "" {
 		s.aparte(turno, r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
-			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true}, sesionImp, p.Proveedor, envia)
+			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma}, sesionImp, p.Proveedor, envia)
 		return
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
@@ -699,7 +701,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP}, func(e llm.Evento) {
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}

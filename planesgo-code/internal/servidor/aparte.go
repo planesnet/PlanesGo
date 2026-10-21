@@ -17,7 +17,7 @@ import (
 // permite copiar sus conversaciones: ahí responde el modelo barato con el resumen que manda la interfaz.
 
 const sistemaAparte = "El usuario te hace una pregunta aparte mientras trabaja con un agente de programación. " +
-	"Responde breve, claro y en español. No tienes herramientas: si no lo sabes con lo que tienes, dilo."
+	"Responde breve y claro. No tienes herramientas: si no lo sabes con lo que tienes, dilo."
 
 // bifurcables: los agentes que pueden copiar su sesión para una pregunta aparte.
 var bifurcables = map[string]bool{"claude-code": true, "opencode": true}

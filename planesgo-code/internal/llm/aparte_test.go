@@ -57,3 +57,21 @@ func TestGemini(t *testing.T) {
 		t.Errorf("petición: %v", pedido)
 	}
 }
+
+// Idioma: Claude Code lo recibe como instrucción de sistema en cada turno; los demás, solo al empezar la
+// conversación (al principio del mensaje).
+func TestIdioma(t *testing.T) {
+	for c, quiero := range map[string]string{"es-ES": "español", "en-GB": "English", "ca": "català", "pt-BR": "português",
+		"ja-JP": "ja-JP", "": "español", "--rm -rf": "español"} {
+		if g := NombreIdioma(c); g != quiero {
+			t.Errorf("%q: %q, quiero %q", c, g, quiero)
+		}
+	}
+	cl := Agentes()[0].(*Agente)
+	if args := strings.Join(cl.Args("hola", Peticion{Idioma: "English"}), " "); !strings.Contains(args, "--append-system-prompt Idioma de las respuestas: English.") {
+		t.Errorf("claude: %s", args)
+	}
+	if args := strings.Join(cl.Args("hola", Peticion{}), " "); strings.Contains(args, "--append-system-prompt") {
+		t.Errorf("claude sin idioma: %s", args)
+	}
+}

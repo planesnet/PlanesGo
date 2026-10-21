@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -221,5 +222,22 @@ func TestAdjuntosOpenCode(t *testing.T) {
 	j := strings.Join(args, " ")
 	if !strings.Contains(j, "--file /p/.pgocode/adjuntos/s/a.png --") {
 		t.Errorf("args: %q", args)
+	}
+}
+
+// OpenCode y Antigravity: la instrucción de idioma va en el primer mensaje de la conversación, no en los siguientes.
+func TestIdiomaEnElPrimerMensaje(t *testing.T) {
+	var visto string
+	a := &Agente{Clave: "opencode", Nombre: "Prueba", Programa: "true",
+		Args: func(msg string, p Peticion) []string { visto = msg; return nil }, Lee: func(io.Reader, func(Evento)) error { return nil }}
+	p := Peticion{Carpeta: t.TempDir(), Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}, Idioma: "English"}
+	a.chat(context.Background(), p, func(Evento) {})
+	if !strings.HasPrefix(visto, InstruccionIdioma("English")) || !strings.HasSuffix(visto, "hola") {
+		t.Errorf("primer mensaje: %q", visto)
+	}
+	p.SesionAgente = "ses_1"
+	a.chat(context.Background(), p, func(Evento) {})
+	if visto != "hola" {
+		t.Errorf("siguiente mensaje: %q", visto)
 	}
 }
