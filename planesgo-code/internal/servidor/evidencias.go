@@ -49,14 +49,14 @@ func guardaCapturas(carpeta string, c Captura, h *llm.Herramienta) {
 		return
 	}
 	dir := dirEvidencias(carpeta, c.Sesion)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
 	excluyeDeGit(carpeta)
 	muEvidencias.Lock()
 	defer muEvidencias.Unlock()
 	ahora := time.Now()
-	idx, err := os.OpenFile(filepath.Join(dir, "indice.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	idx, err := os.OpenFile(filepath.Join(dir, "indice.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -71,7 +71,7 @@ func guardaCapturas(carpeta string, c Captura, h *llm.Herramienta) {
 			nombre = nombre[:40]
 		}
 		f := filepath.Join(dir, fmt.Sprintf("%s-%03d-%d-%s%s", ahora.Format("20060102-150405"), ahora.Nanosecond()/1e6, i, nombre, ext))
-		if os.WriteFile(f, im.Datos, 0o644) != nil {
+		if os.WriteFile(f, im.Datos, 0o600) != nil {
 			continue
 		}
 		x := c

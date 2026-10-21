@@ -34,6 +34,7 @@ type Indice struct {
 	mu          sync.Mutex
 	carpetas    map[int][]string
 	hecho       time.Time
+	buscando    bool
 	registradas map[int][]string
 }
 
@@ -43,14 +44,27 @@ func NuevoIndice(raices []string) *Indice {
 }
 
 // Carpetas devuelve las carpetas locales de cada proyecto (se vuelve a buscar si el índice es viejo o forzar).
+// Con un índice viejo (y sin forzar) se devuelve el que hay y se rehace en segundo plano: recorrer el disco no
+// bloquea las peticiones, que casi todas preguntan por las carpetas.
 func (x *Indice) Carpetas(forzar bool) map[int][]string {
 	x.mu.Lock()
-	defer x.mu.Unlock()
-	if forzar || x.carpetas == nil || time.Since(x.hecho) > x.Vida {
-		x.carpetas = busca(x.Raices)
-		x.hecho = time.Now()
+	if forzar || x.carpetas == nil {
+		x.mu.Unlock()
+		m := busca(x.Raices)
+		x.mu.Lock()
+		x.carpetas, x.hecho = m, time.Now()
+	} else if time.Since(x.hecho) > x.Vida && !x.buscando {
+		x.buscando = true
+		go func() {
+			m := busca(x.Raices)
+			x.mu.Lock()
+			x.carpetas, x.hecho, x.buscando = m, time.Now(), false
+			x.mu.Unlock()
+		}()
 	}
-	return x.carpetas
+	c := x.carpetas
+	x.mu.Unlock()
+	return c
 }
 
 // Pertenece dice si la carpeta es una de las del proyecto (con .planesgo.json o registrada por el usuario).
@@ -131,7 +145,8 @@ func busca(raices []string) map[int][]string {
 				return nil
 			}
 			if d.IsDir() {
-				if p != r && (saltar[d.Name()] || strings.Count(p, string(filepath.Separator))-base > Profundidad) {
+				// Sin las carpetas ocultas (.git, .pgocode, .claude con las copias de los subagentes…).
+				if p != r && (saltar[d.Name()] || strings.HasPrefix(d.Name(), ".") || strings.Count(p, string(filepath.Separator))-base > Profundidad) {
 					return fs.SkipDir
 				}
 				return nil

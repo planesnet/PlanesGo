@@ -59,7 +59,7 @@ type Actualizador struct {
 	DirApp       string        // carpeta de la app instalada (donde está pgocode-backend)
 	DirPreparado string        // dónde se deja la versión nueva (…/actualizacion)
 	Electron     string        // versión de Electron en marcha (si el paquete pide otra, hay que reinstalar)
-	Intervalo    time.Duration // cada cuánto se revisa (60 s)
+	Intervalo    time.Duration // cada cuánto se revisa (15 min; «Buscar ahora» lo adelanta)
 	Ocupado      func() bool   // ¿hay algo en curso?
 	AlAplicar    func()        // guarda el estado y sale con SalidaActualizar
 	HTTP         *http.Client
@@ -74,7 +74,7 @@ type Actualizador struct {
 // Nuevo prepara el actualizador leyendo la versión y la huella instaladas en dirApp.
 func Nuevo(url, dirApp, dirPreparado, version string) *Actualizador {
 	a := &Actualizador{URL: strings.TrimRight(url, "/"), DirApp: dirApp, DirPreparado: dirPreparado,
-		Intervalo: time.Minute, HTTP: &http.Client{Timeout: 5 * time.Minute}, buscar: make(chan struct{}, 1), aplicar: make(chan struct{}, 1)}
+		Intervalo: 15 * time.Minute, HTTP: &http.Client{Timeout: 5 * time.Minute}, buscar: make(chan struct{}, 1), aplicar: make(chan struct{}, 1)}
 	a.estado.Version = version
 	b, err := os.ReadFile(filepath.Join(dirApp, "paquete.sha256"))
 	a.instalado = strings.TrimSpace(string(b))

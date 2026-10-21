@@ -209,7 +209,7 @@ function Grabar({ base }: { base: string }) {
 
   useEffect(() => {
     if (desde === null) return;
-    const id = setInterval(() => setAhora(Date.now()), 1000);
+    const id = setInterval(() => { if (!document.hidden) setAhora(Date.now()); }, 1000);
     return () => clearInterval(id);
   }, [desde]);
 

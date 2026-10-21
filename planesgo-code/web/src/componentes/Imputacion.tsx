@@ -45,8 +45,8 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
   useEffect(() => { carga(); }, [version]);
   // Avanza cada segundo en pantalla y se refresca del servidor cada 30 s (sin tocar Odoo).
   useEffect(() => {
-    const t = setInterval(() => setTic(x => x + 1), 1000);
-    const r = setInterval(carga, 30000);
+    const t = setInterval(() => { if (!document.hidden) setTic(x => x + 1); }, 1000);
+    const r = setInterval(() => { if (!document.hidden) carga(); }, 30000);
     return () => { clearInterval(t); clearInterval(r); };
   }, []);
   useEffect(() => {

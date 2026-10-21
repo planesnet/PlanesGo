@@ -8,14 +8,17 @@ import (
 )
 
 // ConMarca: los procesos (del usuario) cuyo entorno lleva la marca, leyendo /proc/<pid>/environ.
-func ConMarca(marca string) []int {
-	buscada := []byte("\x00" + VarMarca + "=" + marca + "\x00")
+func ConMarca(marca string) []int { return porMarca()[marca] }
+
+// porMarca: un solo recorrido de /proc con los procesos de cada marca (en vez de uno por marca).
+func porMarca() map[string][]int {
+	clave := []byte(VarMarca + "=")
+	m := map[string][]int{}
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return m
 	}
 	yo := os.Getpid()
-	var l []int
 	for _, e := range ents {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid == yo {
@@ -25,11 +28,26 @@ func ConMarca(marca string) []int {
 		if err != nil || len(b) == 0 {
 			continue
 		}
-		if bytes.Contains(append([]byte{0}, b...), buscada) {
-			l = append(l, pid)
+		// La variable puede ir al principio o tras un separador nulo.
+		i := bytes.Index(b, clave)
+		for i > 0 && b[i-1] != 0 {
+			j := bytes.Index(b[i+1:], clave)
+			if j < 0 {
+				i = -1
+				break
+			}
+			i += j + 1
 		}
+		if i < 0 {
+			continue
+		}
+		v := b[i+len(clave):]
+		if k := bytes.IndexByte(v, 0); k >= 0 {
+			v = v[:k]
+		}
+		m[string(v)] = append(m[string(v)], pid)
 	}
-	return l
+	return m
 }
 
 func termina(pid int) { syscall.Kill(pid, syscall.SIGTERM) }

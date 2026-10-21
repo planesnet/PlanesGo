@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
@@ -836,7 +836,8 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
 // Una parte de la respuesta: texto, razonamiento (plegado) o una herramienta (una línea que se despliega), como en Claude Code.
 // Las partes según el nivel de detalle del proyecto: conciso (solo texto y una línea con las acciones), normal
 // (cada acción plegada) o detallado (todo desplegado).
-function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
+// memo (también las de abajo): las partes de los mensajes anteriores no cambian mientras llega la respuesta.
+const Partes = memo(function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
   // Las herramientas de un subagente van dentro de su tarea; la herramienta que crea una tarea se pinta como tarea.
   const dentro = (id: string) => partes.filter(p => p.tipo === 'herramienta' && p.h.padre === id);
   const sueltas = partes.filter(p => p.tipo !== 'herramienta' || !p.h.padre);
@@ -870,10 +871,10 @@ function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea
     {extra}
     {sueltas.filter(p => p.tipo === 'texto').map((p, j) => <ParteMensaje key={j} p={p} abierta={false} />)}
   </>;
-}
+});
 
 // Un subagente o una orden en segundo plano: estado, título, progreso y, dentro, sus herramientas y su resultado.
-function BloqueTarea({ t, h, internas, abierta }: { t: T.Tarea; h?: Herramienta; internas: Parte[]; abierta: boolean }) {
+const BloqueTarea = memo(function BloqueTarea({ t, h, internas, abierta }: { t: T.Tarea; h?: Herramienta; internas: Parte[]; abierta: boolean }) {
   const estado = t.estado || h?.estado || 'curso';
   return (
     <details className={'tarea-agente ' + estado} open={abierta}>
@@ -890,10 +891,10 @@ function BloqueTarea({ t, h, internas, abierta }: { t: T.Tarea; h?: Herramienta;
       {(t.detalle || t.sesion_hija) && <p className="suave pequeno tarea-detalle" title={t.detalle}>{t.detalle ? 'Detalle: ' + t.detalle : 'Sesión: ' + t.sesion_hija}</p>}
     </details>
   );
-}
+});
 
 // La lista de tareas del agente, con casillas.
-function ListaTareas({ t }: { t: T.Tarea }) {
+const ListaTareas = memo(function ListaTareas({ t }: { t: T.Tarea }) {
   const hechas = (t.elementos || []).filter(e => e.estado === 'hecho').length;
   return (
     <details className="lista-tareas-agente" open>
@@ -903,9 +904,9 @@ function ListaTareas({ t }: { t: T.Tarea }) {
       ))}</ul>
     </details>
   );
-}
+});
 
-function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
+const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
   if (p.tipo === 'texto') return <Texto md={p.texto} />;
   if (p.tipo === 'pensamiento') return <details className="pensamiento" open={abierta}><summary>Razonamiento</summary><div>{p.texto}</div></details>;
   const h = p.h;
@@ -926,4 +927,4 @@ function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
       {h.salida && <pre className="salida-h">{h.salida}</pre>}
     </details>
   );
-}
+});

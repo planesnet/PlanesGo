@@ -738,13 +738,28 @@ func configMCP(carpeta string, pedidos []string) string {
 	if err != nil {
 		return ""
 	}
-	d := filepath.Join(os.TempDir(), "pgocode-mcp")
+	// En la caché del usuario (0700), no en /tmp: lleva el entorno de los servidores (puede haber tokens) y otro
+	// usuario del equipo podría dejar ahí una configuración con su propia orden.
+	unaVezMCP.Do(func() { os.RemoveAll(filepath.Join(os.TempDir(), "pgocode-mcp")) }) // la de versiones anteriores
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	d := filepath.Join(cache, "pgocode", "mcp")
 	if os.MkdirAll(d, 0o700) != nil {
 		return ""
 	}
-	f := filepath.Join(d, fmt.Sprintf("%x.json", sha256.Sum256(b)))
-	if _, err := os.Stat(f); err != nil && os.WriteFile(f, b, 0o600) != nil {
+	if st, err := os.Lstat(d); err != nil || !st.IsDir() || st.Mode().Perm()&0o077 != 0 {
 		return ""
+	}
+	f := filepath.Join(d, fmt.Sprintf("%x.json", sha256.Sum256(b)))
+	if _, err := os.Stat(f); err != nil {
+		tmp := f + ".tmp"
+		if os.WriteFile(tmp, b, 0o600) != nil || os.Rename(tmp, f) != nil {
+			return ""
+		}
 	}
 	return f
 }
+
+var unaVezMCP sync.Once

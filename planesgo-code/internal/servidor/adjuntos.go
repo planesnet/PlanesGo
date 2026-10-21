@@ -71,13 +71,13 @@ func (s *Servidor) adjunto(w http.ResponseWriter, r *http.Request, ses *sesiones
 		nombre = "adjunto"
 	}
 	dir := dirAdjuntos(carpeta, sesion)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	excluyeDeGit(carpeta)
 	ruta := filepath.Join(dir, time.Now().Format("150405")+"-"+nombre)
-	dst, err := os.OpenFile(ruta, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	dst, err := os.OpenFile(ruta, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -105,4 +105,39 @@ func adjuntosValidos(carpeta string, l []string) []string {
 		}
 	}
 	return v
+}
+
+// LimpiaAdjuntos borra las carpetas de adjuntos (una por sesión) sin cambios en más de 30 días, en todas las
+// carpetas de los proyectos. Las evidencias no se tocan: son el resultado de las pruebas.
+func (s *Servidor) LimpiaAdjuntos() (borradas int) {
+	limite := time.Now().AddDate(0, 0, -30)
+	for _, cs := range s.Indice.Carpetas(false) {
+		for _, c := range cs {
+			base := filepath.Join(c, ".pgocode", "adjuntos")
+			if st, err := os.Lstat(base); err != nil || !st.IsDir() {
+				continue // tampoco si es un enlace
+			}
+			ents, _ := os.ReadDir(base)
+			for _, e := range ents {
+				d := filepath.Join(base, e.Name())
+				if st, err := os.Lstat(d); err == nil && st.IsDir() && st.ModTime().Before(limite) && !modificadoDesde(d, limite) {
+					if os.RemoveAll(d) == nil {
+						borradas++
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+// modificadoDesde: algún fichero de la carpeta ha cambiado después de t.
+func modificadoDesde(d string, t time.Time) bool {
+	ents, _ := os.ReadDir(d)
+	for _, e := range ents {
+		if i, err := e.Info(); err == nil && i.ModTime().After(t) {
+			return true
+		}
+	}
+	return false
 }

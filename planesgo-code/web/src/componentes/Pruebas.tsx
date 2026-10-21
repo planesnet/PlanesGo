@@ -51,7 +51,7 @@ export default function Pruebas({ proyecto, alVerDirecto }: { proyecto: Proyecto
     if (!campana) return;
     try { localStorage.setItem('pgo:campana:' + proyecto.id, campana); } catch { /* sin almacenamiento */ }
     carga();
-    const id = setInterval(carga, 15000); // el agente o la prueba pueden ir actualizando casos.json
+    const id = setInterval(() => { if (!document.hidden) carga(); }, 15000); // el agente o la prueba pueden ir actualizando casos.json
     return () => clearInterval(id);
   }, [campana]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -142,7 +142,7 @@ function Lanzar({ q, proyecto, campana, alVerDirecto }: { q: string; proyecto: n
   useEffect(() => { carga(); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!enCurso) return;
-    const id = setInterval(carga, 1500);
+    const id = setInterval(() => { if (!document.hidden) carga(); }, 1500);
     return () => clearInterval(id);
   }, [enCurso, q]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { salida.current?.scrollTo(0, salida.current.scrollHeight); }, [ultima?.salida.length]);

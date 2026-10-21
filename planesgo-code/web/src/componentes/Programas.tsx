@@ -81,7 +81,7 @@ function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version:
   const carga = () => get<{ proyecto: EnRed[]; otros: EnRed[] }>(`/api/procesos/externos?proyecto=${proyecto.id}`).then(setL).catch(() => {});
   useEffect(() => {
     carga();
-    const t = setInterval(carga, 10000);
+    const t = setInterval(() => { if (!document.hidden) carga(); }, 10000); // con la ventana oculta, nada
     return () => clearInterval(t);
   }, [proyecto.id, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const para = async (x: EnRed) => {
@@ -148,7 +148,7 @@ function Salida({ nombre, enCurso }: { nombre: string; enCurso: boolean }) {
     const lee = () => get<{ lineas: string[] }>(`/api/procesos/salida?nombre=${encodeURIComponent(nombre)}&n=400`)
       .then(r => { if (vivo) setLineas(r.lineas); }).catch(() => {});
     lee();
-    const t = enCurso ? setInterval(lee, 1500) : undefined;
+    const t = enCurso ? setInterval(() => { if (!document.hidden) lee(); }, 1500) : undefined;
     return () => { vivo = false; if (t) clearInterval(t); };
   }, [nombre, enCurso]);
   useEffect(() => {

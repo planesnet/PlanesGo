@@ -1178,6 +1178,9 @@ func (g *Gestor) diario(evento string, p *Periodo, motivo string) {
 	if g.Diario == "" {
 		return
 	}
+	if st, err := os.Stat(g.Diario); err == nil && st.Size() > 5<<20 {
+		os.Rename(g.Diario, g.Diario+".1") // rota a 5 MB (se guarda el anterior)
+	}
 	if f, err := os.OpenFile(g.Diario, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		b, _ := json.Marshal(r)
 		f.Write(append(b, '\n'))

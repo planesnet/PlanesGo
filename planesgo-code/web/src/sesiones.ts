@@ -51,7 +51,7 @@ export function guarda(login: string, s: Sesion): Sesion[] {
 export function borra(login: string, s: Sesion): Sesion[] {
   const l = lista(login, s.proyecto).filter(x => x.id !== s.id);
   guardaLista(login, s.proyecto, l);
-  try { localStorage.removeItem(claveConv(s.id)); } catch { /* sin almacenamiento */ }
+  try { for (const k of [claveConv(s.id), 'pgo:aparte-gasto:' + s.id]) localStorage.removeItem(k); } catch { /* sin almacenamiento */ }
   return l;
 }
 
@@ -73,6 +73,22 @@ export function conversacion(id: string): Mensaje[] {
   try { return JSON.parse(localStorage.getItem(claveConv(id)) || '[]') as Mensaje[]; } catch { return []; }
 }
 
+// guardaConversacion: lo de las herramientas de los mensajes antiguos se recorta (es lo que más ocupa y ya se ha
+// leído); si aun así no cabe, se recorta más. Si no cabe de ninguna manera, se avisa (no se pierde en silencio).
 export function guardaConversacion(id: string, m: Mensaje[]) {
-  try { localStorage.setItem(claveConv(id), JSON.stringify(m)); } catch { /* lleno: se queda en memoria */ }
+  for (const [recientes, max] of [[10, 1500], [2, 300]] as const) {
+    try { localStorage.setItem(claveConv(id), JSON.stringify(compacta(m, recientes, max))); return; } catch { /* lleno: más corto */ }
+  }
+  window.dispatchEvent(new CustomEvent('pgo:almacen-lleno', { detail: id }));
+}
+
+// compacta: los mensajes salvo los «recientes» últimos, con la entrada y la salida de sus herramientas y su
+// razonamiento recortados a «max» caracteres.
+export function compacta(m: Mensaje[], recientes: number, max: number): Mensaje[] {
+  const corta = (t: string | undefined, n: number) => (t && t.length > n ? t.slice(0, n) + '…' : t);
+  return m.map((x, i) => i >= m.length - recientes || !x.partes ? x : {
+    ...x,
+    partes: x.partes.map(p => p.tipo === 'herramienta' ? { ...p, h: { ...p.h, entrada: corta(p.h.entrada, max / 3), salida: corta(p.h.salida, max) } }
+      : p.tipo === 'pensamiento' ? { ...p, texto: corta(p.texto, max)! } : p),
+  });
 }

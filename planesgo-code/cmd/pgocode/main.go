@@ -315,6 +315,12 @@ func main() {
 		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos"), Version: version}}
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
+	// Adjuntos viejos (de sesiones ya terminadas): fuera, cuando el índice de carpetas esté listo.
+	go func() {
+		if n := s.LimpiaAdjuntos(); n > 0 {
+			log.Printf("adjuntos: %d carpetas de más de 30 días borradas", n)
+		}
+	}()
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

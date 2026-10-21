@@ -57,8 +57,9 @@ func marcasVivas() int {
 	muMarcas.Lock()
 	defer muMarcas.Unlock()
 	n := 0
+	vivos := porMarca()
 	for m := range marcas {
-		if len(ConMarca(m)) > 0 {
+		if len(vivos[m]) > 0 {
 			n++
 		} else {
 			delete(marcas, m)
