@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +80,25 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		depuracion.Log(a.Clave, "la sesión %s no es de %s: se empieza otra", p.SesionAgente, p.Carpeta)
 		emite(Evento{Texto: "_(La conversación anterior de OpenCode era de otra carpeta; empiezo una nueva en la de esta sesión.)_\n\n"})
 		p.SesionAgente = ""
+	}
+	// Antigravity da el consumo acumulado de la conversación (tokens y segundos): se emite solo lo de este turno.
+	if a.Clave == "antigravity" {
+		conv := p.SesionAgente
+		// Su «duración» es el tiempo de reloj desde que empezó la conversación (también lo que estuvo parada): la
+		// del turno la mide pgocode.
+		inicioTurno := time.Now()
+		previo := emite
+		emite = func(e Evento) {
+			if e.SesionAgente != "" {
+				conv = e.SesionAgente
+			}
+			if e.Uso != nil && conv != "" {
+				u := usoDelTurno(conv, *e.Uso)
+				u.Segundos = time.Since(inicioTurno).Seconds()
+				e.Uso = &u
+			}
+			previo(e)
+		}
 	}
 	// OpenCode: se apunta su sesión (también la nueva) para repararla si el turno se corta.
 	sesionOC := p.SesionAgente
@@ -217,7 +237,9 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 		cmd.Cancel()
 	}
 	errWait := cmd.Wait()
-	depuracion.Log(id, "fin en %s: wait=%v lectura=%v respuesta=%v", time.Since(inicio).Round(time.Millisecond), errWait, errLee, respuesta)
+	vivos := len(proceso.GruposConMarca(marca))
+	emite(Evento{Vivos: &vivos})
+	depuracion.Log(id, "fin en %s: wait=%v lectura=%v respuesta=%v vivos=%d", time.Since(inicio).Round(time.Millisecond), errWait, errLee, respuesta, vivos)
 	if errLee != nil && ctx.Err() == nil {
 		return errLee
 	}
@@ -366,6 +388,10 @@ func Agentes() []Proveedor {
 				}
 				for _, d := range p.Autorizadas {
 					a = append(a, "--add-dir", d)
+				}
+				// Solo los servidores MCP que pide la sesión (y «pgo»): el resto ni arranca ni gasta tokens.
+				if f := configMCP(p.Carpeta, p.MCP); f != "" {
+					a = append(a, "--strict-mcp-config", "--mcp-config", f)
 				}
 				// Sin permiso solo lee; «editar» cambia ficheros; «auto» ejecuta comandos con su control de seguridad.
 				switch p.Permisos {
@@ -582,4 +608,102 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 		}
 	}
 	return nil
+}
+
+// Acumulados de consumo por conversación de Antigravity (persisten entre ejecuciones de pgocode).
+var (
+	muAcumulados sync.Mutex
+	acumulados   map[string]Uso
+)
+
+func ficheroAcumulados() string {
+	d, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(d, "pgocode", "antigravity-consumo.json")
+}
+
+// usoDelTurno: lo de este turno = el acumulado que da el agente menos el anterior de la conversación. Si el
+// acumulado baja (conversación nueva con el mismo id, o se perdió el registro), se toma entero.
+func usoDelTurno(conv string, total Uso) Uso {
+	muAcumulados.Lock()
+	defer muAcumulados.Unlock()
+	f := ficheroAcumulados()
+	if acumulados == nil {
+		acumulados = map[string]Uso{}
+		if b, err := os.ReadFile(f); err == nil {
+			json.Unmarshal(b, &acumulados)
+		}
+	}
+	antes, ok := acumulados[conv]
+	turno := total
+	if ok && total.Entrada >= antes.Entrada && total.Salida >= antes.Salida && total.Segundos >= antes.Segundos {
+		turno = Uso{Entrada: total.Entrada - antes.Entrada, Salida: total.Salida - antes.Salida,
+			Coste: max(total.Coste-antes.Coste, 0), Segundos: total.Segundos - antes.Segundos}
+	}
+	acumulados[conv] = total
+	if f != "" {
+		os.MkdirAll(filepath.Dir(f), 0o700)
+		if b, err := json.Marshal(acumulados); err == nil {
+			os.WriteFile(f, b, 0o600)
+		}
+	}
+	return turno
+}
+
+// ServidoresMCP: los servidores MCP de Claude Code configurados (los del usuario y los de la carpeta), por nombre.
+func ServidoresMCP(carpeta string) map[string]json.RawMessage {
+	m := map[string]json.RawMessage{}
+	casa, err := os.UserHomeDir()
+	if err != nil {
+		return m
+	}
+	var cfg struct {
+		MCP       map[string]json.RawMessage `json:"mcpServers"`
+		Proyectos map[string]struct {
+			MCP map[string]json.RawMessage `json:"mcpServers"`
+		} `json:"projects"`
+	}
+	if b, err := os.ReadFile(filepath.Join(casa, ".claude.json")); err == nil && json.Unmarshal(b, &cfg) == nil {
+		for k, v := range cfg.MCP {
+			m[k] = v
+		}
+		for k, v := range cfg.Proyectos[carpeta].MCP {
+			m[k] = v
+		}
+	}
+	var proyecto struct {
+		MCP map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if b, err := os.ReadFile(filepath.Join(carpeta, ".mcp.json")); err == nil && json.Unmarshal(b, &proyecto) == nil {
+		for k, v := range proyecto.MCP {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// configMCP: un fichero de configuración MCP con «pgo» y los servidores pedidos (para --strict-mcp-config).
+func configMCP(carpeta string, pedidos []string) string {
+	todos := ServidoresMCP(carpeta)
+	sel := map[string]json.RawMessage{}
+	for _, n := range append([]string{"pgo"}, pedidos...) {
+		if v, ok := todos[n]; ok {
+			sel[n] = v
+		}
+	}
+	b, err := json.Marshal(map[string]any{"mcpServers": sel})
+	if err != nil {
+		return ""
+	}
+	d := filepath.Join(os.TempDir(), "pgocode-mcp")
+	if os.MkdirAll(d, 0o700) != nil {
+		return ""
+	}
+	f := filepath.Join(d, fmt.Sprintf("%x.json", sha256.Sum256(b)))
+	if _, err := os.Stat(f); err != nil && os.WriteFile(f, b, 0o600) != nil {
+		return ""
+	}
+	return f
 }

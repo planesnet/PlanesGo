@@ -80,3 +80,27 @@ func TestDirPlanes(t *testing.T) {
 		t.Error("vale para otro proyecto")
 	}
 }
+
+// Los planes de antes de la numeración reciben su número por orden de creación; los nuevos, el siguiente.
+func TestNumeraPlanes(t *testing.T) {
+	d := t.TempDir()
+	os.WriteFile(filepath.Join(d, "b.md"), []byte(componePlan(Plan{Titulo: "B", Proyecto: 7, Estado: "borrador", Creado: "2026-10-21T10:00:00Z", Texto: "b"})), 0o644)
+	os.WriteFile(filepath.Join(d, "a.md"), []byte(componePlan(Plan{Titulo: "A", Proyecto: 7, Estado: "borrador", Creado: "2026-10-21T09:00:00Z", Texto: "a"})), 0o644)
+	os.WriteFile(filepath.Join(d, "otro.md"), []byte(componePlan(Plan{Titulo: "Otro", Proyecto: 8, Estado: "borrador", Creado: "2026-10-21T08:00:00Z", Texto: "x"})), 0o644)
+	numera(d, 7)
+	l := planesDe(d, 7)
+	if len(l) != 2 || l[0].Titulo != "A" || l[0].Numero != 1 || l[1].Numero != 2 {
+		t.Fatalf("%+v", l)
+	}
+	if n := siguienteNumero(d, 7); n != 3 {
+		t.Errorf("siguiente: %d", n)
+	}
+	// Borrado el último, su número no se reutiliza.
+	os.Remove(filepath.Join(d, "b.md"))
+	if n := siguienteNumero(d, 7); n != 4 {
+		t.Errorf("tras borrar: %d (no se reutiliza)", n)
+	}
+	if n := siguienteNumero(d, 8); n != 1 {
+		t.Errorf("otro proyecto: %d", n)
+	}
+}

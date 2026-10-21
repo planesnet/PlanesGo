@@ -30,3 +30,15 @@ func TestImagenesClaude(t *testing.T) {
 		t.Errorf("anidada en subagente: %+v", hs[2])
 	}
 }
+
+// Los avisos internos de Antigravity que repite el modelo no llegan al chat, aunque las marcas lleguen partidas.
+func TestQuitaBloque(t *testing.T) {
+	q := &quitaBloque{abre: "<SYSTEM_MESSAGE>", cierra: "</SYSTEM_MESSAGE>"}
+	var b strings.Builder
+	for _, x := range []string{"Hecho. <SYSTEM", "_MESSAGE>\\n[Message] tarea acabada</SYSTEM_MES", "SAGE> FIN-ANTIGRAVITY", " y <b>nada</b> más <"} {
+		b.WriteString(q.Pasa(x))
+	}
+	if g := b.String(); g != "Hecho.  FIN-ANTIGRAVITY y <b>nada</b> más " {
+		t.Errorf("%q", g)
+	}
+}

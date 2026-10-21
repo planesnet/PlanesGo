@@ -8,7 +8,7 @@ import Texto from './Texto';
 // ejecutarlo) y la lista de planes guardados del proyecto (<directorio del proyecto>/.pgocode/planes/).
 
 export type EstadoPlan = 'borrador' | 'ejecutado' | 'descartado';
-export interface Plan { ruta: string; titulo: string; proyecto: number; sesion?: string; agente?: string; estado: EstadoPlan; creado?: string; modificado?: string; texto?: string }
+export interface Plan { ruta: string; numero?: number; titulo: string; proyecto: number; sesion?: string; agente?: string; estado: EstadoPlan; creado?: string; modificado?: string; texto?: string }
 
 const q = (proyecto: number, directorio?: string) => `proyecto=${proyecto}&directorio=${encodeURIComponent(directorio || '')}`;
 export const leePlan = (proyecto: number, directorio: string | undefined, ruta: string) =>
@@ -20,34 +20,35 @@ export const guardaPlan = (proyecto: number, directorio: string | undefined, p: 
 export const borraPlan = (proyecto: number, directorio: string | undefined, ruta: string) =>
   post('/api/planes/borrar', { proyecto, directorio: directorio || '', ruta });
 
-const ESTADOS: Record<EstadoPlan, string> = { borrador: 'Por decidir', ejecutado: 'Ejecutado', descartado: 'Descartado' };
+const ESTADOS: Record<EstadoPlan | 'borrado', string> = { borrador: 'Por decidir', ejecutado: 'Ejecutado', descartado: 'Descartado', borrado: 'Borrado' };
 const nombre = (ruta: string) => ruta.split('/').pop() || ruta;
 
-export function Estado({ e }: { e: EstadoPlan }) {
+export function Estado({ e }: { e: EstadoPlan | 'borrado' }) {
   return <span className={'plan-estado ' + e}>{ESTADOS[e]}</span>;
 }
 
 // Tarjeta del plan bajo la respuesta del agente: abrirlo para revisarlo o editarlo, ejecutarlo o descartarlo.
-export function TarjetaPlan({ titulo, ruta, estado, ocupado, alAbrir, alEjecutar, alDescartar }: {
-  titulo: string; ruta: string; estado: EstadoPlan; ocupado: boolean;
+export function TarjetaPlan({ numero, titulo, ruta, estado, ocupado, alAbrir, alEjecutar, alDescartar }: {
+  numero?: number; titulo: string; ruta: string; estado: EstadoPlan | 'borrado'; ocupado: boolean;
   alAbrir: () => void; alEjecutar: () => void; alDescartar: () => void;
 }) {
   return (
     <div className="tarjeta-plan">
       <div className="tarjeta-plan-cabecera">
         <Icono n="lapiz" t={14} />
+        {numero ? <span className="plan-numero">Plan #{numero}</span> : null}
         <b className="recorta">{titulo}</b>
         <Estado e={estado} />
       </div>
       <code className="recorta suave pequeno" title={ruta}>{nombre(ruta)}</code>
       <div className="tarjeta-plan-acciones">
-        <button className="boton-secundario" onClick={alAbrir}>Revisar y editar</button>
+        {estado !== 'borrado' && <button className="boton-secundario" onClick={alAbrir}>Revisar y editar</button>}
         {estado === 'borrador' && <>
           <button className="primario" onClick={alEjecutar} disabled={ocupado} title={ocupado ? 'Espera a que termine el agente' : 'Pasa la sesión al modo de ejecución y le pide al agente que siga el plan'}>Ejecutar</button>
           <button className="enlace" onClick={alDescartar}>Descartar</button>
         </>}
       </div>
-      {estado === 'borrador' && <span className="suave pequeno">Para pedir cambios, escríbelos en el chat (en modo plan): el agente revisa este plan, con tus ediciones incluidas.</span>}
+      {estado === 'borrador' && numero ? <span className="suave pequeno">En el chat: «plan {numero}: cambios» lo revisa (con tus ediciones), «ejecuta el plan {numero}», «descarta el plan {numero}».</span> : null}
     </div>
   );
 }
@@ -89,7 +90,7 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
     <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
       <div className="modal editor-plan" role="dialog" aria-modal="true" aria-label="Plan">
         <div className="modal-cabecera">
-          <h2 className="recorta">{plan?.titulo || 'Plan'} {plan && <Estado e={plan.estado} />}</h2>
+          <h2 className="recorta">{plan?.numero ? `Plan #${plan.numero} · ` : ''}{plan?.titulo || 'Plan'} {plan && <Estado e={plan.estado} />}</h2>
           <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
         </div>
         <code className="recorta suave pequeno" title={ruta}>{ruta}</code>
@@ -151,7 +152,7 @@ export function ListaPlanes({ proyecto, directorio, alAbrir, alCerrar }: {
             {l.map(p => (
               <li key={p.ruta}>
                 <button onClick={() => alAbrir(p.ruta)} title={p.ruta}>
-                  <span className="recorta">{p.titulo}</span>
+                  <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span>
                   <Estado e={p.estado} />
                   <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
                 </button>

@@ -27,6 +27,8 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [tareas, setTareas] = useState<{ id: number; nombre: string }[] | null>(null);
+  const [mcps, setMcps] = useState<string[] | null>(null);
+  useEffect(() => { if (s.carpeta) get<string[]>(`/api/agentes/mcp?proyecto=${s.proyecto}&carpeta=${encodeURIComponent(s.carpeta)}`).then(setMcps).catch(() => setMcps([])); }, [s.proyecto, s.carpeta]);
   useEffect(() => { get<{ id: number; nombre: string }[]>(`/api/proyecto/tareas?proyecto=${sesion.proyecto}`).then(setTareas).catch(() => setTareas([])); }, [sesion.proyecto]);
   const cambia = (c: Partial<Sesion>) => setS(x => ({ ...x, ...c }));
   const prov = proveedores.find(p => p.id === s.agente);
@@ -173,6 +175,19 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
           <button type="button" className="boton-secundario autorizar" onClick={autoriza}><Icono n="nuevo" t={13} /> Autorizar una carpeta…</button>
           <span className="suave pequeno">El agente solo trabaja en la carpeta de la sesión. Si necesita leer otra (p. ej. un proyecto de referencia), autorízala aquí.</span>
         </div>
+
+        {s.agente === 'claude-code' && mcps && mcps.length > 0 && (
+          <fieldset className="notificaciones">
+            <legend>Servidores MCP de Claude</legend>
+            <span className="suave pequeno">Solo arrancan los marcados (y «pgo»): cada servidor es un proceso más y añade sus herramientas a cada turno.</span>
+            <div className="rejilla-mcp">
+              {mcps.map(n => (
+                <label key={n} className="casilla"><input type="checkbox" checked={(s.mcp || []).includes(n)}
+                  onChange={e => cambia({ mcp: e.target.checked ? [...(s.mcp || []), n] : (s.mcp || []).filter(x => x !== n) })} /> {n}</label>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <fieldset className="notificaciones">
           <legend>Notificaciones</legend>

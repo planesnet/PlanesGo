@@ -76,24 +76,21 @@ func TestRegistroCuadra(t *testing.T) {
 	}
 }
 
-// Dos sesiones abiertas a la vez con la persona delante: el tiempo humano se cuenta dos veces.
+// Si alguna vez se contara dos veces el tiempo humano (dos sesiones a la vez sin descontar), el validador avisa.
 func TestRegistroSolape(t *testing.T) {
-	o := nuevoOdoo()
-	r := &reloj{t: t0}
-	reg := &Registro{Dir: t.TempDir(), Ahora: r.ahora}
-	g := &Gestor{Odoo: o, Ahora: r.ahora, Tiempos: reg}
-	g.Actividad(tr("a"))
-	g.Actividad(tr("b"))
-	for i := 0; i < 10; i++ {
-		r.pasa(time.Minute)
-		g.Actividad(tr("a"))
-		g.Actividad(tr("b"))
+	l := []string{
+		`{"t":"2026-10-21T10:15:00Z","ev":"periodo-cierra","sesion":"a","uid":2,"proyecto":1,"tarea_id":2,"inicio":"2026-10-21T10:00:00Z","fin":"2026-10-21T10:15:00Z","maquina_s":0,"hombre_s":900}`,
+		`{"t":"2026-10-21T10:15:00Z","ev":"periodo-cierra","sesion":"b","uid":2,"proyecto":1,"tarea_id":2,"inicio":"2026-10-21T10:05:00Z","fin":"2026-10-21T10:15:00Z","maquina_s":0,"hombre_s":600}`,
 	}
-	r.pasa(6 * time.Minute)
-	g.revisa()
-	inf := valida(t, reg, t0.Format("2006-01-02"), true)
+	inf, _ := Valida(strings.NewReader(strings.Join(l, "\n")), true)
 	if !strings.Contains(tipos(inf), "aviso:solape") {
 		t.Errorf("no detecta el solape: %s", tipos(inf))
+	}
+	// Con el descuento anotado, no avisa.
+	l = append(l, `{"t":"2026-10-21T10:15:00Z","ev":"periodo-solape","sesion":"b","solapado_s":600}`)
+	inf, _ = Valida(strings.NewReader(strings.Join(l, "\n")), true)
+	if strings.Contains(tipos(inf), "solape") {
+		t.Errorf("avisa aunque ya se descontó: %s", tipos(inf))
 	}
 }
 
@@ -118,5 +115,29 @@ func TestValidaDetecta(t *testing.T) {
 		if !strings.Contains(got, q) {
 			t.Errorf("falta %s en %s", q, got)
 		}
+	}
+}
+
+// Dos sesiones a la vez con la persona delante: el tiempo humano se imputa una sola vez y el validador no avisa.
+func TestSolapeHumanoUnaVez(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	reg := &Registro{Dir: t.TempDir(), Ahora: r.ahora}
+	g := &Gestor{Odoo: o, Ahora: r.ahora, Tiempos: reg}
+	g.Actividad(tr("a"))
+	g.Actividad(tr("b"))
+	for i := 0; i < 10; i++ {
+		r.pasa(time.Minute)
+		g.Actividad(tr("a"))
+		g.Actividad(tr("b"))
+	}
+	r.pasa(6 * time.Minute)
+	g.revisa()
+	g.escribeSucias()
+	// 10 min de actividad + 5 de espera = 15 min, una vez (no 30): 0,25 h.
+	espera(t, func() bool { h := o.con("pgocode-h"); return len(h) == 1 && h[0]["unit_amount"] == 0.25 })
+	inf := valida(t, reg, t0.Format("2006-01-02"), true)
+	if strings.Contains(tipos(inf), "solape") {
+		t.Errorf("avisa de un solape ya descontado: %s", tipos(inf))
 	}
 }

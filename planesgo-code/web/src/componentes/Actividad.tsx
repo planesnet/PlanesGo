@@ -80,7 +80,7 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
         <ul className="planes">
           {(planes || []).map(p => (
             <li key={p.ruta}><button onClick={() => setPlan(p.ruta)} title={p.ruta}>
-              <span className="recorta">{p.titulo}</span><EstadoPlan e={p.estado} />
+              <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span><EstadoPlan e={p.estado} />
               <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
             </button></li>
           ))}

@@ -21,6 +21,7 @@ import (
 // Plan: la cabecera y, al leerlo, el texto.
 type Plan struct {
 	Ruta       string `json:"ruta"`
+	Numero     int    `json:"numero"` // número del plan en el proyecto (#1, #2…), para nombrarlo en el chat
 	Titulo     string `json:"titulo"`
 	Proyecto   int    `json:"proyecto"`
 	Sesion     string `json:"sesion,omitempty"`
@@ -34,7 +35,7 @@ type Plan struct {
 var (
 	estadosPlan  = map[string]bool{"borrador": true, "ejecutado": true, "descartado": true}
 	noSlug       = regexp.MustCompile(`[^a-z0-9]+`)
-	clavesPlan   = []string{"titulo", "proyecto", "sesion", "agente", "estado", "creado"}
+	clavesPlan   = []string{"numero", "titulo", "proyecto", "sesion", "agente", "estado", "creado"}
 	errFueraPlan = errors.New("ese plan no está en la carpeta de planes del proyecto")
 )
 
@@ -78,7 +79,7 @@ func slug(t string) string {
 func componePlan(p Plan) string {
 	var b strings.Builder
 	b.WriteString("---\n")
-	v := map[string]string{"titulo": p.Titulo, "proyecto": strconv.Itoa(p.Proyecto), "sesion": p.Sesion, "agente": p.Agente, "estado": p.Estado, "creado": p.Creado}
+	v := map[string]string{"numero": numeroTexto(p.Numero), "titulo": p.Titulo, "proyecto": strconv.Itoa(p.Proyecto), "sesion": p.Sesion, "agente": p.Agente, "estado": p.Estado, "creado": p.Creado}
 	for _, k := range clavesPlan {
 		if v[k] != "" {
 			b.WriteString(k + ": " + strings.ReplaceAll(v[k], "\n", " ") + "\n")
@@ -107,6 +108,8 @@ func leePlan(contenido string) Plan {
 		}
 		v = strings.TrimSpace(v)
 		switch strings.TrimSpace(k) {
+		case "numero":
+			p.Numero, _ = strconv.Atoi(v)
 		case "titulo":
 			p.Titulo = v
 		case "proyecto":
@@ -179,6 +182,7 @@ func (s *Servidor) planesGuarda(w http.ResponseWriter, r *http.Request, ses *ses
 			pl.Ruta = filepath.Join(dir, ahora.Format("2006-01-02-1504")+"-"+slug(pl.Titulo)+"-"+strconv.Itoa(i)+".md")
 		}
 		pl.Creado = ahora.Format(time.RFC3339)
+		pl.Numero = siguienteNumero(dir, p.Proyecto)
 		if pl.Estado == "" {
 			pl.Estado = "borrador"
 		}
@@ -211,6 +215,9 @@ func (s *Servidor) planesGuarda(w http.ResponseWriter, r *http.Request, ses *ses
 			viejo.Agente = pl.Agente
 		}
 		viejo.Proyecto = p.Proyecto
+		if viejo.Numero == 0 {
+			viejo.Numero = siguienteNumero(dir, p.Proyecto)
+		}
 		pl = viejo
 	}
 	pl.Proyecto = p.Proyecto
@@ -234,6 +241,7 @@ func (s *Servidor) planesLista(w http.ResponseWriter, r *http.Request, ses *sesi
 		jsonError(w, http.StatusBadRequest, "ese directorio no es del proyecto")
 		return
 	}
+	numera(dir, id)
 	ents, _ := os.ReadDir(dir)
 	l := []Plan{}
 	for _, e := range ents {
@@ -331,4 +339,74 @@ func (s *Servidor) planesBorra(w http.ResponseWriter, r *http.Request, ses *sesi
 		return
 	}
 	jsonOK(w, map[string]bool{"ok": true})
+}
+
+func numeroTexto(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
+// planesDe: los planes del proyecto en la carpeta (con su texto), del más antiguo al más reciente.
+func planesDe(dir string, proyecto int) []Plan {
+	ents, _ := os.ReadDir(dir)
+	var l []Plan
+	for _, e := range ents {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		f := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		p := leePlan(string(b))
+		if p.Proyecto != 0 && p.Proyecto != proyecto {
+			continue
+		}
+		p.Ruta = f
+		if p.Creado == "" {
+			if st, err := e.Info(); err == nil {
+				p.Creado = st.ModTime().Format(time.RFC3339)
+			}
+		}
+		l = append(l, p)
+	}
+	sort.SliceStable(l, func(i, j int) bool { return l[i].Creado < l[j].Creado })
+	return l
+}
+
+// siguienteNumero: el número del próximo plan del proyecto. Los números no se reutilizan (un plan borrado deja su
+// número sin usar, para que «plan N» en el chat nunca se confunda): se guarda el último dado en .contador-<proyecto>.
+func siguienteNumero(dir string, proyecto int) int {
+	n := 0
+	for _, p := range planesDe(dir, proyecto) {
+		n = max(n, p.Numero)
+	}
+	f := filepath.Join(dir, ".contador-"+strconv.Itoa(proyecto))
+	if b, err := os.ReadFile(f); err == nil {
+		if c, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+			n = max(n, c)
+		}
+	}
+	os.WriteFile(f, []byte(strconv.Itoa(n+1)+"\n"), 0o644)
+	return n + 1
+}
+
+// numera: los planes de antes de la numeración reciben su número (por orden de creación) y se guarda.
+func numera(dir string, proyecto int) {
+	n := 0
+	l := planesDe(dir, proyecto)
+	for _, p := range l {
+		n = max(n, p.Numero)
+	}
+	for _, p := range l {
+		if p.Numero == 0 {
+			n++
+			p.Numero = n
+			p.Proyecto = proyecto
+			os.WriteFile(p.Ruta, []byte(componePlan(p)), 0o644)
+		}
+	}
 }

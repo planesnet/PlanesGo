@@ -39,3 +39,30 @@ export function tituloPlan(plan: string, peticion: string): string {
   const t = (h ? h.replace(/^#+\s+/, '') : peticion.split('\n')[0]).replace(/[*_`]/g, '').trim();
   return t.length > 80 ? t.slice(0, 79).trimEnd() + '…' : t || 'Plan';
 }
+
+// Órdenes de planes en el chat (los planes son una herramienta, no un modo; van numerados por proyecto):
+//   «/plan <petición>» crea uno · «plan N: <cambios>» o «/plan N <cambios>» lo revisa · «ejecuta el plan N» ·
+//   «descarta el plan N» · «reactiva el plan N» · «borra el plan N» (estas tres, en local: sin agente ni tokens).
+export type OrdenPlan =
+  | { tipo: 'nuevo'; peticion: string }
+  | { tipo: 'revisar'; numero: number; peticion: string }
+  | { tipo: 'ejecutar' | 'descartar' | 'reactivar' | 'borrar'; numero: number };
+
+export function interpreta(texto: string): OrdenPlan | null {
+  const t = texto.trim();
+  let m = /^\/plan\s+#?(\d+)\s+([\s\S]+)$/i.exec(t) || /^plan\s+#?(\d+)\s*[:,\-–]\s*([\s\S]+)$/i.exec(t);
+  if (m) return { tipo: 'revisar', numero: Number(m[1]), peticion: m[2].trim() };
+  m = /^\/plan\s+([\s\S]+)$/i.exec(t);
+  if (m) return { tipo: 'nuevo', peticion: m[1].trim() };
+  const acciones: [RegExp, 'ejecutar' | 'descartar' | 'reactivar' | 'borrar'][] = [
+    [/^(ejecuta|ejecutar|lanza|lanzar)\s+(el\s+)?plan\s+#?(\d+)[.!]?$/i, 'ejecutar'],
+    [/^(descarta|descartar)\s+(el\s+)?plan\s+#?(\d+)[.!]?$/i, 'descartar'],
+    [/^(reactiva|reactivar|recupera|recuperar)\s+(el\s+)?plan\s+#?(\d+)[.!]?$/i, 'reactivar'],
+    [/^(borra|borrar|elimina|eliminar)\s+(el\s+)?plan\s+#?(\d+)[.!]?$/i, 'borrar'],
+  ];
+  for (const [re, tipo] of acciones) {
+    const x = re.exec(t);
+    if (x) return { tipo, numero: Number(x[3]) };
+  }
+  return null;
+}

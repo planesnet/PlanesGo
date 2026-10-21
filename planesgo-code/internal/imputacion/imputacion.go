@@ -155,6 +155,9 @@ type Gestor struct {
 	unificado map[int]bool    // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
 	campos    map[string]bool // campos de IA que tiene account.analytic.line en este Odoo (nil: sin consultar)
 	escribe   sync.Mutex      // una escritura en Odoo a la vez
+	// humanos: los tramos de tiempo humano ya imputados por usuario y día (uid|fecha). Una persona solo está en un
+	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
+	humanos map[string][]Tramo
 	arrancado bool
 }
 
@@ -279,6 +282,7 @@ func (g *Gestor) Arranca(ctx context.Context) {
 		var e struct {
 			Periodos []*Periodo
 			Dias     []*Dia
+			Humanos  map[string][]Tramo
 		}
 		if b, err := os.ReadFile(g.FicheroEstado); err == nil && json.Unmarshal(b, &e) == nil {
 			hoy := g.ahora().Format("2006-01-02")
@@ -286,6 +290,9 @@ func (g *Gestor) Arranca(ctx context.Context) {
 				if d.Fecha == hoy || d.Sucio {
 					g.dias[claveDe(d.Fecha, d.Proyecto, d.TareaID, d.Clase, d.Agente)] = d
 				}
+			}
+			if e.Humanos != nil {
+				g.humanos = e.Humanos
 			}
 			for _, p := range e.Periodos {
 				turno := !p.TurnoDesde.IsZero()
@@ -605,6 +612,19 @@ func (g *Gestor) cierraPeriodo(p *Periodo, motivo string) {
 // sumaPeriodo (con el cerrojo): añade un periodo cerrado a sus líneas del día.
 func (g *Gestor) sumaPeriodo(p *Periodo) {
 	maq, hom := g.partesCerrado(p)
+	// Tiempo humano que ya se imputó en otra sesión a la vez: no se cuenta otra vez.
+	fin := p.Ultima.Add(Espera)
+	if hom > 0 {
+		k := claveHumano(p)
+		if sol := math.Min(hom, solape(g.humanos[k], p.Inicio, fin)); sol > 0 {
+			hom -= sol
+			g.anota("periodo-solape", p, map[string]any{"solapado_s": math.Round(sol*1000) / 1000, "inicio": p.Inicio.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano)})
+		}
+		if g.humanos == nil {
+			g.humanos = map[string][]Tramo{}
+		}
+		g.humanos[k] = append(g.humanos[k], Tramo{p.Inicio, fin})
+	}
 	{
 		if d := g.dia(p, "h"); d != nil {
 			d.Cerrado += hom
@@ -711,7 +731,7 @@ func (g *Gestor) totales(d *Dia) (seg float64, ent, sal int, coste float64, ritm
 		maq, hom := g.partes(p)
 		switch {
 		case d.Clase == "h":
-			seg += hom
+			seg += math.Max(0, hom-g.solapeAbierto(p))
 		case agenteDe(p.T.Modelo) == d.Agente:
 			seg += maq
 			ent, sal, coste = ent+p.Entrada, sal+p.Salida, coste+p.Coste
@@ -1065,7 +1085,14 @@ func (g *Gestor) guarda() {
 	e := struct {
 		Periodos []*Periodo
 		Dias     []*Dia
-	}{}
+		Humanos  map[string][]Tramo
+	}{Humanos: map[string][]Tramo{}}
+	hoy := g.ahora().Format("2006-01-02")
+	for k, v := range g.humanos {
+		if strings.HasSuffix(k, "|"+hoy) {
+			e.Humanos[k] = v
+		}
+	}
 	for _, p := range g.periodos {
 		e.Periodos = append(e.Periodos, p)
 	}
@@ -1232,4 +1259,58 @@ func (g *Gestor) UnificaSueltas(ctx context.Context, uid int, sesionOdoo string)
 	}
 	depuracion.Log("imputacion", "unificar (usuario %d): %s", uid, r.Mensaje)
 	return r, nil
+}
+
+// Tramo de tiempo.
+type Tramo struct{ Ini, Fin time.Time }
+
+func claveHumano(p *Periodo) string { return fmt.Sprintf("%d|%s", p.T.UID, p.Inicio.Format("2006-01-02")) }
+
+// solape: los segundos de [ini, fin] que caen dentro de alguno de los tramos (contando cada instante una vez).
+func solape(tramos []Tramo, ini, fin time.Time) float64 {
+	var l []Tramo
+	for _, t := range tramos {
+		a, b := maxT(t.Ini, ini), minT(t.Fin, fin)
+		if b.After(a) {
+			l = append(l, Tramo{a, b})
+		}
+	}
+	sort.Slice(l, func(i, j int) bool { return l[i].Ini.Before(l[j].Ini) })
+	var total time.Duration
+	var hasta time.Time
+	for _, t := range l {
+		if t.Ini.Before(hasta) {
+			t.Ini = hasta
+		}
+		if t.Fin.After(t.Ini) {
+			total += t.Fin.Sub(t.Ini)
+			hasta = t.Fin
+		}
+	}
+	return total.Seconds()
+}
+
+// solapeAbierto (con el cerrojo): el tiempo de un periodo abierto que ya cuenta como humano en otro sitio (los ya
+// imputados y los otros periodos abiertos del mismo usuario y día que empezaron antes).
+func (g *Gestor) solapeAbierto(p *Periodo) float64 {
+	k := claveHumano(p)
+	tramos := append([]Tramo(nil), g.humanos[k]...)
+	for _, o := range g.periodos {
+		if o == p || claveHumano(o) != k {
+			continue
+		}
+		if o.Inicio.Before(p.Inicio) || (o.Inicio.Equal(p.Inicio) && o.Sesion < p.Sesion) {
+			if _, h := g.partes(o); h > 0 {
+				tramos = append(tramos, Tramo{o.Inicio, g.finDe(o)})
+			}
+		}
+	}
+	return solape(tramos, p.Inicio, g.finDe(p))
+}
+
+func maxT(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }

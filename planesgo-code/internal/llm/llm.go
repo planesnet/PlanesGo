@@ -34,6 +34,9 @@ type Peticion struct {
 	// Autorizadas: carpetas de fuera del proyecto que el usuario ha autorizado en la sesión. El agente no puede
 	// salir de su carpeta salvo a estas (ahorra tokens y evita que recorra el equipo).
 	Autorizadas []string
+	// MCP: servidores MCP de Claude Code que la sesión quiere además de «pgo» (por defecto, ninguno: cada uno
+	// arranca su proceso y añade sus herramientas a cada turno).
+	MCP []string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
@@ -49,6 +52,8 @@ type Evento struct {
 	// Adoptados: programas que el agente dejó en marcha (en segundo plano) y que pgocode se queda al acabar
 	// su respuesta, para no esperarlos ni gastar otro turno (siguen en Programas y en la barra de ejecución).
 	Adoptados []Adoptado `json:"adoptados,omitempty"`
+	// Vivos: al acabar el turno, los grupos de procesos de este agente que siguen en marcha (solo los suyos).
+	Vivos *int `json:"-"`
 }
 
 // Adoptado: un programa del agente que sigue en marcha en pgocode.

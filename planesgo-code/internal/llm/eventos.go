@@ -315,6 +315,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 // leeAntigravity interpreta la salida stream-json de `agy`: texto (text_delta), herramientas (pasos «tool», con
 // su entrada al empezar y su salida al acabar), consumo y el id de conversación para continuar con --conversation.
 func leeAntigravity(r io.Reader, emite func(Evento)) error {
+	// El modelo a veces repite en su respuesta los avisos internos del agente (<SYSTEM_MESSAGE>…): fuera.
+	sinSistema := &quitaBloque{abre: "<SYSTEM_MESSAGE>", cierra: "</SYSTEM_MESSAGE>"}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	empezadas := map[int]string{} // paso → herramienta, mientras no acaba
@@ -372,7 +374,9 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			p := ev.Paso
 			switch {
 			case p.Tipo == "agent_response" && p.Texto != "":
-				emite(Evento{Texto: p.Texto})
+				if t := sinSistema.Pasa(p.Texto); t != "" {
+					emite(Evento{Texto: t})
+				}
 			// Un subagente puede empezar como «tool» y acabar como «subagent» (o al revés): el mismo paso.
 			case (p.Tipo == "tool" || p.Tipo == "subagent") && p.Has != "":
 				id := fmt.Sprintf("paso-%d", p.Indice)
@@ -650,4 +654,46 @@ func salidaTareaClaude(id string) string {
 		}
 	}
 	return ""
+}
+
+// quitaBloque quita de un texto que llega a trozos lo que va entre dos marcas (también si una marca llega partida
+// entre dos trozos: lo que podría ser el principio de una marca se guarda hasta el trozo siguiente).
+type quitaBloque struct {
+	abre, cierra string
+	dentro       bool
+	pendiente    string
+}
+
+func (q *quitaBloque) Pasa(t string) string {
+	t = q.pendiente + t
+	q.pendiente = ""
+	var b strings.Builder
+	for t != "" {
+		marca := q.abre
+		if q.dentro {
+			marca = q.cierra
+		}
+		if i := strings.Index(t, marca); i >= 0 {
+			if !q.dentro {
+				b.WriteString(t[:i])
+			}
+			t = t[i+len(marca):]
+			q.dentro = !q.dentro
+			continue
+		}
+		// ¿Acaba con el principio de la marca? Se guarda para el siguiente trozo.
+		corte := len(t)
+		for n := min(len(marca)-1, len(t)); n > 0; n-- {
+			if strings.HasSuffix(t, marca[:n]) {
+				corte = len(t) - n
+				break
+			}
+		}
+		if !q.dentro {
+			b.WriteString(t[:corte])
+		}
+		q.pendiente = t[corte:]
+		break
+	}
+	return b.String()
 }

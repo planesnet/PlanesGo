@@ -60,3 +60,17 @@ test('ejecución: indica la ruta y lleva el plan', () => {
   assert.match(t, /\/p\/\.pgocode\/planes\/x\.md/);
   assert.ok(t.endsWith('# Plan\n1. a'));
 });
+
+test('órdenes de planes en el chat', () => {
+  assert.deepEqual(P.interpreta('/plan Añade un fichero saludo.txt'), { tipo: 'nuevo', peticion: 'Añade un fichero saludo.txt' });
+  assert.deepEqual(P.interpreta('/plan 2 quita el paso 3'), { tipo: 'revisar', numero: 2, peticion: 'quita el paso 3' });
+  assert.deepEqual(P.interpreta('Plan #12: usa Go 1.24\ny añade pruebas'), { tipo: 'revisar', numero: 12, peticion: 'usa Go 1.24\ny añade pruebas' });
+  assert.deepEqual(P.interpreta('plan 3, más corto'), { tipo: 'revisar', numero: 3, peticion: 'más corto' });
+  assert.deepEqual(P.interpreta('Ejecuta el plan 4'), { tipo: 'ejecutar', numero: 4 });
+  assert.deepEqual(P.interpreta('ejecutar plan #4.'), { tipo: 'ejecutar', numero: 4 });
+  assert.deepEqual(P.interpreta('descarta el plan 2'), { tipo: 'descartar', numero: 2 });
+  assert.deepEqual(P.interpreta('reactiva el plan 2'), { tipo: 'reactivar', numero: 2 });
+  assert.deepEqual(P.interpreta('Borra el plan 2'), { tipo: 'borrar', numero: 2 });
+  // Mensajes normales: nada.
+  for (const t of ['hola', '¿qué opinas del plan 2?', 'ejecuta las pruebas', 'el plan 2 me gusta', '/planes', 'plan']) assert.equal(P.interpreta(t), null, t);
+});

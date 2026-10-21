@@ -7,7 +7,7 @@ import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
 import { direccionesEn } from '../lanzador';
-import { EditorPlan, guardaPlan, leePlan, ListaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
+import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas } from './Capturas';
 import Icono from './Icono';
 import Lanzador, { type AbreWeb } from './Lanzador';
@@ -29,14 +29,21 @@ interface Props {
 
 const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
 
-const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos', plan: 'Plan: propone sin tocar nada' } as const;
+const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos' } as const;
+// El modo de la sesión («plan» ya no es un modo: los de antes cuentan como el que tenían antes, o solo lectura).
+const modoDe = (s: Sesion) => (s.permisos === 'plan' ? s.modoPrevio || 'lectura' : s.permisos || 'lectura');
 const ESFUERZOS: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
 const ALTO_MAX = 240;
 
 export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
-  const [enCurso, setEnCurso] = useState<AbortController | null>(null);
+  // Turnos en curso por sesión: cada sesión lleva el suyo y sigue aunque se cambie de sesión o de proyecto (al
+  // volver se ve su progreso). «enCurso» es el de la sesión abierta.
+  const [enCursos, setEnCursos] = useState<Record<string, AbortController>>({});
+  const enCurso: AbortController | null = (sesion && enCursos[sesion.id]) || null;
+  // La conversación de cada turno en curso, para verla al volver a su sesión (se guarda al acabar).
+  const vivas = useRef<Record<string, Mensaje[]>>({});
   const [verAgentes, setVerAgentes] = useState(false);
   const fin = useRef<HTMLDivElement>(null);
   const lista = useRef<HTMLDivElement>(null);
@@ -45,7 +52,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
   const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
-  // Modo plan: el plan abierto en el editor y la lista de planes del proyecto.
+  // Planes (una herramienta del chat, numerados por proyecto): el abierto en el editor y la lista del proyecto.
   const [planAbierto, setPlanAbierto] = useState<string | null>(null);
   const [verPlanes, setVerPlanes] = useState(false);
   // Copiar: el mensaje entero (su texto, sin las herramientas) con su botón, o lo seleccionado con Ctrl+C / el menú,
@@ -143,11 +150,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }, [mensajes]);
   const modelos = useMemo(() => prov?.modelos?.length ? prov.modelos : (prov?.por_defecto ? [prov.por_defecto] : []), [prov]);
 
-  // Al cambiar de sesión: su conversación; y se corta la respuesta en curso (no se escribe en otra sesión).
+  // Al cambiar de sesión: su conversación (la del turno en curso, si lo tiene). El turno de la otra sesión no se
+  // corta: sigue y guarda su respuesta al acabar.
   useEffect(() => {
     idActual.current = sesion?.id;
-    setMensajes(sesion ? conversacion(sesion.id) : []);
-    return () => { setEnCurso(ac => { ac?.abort(); return null; }); };
+    setMensajes(sesion ? vivas.current[sesion.id] || conversacion(sesion.id) : []);
   }, [sesion?.id]);
 
   // Desplazamiento: al entrar en una sesión, a lo más reciente; mientras llega la respuesta, siempre abajo,
@@ -212,32 +219,49 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     enCurso.abort();
   }
 
-  // cambios: ajustes de la sesión para este envío (p. ej. el modo con el que se ejecuta un plan).
-  async function envia(forzado?: string, adjCola?: Adjunto[], cambios?: Partial<Sesion>) {
+  // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
+  // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string } = {}) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
-    const ses: Sesion = cambios ? { ...sesion, ...cambios } : sesion;
+    const ses: Sesion = sesion;
+    // Órdenes de planes: las de estado se hacen aquí (sin agente ni tokens); crear y revisar van al agente.
+    const orden = opc.crudo ? null : PL.interpreta(t);
+    if (orden && orden.tipo !== 'nuevo' && orden.tipo !== 'revisar') {
+      if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
+      await ordenPlan(orden, t);
+      return;
+    }
+    let planRevisado: Plan | undefined;
+    if (orden?.tipo === 'revisar') {
+      planRevisado = await planNumero(orden.numero);
+      if (!planRevisado || planRevisado.estado === 'descartado') {
+        if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
+        nota(t, !planRevisado ? `No hay ningún plan ${orden.numero} en este proyecto.` : `El plan ${orden.numero} está descartado: «reactiva el plan ${orden.numero}» para seguir con él.`);
+        return;
+      }
+    }
     // Gasto antes del turno, para anotar los avisos que salte (sin interrumpir).
     const gAntes = CO.gasto(forzado !== undefined ? conversacion(sesion.id) : mensajes);
     const aSes = CO.efectivos(ses.agente, ses.avisos);
-    const modoPlan = ses.permisos === 'plan';
-    let rutaPlan: string | undefined;
+    const modoPlan = orden !== null; // crear o revisar un plan
     const id = ses.id;
     ponCola(id, C.empieza);
     let fallo = false;
     const pon = (m: Mensaje[], final = false) => {
+      vivas.current[id] = m;
       if (idActual.current === id) setMensajes(m);
       if (final) guardaConversacion(id, m);
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
     const previos = forzado !== undefined ? conversacion(id) : mensajes;
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
-    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: t, ...(listos.length ? { adjuntos: listos } : {}) }];
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}) }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
     const ac = new AbortController();
-    setEnCurso(ac);
+    setEnCursos(x => ({ ...x, [id]: ac }));
     let sesionAgente = ses.sesionAgente;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
@@ -246,11 +270,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k } : m);
       pon(actual, true);
     };
-    // Modo plan: sin skills; el agente recibe la petición de plan (con el plan en revisión, ya editado, si lo hay).
-    if (modoPlan) {
-      const actualPlan = ses.plan ? await leePlan(proyecto.id, directorio, ses.plan).then(p => p.estado === 'borrador' ? p.texto : undefined).catch(() => undefined) : undefined;
-      aEnviar = PL.peticionPlan(t, actualPlan);
-    } else if (seleccionSkills !== 'agente' && prov.tipo === 'agente') {
+    // Crear o revisar un plan: sin skills; el agente recibe la petición de plan (con el plan actual, ya editado).
+    if (orden) {
+      const actualPlan = planRevisado ? (await leePlan(proyecto.id, directorio, planRevisado.ruta).catch(() => planRevisado)).texto : undefined;
+      aEnviar = PL.peticionPlan(orden.peticion, actualPlan);
+    } else if (seleccionSkills !== 'agente' && prov.tipo === 'agente' && !opc.crudo) {
       const pide = post<Eleccion>('/api/skills/elegir', { proyecto: proyecto.id, carpeta: ses.carpeta, agente: ses.agente, texto: t });
       if (seleccionSkills === 'elegir') {
         const r = await Promise.race([pide.catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 1500))]);
@@ -279,8 +303,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
-        permisos: modoPlan ? 'lectura' : ses.permisos || 'lectura', sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
-        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
+        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
+        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
@@ -295,14 +319,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
-      // Modo plan: la respuesta se guarda como plan (el mismo fichero si se está revisando uno) y sale su tarjeta.
-      if (modoPlan && !fallo && !ac.signal.aborted) {
+      // Plan: la respuesta se guarda como plan (el mismo fichero si se revisa uno) y sale su tarjeta, con su número.
+      if (orden && !fallo && !ac.signal.aborted) {
         const txt = PL.textoDelPlan(actual[actual.length - 1]);
         if (txt) {
           try {
-            const p = await guardaPlan(proyecto.id, directorio, { ruta: ses.plan, titulo: PL.tituloPlan(txt, t), sesion: ses.id, agente: ses.agente, texto: txt, estado: 'borrador' });
-            rutaPlan = p.ruta;
-            ultimo(m => ({ ...m, plan: { ruta: p.ruta, titulo: p.titulo, estado: 'borrador' } }));
+            const p = await guardaPlan(proyecto.id, directorio, { ruta: planRevisado?.ruta, titulo: PL.tituloPlan(txt, orden.peticion), sesion: ses.id, agente: ses.agente, texto: txt, estado: 'borrador' });
+            // Las tarjetas anteriores del mismo plan (si se ha revisado) pasan a su título actual.
+            actual = actual.map(x => (x.plan?.ruta === p.ruta ? { ...x, plan: { ...x.plan, titulo: p.titulo, estado: 'borrador' as const } } : x));
+            ultimo(m => ({ ...m, plan: { ruta: p.ruta, titulo: p.titulo, estado: 'borrador', numero: p.numero } }));
           } catch (e) {
             ultimo(m => ({ ...m, texto: m.texto + '\n\n⚠ No se ha podido guardar el plan: ' + (e as Error).message }));
           }
@@ -317,36 +342,83 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
       avisa(CO.nuevos(gAntes, CO.gasto(actual), aSes));
-      setEnCurso(c => (c === ac ? null : c));
-      alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now(), ...(rutaPlan ? { plan: rutaPlan } : {}) });
+      delete vivas.current[id];
+      setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
+      alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
     }
   }
 
   // Estado del plan en las tarjetas de la conversación (se guarda con ella).
-  function marcaPlan(ruta: string, estado: EstadoPlan, titulo?: string) {
+  // Se parte siempre de la conversación guardada (la más reciente): así un cambio no pisa al anterior.
+  function marcaPlan(ruta: string, estado: EstadoPlan | 'borrado', titulo?: string) {
     if (!sesion) return;
-    const m = (idActual.current === sesion.id ? mensajes : conversacion(sesion.id))
+    const m = conversacion(sesion.id)
       .map(x => x.plan?.ruta === ruta ? { ...x, plan: { ...x.plan, estado, titulo: titulo || x.plan.titulo } } : x);
-    setMensajes(m);
+    if (idActual.current === sesion.id) setMensajes(m);
     guardaConversacion(sesion.id, m);
   }
 
-  // Ejecutar: el plan pasa a «ejecutado», la sesión vuelve a su modo de trabajo y el agente recibe el plan.
-  async function ejecutaPlan(p: Plan) {
+  // Una orden y su respuesta de pgocode en el chat (sin agente): «descarta el plan 2» → «Plan #2 descartado».
+  function nota(orden: string, respuesta: string) {
+    if (!sesion) return;
+    const m: Mensaje[] = [...conversacion(sesion.id), { rol: 'user', texto: orden }, { rol: 'assistant', texto: respuesta, nota: true }];
+    if (idActual.current === sesion.id) setMensajes(m);
+    guardaConversacion(sesion.id, m);
+  }
+
+  // El plan con ese número en el proyecto.
+  async function planNumero(n: number): Promise<Plan | undefined> {
+    if (!proyecto) return undefined;
+    return (await listaPlanes(proyecto.id, directorio).catch(() => [] as Plan[])).find(p => p.numero === n);
+  }
+
+  // Órdenes de estado de un plan, en local: descartar, reactivar, borrar; y ejecutar (que sí va al agente).
+  async function ordenPlan(o: PL.OrdenPlan, t: string) {
+    if (!proyecto || o.tipo === 'nuevo' || o.tipo === 'revisar') return;
+    const p = await planNumero(o.numero);
+    if (!p) { nota(t, `No hay ningún plan ${o.numero} en este proyecto.`); return; }
+    const nombre = `Plan #${p.numero} «${p.titulo}»`;
+    try {
+      switch (o.tipo) {
+        case 'descartar':
+          if (p.estado === 'descartado') { nota(t, `${nombre} ya estaba descartado.`); return; }
+          await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'descartado' });
+          marcaPlan(p.ruta, 'descartado'); nota(t, `${nombre} descartado. Puedes reactivarlo («reactiva el plan ${p.numero}») o borrarlo («borra el plan ${p.numero}»).`);
+          return;
+        case 'reactivar':
+          if (p.estado === 'borrador') { nota(t, `${nombre} ya está por decidir.`); return; }
+          await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'borrador' });
+          marcaPlan(p.ruta, 'borrador'); nota(t, `${nombre} vuelve a estar por decidir.`);
+          return;
+        case 'borrar':
+          if (p.estado !== 'descartado') { nota(t, `Solo se borran los planes descartados: «descarta el plan ${p.numero}» antes.`); return; }
+          await borraPlan(proyecto.id, directorio, p.ruta);
+          marcaPlan(p.ruta, 'borrado'); nota(t, `${nombre} borrado.`);
+          return;
+        case 'ejecutar':
+          if (p.estado === 'descartado') { nota(t, `${nombre} está descartado: «reactiva el plan ${p.numero}» para ejecutarlo.`); return; }
+          await ejecutaPlan(p, t);
+          return;
+      }
+    } catch (e) { nota(t, '⚠ ' + (e as Error).message); }
+  }
+
+  // Ejecutar: el plan pasa a «ejecutado» y el agente lo recibe con permiso para editar (si la sesión es de solo
+  // lectura, solo en este turno).
+  async function ejecutaPlan(p: Plan, orden?: string) {
     if (!sesion || !proyecto || enCurso) return;
     const texto = p.texto ?? (await leePlan(proyecto.id, directorio, p.ruta)).texto ?? '';
     await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'ejecutado' });
     marcaPlan(p.ruta, 'ejecutado', p.titulo);
     setPlanAbierto(null);
-    const modo = sesion.modoPrevio || (sesion.permisos !== 'plan' && sesion.permisos) || 'editar';
-    envia(PL.peticionEjecucion(p.ruta, texto), [], { permisos: modo, plan: undefined });
+    const modo = modoDe(sesion);
+    envia(PL.peticionEjecucion(p.ruta, texto), [], { crudo: true, permisos: modo === 'lectura' ? 'editar' : modo, visible: orden || `Ejecuta el plan #${p.numero ?? ''} «${p.titulo}»` });
   }
 
   async function descartaPlan(ruta: string) {
     if (!sesion || !proyecto) return;
     await guardaPlan(proyecto.id, directorio, { ruta, estado: 'descartado' }).catch(() => {});
     marcaPlan(ruta, 'descartado');
-    if (sesion.plan === ruta) alCambiarSesion({ ...sesion, plan: undefined });
   }
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -412,11 +484,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
                 <p><b>{titulo(sesion)}</b></p>
-                <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos', plan: 'modo plan: propone sin tocar nada' }[sesion.permisos || 'lectura']}` : ''}</p>
+                <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos' }[modoDe(sesion)]}` : ''}</p>
               </div>
             )}
             {mensajes.map((m, i) => (
-              <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '')}>
+              <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '')}>
                 {m.texto && !(enCurso && i === mensajes.length - 1) && (
                   <button className="icono copiar-mensaje" onClick={() => copiaTexto(m.texto, i)} title={copiado === i ? 'Copiado' : 'Copiar el mensaje'} aria-label="Copiar el mensaje">
                     <Icono n={copiado === i ? 'hecho' : 'copiar'} t={13} />
@@ -433,7 +505,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   <div className="adjuntos-mensaje">{m.adjuntos.map(a => <span key={a.ruta} className="ficha-adjunto" title={a.ruta}><Icono n="clip" t={12} /> {a.nombre}</span>)}</div>
                 )}
                 {m.plan && (
-                  <TarjetaPlan titulo={m.plan.titulo} ruta={m.plan.ruta} estado={m.plan.estado || 'borrador'} ocupado={Boolean(enCurso)}
+                  <TarjetaPlan numero={m.plan.numero} titulo={m.plan.titulo} ruta={m.plan.ruta} estado={m.plan.estado || 'borrador'} ocupado={Boolean(enCurso)}
                     alAbrir={() => setPlanAbierto(m.plan!.ruta)} alEjecutar={() => ejecutaPlan({ ruta: m.plan!.ruta, titulo: m.plan!.titulo, proyecto: proyecto.id, estado: 'borrador' })}
                     alDescartar={() => descartaPlan(m.plan!.ruta)} />
                 )}
@@ -532,7 +604,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
                 placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? 'Escribe; se enviará cuando termine el agente…'
-                  : sesion.permisos === 'plan' ? (sesion.plan ? 'Pide cambios al plan en revisión…' : 'Describe lo que quieres planificar…') : 'Escribe…'}
+                  : 'Escribe… (/plan para crear un plan)'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? (texto.trim()
@@ -543,14 +615,25 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {/* Debajo del campo, como en Claude Code: el modo a la izquierda; el modelo y su esfuerzo a la derecha. */}
             <div className="pie-redactor">
               {prov?.modos && (
-                <select className="pie-select" value={sesion.permisos || 'lectura'} aria-label="Modo"
-                  onChange={e => {
-                    const v = e.target.value as NonNullable<Sesion['permisos']>;
-                    const previo = sesion.permisos && sesion.permisos !== 'plan' ? sesion.permisos : sesion.modoPrevio;
-                    alCambiarSesion({ ...sesion, permisos: v, modoPrevio: v === 'plan' ? previo : undefined });
-                  }}>
+                <select className="pie-select" value={modoDe(sesion)} aria-label="Modo"
+                  onChange={e => alCambiarSesion({ ...sesion, permisos: e.target.value as Sesion['permisos'], modoPrevio: undefined })}>
                   {Object.entries(MODOS).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
                 </select>
+              )}
+              {/* Plan: una herramienta, no un modo. Pide como plan lo escrito («/plan …»); sin texto, lo prepara. */}
+              {prov?.tipo === 'agente' && (
+                <button className="pie-boton" disabled={!sesion.hosting}
+                  title="Pedirlo como plan (o escribe «/plan …»). Después: «plan N: cambios», «ejecuta el plan N», «descarta / reactiva / borra el plan N»."
+                  onClick={() => {
+                    const t = texto.trim();
+                    if (!t || /^\/plan\b/i.test(t)) { if (!t) setTexto('/plan '); area.current?.focus(); return; }
+                    const listos = adjuntos.filter(a => !a.subiendo && !a.error);
+                    if (enCurso) ponCola(sesion.id, c => C.encola(c, '/plan ' + t, listos));
+                    else envia('/plan ' + t, listos);
+                    setTexto(''); setAdjuntos([]);
+                  }}>
+                  <Icono n="plan" t={13} /> Plan
+                </button>
               )}
               <span className="hueco" />
               {gastoSesion.turnos > 0 && (

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,6 +143,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actividad", s.conSesion(s.marcaActividad))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
+	mux.HandleFunc("GET /api/agentes/mcp", s.conSesion(s.servidoresMCP))
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
 	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
@@ -548,6 +550,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		SesionAgente string        `json:"sesion_agente"`
 		Rama         string        `json:"rama"`
 		Autorizadas  []string      `json:"autorizadas"` // carpetas de fuera del proyecto autorizadas en la sesión
+		MCP          []string      `json:"mcp"`         // servidores MCP de Claude que la sesión quiere además de «pgo»
 		Permisos     string        `json:"permisos"`
 		Esfuerzo     string        `json:"esfuerzo"`
 		Sesion       string        `json:"sesion"` // id de la sesión de pgocode (para imputar su tiempo)
@@ -659,15 +662,20 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
 	inicioTurno := time.Now()
+	vivosTurno := 0 // procesos de este agente que siguen vivos al acabar (en segundo plano)
 	if s.Imputacion != nil {
 		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas}, func(e llm.Evento) {
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}
 		// Capturas de la herramienta: a disco, como evidencias; por el chat, solo sus rutas.
+		if e.Vivos != nil {
+			vivosTurno = *e.Vivos
+			return
+		}
 		if h := e.Herramienta; h != nil && len(h.Imagenes) > 0 {
 			guardaCapturas(p.Carpeta, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)
 		}
@@ -698,7 +706,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	})
 	if s.Imputacion != nil {
 		fin := map[string]any{"turno_s": time.Since(inicioTurno).Seconds(), "cancelada": r.Context().Err() != nil,
-			"procesos_vivos": proceso.GruposVivos()}
+			"procesos_vivos": vivosTurno}
 		if err != nil {
 			fin["error"] = err.Error()
 		}
@@ -1049,4 +1057,20 @@ func carpetasAutorizadas(l []string) []string {
 		}
 	}
 	return out
+}
+
+// servidoresMCP: los servidores MCP de Claude Code configurados para la carpeta (para elegirlos en la sesión).
+func (s *Servidor) servidoresMCP(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	id, _ := strconv.Atoi(r.URL.Query().Get("proyecto"))
+	if _, ok := s.proyecto(w, r, ses, id); !ok {
+		return
+	}
+	l := []string{}
+	for n := range llm.ServidoresMCP(r.URL.Query().Get("carpeta")) {
+		if n != "pgo" {
+			l = append(l, n)
+		}
+	}
+	sort.Strings(l)
+	jsonOK(w, l)
 }

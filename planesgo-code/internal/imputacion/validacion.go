@@ -94,6 +94,7 @@ type suceso struct {
 	Salida     int     `json:"salida"`
 	Coste      float64 `json:"coste"`
 	TurnoCorte bool    `json:"turno_cortado"`
+	Solapado   float64 `json:"solapado_s"`
 }
 
 // PeriodoLargo: un periodo más largo que esto es sospechoso (alguien se dejó la sesión abierta, un turno colgado…).
@@ -145,6 +146,7 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 		ini, fin time.Time
 	}
 	var humanos []intervalo
+	solapados := map[string]float64{} // tiempo humano solapado que ya se descontó, por sesión
 	turnos := map[string]int{} // turnos vivos por sesión
 	turnoDesde := map[string]time.Time{}
 	var ultimo time.Time
@@ -240,6 +242,8 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 			l.Odoo, l.LineaOdoo = s.Horas, s.Linea
 		case "error":
 			av(&s, "error", "imputacion", "%s", s.Error)
+		case "periodo-solape":
+			solapados[s.Sesion] += s.Solapado
 		case "uso":
 			x := ses(&s)
 			x.Tokens += s.Entrada + s.Salida
@@ -279,6 +283,15 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 				continue
 			}
 			sol := minT(a.fin, b.fin).Sub(b.ini).Seconds()
+			// Ya descontado al imputar (una persona solo está en un sitio): no es un fallo.
+			if solapados[b.sesion] >= sol-60 || solapados[a.sesion] >= sol-60 {
+				if solapados[b.sesion] >= sol-60 {
+					solapados[b.sesion] -= sol
+				} else {
+					solapados[a.sesion] -= sol
+				}
+				continue
+			}
 			if sol >= 60 {
 				av(&suceso{T: b.ini, Sesion: b.sesion}, "aviso", "solape", "%s de tiempo humano a la vez en las sesiones %s y %s (%s–%s): se cuenta dos veces",
 					dur(sol), a.sesion, b.sesion, b.ini.Format("15:04"), minT(a.fin, b.fin).Format("15:04"))

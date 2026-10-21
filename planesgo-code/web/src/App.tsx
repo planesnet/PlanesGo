@@ -169,7 +169,9 @@ export default function App() {
   const cambiaSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
     const l = S.guarda(usuario.login, s);
-    if (s.proyecto === proyecto?.id) setSesiones(l); // las de otros proyectos solo se guardan
+    // Con el proyecto activo de ahora (no el de cuando se llamó: un turno que acaba en segundo plano llama a
+    // esto con la función de cuando empezó); las de otros proyectos solo se guardan.
+    if (s.proyecto === proyectoId.current) setSesiones(l);
     setSesion(x => (x?.id === s.id ? s : x));
   }, [usuario, proyecto?.id]);
 
