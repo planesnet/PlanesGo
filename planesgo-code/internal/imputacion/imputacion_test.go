@@ -20,6 +20,7 @@ type odooFalso struct {
 	ia       map[string]any
 	falla    bool
 	sig      int
+	cronos   []any // cronómetros en marcha que «tiene» Odoo
 }
 
 func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []any, _ map[string]any, res any) error {
@@ -33,6 +34,11 @@ func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []a
 	switch modelo + "." + metodo {
 	case "project.task.search_read":
 		r = []any{}
+	case "account.analytic.line.search_read":
+		r = o.cronos
+		if r == nil {
+			r = []any{}
+		}
 	case "project.task.create":
 		r = 7
 	case "account.analytic.line.create":
@@ -184,5 +190,38 @@ func TestCambioDeTarea(t *testing.T) {
 	ab, ce := g.Estado()
 	if len(ab) != 1 || ab[0].TareaID != 6 || ce[0].TareaID != 5 {
 		t.Errorf("abiertos %+v cerrados %+v", ab, ce)
+	}
+}
+
+// Tras actualizarse (Suspende), la versión nueva retoma el parte: misma línea, mismo inicio, sin cerrarlo.
+func TestRetomaTrasActualizar(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "partes.json")
+	o := &odooFalso{}
+	g := &Gestor{Odoo: o, FicheroEstado: f}
+	g.Empieza(Trabajo{Sesion: "s1", Proyecto: 1, TareaID: 5, UID: 2, OdooSesion: "x"})()
+	espera(t, func() bool { ab, _ := g.Estado(); return len(ab) == 1 && ab[0].LineaID > 0 })
+	ab, _ := g.Estado()
+	g.Suspende()
+	g2 := &Gestor{Odoo: &odooFalso{}, FicheroEstado: f}
+	ctx, cancela := context.WithCancel(context.Background())
+	defer cancela()
+	g2.Arranca(ctx)
+	ab2, ce2 := g2.Estado()
+	if len(ab2) != 1 || len(ce2) != 0 || ab2[0].LineaID != ab[0].LineaID || !ab2[0].Inicio.Equal(ab[0].Inicio) {
+		t.Fatalf("antes %+v; después abiertos %+v cerrados %+v", ab, ab2, ce2)
+	}
+}
+
+// Un cronómetro de pgocode en marcha en Odoo que pgocode no conoce (p. ej. fichero perdido) se retoma.
+func TestSincronizaDesdeOdoo(t *testing.T) {
+	o := &odooFalso{cronos: []any{map[string]any{"id": 321, "name": "Sesión de pgocode «A»: x", "ai_session_id": "pgocode-s9",
+		"timer_start": "2026-10-21 08:00:00", "project_id": []any{447, "MADERAS PLANES"}, "task_id": []any{7, "pgocode - Sesión IA"}}}}
+	g := &Gestor{Odoo: o}
+	g.Sincroniza(context.Background(), 2, "x")
+	ab, _ := g.Estado()
+	if len(ab) != 1 || ab[0].LineaID != 321 || ab[0].Sesion != "s9" || ab[0].Proyecto != 447 || ab[0].TareaID != 7 ||
+		!ab[0].Inicio.Equal(time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)) {
+		t.Fatalf("retomado: %+v", ab)
 	}
 }

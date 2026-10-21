@@ -9,9 +9,12 @@
 //   - Tras el último trabajo hay una espera activa de 5 minutos que también cuenta. Si en ese plazo no hay más
 //     trabajo, el parte se cierra con las horas de inicio → último trabajo + 5 minutos. Mientras tanto no se
 //     envía nada a Odoo.
-//   - Fiabilidad: los partes abiertos se guardan en disco; si pgocode se cierra mal, al volver se cierran con su
-//     último trabajo. Si Odoo falla al cerrar, se reintenta hasta lograrlo. Cada apertura y cierre queda en un
-//     diario (imputacion.log) para poder auditarlo.
+//   - Los cronómetros los tiene Odoo: cada línea lleva su sesión (ai_session_id = pgocode-<sesión>) desde que se
+//     crea. Al arrancar (por ejemplo tras actualizarse), pgocode lee de Odoo las líneas suyas con el cronómetro en
+//     marcha y las retoma (misma línea, mismo inicio). Al salir para actualizarse no se cierra nada; al salir de
+//     verdad, sí. Si ha pasado más de la espera sin trabajo, se cierran con su último trabajo.
+//   - Fiabilidad: los partes abiertos se guardan también en disco; si Odoo falla al cerrar, se reintenta hasta
+//     lograrlo. Cada apertura, reanudación y cierre queda en un diario (imputacion.log) para poder auditarlo.
 package imputacion
 
 import (
@@ -95,11 +98,12 @@ type Gestor struct {
 	// Ahora se puede sustituir en las pruebas.
 	Ahora func() time.Time
 
-	mu         sync.Mutex
-	partes     map[string]*parte
-	pendientes []*parte // cierres que Odoo no aceptó: se reintentan
-	cerrados   []Parte
-	arrancado  bool
+	mu            sync.Mutex
+	sincronizados map[int]bool // usuarios cuyos cronómetros de Odoo ya se han leído
+	partes        map[string]*parte
+	pendientes    []*parte // cierres que Odoo no aceptó: se reintentan
+	cerrados      []Parte
+	arrancado     bool
 }
 
 func (g *Gestor) ahora() time.Time {
@@ -144,12 +148,31 @@ func (g *Gestor) Arranca(ctx context.Context) {
 		}
 	}
 	g.mu.Unlock()
+	usuarios := map[int]string{}
 	for _, p := range viejos {
 		p.abriendo = make(chan struct{})
 		close(p.abriendo)
+		if p.T.UID > 0 && p.T.OdooSesion != "" {
+			usuarios[p.T.UID] = p.T.OdooSesion
+		}
+		// Reciente (p. ej. una actualización): se retoma tal cual. Si no, se cierra con su último trabajo.
+		if p.Estado != "pendiente" && g.ahora().Sub(p.Ultima) < Espera && p.LineaID > 0 {
+			g.mu.Lock()
+			p.Turnos = 0
+			g.estado(p)
+			g.partes[p.Sesion] = p
+			g.mu.Unlock()
+			g.diario("retoma", p, "parte abierto antes de reiniciar pgocode")
+			continue
+		}
 		g.diario("recupera", p, "parte de una ejecución anterior de pgocode")
 		g.cierraParte(p, "pgocode se cerró sin cerrarlo")
 	}
+	// Y lo que diga Odoo: cronómetros de pgocode en marcha que no estén en el fichero.
+	for uid, ses := range usuarios {
+		g.Sincroniza(ctx, uid, ses)
+	}
+	g.guarda()
 	go func() {
 		tic := time.NewTicker(15 * time.Second)
 		defer tic.Stop()
@@ -231,7 +254,90 @@ func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *parte {
 	}
 	g.guarda()
 	g.avisa()
+	if t.UID > 0 && t.OdooSesion != "" {
+		g.mu.Lock()
+		hecho := g.sincronizados[t.UID]
+		g.mu.Unlock()
+		if !hecho {
+			go g.Sincroniza(context.Background(), t.UID, t.OdooSesion)
+		}
+	}
 	return p
+}
+
+// Sincroniza lee de Odoo los cronómetros en marcha de pgocode del usuario (líneas con ai_session_id «pgocode-…» y
+// timer_start) y retoma los que pgocode no tenga abiertos: los cronómetros los tiene Odoo.
+func (g *Gestor) Sincroniza(ctx context.Context, uid int, sesionOdoo string) {
+	g.mu.Lock()
+	if g.sincronizados == nil {
+		g.sincronizados = map[int]bool{}
+	}
+	if g.sincronizados[uid] {
+		g.mu.Unlock()
+		return
+	}
+	g.sincronizados[uid] = true
+	g.mu.Unlock()
+	ctx, cancela := context.WithTimeout(ctx, 30*time.Second)
+	defer cancela()
+	var l []struct {
+		ID         int    `json:"id"`
+		Name       string `json:"name"`
+		Sesion     any    `json:"ai_session_id"`
+		TimerStart any    `json:"timer_start"`
+		Project    []any  `json:"project_id"`
+		Task       any    `json:"task_id"`
+	}
+	dominio := []any{[]any{"user_id", "=", uid}, []any{"timer_start", "!=", false}, []any{"ai_session_id", "=like", "pgocode-%"}}
+	campos := map[string]any{"fields": []string{"id", "name", "ai_session_id", "timer_start", "project_id", "task_id"}, "limit": 50}
+	if err := g.Odoo.CallKW(ctx, sesionOdoo, "account.analytic.line", "search_read", []any{dominio}, campos, &l); err != nil {
+		depuracion.Log("imputacion", "leer cronómetros de Odoo (usuario %d): %v", uid, err)
+		return
+	}
+	for _, x := range l {
+		s, _ := x.Sesion.(string)
+		sesion := strings.TrimPrefix(s, "pgocode-")
+		ts, _ := x.TimerStart.(string)
+		inicio, err := time.ParseInLocation("2006-01-02 15:04:05", ts, time.UTC)
+		if sesion == "" || err != nil || len(x.Project) < 2 {
+			continue
+		}
+		g.mu.Lock()
+		conocido := false
+		for _, p := range g.partes {
+			conocido = conocido || p.LineaID == x.ID || p.Sesion == sesion
+		}
+		for _, p := range g.pendientes {
+			conocido = conocido || p.LineaID == x.ID
+		}
+		if conocido {
+			g.mu.Unlock()
+			continue
+		}
+		proy, _ := x.Project[0].(float64)
+		nombreProy, _ := x.Project[1].(string)
+		tareaID, tarea := 0, TareaDefecto
+		if t, ok := x.Task.([]any); ok && len(t) == 2 {
+			f, _ := t[0].(float64)
+			tareaID = int(f)
+			tarea, _ = t[1].(string)
+		}
+		p := &parte{T: Trabajo{Sesion: sesion, Proyecto: int(proy), NombreProy: nombreProy, TareaID: tareaID, Tarea: tarea, UID: uid,
+			OdooSesion: sesionOdoo, Desc: x.Name}, abriendo: make(chan struct{})}
+		close(p.abriendo)
+		// No se sabe cuándo fue el último trabajo: se cuenta desde ahora con su espera (si no hay más, se cierra en 5 min).
+		p.Parte = Parte{Sesion: sesion, Proyecto: int(proy), NombreProy: nombreProy, TareaID: tareaID, Tarea: tarea, LineaID: x.ID,
+			Inicio: inicio.Local(), Ultima: g.ahora(), Desc: x.Name}
+		g.estado(p)
+		if g.partes == nil {
+			g.partes = map[string]*parte{}
+		}
+		g.partes[sesion] = p
+		g.mu.Unlock()
+		g.diario("retoma", p, "cronómetro en marcha en Odoo")
+	}
+	g.guarda()
+	g.avisa()
 }
 
 // estado (con el cerrojo): trabajando si hay turno del agente; activo si la persona lo usó hace poco; si no, en
@@ -326,8 +432,15 @@ func (g *Gestor) abre(p *parte) {
 	if t.UID > 0 {
 		vals["user_id"] = t.UID
 	}
+	// La sesión va en la línea desde el principio: así se puede retomar su cronómetro tras reiniciar pgocode.
+	vals["ai_session_id"] = "pgocode-" + t.Sesion
 	var id int
-	if err := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{vals}, nil, &id); err != nil {
+	err := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{vals}, nil, &id)
+	if err != nil {
+		delete(vals, "ai_session_id") // Odoo sin el módulo de PlanesGo (campos de IA)
+		err = g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{vals}, nil, &id)
+	}
+	if err != nil {
 		g.falla(p, "crear el parte: "+err.Error())
 		return
 	}
@@ -576,4 +689,19 @@ func Descripcion(titulo, pedido string) string {
 		return "Sesión de pgocode: " + pedido
 	}
 	return fmt.Sprintf("Sesión de pgocode «%s»: %s", titulo, pedido)
+}
+
+// Suspende: pgocode sale para actualizarse. No se cierra nada (los cronómetros siguen en Odoo): solo se guarda el
+// estado para retomarlo al arrancar la versión nueva.
+func (g *Gestor) Suspende() {
+	g.mu.Lock()
+	for _, p := range g.partes {
+		p.Turnos = 0
+	}
+	g.mu.Unlock()
+	g.guarda()
+	g.mu.Lock()
+	n := len(g.partes)
+	g.mu.Unlock()
+	depuracion.Log("imputacion", "pgocode se actualiza: %d partes siguen abiertos en Odoo", n)
 }

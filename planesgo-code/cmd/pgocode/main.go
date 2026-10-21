@@ -360,8 +360,13 @@ func main() {
 		<-ctx.Done()
 		log.Print("cerrando Planes Go Code…")
 		cancelaBase()
-		s.Procesos.ParaTodos()    // los programas lanzados se cierran con la app
-		s.Imputacion.CierraTodo() // y los partes abiertos se imputan
+		s.Procesos.ParaTodos() // los programas lanzados se cierran con la app
+		// Al actualizarse, los cronómetros siguen en Odoo y la versión nueva los retoma; al salir de verdad, se cierran.
+		if salirParaActualizar.Load() {
+			s.Imputacion.Suspende()
+		} else {
+			s.Imputacion.CierraTodo()
+		}
 		if estudio != nil {
 			estudio.Cierra() // cierra bien los vídeos que se estén grabando
 		}
