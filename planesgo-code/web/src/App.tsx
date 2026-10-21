@@ -49,6 +49,7 @@ export default function App() {
   // Avisos del backend: programas que cambian y URL que abrir en el navegador integrado.
   const [pedidoWeb, setPedidoWeb] = useState<{ url: string; n: number } | null>(null);
   const [versionProcesos, setVersionProcesos] = useState(0);
+  const [versionImputacion, setVersionImputacion] = useState(0);
   const proyectoId = useRef(0);
   proyectoId.current = proyecto?.id || 0;
   const abreWeb = useCallback((url: string) => { setPanel(true); setPedidoWeb({ url, n: Date.now() }); }, []);
@@ -56,6 +57,7 @@ export default function App() {
     if (!usuario) return;
     return escuchaAvisos(a => {
       if (a.tipo === 'procesos') setVersionProcesos(v => v + 1);
+      else if (a.tipo === 'imputacion') setVersionImputacion(v => v + 1);
       else if (a.tipo === 'abrir' && (!a.proyecto || a.proyecto === proyectoId.current)) abreWeb(a.url);
     });
   }, [usuario, abreWeb]);
@@ -237,7 +239,7 @@ export default function App() {
 
   return (
     <div className="aplicacion">
-    <Barra usuario={usuario} alSalir={salir} />
+    <Barra usuario={usuario} alSalir={salir} versionImputacion={versionImputacion} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}
       style={panel && anchoPanel ? { gridTemplateColumns: `248px minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
       <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}

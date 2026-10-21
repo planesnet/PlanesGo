@@ -242,7 +242,8 @@ func (s *Servidor) procesosSalida(w http.ResponseWriter, r *http.Request, ses *s
 
 // entornoAgente: lo que reciben los agentes y los programas para usar «pgo».
 func (s *Servidor) entornoAgente(proyecto int) []string {
-	// PLANESGO_GESTOR: el hook de PlanesGo no hace nada en los agentes de pgocode (pgocode lleva el tiempo).
+	// PLANESGO_GESTOR: PlanesGo (hooks, plugins y planesgo-mcp) se queda dormido en los agentes de pgocode, que
+	// imputa él directamente en Odoo.
 	e := []string{"PGO_API=http://127.0.0.1:" + s.Puerto, "PGO_TOKEN=" + s.TokenAgente, "PGO_PROYECTO=" + strconv.Itoa(proyecto), "PLANESGO_GESTOR=pgocode"}
 	if s.DirBin != "" {
 		e = append(e, "PATH="+s.DirBin+string(os.PathListSeparator)+os.Getenv("PATH"))

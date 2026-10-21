@@ -36,19 +36,18 @@ func proveedorDeepSeek() (map[string]any, error) {
 	}, nil
 }
 
-// entornoOpenCode: permisos según el modo y una configuración añadida (OPENCODE_CONFIG_CONTENT) sin el MCP de
-// PlanesGo (pgocode lleva el proyecto y el tiempo) y, con DeepSeek en Vertex, su proveedor.
+// entornoOpenCode: permisos según el modo y, con DeepSeek en Vertex, su proveedor (OPENCODE_CONFIG_CONTENT).
 func entornoOpenCode(p Peticion) []string {
-	c := map[string]any{"mcp": map[string]any{"planesgo": map[string]any{"enabled": false}}}
+	e := []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos)}
 	if strings.HasPrefix(p.Modelo, proveedorDeepSeekVertex+"/") {
 		if prov, err := proveedorDeepSeek(); err != nil {
 			depuracion.Log("opencode", "sin token de Google para DeepSeek en Vertex: %v", err)
 		} else {
-			c["provider"] = map[string]any{proveedorDeepSeekVertex: prov}
+			b, _ := json.Marshal(map[string]any{"provider": map[string]any{proveedorDeepSeekVertex: prov}})
+			e = append(e, "OPENCODE_CONFIG_CONTENT="+string(b))
 		}
 	}
-	b, _ := json.Marshal(c)
-	return []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos), "OPENCODE_CONFIG_CONTENT=" + string(b)}
+	return e
 }
 
 // modelosOpenCode: Gemini y DeepSeek en Vertex AI; y los de la API de DeepSeek si hay clave.

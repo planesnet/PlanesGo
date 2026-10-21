@@ -282,7 +282,13 @@ func main() {
 	s.Indice.Registro = filepath.Join(filepath.Dir(*dirGrab), "carpetas-proyectos.json")
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
-	s.Imputacion = &imputacion.Gestor{}
+	// Imputación directa en Odoo; y PlanesGo dormido en los agentes (la primera vez se activa el interruptor).
+	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) }}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".planesgo", "gestor")); os.IsNotExist(err) {
+		if err := servidor.PonGestor(true); err != nil {
+			log.Printf("interruptor de PlanesGo: %v", err)
+		}
+	}
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

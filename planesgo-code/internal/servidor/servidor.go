@@ -115,6 +115,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) { jsonOK(w, map[string]string{"version": s.Version}) })
 	mux.HandleFunc("GET /api/proyecto/repo", s.conSesion(s.repoProyecto))
 	mux.HandleFunc("GET /api/proyecto/ramas", s.conSesion(s.proyectoRamas))
+	mux.HandleFunc("GET /api/proyecto/tareas", s.conSesion(s.proyectoTareas))
+	mux.HandleFunc("GET /api/imputacion", s.conSesion(s.imputacionEstado))
+	mux.HandleFunc("POST /api/imputacion/gestor", s.conSesion(s.imputacionGestor))
 	mux.HandleFunc("POST /api/proyecto/carpeta", s.conSesion(s.proyectoCarpeta))
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
@@ -511,6 +514,8 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Esfuerzo     string        `json:"esfuerzo"`
 		Sesion       string        `json:"sesion"` // id de la sesión de pgocode (para imputar su tiempo)
 		Titulo       string        `json:"titulo"`
+		TareaID      int           `json:"tarea_id"` // tarea de Odoo a la que se imputa (0: por nombre)
+		Tarea        string        `json:"tarea"`
 		Mensajes     []llm.Mensaje `json:"mensajes"`
 	}
 	if err := lee(r, &p); err != nil {
@@ -574,18 +579,19 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		p.Carpeta = dir
 	}
 
-	// PlanesGo: pgocode sabe el proyecto, así que vincula la carpeta y lleva él el tiempo (el agente no tiene que
-	// hacer nada: sin set_project ni latidos desde el agente).
-	if info.NecesitaDir && p.Carpeta != "" && p.Proyecto > 0 && s.Imputacion != nil {
-		if err := imputacion.Vincula(p.Carpeta, p.Proyecto, nombre); err != nil {
-			log.Printf("vincular %s con PlanesGo: %v", p.Carpeta, err)
+	// Tiempo: pgocode lo imputa directamente en Odoo (proyecto y tarea de la sesión), sin PlanesGo ni el agente.
+	sesionImp := p.Sesion
+	if s.Imputacion != nil && info.NecesitaDir && p.Proyecto > 0 {
+		if sesionImp == "" {
+			sesionImp = fmt.Sprintf("%d-%s", p.Proyecto, filepath.Base(p.Carpeta))
 		}
-		sesion := p.Sesion
-		if sesion == "" {
-			sesion = fmt.Sprintf("%d-%s", p.Proyecto, filepath.Base(p.Carpeta))
+		pedido := ""
+		if len(p.Mensajes) > 0 {
+			pedido = p.Mensajes[len(p.Mensajes)-1].Texto
 		}
-		fin := s.Imputacion.Empieza(imputacion.Trabajo{Sesion: sesion, Proyecto: p.Proyecto, Nombre: nombre, Carpeta: p.Carpeta,
-			Modelo: strings.TrimSpace(info.Nombre + " " + strings.TrimPrefix(p.Modelo, "por defecto")), Desc: descripcionTrabajo(p.Titulo, p.Mensajes)})
+		fin := s.Imputacion.Empieza(imputacion.Trabajo{Sesion: sesionImp, Titulo: p.Titulo, Proyecto: p.Proyecto, NombreProy: nombre,
+			TareaID: p.TareaID, Tarea: p.Tarea, UID: ses.UID, OdooSesion: ses.OdooSesion,
+			Modelo: strings.TrimSpace(info.Nombre + " " + strings.TrimPrefix(p.Modelo, "por defecto")), Desc: imputacion.Descripcion(p.Titulo, pedido)})
 		defer fin()
 	}
 
@@ -611,7 +617,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		p.Permisos = "lectura"
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) { envia(e) })
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto)}, func(e llm.Evento) {
+		if e.Uso != nil && s.Imputacion != nil {
+			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
+		}
+		envia(e)
+	})
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
 	}
@@ -940,19 +951,4 @@ func (s *Servidor) qaComenta(w http.ResponseWriter, r *http.Request, ses *sesion
 		return
 	}
 	jsonOK(w, c)
-}
-
-// descripcionTrabajo: lo que se imputa en Odoo (en español): la sesión y lo último que se ha pedido.
-func descripcionTrabajo(titulo string, m []llm.Mensaje) string {
-	pedido := ""
-	if len(m) > 0 {
-		pedido = strings.Join(strings.Fields(m[len(m)-1].Texto), " ")
-	}
-	if r := []rune(pedido); len(r) > 200 {
-		pedido = string(r[:197]) + "…"
-	}
-	if titulo == "" {
-		return "Sesión de pgocode: " + pedido
-	}
-	return "Sesión de pgocode «" + titulo + "»: " + pedido
 }

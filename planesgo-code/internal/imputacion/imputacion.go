@@ -1,17 +1,19 @@
-// Package imputacion lleva el tiempo de las sesiones de pgocode a PlanesGo (Odoo) sin que el agente intervenga:
-// pgocode sabe el proyecto de cada sesión, así que vincula la carpeta (.planesgo.json) y envía los latidos con
-// planesgo-mcp: uno al empezar cada turno del agente y otro cada 30 s mientras trabaja; si en 5 minutos no hay
-// otro turno, cierra el parte (se imputa en Odoo con su descripción).
+// Package imputacion lleva el tiempo de las sesiones de pgocode directamente a Odoo (partes de horas en
+// account.analytic.line), con la sesión de Odoo del usuario y sin pasar por PlanesGo ni por el agente.
+//
+// Regla: cada sesión imputa a su proyecto y a su tarea (la de sus ajustes; por defecto «pgocode - Sesión IA», que
+// se crea si no existe). Un parte es un periodo de trabajo: se crea en Odoo (con su cronómetro) al empezar el
+// primer turno del agente; mientras se trabaja no se envía nada (pgocode anota la última actividad); se cierra a
+// los 5 minutos sin turnos, al cambiar de tarea o al salir, con las horas reales (inicio → última actividad), la
+// descripción y los datos de IA (tokens, coste, modelo y sesión).
 package imputacion
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,138 +21,136 @@ import (
 )
 
 const (
-	Tarea       = "pgocode - Sesión IA"
-	TipoTarea   = "Desarrollo"
-	Intervalo   = 30 * time.Second
-	CerrarTras  = 5 * time.Minute
-	URLPlanesGo = "https://planesgo.autopyme.com"
+	TareaDefecto = "pgocode - Sesión IA"
+	CerrarTras   = 5 * time.Minute
+	minimo       = time.Minute // un parte cuenta al menos un minuto
 )
 
-// Trabajo es lo que se imputa de una sesión.
+// Odoo: lo que necesita del cliente de Odoo (call_kw con la sesión del usuario).
+type Odoo interface {
+	CallKW(ctx context.Context, sesion, modelo, metodo string, args []any, kwargs map[string]any, res any) error
+}
+
+// Trabajo: un turno del agente en una sesión.
 type Trabajo struct {
-	Sesion   string // id de la sesión de pgocode (va como ai_session_id)
-	Proyecto int    // proyecto de Odoo
-	Nombre   string // nombre del proyecto (para .planesgo.json)
-	Carpeta  string
-	Modelo   string // agente y modelo
-	Desc     string // qué se está haciendo (en español)
+	Sesion     string // id de la sesión de pgocode
+	Titulo     string
+	Proyecto   int
+	NombreProy string
+	TareaID    int    // 0: se busca o crea por nombre
+	Tarea      string // nombre de la tarea (vacío: la de por defecto)
+	UID        int    // usuario de Odoo
+	OdooSesion string
+	Modelo     string // agente y modelo
+	Desc       string
+}
+
+// Uso de IA acumulado de un parte.
+type Uso struct {
+	Entrada, Salida int
+	Coste           float64
+}
+
+// Parte es lo que se ve en la interfaz.
+type Parte struct {
+	Sesion     string    `json:"sesion"`
+	Titulo     string    `json:"titulo"`
+	Proyecto   int       `json:"proyecto"`
+	NombreProy string    `json:"nombre_proyecto"`
+	TareaID    int       `json:"tarea_id"`
+	Tarea      string    `json:"tarea"`
+	LineaID    int       `json:"linea_id"`
+	Inicio     time.Time `json:"inicio"`
+	Ultima     time.Time `json:"ultima"`
+	Fin        time.Time `json:"fin,omitzero"`
+	Horas      float64   `json:"horas"`
+	Tokens     int       `json:"tokens"`
+	Coste      float64   `json:"coste"`
+	Estado     string    `json:"estado"` // trabajando | en-espera | cerrado | error
+	Error      string    `json:"error,omitempty"`
+	Desc       string    `json:"desc"`
 }
 
 type parte struct {
+	Parte
 	t        Trabajo
-	abierto  bool      // Odoo confirmó el primer latido
-	ultimo   time.Time // último latido enviado
-	enTurnos int       // turnos de agente en curso
+	turnos   int
+	uso      Uso
 	cierre   *time.Timer
+	abriendo chan struct{} // se cierra cuando la línea ya está creada en Odoo (o falló)
 }
 
-// Gestor lleva los partes abiertos (uno por sesión).
+// Gestor lleva los partes de todas las sesiones.
 type Gestor struct {
-	Bin string // planesgo-mcp (vacío: se busca)
+	Odoo Odoo
+	// Aviso se llama cuando cambia algún parte (para refrescar la interfaz).
+	Aviso func()
 
-	mu     sync.Mutex
-	partes map[string]*parte
+	mu       sync.Mutex
+	partes   map[string]*parte
+	cerrados []Parte // los últimos cerrados (para la interfaz)
 }
 
-func (g *Gestor) bin() string {
-	if g.Bin != "" {
-		return g.Bin
-	}
-	if p, err := exec.LookPath("planesgo-mcp"); err == nil {
-		return p
-	}
-	casa, _ := os.UserHomeDir()
-	return filepath.Join(casa, ".local", "bin", "planesgo-mcp")
-}
-
-// Vincula escribe .planesgo.json en la carpeta si no lo tiene (el mismo vínculo que crea set_project).
-func Vincula(carpeta string, proyecto int, nombre string) error {
-	f := filepath.Join(carpeta, ".planesgo.json")
-	if _, err := os.Stat(f); err == nil {
-		return nil
-	}
-	b, _ := json.MarshalIndent(map[string]any{"odoo_project_id": proyecto, "odoo_project_name": nombre, "planesgo_url": URLPlanesGo}, "", "  ")
-	if err := os.WriteFile(f, append(b, '\n'), 0o644); err != nil {
-		return err
-	}
-	// Que no acabe en un commit: es un vínculo local.
-	excluye(carpeta, ".planesgo.json")
-	return nil
-}
-
-// excluye añade un patrón a .git/info/exclude del repositorio de la carpeta (también en copias de trabajo).
-func excluye(carpeta, patron string) {
-	out, err := exec.Command("git", "-C", carpeta, "rev-parse", "--git-common-dir").Output()
-	if err != nil {
-		return
-	}
-	dir := string(out[:len(out)-1])
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(carpeta, dir)
-	}
-	f := filepath.Join(dir, "info", "exclude")
-	b, _ := os.ReadFile(f)
-	for _, l := range splitLineas(string(b)) {
-		if l == patron {
-			return
-		}
-	}
-	os.MkdirAll(filepath.Dir(f), 0o755)
-	if fh, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintln(fh, patron)
-		fh.Close()
+func (g *Gestor) avisa() {
+	if g.Aviso != nil {
+		go g.Aviso()
 	}
 }
 
-func splitLineas(s string) []string {
-	var l []string
-	ini := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			l = append(l, s[ini:i])
-			ini = i + 1
-		}
+func tareaDe(t Trabajo) string {
+	if strings.TrimSpace(t.Tarea) == "" {
+		return TareaDefecto
 	}
-	return append(l, s[ini:])
+	return strings.TrimSpace(t.Tarea)
 }
 
-// Empieza: un turno del agente empieza. Primer latido (abre el parte si hace falta) y latidos cada 30 s hasta
-// que se llame a la función devuelta (fin del turno), que programa el cierre del parte.
+// Empieza: empieza un turno del agente. Abre el parte si no lo hay (en segundo plano: el agente no espera a Odoo)
+// y devuelve la función de fin de turno.
 func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 	g.mu.Lock()
 	if g.partes == nil {
 		g.partes = map[string]*parte{}
 	}
 	p := g.partes[t.Sesion]
+	// Otra tarea u otro proyecto en la misma sesión: se cierra el parte anterior y se abre otro.
+	if p != nil && (p.t.Proyecto != t.Proyecto || tareaDe(p.t) != tareaDe(t) || p.t.TareaID != t.TareaID) {
+		ant := p
+		delete(g.partes, t.Sesion)
+		go g.cierraParte(ant)
+		p = nil
+	}
+	ahora := time.Now()
 	if p == nil {
-		p = &parte{}
+		p = &parte{t: t, abriendo: make(chan struct{})}
+		p.Parte = Parte{Sesion: t.Sesion, Titulo: t.Titulo, Proyecto: t.Proyecto, NombreProy: t.NombreProy, TareaID: t.TareaID,
+			Tarea: tareaDe(t), Inicio: ahora, Ultima: ahora, Estado: "trabajando", Desc: t.Desc}
 		g.partes[t.Sesion] = p
+		go g.abre(p)
 	}
 	if p.cierre != nil {
 		p.cierre.Stop()
 		p.cierre = nil
 	}
-	// Otra carpeta o proyecto en la misma sesión: se cierra antes el parte anterior.
-	if p.abierto && (p.t.Proyecto != t.Proyecto || p.t.Carpeta != t.Carpeta) {
-		ant := p.t
-		p.abierto = false
-		go g.ejecuta("--stop", ant)
-	}
-	p.t = t
-	p.enTurnos++
+	p.t.Desc, p.Desc, p.t.Modelo, p.t.Titulo, p.Titulo = t.Desc, t.Desc, t.Modelo, t.Titulo, t.Titulo
+	p.t.OdooSesion = t.OdooSesion
+	p.turnos++
+	p.Ultima, p.Estado = ahora, "trabajando"
 	g.mu.Unlock()
+	g.avisa()
 
-	g.late(t.Sesion)
 	ctx, cancela := context.WithCancel(context.Background())
+	// Mientras el agente trabaja solo se anota la actividad (sin red).
 	go func() {
-		tic := time.NewTicker(Intervalo)
+		tic := time.NewTicker(30 * time.Second)
 		defer tic.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-tic.C:
-				g.late(t.Sesion)
+				g.mu.Lock()
+				p.Ultima = time.Now()
+				g.mu.Unlock()
 			}
 		}
 	}()
@@ -159,81 +159,207 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 		una.Do(func() {
 			cancela()
 			g.mu.Lock()
-			defer g.mu.Unlock()
-			if p.enTurnos--; p.enTurnos == 0 {
-				p.cierre = time.AfterFunc(CerrarTras, func() { g.cierra(t.Sesion) })
+			p.Ultima = time.Now()
+			if p.turnos--; p.turnos == 0 {
+				p.Estado = "en-espera"
+				p.cierre = time.AfterFunc(CerrarTras, func() { g.Cierra(t.Sesion) })
 			}
+			g.mu.Unlock()
+			g.avisa()
 		})
 	}
 }
 
-// late envía un latido si toca (el primero, en primer plano: solo se da el parte por abierto si Odoo lo confirma).
-func (g *Gestor) late(sesion string) {
+// SumaUso añade el consumo de IA de un turno al parte abierto de la sesión.
+func (g *Gestor) SumaUso(sesion string, entrada, salida int, coste float64) {
 	g.mu.Lock()
-	p := g.partes[sesion]
-	if p == nil || (p.abierto && time.Since(p.ultimo) < Intervalo-time.Second) {
-		g.mu.Unlock()
-		return
-	}
-	t := p.t
-	p.ultimo = time.Now()
-	g.mu.Unlock()
-	if err := g.ejecuta("--beat", t); err == nil {
-		g.mu.Lock()
-		p.abierto = true
-		g.mu.Unlock()
+	defer g.mu.Unlock()
+	if p := g.partes[sesion]; p != nil {
+		p.uso.Entrada += entrada
+		p.uso.Salida += salida
+		p.uso.Coste += coste
+		p.Tokens, p.Coste = p.uso.Entrada+p.uso.Salida, p.uso.Coste
 	}
 }
 
-// cierra el parte de una sesión (lo imputa en Odoo).
-func (g *Gestor) cierra(sesion string) {
+// abre crea la línea del parte en Odoo (y la tarea, si no existe) y pone en marcha su cronómetro.
+func (g *Gestor) abre(p *parte) {
+	defer close(p.abriendo)
+	ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancela()
+	g.mu.Lock()
+	t := p.t
+	g.mu.Unlock()
+	tarea := t.TareaID
+	if tarea == 0 {
+		id, err := g.tarea(ctx, t)
+		if err != nil {
+			g.falla(p, "tarea: "+err.Error())
+			return
+		}
+		tarea = id
+	}
+	vals := map[string]any{"name": t.Desc, "date": time.Now().Format("2006-01-02"), "project_id": t.Proyecto,
+		"task_id": tarea, "unit_amount": 0}
+	if t.UID > 0 {
+		vals["user_id"] = t.UID
+	}
+	var id int
+	if err := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "create", []any{vals}, nil, &id); err != nil {
+		g.falla(p, "crear el parte: "+err.Error())
+		return
+	}
+	var nada any
+	g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "action_timer_start", []any{[]int{id}}, nil, &nada)
+	g.mu.Lock()
+	p.LineaID, p.TareaID = id, tarea
+	g.mu.Unlock()
+	depuracion.Log("imputacion", "parte %d abierto: proyecto %d tarea %d sesión %s", id, t.Proyecto, tarea, t.Sesion)
+	g.avisa()
+}
+
+// tarea busca la tarea por nombre en el proyecto y, si no existe, la crea (asignada al usuario).
+func (g *Gestor) tarea(ctx context.Context, t Trabajo) (int, error) {
+	var l []struct {
+		ID int `json:"id"`
+	}
+	dominio := []any{[]any{"project_id", "=", t.Proyecto}, []any{"name", "=", tareaDe(t)}}
+	if err := g.Odoo.CallKW(ctx, t.OdooSesion, "project.task", "search_read", []any{dominio}, map[string]any{"fields": []string{"id"}, "limit": 1}, &l); err != nil {
+		return 0, err
+	}
+	if len(l) > 0 {
+		return l[0].ID, nil
+	}
+	vals := map[string]any{"name": tareaDe(t), "project_id": t.Proyecto}
+	if t.UID > 0 {
+		vals["user_id"] = t.UID // Odoo 14; en versiones nuevas, user_ids
+	}
+	var id int
+	err := g.Odoo.CallKW(ctx, t.OdooSesion, "project.task", "create", []any{vals}, nil, &id)
+	if err != nil && t.UID > 0 {
+		delete(vals, "user_id")
+		vals["user_ids"] = []any{[]any{6, 0, []int{t.UID}}}
+		err = g.Odoo.CallKW(ctx, t.OdooSesion, "project.task", "create", []any{vals}, nil, &id)
+	}
+	if err == nil {
+		depuracion.Log("imputacion", "tarea «%s» creada en el proyecto %d: %d", tareaDe(t), t.Proyecto, id)
+	}
+	return id, err
+}
+
+func (g *Gestor) falla(p *parte, e string) {
+	g.mu.Lock()
+	p.Estado, p.Error = "error", e
+	g.mu.Unlock()
+	depuracion.Log("imputacion", "sesión %s: %s", p.Sesion, e)
+	g.avisa()
+}
+
+// Cierra el parte de una sesión (si no hay turnos en curso).
+func (g *Gestor) Cierra(sesion string) {
 	g.mu.Lock()
 	p := g.partes[sesion]
-	if p == nil || p.enTurnos > 0 {
+	if p == nil || p.turnos > 0 {
 		g.mu.Unlock()
 		return
 	}
 	delete(g.partes, sesion)
-	t, abierto := p.t, p.abierto
 	g.mu.Unlock()
-	if abierto {
-		g.ejecuta("--stop", t)
-	}
+	g.cierraParte(p)
 }
 
-// CierraTodo cierra los partes abiertos (al cerrar pgocode).
+// cierraParte para el cronómetro y escribe las horas reales, la descripción y los datos de IA.
+func (g *Gestor) cierraParte(p *parte) {
+	select {
+	case <-p.abriendo:
+	case <-time.After(40 * time.Second):
+	}
+	g.mu.Lock()
+	if p.cierre != nil {
+		p.cierre.Stop()
+	}
+	t, id, uso := p.t, p.LineaID, p.uso
+	dur := p.Ultima.Sub(p.Inicio)
+	if dur < minimo {
+		dur = minimo
+	}
+	horas := float64(int(dur.Minutes()+0.5)) / 60
+	g.mu.Unlock()
+	err := errors.New("el parte no llegó a crearse en Odoo")
+	if id > 0 {
+		ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancela()
+		var nada any
+		g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "action_timer_stop", []any{[]int{id}}, nil, &nada)
+		err = g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "write", []any{[]int{id}, map[string]any{"unit_amount": horas, "name": t.Desc}}, nil, &nada)
+		// Campos de IA (módulo de PlanesGo en Odoo): si no están, el parte vale igual.
+		ia := map[string]any{"ai_model": t.Modelo, "ai_session_id": "pgocode-" + t.Sesion, "ai_tokens_input": uso.Entrada,
+			"ai_tokens_output": uso.Salida, "ai_tokens_total": uso.Entrada + uso.Salida, "ai_cost": uso.Coste}
+		if e := g.Odoo.CallKW(ctx, t.OdooSesion, "account.analytic.line", "write", []any{[]int{id}, ia}, nil, &nada); e != nil {
+			depuracion.Log("imputacion", "parte %d: campos de IA no guardados: %v", id, e)
+		}
+	}
+	g.mu.Lock()
+	p.Fin, p.Horas, p.Estado = time.Now(), horas, "cerrado"
+	if err != nil && id > 0 {
+		p.Estado, p.Error = "error", "cerrar el parte: "+err.Error()
+	} else if id == 0 && p.Error == "" {
+		p.Estado, p.Error = "error", err.Error()
+	}
+	g.cerrados = append([]Parte{p.Parte}, g.cerrados...)
+	if len(g.cerrados) > 50 {
+		g.cerrados = g.cerrados[:50]
+	}
+	g.mu.Unlock()
+	depuracion.Log("imputacion", "parte %d cerrado: %.2f h, %d tokens (sesión %s) err=%v", id, horas, uso.Entrada+uso.Salida, t.Sesion, err)
+	g.avisa()
+}
+
+// CierraTodo cierra todos los partes (al salir de pgocode).
 func (g *Gestor) CierraTodo() {
 	g.mu.Lock()
-	var ss []string
+	var l []*parte
 	for s, p := range g.partes {
-		if p.cierre != nil {
-			p.cierre.Stop()
-		}
-		p.enTurnos = 0
-		ss = append(ss, s)
+		l = append(l, p)
+		delete(g.partes, s)
 	}
 	g.mu.Unlock()
-	for _, s := range ss {
-		g.cierra(s)
+	var wg sync.WaitGroup
+	for _, p := range l {
+		wg.Add(1)
+		go func(p *parte) { defer wg.Done(); g.cierraParte(p) }(p)
 	}
+	wg.Wait()
 }
 
-func (g *Gestor) ejecuta(accion string, t Trabajo) error {
-	args := []string{accion, "--path", t.Carpeta, "--project-id", strconv.Itoa(t.Proyecto), "--desc", t.Desc,
-		"--task", Tarea, "--type", TipoTarea, "--model", t.Modelo, "--session-id", "pgocode-" + t.Sesion}
-	ctx, cancela := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancela()
-	cmd := exec.CommandContext(ctx, g.bin(), args...)
-	cmd.Dir = t.Carpeta
-	cmd.Env = append(os.Environ(), "PLANESGO_GESTOR=pgocode")
-	out, err := cmd.CombinedOutput()
-	depuracion.Log("imputacion", "%s proyecto %d sesión %s: err=%v %s", accion, t.Proyecto, t.Sesion, err, recorta(string(out), 300))
-	return err
+// Estado: partes abiertos y los últimos cerrados de hoy.
+func (g *Gestor) Estado() (abiertos, cerrados []Parte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	abiertos, cerrados = []Parte{}, []Parte{}
+	for _, p := range g.partes {
+		x := p.Parte
+		x.Horas = time.Since(p.Inicio).Hours()
+		abiertos = append(abiertos, x)
+	}
+	sort.Slice(abiertos, func(i, j int) bool { return abiertos[i].Inicio.Before(abiertos[j].Inicio) })
+	hoy := time.Now().Format("2006-01-02")
+	for _, c := range g.cerrados {
+		if c.Fin.Format("2006-01-02") == hoy {
+			cerrados = append(cerrados, c)
+		}
+	}
+	return
 }
 
-func recorta(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "…"
+// Descripcion: lo que se imputa (en español): la sesión y lo último que se ha pedido.
+func Descripcion(titulo, pedido string) string {
+	pedido = strings.Join(strings.Fields(pedido), " ")
+	if r := []rune(pedido); len(r) > 200 {
+		pedido = string(r[:197]) + "…"
 	}
-	return s
+	if titulo == "" {
+		return "Sesión de pgocode: " + pedido
+	}
+	return fmt.Sprintf("Sesión de pgocode «%s»: %s", titulo, pedido)
 }

@@ -742,12 +742,39 @@ def shadowed_by_global_hook():
         return False
 
 
-def main():
-    # Agentes lanzados por pgocode: pgocode ya sabe el proyecto, vincula la carpeta y envía él los latidos.
-    # El hook no inyecta contexto (sin tokens), no bloquea y no imputa.
-    if os.environ.get("PLANESGO_GESTOR") == "pgocode":
+def gestor_pgocode():
+    """Interruptor «PlanesGo en los agentes»: si ~/.planesgo/gestor dice «pgocode», la imputación la lleva pgocode.
+    Se lee en cada evento, así que vale también para las sesiones que ya estaban abiertas."""
+    try:
+        if os.environ.get("PLANESGO_GESTOR") == "pgocode":  # agente lanzado por pgocode: siempre
+            return True
+        with open(os.path.join(HOME, ".planesgo", "gestor"), "r", encoding="utf-8") as f:
+            return f.read().strip() == "pgocode"
+    except OSError:
+        return False
+
+
+def close_all_parts():
+    """Cierra e imputa los partes que tengan abiertos las sesiones de los agentes (al pasar a pgocode)."""
+    try:
+        sids = os.listdir(STATE_ROOT)
+    except OSError:
         return
+    for sid in sids:
+        sdir = os.path.join(STATE_ROOT, sid)
+        for state, root in active_projects(sdir):
+            cancel_consolidation(state)
+            close_part({"session_id": sid}, state, root)
+
+
+def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "cierra-partes":
+        close_all_parts()
+        return
+    # Con pgocode al mando el hook no hace nada: ni contexto (sin tokens), ni bloqueos, ni latidos.
+    if gestor_pgocode():
+        return
     if shadowed_by_global_hook():
         sys.exit(0)
     if mode == "consolidate":

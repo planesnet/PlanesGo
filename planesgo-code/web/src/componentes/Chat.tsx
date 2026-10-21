@@ -135,7 +135,7 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: sesion.modelo || prov.por_defecto, carpeta: sesion.carpeta, rama: sesion.rama,
         permisos: sesion.permisos || 'lectura', sesion_agente: sesion.sesionAgente, esfuerzo: sesion.esfuerzo || '',
-        sesion: sesion.id, titulo: sesion.nombre,
+        sesion: sesion.id, titulo: sesion.nombre, tarea_id: sesion.tareaId || 0, tarea: sesion.tarea || '',
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
@@ -173,6 +173,10 @@ export default function Chat({ alAjustes, seleccionSkills, hosting, detalle, env
             <button className="miga-item" onClick={alAjustes} title={nombreHosting(sesion.hosting || hosting || repo?.tipo) + ' · ajustes de la sesión'}><Hosting tipo={sesion.hosting || hosting || repo?.tipo} t={16} /></button>
             {repo?.repositorio && <><span className="sep">/</span><span className="miga-item" title={repo.remoto}><Icono n="repo" t={14} /> {repo.repositorio}</span></>}
             {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
+            <span className="sep">·</span>
+            <button className="miga-item imputa" onClick={alAjustes} title="Tarea de Odoo a la que se imputa el tiempo de esta sesión (cámbiala en los ajustes)">
+              <Icono n="reloj" t={13} /> {sesion.tarea || 'pgocode - Sesión IA'}
+            </button>
             {repo && repo.ramas.length > 0 && (
               <><span className="sep">/</span>
                 <label className="miga-item rama" title="Cambiar de rama abre una sesión nueva">

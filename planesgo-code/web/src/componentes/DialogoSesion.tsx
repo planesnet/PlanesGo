@@ -25,6 +25,8 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   const [carpetaElegida, setCarpetaElegida] = useState(!nueva); // la carpeta la ha puesto el usuario: no se recalcula
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [tareas, setTareas] = useState<{ id: number; nombre: string }[] | null>(null);
+  useEffect(() => { get<{ id: number; nombre: string }[]>(`/api/proyecto/tareas?proyecto=${sesion.proyecto}`).then(setTareas).catch(() => setTareas([])); }, [sesion.proyecto]);
   const cambia = (c: Partial<Sesion>) => setS(x => ({ ...x, ...c }));
   const prov = proveedores.find(p => p.id === s.agente);
   const ajustes = leeAjustes(login, s.proyecto);
@@ -114,6 +116,20 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
             {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}
           </span>
         </div>
+
+        <label>Tarea de Odoo a la que se imputa
+          <span className="con-icono"><Icono n="reloj" t={15} />
+            <select value={s.tareaId || 0} onChange={e => {
+              const id = Number(e.target.value);
+              cambia({ tareaId: id || undefined, tarea: id ? tareas?.find(t => t.id === id)?.nombre : undefined });
+            }}>
+              <option value={0}>pgocode - Sesión IA (por defecto; se crea si no existe)</option>
+              {s.tareaId && !tareas?.some(t => t.id === s.tareaId) && <option value={s.tareaId}>{s.tarea}</option>}
+              {(tareas || []).filter(t => t.nombre !== 'pgocode - Sesión IA').map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+            </select>
+          </span>
+          {!tareas && <span className="suave pequeno">Cargando tareas de Odoo…</span>}
+        </label>
 
         <label>Agente
           <span className="con-icono"><Agente id={s.agente} t={15} />

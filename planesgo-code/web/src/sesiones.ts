@@ -16,6 +16,8 @@ export interface Sesion {
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
+  tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
+  tarea?: string;
   creada: number;
   ultima: number;
 }

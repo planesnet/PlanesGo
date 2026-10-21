@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -805,7 +806,7 @@ func (c *PlanesGoClient) SearchProjects(query string) ([]map[string]interface{},
 
 	var res struct {
 		Projects []map[string]interface{} `json:"projects"`
-		Error    string                    `json:"error"`
+		Error    string                   `json:"error"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, fmt.Errorf("respuesta inválida de PlanesGo (HTTP %d): %s", statusCode, string(body))
@@ -2532,6 +2533,7 @@ func getToolsDefinition() []map[string]interface{} {
 }
 
 func runMCPServer() {
+	go vigilaGestor()
 	scanner := bufio.NewScanner(os.Stdin)
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -2556,13 +2558,13 @@ func runMCPServer() {
 				Result: map[string]interface{}{
 					"protocolVersion": "2024-11-05",
 					"capabilities": map[string]interface{}{
-						"tools": map[string]interface{}{},
+						"tools": map[string]interface{}{"listChanged": true},
 					},
 					"serverInfo": map[string]interface{}{
 						"name":    "planesgo-mcp",
 						"version": Version,
 					},
-					"instructions": mcpInstructions,
+					"instructions": instruccionesMCP(),
 				},
 			}
 			sendResponse(resp)
@@ -2578,11 +2580,16 @@ func runMCPServer() {
 			})
 
 		case "tools/list":
+			// Con pgocode al mando, el agente no ve ninguna herramienta (ni paga sus descripciones).
+			herramientas := getToolsDefinition()
+			if gestorPgocode() {
+				herramientas = []map[string]interface{}{}
+			}
 			sendResponse(JSONRPCResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
 				Result: map[string]interface{}{
-					"tools": getToolsDefinition(),
+					"tools": herramientas,
 				},
 			})
 
@@ -2600,7 +2607,12 @@ func runMCPServer() {
 				continue
 			}
 
-			result := executeToolCall(params.Name, params.Arguments)
+			var result interface{}
+			if gestorPgocode() {
+				result = map[string]interface{}{"content": []map[string]interface{}{{"type": "text", "text": textoGestorPgocode}}}
+			} else {
+				result = executeToolCall(params.Name, params.Arguments)
+			}
 			sendResponse(JSONRPCResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
@@ -2626,14 +2638,58 @@ func runMCPServer() {
 	}
 }
 
+var muSalida sync.Mutex
+
 func sendResponse(resp JSONRPCResponse) {
 	data, err := json.Marshal(resp)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[planesgo-mcp] Error serializando respuesta: %v\n", err)
 		return
 	}
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
+	escribeMensaje(data)
+}
+
+// escribeMensaje escribe una línea JSON-RPC en la salida (respuestas y avisos pueden coincidir: con cerrojo).
+func escribeMensaje(data []byte) {
+	muSalida.Lock()
+	defer muSalida.Unlock()
+	os.Stdout.Write(append(data, '\n'))
+}
+
+// Interruptor «PlanesGo en los agentes»: si ~/.planesgo/gestor dice «pgocode», la imputación la lleva pgocode y
+// este servidor no ofrece herramientas a los agentes. Se lee en cada petición: vale para las sesiones ya abiertas.
+const textoGestorPgocode = "La imputación de tiempo la gestiona pgocode: no hace falta vincular el proyecto ni enviar latidos. Sigue con la tarea."
+
+func ficheroGestor() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".planesgo", "gestor")
+}
+
+func gestorPgocode() bool {
+	if os.Getenv("PLANESGO_GESTOR") == "pgocode" { // agente lanzado por pgocode: siempre
+		return true
+	}
+	b, err := os.ReadFile(ficheroGestor())
+	return err == nil && strings.TrimSpace(string(b)) == "pgocode"
+}
+
+func instruccionesMCP() string {
+	if gestorPgocode() {
+		return textoGestorPgocode
+	}
+	return mcpInstructions
+}
+
+// vigilaGestor avisa al agente (notifications/tools/list_changed) cuando el interruptor cambia, para que las
+// sesiones abiertas dejen de ver (o vuelvan a ver) las herramientas sin reiniciarse.
+func vigilaGestor() {
+	antes := gestorPgocode()
+	for range time.Tick(3 * time.Second) {
+		if ahora := gestorPgocode(); ahora != antes {
+			antes = ahora
+			escribeMensaje([]byte(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`))
+		}
+	}
 }
 
 func main() {

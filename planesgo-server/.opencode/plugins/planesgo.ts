@@ -76,130 +76,90 @@ function runHook(
   return null;
 }
 
-export default {
-  id: "planesgo",
-  async setup(ctx: any) {
-    const workDir: string =
-      ctx?.location?.directory || ctx?.location?.worktree || process.cwd();
-    const regKey = Symbol.for("planesgo.opencode.registered_dirs");
-    const regDirs: Set<string> = ((globalThis as any)[regKey] ||= new Set<string>());
-    if (regDirs.has(workDir)) {
-      return;
-    }
-    regDirs.add(workDir);
-    const startedSessions = new Set<string>();
+import { readFileSync } from "node:fs";
 
-    // 1. Inyección de estado de vinculación PSF en el prompt de sistema de la sesión
-    await ctx.session.hook("context", async (input: any) => {
+// Interruptor «PlanesGo en los agentes»: si ~/.planesgo/gestor dice «pgocode», la imputación la lleva pgocode y
+// el plugin no hace nada (ni lanza el hook). Se lee en cada evento: vale para las sesiones ya abiertas.
+function gestorPgocode(): boolean {
+  if (process.env.PLANESGO_GESTOR === "pgocode") return true; // agente lanzado por pgocode: siempre
+  try {
+    return readFileSync(join(HOME, ".planesgo", "gestor"), "utf-8").trim() === "pgocode";
+  } catch {
+    return false;
+  }
+}
+
+// Formato de plugin de OpenCode 1.x: una función que devuelve los hooks (no un objeto {id, setup}).
+export const PlanesGo = async ({ directory, worktree }: { directory?: string; worktree?: string }) => {
+  const workDir: string = directory || worktree || process.cwd();
+  const startedSessions = new Set<string>();
+
+  return {
+    // 1. Estado de vinculación PSF en el prompt de sistema de la sesión
+    "experimental.chat.system.transform": async (input: any, output: any) => {
+      if (gestorPgocode()) return;
       const sid = String(input?.sessionID || "default");
       const mode = startedSessions.has(sid) ? "prompt" : "session-start";
       startedSessions.add(sid);
-
-      const res = runHook(workDir, mode, { session_id: sid });
-      const ctxText = res?.hookSpecificOutput?.additionalContext;
-      if (ctxText && Array.isArray(input?.system)) {
-        input.system.push(`<planesgo-context>\n${ctxText}\n</planesgo-context>`);
+      const ctxText = runHook(workDir, mode, { session_id: sid })?.hookSpecificOutput?.additionalContext;
+      if (ctxText && Array.isArray(output?.system)) {
+        output.system.push(`<planesgo-context>\n${ctxText}\n</planesgo-context>`);
       }
-    });
+    },
 
-    // 2. Registro de la primera petición del usuario y cancelación de consolidación pendiente
-    await ctx.session.hook("prompt", async (input: any) => {
+    // 2. Registro de la petición del usuario
+    "chat.message": async (input: any, output: any) => {
+      if (gestorPgocode()) return;
       const sid = String(input?.sessionID || "default");
-      const text =
-        typeof input?.prompt?.text === "string" ? input.prompt.text : "";
-      if (text) {
-        runHook(workDir, "prompt", { session_id: sid, prompt: text });
-      }
-    });
+      const text = (output?.parts || [])
+        .filter((p: any) => p?.type === "text" && typeof p.text === "string")
+        .map((p: any) => p.text)
+        .join("\n");
+      if (text) runHook(workDir, "prompt", { session_id: sid, prompt: text });
+    },
 
-    // 3. Guardián PreToolUse + Inyección de project_path y session_id en MCP planesgo
-    await ctx.tool.hook("execute.before", async (call: any) => {
-      const sid = String(call?.sessionID || "default");
-      const toolName = String(call?.tool || "");
-      const args = (call?.input || {}) as Record<string, any>;
-
-      // Herramientas MCP de PlanesGo (en OpenCode se exponen como planesgo_planesgo_*)
-      if (
-        toolName.startsWith("planesgo_") ||
-        toolName.startsWith("mcp__planesgo__")
-      ) {
-        const res = runHook(workDir, "mcp", {
-          session_id: sid,
-          tool_name: toolName,
-          tool_input: args,
-        });
-        const updated = res?.hookSpecificOutput?.updatedInput;
-        if (updated && call.input) {
-          Object.assign(call.input, updated);
+    // 3. Guardián antes de cada herramienta e inyección de project_path/session_id en el MCP planesgo
+    "tool.execute.before": async (input: any, output: any) => {
+      if (gestorPgocode()) return;
+      const sid = String(input?.sessionID || "default");
+      const toolName = String(input?.tool || "");
+      const args = (output?.args || {}) as Record<string, any>;
+      if (toolName.startsWith("planesgo_") || toolName.startsWith("mcp__planesgo__")) {
+        const updated = runHook(workDir, "mcp", { session_id: sid, tool_name: toolName, tool_input: args })?.hookSpecificOutput?.updatedInput;
+        if (updated) Object.assign(args, updated);
+        if (!toolName.endsWith("planesgo_search_projects")) {
+          if (!args.project_path && workDir) args.project_path = workDir;
+          if (!args.session_id && sid) args.session_id = sid;
         }
-        if (call.input && !toolName.endsWith("planesgo_search_projects")) {
-          if (!call.input.project_path && workDir) {
-            call.input.project_path = workDir;
-          }
-          if (!call.input.session_id && sid) {
-            call.input.session_id = sid;
-          }
-        }
+        output.args = args;
         return;
       }
-
-      // Herramientas de edición y consola (edit, write, patch, multiedit, shell, bash)
       if (TRACKED_TOOLS.has(toolName)) {
-        const res = runHook(workDir, "guard", {
-          session_id: sid,
-          tool_name: toolName,
-          tool_input: args,
-        });
-        const hso = res?.hookSpecificOutput;
+        const hso = runHook(workDir, "guard", { session_id: sid, tool_name: toolName, tool_input: args })?.hookSpecificOutput;
         if (hso?.permissionDecision === "deny") {
-          throw new Error(
-            hso.permissionDecisionReason ||
-              "Bloqueo PSF: El proyecto no está vinculado a Odoo (.planesgo.json)."
-          );
+          throw new Error(hso.permissionDecisionReason || "Bloqueo PSF: El proyecto no está vinculado a Odoo (.planesgo.json).");
         }
-        if (hso?.updatedInput && call.input) {
-          Object.assign(call.input, hso.updatedInput);
-        }
+        if (hso?.updatedInput) Object.assign(args, hso.updatedInput);
+        output.args = args;
       }
-    });
+    },
 
-    // 4. Latidos PostToolUse (apertura y actualización de cronómetro en Odoo)
-    await ctx.tool.hook("execute.after", async (call: any) => {
-      if (call?.status === "error") return;
-      const sid = String(call?.sessionID || "default");
-      const toolName = String(call?.tool || "");
+    // 4. Latidos tras editar o ejecutar
+    "tool.execute.after": async (input: any, output: any) => {
+      if (gestorPgocode()) return;
+      const toolName = String(input?.tool || "");
       if (TRACKED_TOOLS.has(toolName)) {
-        runHook(workDir, "track", {
-          session_id: sid,
-          tool_name: toolName,
-          tool_input: call?.input || {},
-        });
+        runHook(workDir, "track", { session_id: String(input?.sessionID || "default"), tool_name: toolName, tool_input: output?.metadata?.input || {} });
       }
-    });
+    },
 
-    // 5. Consolidación al quedar la sesión inactiva (session.idle) o cerrarse
-    if (ctx?.event?.subscribe) {
-      (async () => {
-        try {
-          for await (const ev of ctx.event.subscribe()) {
-            const evType = String(ev?.type || "");
-            const sid = String(
-              ev?.properties?.sessionID || ev?.sessionID || "default"
-            );
-            if (evType === "session.idle") {
-              runHook(workDir, "turn-end", { session_id: sid });
-            } else if (
-              evType === "session.deleted" ||
-              evType === "location.shutdown" ||
-              evType === "global.disposed"
-            ) {
-              runHook(workDir, "session-end", { session_id: sid });
-            }
-          }
-        } catch {
-          // Cierre normal del stream de eventos
-        }
-      })();
-    }
-  },
+    // 5. Consolidación del parte al quedar la sesión inactiva o cerrarse
+    event: async ({ event }: { event: any }) => {
+      if (gestorPgocode()) return;
+      const t = String(event?.type || "");
+      const sid = String(event?.properties?.sessionID || "default");
+      if (t === "session.idle") runHook(workDir, "turn-end", { session_id: sid });
+      else if (t === "session.deleted") runHook(workDir, "session-end", { session_id: sid });
+    },
+  };
 };
