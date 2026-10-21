@@ -592,7 +592,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		}
 	}
 	if p.Carpeta != "" && !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
-		jsonError(w, http.StatusForbidden, "esa carpeta no pertenece al proyecto")
+		jsonError(w, http.StatusForbidden, fmt.Sprintf("la carpeta %s no es del proyecto «%s»: elígela en los ajustes de la sesión (la carpeta de la sesión es la que decide el repositorio)", p.Carpeta, nombre))
 		return
 	}
 	if info.NecesitaDir && p.Carpeta == "" {

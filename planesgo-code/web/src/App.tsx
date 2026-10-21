@@ -108,6 +108,9 @@ export default function App() {
   // Al elegir proyecto: su repositorio (si tiene carpeta local) y sus sesiones; si no hay ninguna, se crea una.
   useEffect(() => {
     if (!usuario || !proyecto) { setRepo(null); setSesiones([]); setSesion(null); return; }
+    // La sesión de otro proyecto se suelta ya: mientras se lee el repositorio del nuevo, el chat no puede seguir
+    // con la sesión anterior (sus mensajes irían con este proyecto y la carpeta del otro).
+    setSesion(x => (x && x.proyecto === proyecto.id ? x : null));
     let l = S.lista(usuario.login, proyecto.id);
     const quiere = pedida.current;
     pedida.current = '';
@@ -228,6 +231,8 @@ export default function App() {
     try { await post('/api/logout', {}); } finally { setUsuario(null); setProyecto(null); recuerdaProyecto('', 0); }
   }, []);
 
+  // El chat solo trabaja con una sesión del proyecto activo: su carpeta es la que manda (repositorio, rama, git).
+  const sesionDelProyecto = sesion && proyecto && sesion.proyecto === proyecto.id ? sesion : null;
   const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(usuario?.login || '', p.id); }, [usuario]);
 
   // Desde la lista lateral: una sesión de cualquier proyecto reciente, o una nueva en él.
@@ -256,7 +261,7 @@ export default function App() {
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
         alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
-      <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesion} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+      <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
