@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -72,6 +74,12 @@ func (a *Agente) Info(ctx context.Context) Info {
 }
 
 func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error {
+	// OpenCode: una conversación de otra carpeta no se retoma (trabajaría allí y lo de fuera le parecería dentro).
+	if a.Clave == "opencode" && p.SesionAgente != "" && p.Carpeta != "" && !sesionOpenCodeEn(ctx, a, p) {
+		depuracion.Log(a.Clave, "la sesión %s no es de %s: se empieza otra", p.SesionAgente, p.Carpeta)
+		emite(Evento{Texto: "_(La conversación anterior de OpenCode era de otra carpeta; empiezo una nueva en la de esta sesión.)_\n\n"})
+		p.SesionAgente = ""
+	}
 	err := a.chat(ctx, p, emite)
 	// La sesión propia del agente ya no existe (p. ej. OpenCode con otra carpeta de datos): se empieza otra.
 	if err != nil && p.SesionAgente != "" && ctx.Err() == nil && sesionPerdida(err) {
@@ -111,6 +119,11 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	depuracion.Log(id, "lanza %s %q en %s (entorno añadido: %s)", a.Programa, args, p.Carpeta, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
 	cmd.Dir = p.Carpeta
 	entorno := append([]string(nil), p.Entorno...)
+	// PWD con la carpeta de la sesión: algunos agentes (OpenCode) toman su carpeta de PWD, no de la del proceso, y
+	// heredarían la de pgocode (la personal), con lo que todo el equipo les parecería «dentro» del proyecto.
+	if p.Carpeta != "" {
+		entorno = append(entorno, "PWD="+p.Carpeta)
+	}
 	if a.EntornoPara != nil {
 		entorno = append(entorno, a.EntornoPara(p)...)
 	}
@@ -386,6 +399,10 @@ func Agentes() []Proveedor {
 				if p.SesionAgente != "" {
 					a = append(a, "--session", p.SesionAgente)
 				}
+				// La carpeta de la sesión, explícita: OpenCode guarda con ella su «dentro» y su «fuera».
+				if p.Carpeta != "" {
+					a = append(a, "--dir", p.Carpeta)
+				}
 				// Los adjuntos van además como ficheros del mensaje (imágenes incluidas).
 				for _, f := range p.Adjuntos {
 					a = append(a, "--file", f)
@@ -448,4 +465,49 @@ func nombreDe(titulo, orden string) string {
 		n = "programa"
 	}
 	return n
+}
+
+// Sesiones de OpenCode ya comprobadas (sesión → carpeta).
+var (
+	muSesionesOC sync.Mutex
+	sesionesOC   = map[string]string{}
+)
+
+// sesionOpenCodeEn: si la sesión de OpenCode es de la carpeta (su listado de sesiones, que es por carpeta). Si no
+// se puede comprobar, se da por buena.
+func sesionOpenCodeEn(ctx context.Context, a *Agente, p Peticion) bool {
+	muSesionesOC.Lock()
+	ya := sesionesOC[p.SesionAgente] == p.Carpeta
+	muSesionesOC.Unlock()
+	if ya {
+		return true
+	}
+	ctx, cancela := context.WithTimeout(ctx, 15*time.Second)
+	defer cancela()
+	cmd := exec.CommandContext(ctx, "opencode", "session", "list", "--format", "json", "-n", "1000")
+	cmd.Dir = p.Carpeta
+	cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+	if a.EntornoPara != nil {
+		cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return true
+	}
+	var l []struct {
+		ID  string `json:"id"`
+		Dir string `json:"directory"`
+	}
+	if json.Unmarshal(out, &l) != nil {
+		return true
+	}
+	for _, x := range l {
+		if x.ID == p.SesionAgente && filepath.Clean(x.Dir) == filepath.Clean(p.Carpeta) {
+			muSesionesOC.Lock()
+			sesionesOC[p.SesionAgente] = p.Carpeta
+			muSesionesOC.Unlock()
+			return true
+		}
+	}
+	return false
 }
