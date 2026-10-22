@@ -901,3 +901,7 @@ button.miga-item:hover { background: var(--hover); }
 .outside-context-label::before, .outside-context-label::after { content: ''; flex: 1; border-top: 1px dashed var(--linea); }
 .cut-notice { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; color: var(--aviso, #b26b00); margin: 0 4px 4px; }
 .cut-notice .enlace { font-size: 12px; white-space: nowrap; }
+
+/* «Trabajando… leyendo X · N tokens»: siempre en una sola línea (lo que no cabe se recorta). */
+.mensaje .pensando { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actividad-agente { color: var(--suave); }

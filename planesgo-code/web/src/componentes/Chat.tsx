@@ -15,6 +15,7 @@ import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, T
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
+import { actividad } from '../activity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as AY from '../ayuda';
@@ -881,7 +882,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 {(m.inyectados || (enCurso && i === mensajes.length - 1 ? inyectados[sesion.id] : undefined))?.map((x, j) => (
                   <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}</div>
                 ))}
-                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
+                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
                 {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en la conversación hasta este turno (sin las preguntas aparte)">{CO.tokens(acumulados[i])} en la conversación</span></div>}
                 {m.relevo && (
                   <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>
