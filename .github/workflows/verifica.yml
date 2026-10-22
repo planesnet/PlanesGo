@@ -1,11 +1,14 @@
-# Control de calidad de pgocode (planesgo-code): lo mismo que «make verifica», en cada push y pull request.
+# Control de calidad de pgocode (planesgo-code): lo mismo que «make verifica», en las ramas de desarrollo y en las
+# pull requests (antes de fusionar). En master no se ejecuta; se puede lanzar a mano (workflow_dispatch).
 name: verifica
 
 on:
   push:
+    branches-ignore: [master]
     paths: ["planesgo-code/**", ".github/workflows/verifica.yml"]
   pull_request:
     paths: ["planesgo-code/**", ".github/workflows/verifica.yml"]
+  workflow_dispatch:
 
 jobs:
   verifica:
