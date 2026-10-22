@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,5 +83,161 @@ func TestAcumuladoAntigravity(t *testing.T) {
 	r := c.fin()
 	if r.Entrada != 800 || r.Salida != 15 || r.CacheLeida != 400 {
 		t.Errorf("%+v", r.Medida)
+	}
+}
+
+// El contexto de un turno es el de su última llamada al modelo (no la suma).
+func TestRecogeContexto(t *testing.T) {
+	c := &recoge{agente: "claude-code"}
+	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 100, Contexto: 30}})
+	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 200, Contexto: 70}})
+	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 5}})
+	if r := c.fin(); r.Entrada != 305 || r.Contexto != 70 {
+		t.Errorf("%+v", r.Medida)
+	}
+	var m Medida
+	m.suma(Medida{Entrada: 10, Contexto: 30})
+	m.suma(Medida{Entrada: 20, Contexto: 50})
+	if m.Entrada != 30 || m.Contexto != 50 {
+		t.Errorf("suma: %+v", m)
+	}
+}
+
+func TestEstrategias(t *testing.T) {
+	if _, ok := strategies["ninguna"]; !ok {
+		t.Fatal("falta la estrategia «ninguna»")
+	}
+	c := &conversation{Session: "s1", Message: "hola"}
+	if err := strategies["ninguna"]().before(context.Background(), c); err != nil || c.Session != "s1" || c.Message != "hola" {
+		t.Errorf("«ninguna» no ha de cambiar nada: %+v %v", c, err)
+	}
+}
+
+// El informe de una prueba de varios turnos lleva la evolución turno a turno, con cada modo.
+func TestEvolucionPorTurno(t *testing.T) {
+	p := Prueba{ID: 9, Nombre: "X", Turnos: []Turno{{Mensaje: "uno"}, {Mensaje: "dos"}}}
+	tm := func(ctx, ent int) turnMeasure {
+		return turnMeasure{Medida: Medida{Contexto: ctx, Entrada: ent}, Acierto: true}
+	}
+	todas := []Ejecucion{
+		{Modo: "directo", Agente: "claude-code", Prueba: 9, Acierto: true, Turnos: []turnMeasure{tm(20000, 40000), tm(30000, 90000)}},
+		{Modo: "pgocode", Agente: "claude-code", Prueba: 9, Acierto: false, Turnos: []turnMeasure{tm(12000, 24000)}},
+	}
+	inf := informe(Banco{Agentes: map[string]ConfAgente{"claude-code": {Modelo: "opus"}}}, []string{"claude-code"},
+		[]Prueba{p}, []string{"directo", "pgocode"}, todas, t.TempDir(), 1, "ninguna")
+	for _, x := range []string{"turno a turno", "Contexto sin pgocode", "Contexto pgocode",
+		"| 1 | uno | 20.0k | 40.0k | 0.000 $ | 1/1 | 12.0k | 24.0k |", "| 2 | dos | 30.0k | 90.0k | 0.000 $ | 1/1 | — | — | — | — |", "Estrategia: `ninguna`"} {
+		if !strings.Contains(inf, x) {
+			t.Errorf("falta %q en:\n%s", x, inf)
+		}
+	}
+}
+
+// Prueba 6 («Ida y vuelta»): con una solución de referencia, cada turno cumple su comprobación y, antes de
+// hacerlo, no (salvo las preguntas, que se comprueban con una respuesta mala).
+func TestIdaYVuelta(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("sin python3")
+	}
+	b := banco(t)
+	i := slices.IndexFunc(b.Pruebas, func(p Prueba) bool { return p.ID == 6 })
+	if i < 0 {
+		t.Fatal("falta la prueba 6")
+	}
+	p := b.Pruebas[i]
+	if len(p.Turnos) != 10 {
+		t.Fatalf("%d turnos", len(p.Turnos))
+	}
+	d := filepath.Join(t.TempDir(), "p")
+	if err := copia("../../consumo/proyecto", d); err != nil {
+		t.Fatal(err)
+	}
+	cambia := func(f, de, a string) {
+		t.Helper()
+		bs, err := os.ReadFile(filepath.Join(d, f))
+		if err != nil || !strings.Contains(string(bs), de) {
+			t.Fatalf("%s: no está %q", f, de)
+		}
+		os.WriteFile(filepath.Join(d, f), []byte(strings.Replace(string(bs), de, a, 1)), 0o644)
+	}
+	renombra := func() {
+		filepath.WalkDir(d, func(f string, e os.DirEntry, _ error) error {
+			if strings.HasSuffix(f, ".py") {
+				bs, _ := os.ReadFile(f)
+				os.WriteFile(f, []byte(strings.ReplaceAll(string(bs), "subtotal(", "base_imponible(")), 0o644)
+			}
+			return nil
+		})
+	}
+	pruebaLineas := func(nombre, cuerpo string) {
+		cambia("tests/test_lineas.py", "\n\nif __name__", "\n\n    def "+nombre+"(self):\n        "+cuerpo+"\n\n\nif __name__")
+	}
+	pasos := []struct {
+		hace      func()
+		bien, mal string
+	}{
+		{hace: func() {
+			cambia("facturacion/lineas.py", "self.bruto() - self.descuento", "self.bruto() * (1 - self.descuento / 100)")
+		}},
+		{hace: func() {
+			pruebaLineas("test_descuento_total", "self.assertEqual(Linea(TORNILLO, 4, descuento=100).subtotal(), 0.0)")
+		}},
+		{hace: func() {
+			cambia("facturacion/redondeo.py", "decimales=2):", "decimales=2, modo=\"mitad\"):")
+			cambia("facturacion/redondeo.py", "rounding=ROUND_HALF_UP", "rounding=ROUND_DOWN if modo == \"abajo\" else ROUND_HALF_UP")
+			cambia("facturacion/redondeo.py", "import Decimal, ROUND_HALF_UP", "import Decimal, ROUND_DOWN, ROUND_HALF_UP")
+		}},
+		{hace: func() {
+			cambia("facturacion/impuestos/calculo.py", "redondea(base * porcentaje / 100)", "redondea(base * porcentaje / 100, modo=\"abajo\")")
+		}},
+		{hace: renombra},
+		{hace: func() {
+			cambia("facturacion/lineas.py", "descuento: float = 0.0  # porcentaje (0-100)", "descuento: float = 0.0  # porcentaje (0-100)\n    descuento_fijo: float = 0.0  # euros")
+			cambia("facturacion/lineas.py", "self.bruto() * (1 - self.descuento / 100))", "self.bruto() * (1 - self.descuento / 100) - self.descuento_fijo)")
+		}},
+		{bien: "Arreglé el descuento (porcentaje), renombré subtotal a `base_imponible` y añadí `descuento_fijo`.", mal: "Arreglé el descuento."},
+		{hace: func() {
+			cambia("facturacion/lineas.py", "redondea(self.bruto()", "redondea(max(0, self.bruto()")
+			cambia("facturacion/lineas.py", "- self.descuento_fijo)", "- self.descuento_fijo))")
+		}},
+		{hace: func() {
+			pruebaLineas("test_descuento_fijo_minimo", "self.assertEqual(Linea(TORNILLO, 1, descuento_fijo=50).base_imponible(), 0.0)")
+		}},
+		{bien: "Antes, mitad hacia arriba (ROUND_HALF_UP); ahora, hacia abajo (trunca).", mal: "Igual que antes."},
+	}
+	for n, x := range pasos {
+		tu := p.Turnos[n]
+		if x.hace != nil {
+			if f := comprueba(tu, x.bien, d); f == "" {
+				t.Errorf("turno %d: se cumple sin hacerlo", n+1)
+			}
+			x.hace()
+		} else if comprueba(tu, x.mal, d) == "" {
+			t.Errorf("turno %d acepta %q", n+1, x.mal)
+		}
+		if f := comprueba(tu, x.bien, d); f != "" {
+			t.Fatalf("turno %d: %s", n+1, f)
+		}
+	}
+}
+
+// Claude Code al reanudar da el acumulado de la sesión (tokens y coste): se resta el anterior; si baja (otra
+// sesión), se toma entero.
+func TestAcumuladoClaude(t *testing.T) {
+	if !cumulativeUsage("claude-code", "directo") || !cumulativeUsage("claude-code", "pgocode") || cumulativeUsage("antigravity", "pgocode") {
+		t.Fatal("cumulativeUsage")
+	}
+	previo := &llm.Uso{Entrada: 100000, Salida: 1000, CacheLeida: 85000, CacheEscrita: 14000, Coste: 0.15}
+	c := &recoge{agente: "claude-code", previo: previo}
+	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 155000, Salida: 1500, CacheLeida: 136000, CacheEscrita: 19000, Coste: 0.20, Llamadas: 2, Contexto: 28000}})
+	r := c.fin()
+	if r.Entrada != 55000 || r.Salida != 500 || r.CacheLeida != 51000 || r.CacheEscrita != 5000 || r.Llamadas != 2 || r.Contexto != 28000 ||
+		r.Coste < 0.049 || r.Coste > 0.051 || r.bruto.Entrada != 155000 {
+		t.Errorf("%+v", r.Medida)
+	}
+	c = &recoge{agente: "claude-code", previo: previo}
+	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 30000, Coste: 0.05}})
+	if r := c.fin(); r.Entrada != 30000 || r.Coste != 0.05 {
+		t.Errorf("otra sesión: %+v", r.Medida)
 	}
 }

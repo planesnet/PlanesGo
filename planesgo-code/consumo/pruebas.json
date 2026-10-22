@@ -45,6 +45,32 @@
          "orden": "python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 4}},
         {"mensaje": "Resume en tres líneas lo que has cambiado en esta conversación.", "texto": "lineas\\.py"}
       ]
+    },
+    {
+      "id": 6, "nombre": "Ida y vuelta", "permisos": "auto",
+      "mide": "Diez turnos cortos que dependen de los anteriores: cuánto crece el contexto en un ir y venir (y, con otras estrategias, cuánto ahorran)",
+      "turnos": [
+        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Arregla el fallo del descuento sin tocar las pruebas.",
+         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]},
+        {"mensaje": "Añade a las pruebas de las líneas una para un descuento del 100 % (subtotal 0) y comprueba que pasa.",
+         "orden": "python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 4}},
+        {"mensaje": "Añade a redondea un tercer parámetro opcional, modo: «mitad» (el de ahora, por defecto) o «abajo» (trunca hacia cero).",
+         "orden": "python3 -c \"from facturacion.redondeo import redondea as r; assert r(0.105) == 0.11; assert r(0.105, 2, 'abajo') == 0.1; assert r(2.999, modo='abajo') == 2.99\" && python3 -m unittest discover -s tests"},
+        {"mensaje": "Usa ese modo «abajo» en la cuota de IVA (cuota_iva); lo demás, igual.",
+         "orden": "python3 -c \"from facturacion.impuestos import cuota_iva; from facturacion.redondeo import redondea; assert cuota_iva(0.5, 21) == 0.1; assert redondea(0.105) == 0.11\" && python3 -m unittest discover -s tests"},
+        {"mensaje": "Renombra el método que arreglaste al principio a base_imponible, en todo el proyecto (pruebas incluidas).",
+         "orden": "! grep -rqE --include='*.py' '\\.subtotal\\(|def subtotal' facturacion tests && grep -q 'def base_imponible' facturacion/lineas.py && python3 -m unittest discover -s tests"},
+        {"mensaje": "Añade a Linea un campo opcional descuento_fijo (importe en euros, 0 por defecto) que se resta de la base después del descuento en porcentaje.",
+         "orden": "python3 -c \"from facturacion.lineas import Linea; from facturacion.productos import Producto as P; assert Linea(P('a', 'a', 10.0), 2, descuento=10, descuento_fijo=3).base_imponible() == 15.0; assert Linea(P('a', 'a', 10.0), 2).base_imponible() == 20.0\" && python3 -m unittest discover -s tests"},
+        {"mensaje": "¿Qué has cambiado en lineas.py? Responde en pocas líneas.",
+         "texto": "base_imponible.*descuento_fijo|descuento_fijo.*base_imponible"},
+        {"mensaje": "Que el descuento fijo nunca deje la base en negativo: como mínimo, 0.",
+         "orden": "python3 -c \"from facturacion.lineas import Linea; from facturacion.productos import Producto as P; assert Linea(P('a', 'a', 10.0), 1, descuento_fijo=50).base_imponible() == 0; assert Linea(P('a', 'a', 10.0), 2, descuento=10, descuento_fijo=3).base_imponible() == 15.0\" && python3 -m unittest discover -s tests"},
+        {"mensaje": "Añade una prueba de eso al mismo fichero de pruebas de antes y comprueba que pasa.",
+         "orden": "grep -q descuento_fijo tests/test_lineas.py && python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 5}},
+        {"mensaje": "¿Cómo redondeaba la cuota de IVA antes de tu cambio y cómo redondea ahora? Una línea.",
+         "texto": "(mitad|arriba|half).*(abajo|trunc|down|cero)"}
+      ]
     }
   ]
 }
