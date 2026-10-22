@@ -16,10 +16,12 @@ export interface Uso { entrada: number; salida: number; coste?: number; segundos
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; child?: ChildStart } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja
 // Relevo: el mensaje fue a una sesión nueva del agente con la memoria de trabajo (de: tokens de contexto que tenía la
 // sesión anterior; a: los de la memoria, estimados, y al acabar el turno los del contexto real de la sesión nueva);
 // anterior: la sesión del agente de antes (para deshacerlo).
+// child: primer mensaje de una sesión hija (otro tema): de qué sesión sale y lo que ocupaba su contexto mínimo.
+export interface ChildStart { parentName: string; tokens: number }
 export interface Relevo { de: number; a: number; anterior: string; motivo: string }
 
 // Sube un fichero adjunto a la carpeta de la sesión (para pasárselo al agente).
