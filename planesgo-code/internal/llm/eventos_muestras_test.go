@@ -298,3 +298,37 @@ func TestClaudeConsumoConSubagente(t *testing.T) {
 		t.Errorf("tokens de las herramientas: %v", herr)
 	}
 }
+
+// Sesión retomada con --resume (muestra real, haiku): «modelUsage» y «total_cost_usd» son lo acumulado de toda la
+// sesión, no del proceso. El segundo turno ha de contar solo lo suyo (3.447 de entrada y 43 de salida), con el
+// acumulado guardado del turno anterior y también sin él (sesión de antes de guardarlo).
+func TestClaudeConsumoAlRetomar(t *testing.T) {
+	turno := func(f string) Uso {
+		var u Uso
+		for _, e := range lee(t, f, func(r *os.File, emite func(Evento)) error { return leeClaudeCode(r, emite) }) {
+			if e.Uso != nil {
+				u.Entrada += e.Uso.Entrada
+				u.Salida += e.Uso.Salida
+				u.Coste += e.Uso.Coste
+			}
+		}
+		return u
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	acumulados = nil
+	if u := turno("claude-11-resume-1.jsonl"); u.Entrada != 3361 || u.Salida != 55 || math.Abs(u.Coste-6.129e-05) > 1e-9 {
+		t.Errorf("primer turno: %+v", u)
+	}
+	if u := turno("claude-11-resume-2.jsonl"); u.Entrada != 3447 || u.Salida != 43 || math.Abs(u.Coste-(0.00011744-6.129e-05)) > 1e-9 {
+		t.Errorf("segundo turno, con el acumulado guardado: %+v", u)
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir()) // sin acumulado guardado
+	acumulados = nil
+	u := turno("claude-11-resume-2.jsonl")
+	if u.Entrada != 3447 || u.Salida != 43 {
+		t.Errorf("segundo turno, sin acumulado: %+v", u)
+	}
+	if real := 0.00011744 - 6.129e-05; math.Abs(u.Coste-real) > real*0.25 { // proporcional: aproximado
+		t.Errorf("coste sin acumulado %.8f, real %.8f", u.Coste, real)
+	}
+}

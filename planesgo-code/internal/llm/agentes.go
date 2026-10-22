@@ -792,7 +792,8 @@ func borraOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) er
 	return nil
 }
 
-// Acumulados de consumo por conversación de Antigravity (persisten entre ejecuciones de pgocode).
+// Acumulados de consumo por conversación de Antigravity y por sesión de Claude Code (persisten entre ejecuciones
+// de pgocode: los dos dan lo acumulado de toda la conversación, y lo del turno es la diferencia).
 var (
 	muAcumulados sync.Mutex
 	acumulados   map[string]Uso
@@ -804,6 +805,43 @@ func ficheroAcumulados() string {
 		return ""
 	}
 	return filepath.Join(d, "pgocode", "antigravity-consumo.json")
+}
+
+// cargaAcumulados (con muAcumulados): el registro de acumulados, del fichero la primera vez.
+func cargaAcumulados() {
+	if acumulados == nil {
+		acumulados = map[string]Uso{}
+		if b, err := os.ReadFile(ficheroAcumulados()); err == nil {
+			json.Unmarshal(b, &acumulados)
+		}
+	}
+}
+
+// guardaAcumulados (con muAcumulados).
+func guardaAcumulados() {
+	if f := ficheroAcumulados(); f != "" {
+		os.MkdirAll(filepath.Dir(f), 0o700)
+		if b, err := json.Marshal(acumulados); err == nil {
+			os.WriteFile(f, b, 0o600)
+		}
+	}
+}
+
+// acumuladoClaude: el acumulado de una sesión de Claude Code la última vez que se vio (modelUsage y coste).
+func acumuladoClaude(sesion string) (Uso, bool) {
+	muAcumulados.Lock()
+	defer muAcumulados.Unlock()
+	cargaAcumulados()
+	u, ok := acumulados["claude:"+sesion]
+	return u, ok
+}
+
+func guardaAcumuladoClaude(sesion string, u Uso) {
+	muAcumulados.Lock()
+	defer muAcumulados.Unlock()
+	cargaAcumulados()
+	acumulados["claude:"+sesion] = u
+	guardaAcumulados()
 }
 
 // usoDelTurno: lo de este turno = el acumulado que da el agente menos el anterior de la conversación. Si el

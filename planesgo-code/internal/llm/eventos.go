@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -193,9 +194,6 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	nombres := map[string]string{}
-	// total_cost_usd es lo acumulado por el proceso: con tareas en segundo plano hay varios «result» y cada uno
-	// lleva el total hasta entonces; se emite solo la diferencia para no contar dos veces.
-	costeAntes := 0.0
 	// Órdenes en segundo plano: la orden de cada Bash lanzado así y las tareas que siguen vivas.
 	ordenes := map[string]string{}
 	type viva struct {
@@ -205,18 +203,23 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	vivas := map[string]viva{}
 	lista := &listaClaude{}
 	contexto := 0
-	// Consumo real del turno, también en vivo: «usage» del result solo cuenta el agente principal; «modelUsage» es
-	// el acumulado del proceso con los subagentes. En vivo: lo acumulado al último result más las llamadas de
-	// después (cada mensaje una vez: Claude repite el mensaje por cada bloque; su salida llega parcial y se
-	// completa con el result, cuyo vivo coincide así con la suma de los consumos emitidos).
-	var base Uso
-	llamadas := map[string][2]int{}
+	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
+	// «modelUsage» y «total_cost_usd» llevan los subagentes pero son lo acumulado de TODA la sesión (también a través
+	// de --resume). El turno es el acumulado menos el de la vez anterior (guardado por sesión: acumuladoClaude); sin
+	// él, en una sesión retomada, se reconstruye con las llamadas vistas (consumoObservado). En vivo: lo de los
+	// result anteriores de este proceso más las llamadas de después (cada mensaje una vez: Claude repite el mensaje
+	// por cada bloque; su salida llega parcial y se completa con el result, cuyo vivo coincide así con la suma).
+	var hecho Uso   // lo emitido en los result de este proceso
+	var previo *Uso // el acumulado de la sesión en el result anterior (nil: aún no se sabe)
+	sesion := ""
+	costeSinDesglose := 0.0 // sin modelUsage: el coste del result también es acumulado (se resta el anterior)
+	llamadas := map[string]llamadaClaude{}
 	cerradas := map[string]bool{}
 	vivo := func() *Uso {
-		u := Uso{Entrada: base.Entrada, Salida: base.Salida}
+		u := Uso{Entrada: hecho.Entrada, Salida: hecho.Salida}
 		for _, l := range llamadas {
-			u.Entrada += l[0]
-			u.Salida += l[1]
+			u.Entrada += l.entrada()
+			u.Salida += l.Salida
 		}
 		return &u
 	}
@@ -243,6 +246,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			} `json:"patch"`
 			Message struct {
 				ID      string `json:"id"`
+				Model   string `json:"model"`
 				Content []struct {
 					Type      string          `json:"type"`
 					Text      string          `json:"text"`
@@ -261,17 +265,12 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					Output        int `json:"output_tokens"`
 				} `json:"usage"`
 			} `json:"message"`
-			ModelUsage map[string]struct {
-				Input         int `json:"inputTokens"`
-				Output        int `json:"outputTokens"`
-				CacheRead     int `json:"cacheReadInputTokens"`
-				CacheCreation int `json:"cacheCreationInputTokens"`
-			} `json:"modelUsage"`
-			ResultadoHerr json.RawMessage `json:"tool_use_result"`
-			IsError       bool            `json:"is_error"`
-			Result        string          `json:"result"`
-			Coste         float64         `json:"total_cost_usd"`
-			Duracion      float64         `json:"duration_ms"`
+			ModelUsage    map[string]usoModeloClaude `json:"modelUsage"`
+			ResultadoHerr json.RawMessage            `json:"tool_use_result"`
+			IsError       bool                       `json:"is_error"`
+			Result        string                     `json:"result"`
+			Coste         float64                    `json:"total_cost_usd"`
+			Duracion      float64                    `json:"duration_ms"`
 			Usage         struct {
 				Total         int `json:"total_tokens"` // task_progress
 				Herramientas  int `json:"tool_uses"`
@@ -287,6 +286,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		if ev.SessionID != "" && ev.Type == "system" && ev.Subtype == "init" {
 			emite(Evento{SesionAgente: ev.SessionID})
 			lista.sesion = ev.SessionID
+			sesion = ev.SessionID
 		}
 		// La lista de tareas (TodoWrite, TaskCreate, TaskUpdate), también si la toca un subagente.
 		for _, c := range ev.Message.Content {
@@ -319,8 +319,9 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			continue
 		}
 		if u := ev.Message.Usage; ev.Type == "assistant" && ev.Message.ID != "" && !cerradas[ev.Message.ID] {
-			antes, n := llamadas[ev.Message.ID], [2]int{u.Input + u.CacheCreation + u.CacheRead, u.Output}
-			n[1] = max(n[1], antes[1])
+			antes := llamadas[ev.Message.ID]
+			n := llamadaClaude{Modelo: ev.Message.Model, Sub: ev.Padre != "", Nueva: u.Input, Leida: u.CacheRead, Escrita: u.CacheCreation,
+				Salida: max(u.Output, antes.Salida)}
 			if n != antes {
 				llamadas[ev.Message.ID] = n
 				emite(Evento{Vivo: vivo()})
@@ -386,25 +387,37 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					Salida: recorta(textoDe(c.Content), maxSalida), Estado: estado, Imagenes: imagenesDe(c.Content)}})
 			}
 		case "result":
-			coste := max(ev.Coste-costeAntes, 0)
-			costeAntes = max(ev.Coste, costeAntes)
-			turno := Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
-				CacheLeida: ev.Usage.CacheRead, CacheEscrita: ev.Usage.CacheCreation}
-			if len(ev.ModelUsage) > 0 {
-				var total Uso
-				for _, m := range ev.ModelUsage {
-					total.Entrada += m.Input + m.CacheCreation + m.CacheRead
-					total.Salida += m.Output
-					total.CacheLeida += m.CacheRead
-					total.CacheEscrita += m.CacheCreation
+			total := acumuladoSesionClaude(ev.ModelUsage, ev.Coste)
+			observado := consumoObservado(llamadas, ev.Usage.Output, ev.ModelUsage)
+			if previo == nil && sesion != "" {
+				if a, ok := acumuladoClaude(sesion); ok && a.Entrada <= total.Entrada {
+					previo = &a
 				}
-				turno = Uso{Entrada: max(total.Entrada-base.Entrada, 0), Salida: max(total.Salida-base.Salida, 0),
-					CacheLeida: max(total.CacheLeida-base.CacheLeida, 0), CacheEscrita: max(total.CacheEscrita-base.CacheEscrita, 0)}
 			}
-			base.Entrada += turno.Entrada
-			base.Salida += turno.Salida
-			base.CacheLeida += turno.CacheLeida
-			base.CacheEscrita += turno.CacheEscrita
+			var turno Uso
+			switch {
+			case len(ev.ModelUsage) == 0: // sin acumulado: lo del propio result (solo el agente principal)
+				turno = Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
+					CacheLeida: ev.Usage.CacheRead, CacheEscrita: ev.Usage.CacheCreation, Coste: max(ev.Coste-costeSinDesglose, 0)}
+				costeSinDesglose = max(ev.Coste, costeSinDesglose)
+			case previo != nil:
+				turno = Uso{Entrada: max(total.Entrada-previo.Entrada, 0), Salida: max(total.Salida-previo.Salida, 0),
+					CacheLeida: max(total.CacheLeida-previo.CacheLeida, 0), CacheEscrita: max(total.CacheEscrita-previo.CacheEscrita, 0),
+					Coste: max(total.Coste-previo.Coste, 0)}
+			case total.Entrada <= observado.Entrada+observado.Entrada/100+100:
+				turno = total // sesión nueva: todo lo acumulado es de este turno
+			default:
+				turno = observado // sesión retomada sin acumulado guardado: lo visto en este proceso
+			}
+			if len(ev.ModelUsage) > 0 {
+				previo = &total
+				if sesion != "" {
+					guardaAcumuladoClaude(sesion, total)
+				}
+			}
+			coste := turno.Coste
+			hecho.Entrada += turno.Entrada
+			hecho.Salida += turno.Salida
 			turno.Llamadas = len(llamadas)
 			for id := range llamadas {
 				cerradas[id] = true
@@ -1040,4 +1053,77 @@ func Lector(clave string) func(io.Reader, func(Evento)) error {
 		return leeOpenCode
 	}
 	return nil
+}
+
+// llamadaClaude: una llamada al modelo vista en el flujo de Claude Code (su mensaje), con su consumo.
+type llamadaClaude struct {
+	Modelo                        string
+	Sub                           bool // de un subagente
+	Nueva, Leida, Escrita, Salida int  // entrada nueva, leída y escrita en caché; salida (parcial hasta el result)
+}
+
+func (l llamadaClaude) entrada() int { return l.Nueva + l.Leida + l.Escrita }
+
+// usoModeloClaude: lo acumulado de la sesión de un modelo («modelUsage»).
+type usoModeloClaude struct {
+	Input         int     `json:"inputTokens"`
+	Output        int     `json:"outputTokens"`
+	CacheRead     int     `json:"cacheReadInputTokens"`
+	CacheCreation int     `json:"cacheCreationInputTokens"`
+	Coste         float64 `json:"costUSD"`
+}
+
+// peso: lo que pesa en el precio (entrada nueva 1, escritura en caché 1,25, lectura 0,1, salida 5).
+func peso(nueva, escrita, leida, salida int) float64 {
+	return float64(nueva) + 1.25*float64(escrita) + 0.1*float64(leida) + 5*float64(salida)
+}
+
+// acumuladoSesionClaude: el acumulado de toda la sesión (todos sus modelos).
+func acumuladoSesionClaude(mu map[string]usoModeloClaude, coste float64) Uso {
+	var u Uso
+	for _, m := range mu {
+		u.Entrada += m.Input + m.CacheCreation + m.CacheRead
+		u.Salida += m.Output
+		u.CacheLeida += m.CacheRead
+		u.CacheEscrita += m.CacheCreation
+	}
+	u.Coste = coste
+	return u
+}
+
+// consumoObservado: el del turno según las llamadas vistas en este proceso. La entrada es exacta; la salida, la
+// del result para el agente principal (exacta) más lo visto de los subagentes; el coste, la parte del acumulado de
+// cada modelo que le toca por el peso de sus tokens en el precio.
+func consumoObservado(ls map[string]llamadaClaude, salidaPrincipal int, mu map[string]usoModeloClaude) Uso {
+	var u Uso
+	pesos := map[string]float64{}
+	principal, vistaPrincipal := "", 0
+	for _, l := range ls {
+		u.Entrada += l.entrada()
+		u.CacheLeida += l.Leida
+		u.CacheEscrita += l.Escrita
+		if l.Sub {
+			u.Salida += l.Salida
+		} else {
+			principal = l.Modelo
+			vistaPrincipal += l.Salida
+		}
+		pesos[l.Modelo] += peso(l.Nueva, l.Escrita, l.Leida, l.Salida)
+	}
+	u.Salida += salidaPrincipal
+	if s := salidaPrincipal - vistaPrincipal; s > 0 {
+		pesos[principal] += 5 * float64(s)
+	}
+	for modelo, w := range pesos {
+		m, ok := mu[modelo]
+		if !ok && len(mu) == 1 {
+			for _, x := range mu {
+				m, ok = x, true
+			}
+		}
+		if wc := peso(m.Input, m.CacheCreation, m.CacheRead, m.Output); ok && wc > 0 {
+			u.Coste += m.Coste * math.Min(1, w/wc)
+		}
+	}
+	return u
 }
