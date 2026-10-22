@@ -3,14 +3,14 @@
 :root {
   --fondo: #fbfbfa; --panel: #f5f5f3; --superficie: #ffffff; --texto: #1c1c1a; --suave: #74736e; --tenue: #a3a29c;
   --linea: #e8e7e3; --hover: #efeeea; --acento: #0a6fc9; --acento-texto: #ffffff; --enfoque: #0a6fc9;
-  --error: #c4352b; --directo: #e5484d; --usuario: #f1f0ec; --codigo: #f1f0ec;
+  --error: #c4352b; --warning: #9a6700; --directo: #e5484d; --usuario: #f1f0ec; --codigo: #f1f0ec;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --fondo: #191918; --panel: #1f1f1d; --superficie: #242422; --texto: #ecebe7; --suave: #a09f99; --tenue: #6f6e69;
     --linea: #30302d; --hover: #2b2b28; --acento: #4ea3f0; --acento-texto: #0d1420; --enfoque: #4ea3f0;
-    --error: #ff8278; --directo: #ff6369; --usuario: #2a2a27; --codigo: #2a2a27;
+    --error: #ff8278; --warning: #d4a72c; --directo: #ff6369; --usuario: #2a2a27; --codigo: #2a2a27;
     color-scheme: dark;
   }
 }
@@ -406,6 +406,25 @@ textarea { resize: none; }
 button.chip { cursor: pointer; }
 button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
 
+/* Ventanas (Modal.tsx): pie, propiedades con pie y diálogos de mensaje/confirmación */
+.modal-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-top: 1px solid var(--linea); padding-top: 10px; }
+.modal.propiedades.with-footer { height: min(580px, calc(100vh - 32px)); grid-template-rows: auto minmax(0, 1fr) auto; }
+.incomplete-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); margin-left: auto; flex: none; }
+.fondo-modal.on-top { z-index: 1200; }
+.footer-error { flex-basis: 100%; margin: 0; }
+.modal.dialog { width: min(460px, 100%); }
+.dialog-body { display: flex; align-items: flex-start; gap: 12px; }
+.dialog-icon { flex: none; margin-top: 1px; }
+.dialog-body.info .dialog-icon { color: var(--acento); }
+.dialog-body.warning .dialog-icon { color: var(--warning); }
+.dialog-body.error .dialog-icon { color: var(--error); }
+.dialog-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; }
+button.primario.danger { background: var(--error); }
+.account-card { display: flex; align-items: center; gap: 12px; }
+.account-card .avatar { width: 44px; height: 44px; font-size: 15px; }
+.account-card > div { display: grid; min-width: 0; }
+.app-actions { gap: 8px; }
+
 /* Propiedades del proyecto */
 .grupo-puntos { opacity: 0; }
 .grupo-cabecera:hover .grupo-puntos, .grupo-puntos[aria-expanded="true"] { opacity: 1; }
@@ -520,15 +539,11 @@ button.chip:hover { filter: brightness(0.95); text-decoration: underline; }
 .sk-barra-fondo > i { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--texto); opacity: .5; }
 
 /* Ventana de la sesión */
-.modal.propiedades.ajustes-sesion { height: min(580px, calc(100vh - 32px)); grid-template-rows: auto minmax(0, 1fr) auto; }
-.propiedades-pie { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 10px; }
-.propiedades-pie .fila-config { gap: 10px; }
-.punto-pendiente { width: 7px; height: 7px; border-radius: 50%; background: #d4a72c; margin-left: auto; flex: none; }
-.identificadores { display: grid; gap: 6px; margin: 0; }
-.identificadores > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 8px; }
-.identificadores dt { font-size: 12px; color: var(--suave); }
-.identificadores dd { margin: 0; display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12.5px; }
-.identificadores code { flex: 1; min-width: 0; font-size: 12px; background: var(--panel); border: 1px solid var(--linea); border-radius: 6px; padding: 4px 8px; user-select: all; }
+.session-ids { display: grid; gap: 6px; margin: 0; }
+.session-ids > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 8px; }
+.session-ids dt { font-size: 12px; color: var(--suave); }
+.session-ids dd { margin: 0; display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12.5px; }
+.session-ids code { flex: 1; min-width: 0; font-size: 12px; background: var(--panel); border: 1px solid var(--linea); border-radius: 6px; padding: 4px 8px; user-select: all; }
 .ajustes-sesion .campo { display: grid; gap: 4px; }
 .etiqueta-campo { font-size: 12px; color: var(--suave); }
 .obligatorio { font-size: 10.5px; color: #9a6700; border: 1px solid #d4a72c; border-radius: 999px; padding: 0 6px; margin-left: 4px; }

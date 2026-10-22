@@ -5,6 +5,7 @@ import { identificador, lista as sesionesDe, titulo, type Repo, type Sesion } fr
 import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Hosting } from './Marca';
+import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 import './config-sesion.css';
 
 interface Props {
@@ -224,9 +225,10 @@ function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Part
   </>;
 }
 
-// Ventana de propiedades del proyecto: secciones a la izquierda y su detalle a la derecha.
-const SECCIONES = [{ id: 'general', nombre: 'General', icono: 'carpeta' }, { id: 'conversacion', nombre: 'Conversación', icono: 'comentario' }, { id: 'skills', nombre: 'Skills', icono: 'skill' }, { id: 'alojamiento', nombre: 'Alojamiento', icono: 'equipo' }] as const;
-type Seccion = typeof SECCIONES[number]['id'];
+// Project properties window (PropertiesModal: sections on the left, their properties on the right).
+type ProjectSection = 'general' | 'conversation' | 'skills' | 'hosting';
+const PROJECT_SECTIONS: readonly PropertiesSection<ProjectSection>[] = [{ id: 'general', name: 'General', icon: 'carpeta' }, { id: 'conversation', name: 'Conversación', icon: 'comentario' },
+  { id: 'skills', name: 'Skills', icon: 'skill' }, { id: 'hosting', name: 'Alojamiento', icon: 'equipo' }];
 const SELECCION: { id: SeleccionSkills; nombre: string; ayuda: string }[] = [
   { id: 'agente', nombre: 'Decide el agente', ayuda: 'Como siempre: el modelo lee las descripciones de las skills y decide él. pgocode no interviene.' },
   { id: 'sugerir', nombre: 'pgocode sugiere', ayuda: 'pgocode calcula qué skill encaja y lo muestra junto al mensaje, sin cambiar lo que se envía al agente. Sirve para ver si el agente acierta.' },
@@ -240,7 +242,6 @@ const DETALLES: { id: Detalle; nombre: string; ayuda: string }[] = [
 ];
 
 function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; login: string; alCerrar: () => void; alGuardar: (a: AjustesProyecto) => void }) {
-  const [seccion, setSeccion] = useState<Seccion>('general');
   const [a, setA] = useState<AjustesProyecto>(() => leeAjustes(login, p.id));
   const cambia = (c: Partial<AjustesProyecto>) => {
     const n = { ...a, ...c };
@@ -248,58 +249,40 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
     guardaAjustes(login, p.id, n);
     alGuardar(n);
   };
-  useEffect(() => {
-    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
-    document.addEventListener('keydown', tecla);
-    return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar]);
-  return createPortal(
-    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
-      <div className="modal propiedades" role="dialog" aria-modal="true" aria-label={'Propiedades de ' + p.nombre}>
-        <div className="modal-cabecera">
-          <h2><span className="suave">Propiedades ·</span> {p.nombre}</h2>
-          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
-        </div>
-        <div className="propiedades-cuerpo">
-          <nav className="propiedades-secciones" aria-label="Secciones">
-            {SECCIONES.map(s => (
-              <button key={s.id} aria-current={seccion === s.id} onClick={() => setSeccion(s.id)}><Icono n={s.icono} t={15} /> {s.nombre}</button>
+  return (
+    <PropertiesModal title={<><span className="suave">Propiedades ·</span> {p.nombre}</>} label={'Propiedades de ' + p.nombre}
+      sections={PROJECT_SECTIONS} onClose={alCerrar}>
+      {section => <>
+        {section === 'general' && <General p={p} a={a} alCambiar={cambia} />}
+        {section === 'hosting' && <Alojamiento a={a} alCambiar={cambia} />}
+        {section === 'skills' && <>
+          <h3>Skills</h3>
+          <fieldset className="opciones-detalle">
+            <legend>Cómo se elige la skill de cada petición</legend>
+            <p className="suave pequeno">pgocode compara cada petición con las skills del agente de la sesión mediante embeddings, en local (Ollama, embeddinggemma; si no está, Vertex AI): unos 90 ms y sin gastar tokens del agente.</p>
+            {SELECCION.map(d => (
+              <label key={d.id} className={'opcion-detalle' + (a.skills === d.id ? ' elegida' : '')}>
+                <input type="radio" name="skills" checked={a.skills === d.id} onChange={() => cambia({ skills: d.id })} />
+                <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
+              </label>
             ))}
-          </nav>
-          <section className="propiedades-detalle">
-            {seccion === 'general' && <General p={p} a={a} alCambiar={cambia} />}
-            {seccion === 'alojamiento' && <Alojamiento a={a} alCambiar={cambia} />}
-            {seccion === 'skills' && <>
-              <h3>Skills</h3>
-              <fieldset className="opciones-detalle">
-                <legend>Cómo se elige la skill de cada petición</legend>
-                <p className="suave pequeno">pgocode compara cada petición con las skills del agente de la sesión mediante embeddings, en local (Ollama, embeddinggemma; si no está, Vertex AI): unos 90 ms y sin gastar tokens del agente.</p>
-                {SELECCION.map(d => (
-                  <label key={d.id} className={'opcion-detalle' + (a.skills === d.id ? ' elegida' : '')}>
-                    <input type="radio" name="skills" checked={a.skills === d.id} onChange={() => cambia({ skills: d.id })} />
-                    <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
-                  </label>
-                ))}
-              </fieldset>
-            </>}
-            {seccion === 'conversacion' && <>
-              <h3>Conversación</h3>
-              <fieldset className="opciones-detalle">
-                <legend>Nivel de detalle de la conversación</legend>
-                <p className="suave pequeno">Cuánto se muestra en el chat de lo que hace el agente. No cambia lo que se le pide: no gasta tokens.</p>
-                {DETALLES.map(d => (
-                  <label key={d.id} className={'opcion-detalle' + (a.detalle === d.id ? ' elegida' : '')}>
-                    <input type="radio" name="detalle" checked={a.detalle === d.id} onChange={() => cambia({ detalle: d.id })} />
-                    <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
-                  </label>
-                ))}
-              </fieldset>
-            </>}
-          </section>
-        </div>
-      </div>
-    </div>,
-    document.body,
+          </fieldset>
+        </>}
+        {section === 'conversation' && <>
+          <h3>Conversación</h3>
+          <fieldset className="opciones-detalle">
+            <legend>Nivel de detalle de la conversación</legend>
+            <p className="suave pequeno">Cuánto se muestra en el chat de lo que hace el agente. No cambia lo que se le pide: no gasta tokens.</p>
+            {DETALLES.map(d => (
+              <label key={d.id} className={'opcion-detalle' + (a.detalle === d.id ? ' elegida' : '')}>
+                <input type="radio" name="detalle" checked={a.detalle === d.id} onChange={() => cambia({ detalle: d.id })} />
+                <span><b>{d.nombre}</b><span className="suave pequeno">{d.ayuda}</span></span>
+              </label>
+            ))}
+          </fieldset>
+        </>}
+      </>}
+    </PropertiesModal>
   );
 }
 
@@ -331,7 +314,7 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
               { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
               // Para analizar la sesión (registro de tiempos, depuracion.log, conversación del agente) a partir de sus ids.
               { icono: 'copiar', texto: 'Copiar identificador', accion: () => navigator.clipboard.writeText(identificador(s)).catch(() => {}) },
-              { icono: 'borrar', texto: 'Borrar', peligro: true, accion: () => { if (confirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`)) alBorrarSesion(s); } },
+              { icono: 'borrar', texto: 'Borrar', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`, { okText: 'Borrar', danger: true })) alBorrarSesion(s); } },
               null,
               { icono: 'ajustes', texto: 'Ajustes', accion: () => alAjustesSesion(s) },
             ]} />

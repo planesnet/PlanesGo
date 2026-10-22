@@ -3,6 +3,7 @@ import { get, listaCopias, post, quitaCopia, type Proyecto } from '../api';
 import * as C from '../copias';
 import Icono from './Icono';
 import { MenuSesion, type Opcion } from './Proyectos';
+import { askConfirm } from './Modal';
 
 // Flujo del repositorio (GitHub): la rama de la sesión y su pull request, las issues por fase (por empezar →
 // en desarrollo → en revisión → en test → cerradas) y por clase (peticiones nuevas / mantenimiento), y las PR.
@@ -136,7 +137,7 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   useEffect(() => { if (e) cargaCopias(); }, [e]); // eslint-disable-line react-hooks/exhaustive-deps
   const copiaDe = (rama: string) => copias.find(c => c.rama === rama && c.worktree);
   const limpia = async (c: C.Copia) => {
-    if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Limpiar rama y copia?')) return;
+    if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Limpiar rama y copia?', { okText: 'Limpiar', danger: true }))) return;
     setErrorAccion('');
     try {
       const r = await quitaCopia(proyecto.id, c.carpeta, true);
@@ -158,12 +159,12 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
       ? [{ icono: 'hecho', texto: 'Cerrar como hecha', accion: () => accion('issue', m.numero, 'cerrar') },
         { icono: 'cerrar', texto: 'Cerrar como «no se hará»', accion: () => accion('issue', m.numero, 'descartar') },
         null,
-        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: () => { if (confirm(`¿Borrar la issue #${m.numero}? No se puede deshacer (solo pueden los administradores del repositorio).`)) accion('issue', m.numero, 'borrar'); } }]
+        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la issue #${m.numero}? No se puede deshacer (solo pueden los administradores del repositorio).`, { okText: 'Borrar', danger: true })) accion('issue', m.numero, 'borrar'); } }]
       : [{ icono: 'recargar', texto: 'Reabrir', accion: () => accion('issue', m.numero, 'reabrir') },
         null,
-        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: () => { if (confirm(`¿Borrar la issue #${m.numero}? No se puede deshacer.`)) accion('issue', m.numero, 'borrar'); } }])
+        { icono: 'borrar', texto: 'Borrar la issue', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la issue #${m.numero}? No se puede deshacer.`, { okText: 'Borrar', danger: true })) accion('issue', m.numero, 'borrar'); } }])
     : (m.estado === 'OPEN'
-      ? [{ icono: 'cerrar', texto: 'Cerrar sin fusionar', accion: () => { if (confirm(`¿Cerrar la pull request #${m.numero} sin fusionarla?`)) accion('pr', m.numero, 'cerrar'); } }]
+      ? [{ icono: 'cerrar', texto: 'Cerrar sin fusionar', accion: async () => { if (await askConfirm(`¿Cerrar la pull request #${m.numero} sin fusionarla?`, { okText: 'Cerrar' })) accion('pr', m.numero, 'cerrar'); } }]
       : [{ icono: 'recargar', texto: 'Reabrir', accion: () => accion('pr', m.numero, 'reabrir') }]);
 
   const abiertas = useMemo(() => (e?.issues || []).filter(i => i.estado === 'OPEN'), [e]);

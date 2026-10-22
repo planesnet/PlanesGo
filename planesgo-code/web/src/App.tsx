@@ -10,6 +10,7 @@ import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
 import Barra from './componentes/Barra';
 import DialogoSesion from './componentes/DialogoSesion';
+import { askConfirm, Dialogs, showMessage } from './componentes/Modal';
 
 // El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
 // tras F5, cerrar la app o pulsar «Salir», se abre directamente.
@@ -36,14 +37,14 @@ async function ofreceQuitarCopia(s: S.Sesion, otras: S.Sesion[]) {
   try { c = C.copiaDeSesion(await listaCopias(s.proyecto), s, otras); } catch { return; }
   if (!c) return;
   if (!c.se_puede_quitar) {
-    alert(`La sesión trabajaba en una copia de trabajo creada por pgocode:\n${c.carpeta}\n\nTiene trabajo sin guardar (${c.pendiente || c.error || 'no se ha podido comprobar'}): no se quita.`);
+    await showMessage(`La sesión trabajaba en una copia de trabajo creada por pgocode:\n${c.carpeta}\n\nTiene trabajo sin guardar (${c.pendiente || c.error || 'no se ha podido comprobar'}): no se quita.`, { level: 'warning' });
     return;
   }
-  if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Quitar la copia de trabajo de la sesión borrada?')) return;
+  if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Quitar la copia de trabajo de la sesión borrada?', { okText: 'Quitar', danger: true }))) return;
   try {
     const r = await quitaCopia(s.proyecto, c.carpeta, true);
-    if (r.aviso) alert(r.aviso);
-  } catch (e) { alert('No se ha quitado la copia: ' + (e as Error).message); }
+    if (r.aviso) await showMessage(r.aviso, { level: 'warning' });
+  } catch (e) { await showMessage('No se ha quitado la copia: ' + (e as Error).message, { level: 'error' }); }
 }
 
 export default function App() {
@@ -293,6 +294,7 @@ export default function App() {
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
     {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login}
       proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} />}
+    <Dialogs />
     </div>
     </div>
   );

@@ -6,6 +6,7 @@ import * as T from '../tareas';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, type Plan } from './Planes';
 import Programas from './Programas';
+import { askConfirm } from './Modal';
 
 // Actividad: todo lo que corre a la vez en el proyecto, en un sitio. El agente de la sesión (si está trabajando),
 // sus subagentes, tareas en segundo plano y lista de tareas; los programas del proyecto (fuera del agente, también
@@ -119,7 +120,7 @@ function CopiasTrabajo({ proyecto }: { proyecto: number }) {
   const carga = () => { setError(''); listaCopias(proyecto).then(setCopias).catch(e => { setCopias([]); setError((e as Error).message); }); };
   useEffect(() => { setCopias(null); carga(); }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
   const quita = async (c: C.Copia) => {
-    if (!confirm(C.explicaQuitar(c, true) + '\n\n¿Continuar?')) return;
+    if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Continuar?', { danger: true }))) return;
     setQuitando(c.carpeta);
     setError('');
     try {

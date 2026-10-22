@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { get, post } from '../api';
 import Icono from './Icono';
 import Texto from './Texto';
+import { askConfirm, Modal } from './Modal';
 
 // Planes del modo plan: la tarjeta que aparece en el chat, el editor (el usuario lo cambia a mano antes de
 // ejecutarlo) y la lista de planes guardados del proyecto (<directorio del proyecto>/.pgocode/planes/).
@@ -66,11 +66,6 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
   useEffect(() => {
     leePlan(proyecto, directorio, ruta).then(p => { setPlan(p); setTexto(p.texto || ''); }).catch(e => setError(e.message));
   }, [proyecto, directorio, ruta]);
-  useEffect(() => {
-    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
-    document.addEventListener('keydown', tecla);
-    return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar]);
   const cambiado = plan !== null && texto !== (plan.texto || '');
 
   const guarda = async (estado?: EstadoPlan) => {
@@ -86,42 +81,36 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
     } catch (e) { setError((e as Error).message); return null; } finally { setGuardando(false); }
   };
 
-  return createPortal(
-    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
-      <div className="modal editor-plan" role="dialog" aria-modal="true" aria-label="Plan">
-        <div className="modal-cabecera">
-          <h2 className="recorta">{plan?.numero ? `Plan #${plan.numero} · ` : ''}{plan?.titulo || 'Plan'} {plan && <Estado e={plan.estado} />}</h2>
-          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
-        </div>
-        <code className="recorta suave pequeno" title={ruta}>{ruta}</code>
-        {error && <p className="error">{error}</p>}
-        <div className="editor-plan-pestanas" role="tablist">
-          <button role="tab" aria-selected={vista} onClick={() => setVista(true)}>Vista previa</button>
-          <button role="tab" aria-selected={!vista} onClick={() => setVista(false)}>Editar</button>
-          {cambiado && <span className="suave pequeno">Cambios sin guardar</span>}
-        </div>
-        {vista
-          ? <div className="editor-plan-vista"><Texto md={texto} /></div>
-          : <textarea className="editor-plan-texto" value={texto} onChange={e => setTexto(e.target.value)} spellCheck={false} aria-label="Texto del plan (Markdown)" disabled={!plan} />}
-        <div className="editor-plan-acciones">
-          {plan?.estado === 'borrador' && <button className="enlace" onClick={() => guarda('descartado')} disabled={guardando}>Descartar plan</button>}
-          {plan && plan.estado !== 'borrador' && <button className="enlace" onClick={() => guarda('borrador')} disabled={guardando}>Volver a «Por decidir»</button>}
-          {plan?.estado === 'descartado' && (
-            <button className="enlace peligro" disabled={guardando} onClick={async () => {
-              if (!confirm(`¿Borrar el plan «${plan.titulo}»? Se borra su fichero y no se puede deshacer.`)) return;
-              try { await borraPlan(proyecto, directorio, plan.ruta); alBorrar?.(plan.ruta); alCerrar(); } catch (e) { setError((e as Error).message); }
-            }}>Borrar el plan</button>
-          )}
-          <span className="hueco" />
-          <button className="boton-secundario" onClick={() => guarda()} disabled={!cambiado || guardando}>Guardar</button>
-          {plan?.estado === 'borrador' && (
-            <button className="primario" disabled={guardando || ocupado || !texto.trim()} title={ocupado ? 'Espera a que termine el agente' : ''}
-              onClick={async () => { const p = await guarda(); if (p) alEjecutar(p); }}>Guardar y ejecutar</button>
-          )}
-        </div>
+  return (
+    <Modal title={<>{plan?.numero ? `Plan #${plan.numero} · ` : ''}{plan?.titulo || 'Plan'} {plan && <Estado e={plan.estado} />}</>} label="Plan"
+      className="editor-plan" onClose={alCerrar}>
+      <code className="recorta suave pequeno" title={ruta}>{ruta}</code>
+      {error && <p className="error">{error}</p>}
+      <div className="editor-plan-pestanas" role="tablist">
+        <button role="tab" aria-selected={vista} onClick={() => setVista(true)}>Vista previa</button>
+        <button role="tab" aria-selected={!vista} onClick={() => setVista(false)}>Editar</button>
+        {cambiado && <span className="suave pequeno">Cambios sin guardar</span>}
       </div>
-    </div>,
-    document.body,
+      {vista
+        ? <div className="editor-plan-vista"><Texto md={texto} /></div>
+        : <textarea className="editor-plan-texto" value={texto} onChange={e => setTexto(e.target.value)} spellCheck={false} aria-label="Texto del plan (Markdown)" disabled={!plan} />}
+      <div className="editor-plan-acciones">
+        {plan?.estado === 'borrador' && <button className="enlace" onClick={() => guarda('descartado')} disabled={guardando}>Descartar plan</button>}
+        {plan && plan.estado !== 'borrador' && <button className="enlace" onClick={() => guarda('borrador')} disabled={guardando}>Volver a «Por decidir»</button>}
+        {plan?.estado === 'descartado' && (
+          <button className="enlace peligro" disabled={guardando} onClick={async () => {
+            if (!(await askConfirm(`¿Borrar el plan «${plan.titulo}»? Se borra su fichero y no se puede deshacer.`, { okText: 'Borrar', danger: true }))) return;
+            try { await borraPlan(proyecto, directorio, plan.ruta); alBorrar?.(plan.ruta); alCerrar(); } catch (e) { setError((e as Error).message); }
+          }}>Borrar el plan</button>
+        )}
+        <span className="hueco" />
+        <button className="boton-secundario" onClick={() => guarda()} disabled={!cambiado || guardando}>Guardar</button>
+        {plan?.estado === 'borrador' && (
+          <button className="primario" disabled={guardando || ocupado || !texto.trim()} title={ocupado ? 'Espera a que termine el agente' : ''}
+            onClick={async () => { const p = await guarda(); if (p) alEjecutar(p); }}>Guardar y ejecutar</button>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -132,36 +121,24 @@ export function ListaPlanes({ proyecto, directorio, alAbrir, alCerrar }: {
   const [l, setL] = useState<Plan[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => { listaPlanes(proyecto, directorio).then(setL).catch(e => setError(e.message)); }, [proyecto, directorio]);
-  useEffect(() => {
-    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') alCerrar(); };
-    document.addEventListener('keydown', tecla);
-    return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar]);
-  return createPortal(
-    <div className="fondo-modal" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
-      <div className="modal lista-planes" role="dialog" aria-modal="true" aria-label="Planes del proyecto">
-        <div className="modal-cabecera">
-          <h2>Planes del proyecto</h2>
-          <button className="icono" onClick={alCerrar} title="Cerrar" aria-label="Cerrar"><Icono n="cerrar" /></button>
-        </div>
-        {error && <p className="error">{error}</p>}
-        {!l && !error && <p className="suave">Cargando…</p>}
-        {l && l.length === 0 && <p className="suave">Aún no hay planes. Elige el modo «Plan» en el chat y pide lo que quieras planificar.</p>}
-        {l && l.length > 0 && (
-          <ul className="planes">
-            {l.map(p => (
-              <li key={p.ruta}>
-                <button onClick={() => alAbrir(p.ruta)} title={p.ruta}>
-                  <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span>
-                  <Estado e={p.estado} />
-                  <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Modal title="Planes del proyecto" className="lista-planes" onClose={alCerrar}>
+      {error && <p className="error">{error}</p>}
+      {!l && !error && <p className="suave">Cargando…</p>}
+      {l && l.length === 0 && <p className="suave">Aún no hay planes. Elige el modo «Plan» en el chat y pide lo que quieras planificar.</p>}
+      {l && l.length > 0 && (
+        <ul className="planes">
+          {l.map(p => (
+            <li key={p.ruta}>
+              <button onClick={() => alAbrir(p.ruta)} title={p.ruta}>
+                <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span>
+                <Estado e={p.estado} />
+                <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }

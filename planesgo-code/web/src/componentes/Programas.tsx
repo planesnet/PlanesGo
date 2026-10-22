@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { get, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
 import Icono from './Icono';
+import { askConfirm } from './Modal';
 
 // Programas del proyecto en local (un Odoo, un servicio, lo que se está desarrollando): los guardados en
 // .psf/ejecutar.json de la carpeta de la sesión, los que están en marcha (lanzados aquí o por el agente con «pgo»)
@@ -85,7 +86,7 @@ function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version:
     return () => clearInterval(t);
   }, [proyecto.id, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const para = async (x: EnRed) => {
-    if (!confirm(`¿Parar «${x.orden.slice(0, 120)}» (puerto ${x.puertos.join(', ')})?`)) return;
+    if (!(await askConfirm(`¿Parar «${x.orden.slice(0, 120)}» (puerto ${x.puertos.join(', ')})?`, { okText: 'Parar', danger: true }))) return;
     setError('');
     setParando(p => [...p, x.grupo]);
     try { await post('/api/procesos/externos/parar', { proyecto: proyecto.id, grupo: x.grupo }); setTimeout(carga, 1500); setTimeout(carga, 6000); }

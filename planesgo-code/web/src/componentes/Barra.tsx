@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { get, post, type Usuario } from '../api';
 import Icono from './Icono';
 import Imputacion, { type SesionMarcador } from './Imputacion';
+import AppProperties, { type AppSection, type UpdateStatus } from './AppProperties';
+import { askConfirm } from './Modal';
 
-interface EstadoAct { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; pausada?: boolean }
+type EstadoAct = UpdateStatus;
 
 const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
 
@@ -11,7 +13,7 @@ const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(
 export default function Barra({ usuario, alSalir, versionImputacion, sesion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number; sesion?: SesionMarcador }) {
   const [act, setAct] = useState<EstadoAct | null>(null);
   const [abierto, setAbierto] = useState(false);
-  const [acerca, setAcerca] = useState(false);
+  const [properties, setProperties] = useState<AppSection | null>(null);
   const [sinFoto, setSinFoto] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
 
@@ -34,7 +36,7 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
 
   // Pulsar el aviso de actualización pendiente la instala ya (si hay algo en curso, se avisa antes).
   const aplicar = async () => {
-    if (act?.ocupado && !confirm('Se cerrará y volverá a abrir pgocode. Si hay un agente respondiendo, una prueba o un programa en marcha, se detendrá. ¿Actualizar ahora?')) return;
+    if (act?.ocupado && !(await askConfirm('Se cerrará y volverá a abrir pgocode. Si hay un agente respondiendo, una prueba o un programa en marcha, se detendrá. ¿Actualizar ahora?', { okText: 'Actualizar', level: 'warning' }))) return;
     setAct(a => a && { ...a, estado: 'aplicando' });
     try { await post('/api/actualizacion/aplicar', {}); } catch { carga(); }
   };
@@ -76,25 +78,8 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
                 <Icono n={act.pausada ? 'ejecutar' : 'parar'} t={16} /> {act.pausada ? 'Reanudar actualizaciones automáticas' : 'Pausar actualizaciones automáticas'}
               </button>
             )}
-            <button role="menuitem" onClick={() => setAcerca(a => !a)} aria-expanded={acerca}><Icono n="info" t={16} /> Acerca de Planes Go Code</button>
-            {acerca && (
-              <div className="acerca">
-                <img src="/logo.svg" alt="" width="40" height="40" />
-                <div>
-                  <b>Planes Go Code</b>
-                  <div className="suave pequeno">Versión {act?.version || usuario.version || '—'}</div>
-                  <div className="suave pequeno">
-                    {act?.estado === 'al-dia' && 'Al día'}
-                    {act?.estado === 'desactivada' && 'Sin autoactualización (desarrollo)'}
-                    {act?.estado === 'pendiente' && `v${act.nueva} lista para instalar`}
-                    {act?.estado === 'descargando' && `Descargando v${act.nueva}`}
-                    {act?.estado === 'manual' && act.error}
-                    {act?.estado === 'error' && 'No se pudo actualizar: ' + act.error}
-                  </div>
-                  {usuario.odoo && <div className="suave pequeno recorta">Odoo: {usuario.odoo.replace(/^https?:\/\//, '')}</div>}
-                </div>
-              </div>
-            )}
+            <button role="menuitem" onClick={() => { setAbierto(false); setProperties('account'); }}><Icono n="ajustes" t={16} /> Propiedades</button>
+            <button role="menuitem" onClick={() => { setAbierto(false); setProperties('about'); }}><Icono n="info" t={16} /> Acerca de Planes Go Code</button>
             <div className="separador" />
             <button role="menuitem" onClick={alSalir}><Icono n="salir" t={16} /> Salir</button>
           </div>
@@ -107,6 +92,8 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
       {etiqueta && (act!.estado === 'pendiente'
         ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
         : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}
+      {properties && <AppProperties user={usuario} avatar={foto} status={act} initial={properties} onClose={() => setProperties(null)}
+        onCheck={buscar} onTogglePause={pausa} onApply={aplicar} onLogout={alSalir} />}
     </header>
   );
 }
