@@ -25,6 +25,7 @@ export interface Sesion {
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
+  compactAtK?: number;   // compactar el historial del agente a partir de N k tokens de contexto (vacío: por defecto)
   tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
   tarea?: string;
   madre?: string;        // sesión de la que sale (sesión hija: otro tema, con lo mínimo)

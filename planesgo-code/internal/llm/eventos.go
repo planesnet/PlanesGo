@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"planesgo-code/internal/depuracion"
 )
 
 const (
@@ -246,6 +248,11 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			Patch        struct {
 				Status string `json:"status"`
 			} `json:"patch"`
+			// Compactación del historial (system/compact_boundary): tokens antes y después.
+			Compactado struct {
+				Pre  int `json:"pre_tokens"`
+				Post int `json:"post_tokens"`
+			} `json:"compact_metadata"`
 			Message struct {
 				ID      string `json:"id"`
 				Model   string `json:"model"`
@@ -302,6 +309,11 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			if t != nil {
 				emite(Evento{Tarea: t})
 			}
+		}
+		if ev.Type == "system" && ev.Subtype == "compact_boundary" {
+			depuracion.Log("claude-code", "compacta su historial: %d → %d tokens", ev.Compactado.Pre, ev.Compactado.Post)
+			emite(Evento{Texto: compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post)})
+			continue
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
 			switch {
@@ -469,6 +481,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	}()
 	vistas := map[int]bool{}
 	llamadasAgy := map[int]bool{}           // pasos con consumo propio: cada uno, una llamada al modelo
+	contexto := 0                           // tokens de entrada de la última llamada
 	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
 	for sc.Scan() {
 		var ev struct {
@@ -478,7 +491,8 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				Indice int    `json:"step_index"`
 				Estado string `json:"state"`
 				Uso    struct {
-					Input int `json:"input_tokens"`
+					Input     int `json:"input_tokens"`
+					CacheRead int `json:"cache_read_tokens"`
 				} `json:"usage"`
 				Tipo  string `json:"step_type"`
 				Texto string `json:"text_delta"`
@@ -521,8 +535,13 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			p := ev.Paso
 			if p.Uso.Input > 0 {
 				llamadasAgy[p.Indice] = true
+				contexto = p.Uso.Input + p.Uso.CacheRead // el de la última llamada
 			}
 			switch {
+			// «checkpoint»: Antigravity ha resumido la conversación (/compact o su compactación automática).
+			case p.Tipo == "checkpoint" && p.Estado == "DONE":
+				depuracion.Log("antigravity", "compacta su historial (paso %d)", p.Indice)
+				emite(Evento{Texto: compactionNotice("Antigravity", 0, 0)})
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
 					emite(Evento{Texto: t})
@@ -561,7 +580,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			res := ev.Resultado
 			// El razonamiento se cobra como salida: va con ella. Llamadas: los pasos con consumo propio.
 			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output + res.Usage.Thinking,
-				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos}})
+				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos, Contexto: contexto}})
 			if res.Estado != "" && res.Estado != "SUCCESS" {
 				if res.Error != "" {
 					return errors.New(res.Error)
@@ -587,6 +606,27 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	sesion := ""
 	var errores []string
 	limite := false // OpenCode llegó a su límite de pasos (y Gemini rechazó su último mensaje)
+	// Compactación: OpenCode escribe el resumen como texto de un paso y después un mensaje sintético
+	// (compaction_continue). El texto y el consumo de cada paso se retienen hasta el paso siguiente (o el final)
+	// para no mostrar el resumen como respuesta; en su lugar, un aviso con el contexto antes y después.
+	var retenidos []Evento
+	suelta := func() {
+		for _, e := range retenidos {
+			emite(e)
+		}
+		retenidos = nil
+	}
+	ctxAnterior, ctxUltimo := 0, 0 // contexto de los dos últimos pasos (el último puede ser el del resumen)
+	compactadoDe := 0              // compactación pendiente de aviso: el contexto de antes
+	avisa := func(post int) {
+		if compactadoDe > 0 {
+			depuracion.Log("opencode", "compacta su historial: %d → %d tokens", compactadoDe, post)
+			emite(Evento{Texto: compactionNotice("OpenCode", compactadoDe, post)})
+			compactadoDe = 0
+		}
+	}
+	defer avisa(0)
+	defer suelta()
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -595,9 +635,12 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 				ID        string `json:"id"`
 				MessageID string `json:"messageID"`
 				Text      string `json:"text"`
-				Tool      string `json:"tool"`
-				CallID    string `json:"callID"`
-				State     struct {
+				Meta      struct {
+					CompactionContinue bool `json:"compaction_continue"`
+				} `json:"metadata"`
+				Tool   string `json:"tool"`
+				CallID string `json:"callID"`
+				State  struct {
 					Status string          `json:"status"`
 					Input  json.RawMessage `json:"input"`
 					Output string          `json:"output"`
@@ -642,10 +685,23 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		}
 		switch ev.Type {
 		case "text":
-			if ev.Part.Text != "" {
-				emite(Evento{Texto: ev.Part.Text})
+			if ev.Part.Meta.CompactionContinue {
+				// El paso anterior era el resumen: fuera su texto; su consumo cuenta, pero no es el contexto.
+				for _, e := range retenidos {
+					if e.Uso != nil {
+						e.Uso.Contexto = 0
+						emite(e)
+					}
+				}
+				retenidos = nil
+				compactadoDe = max(ctxAnterior, 1)
+			} else if ev.Part.Text != "" {
+				retenidos = append(retenidos, Evento{Texto: ev.Part.Text})
 			}
+		case "step_start":
+			suelta()
 		case "tool_use":
+			suelta()
 			id := ev.Part.CallID
 			if id == "" {
 				id = ev.Part.ID
@@ -673,10 +729,13 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		case "step_finish":
 			// Cada paso, su consumo ya (el gasto se ve crecer durante el turno) y el tamaño del contexto enviado.
 			t := ev.Part.Tokens
-			emite(Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
+			ctxAnterior, ctxUltimo = ctxUltimo, t.Input+t.Cache.Read+t.Cache.Write
+			avisa(ctxUltimo)
+			retenidos = append(retenidos, Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
 				CacheLeida: t.Cache.Read, CacheEscrita: t.Cache.Write, Llamadas: 1,
 				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}, Punto: ev.Part.MessageID})
 		case "error":
+			suelta()
 			m := ev.Error.Data.Message
 			if m == "" {
 				m = ev.Error.Name

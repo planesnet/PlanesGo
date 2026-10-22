@@ -54,6 +54,12 @@ type Peticion struct {
 	// Traspaso: la conversación hasta el punto elegido, resumida por pgocode (sin gastar tokens). Si el agente no
 	// puede cortar su sesión (Antigravity), o el corte falla, se empieza otra con esto delante del mensaje.
 	Traspaso string
+	// CompactAt: tokens de contexto a partir de los que el agente compacta su historial (0: CompactAtDefault).
+	// Cada agente lo hace a su manera (ver compaction.go).
+	CompactAt int
+	// LastContext: tokens de contexto de la última llamada del turno anterior (para los agentes a los que pgocode
+	// les pide la compactación él mismo: Antigravity).
+	LastContext int
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,

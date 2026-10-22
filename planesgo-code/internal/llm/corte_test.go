@@ -72,7 +72,11 @@ func TestCorteConTraspaso(t *testing.T) {
 	var vistos []Peticion
 	var msgs []string
 	a := &Agente{Clave: "antigravity", Nombre: "Prueba", Programa: "sh",
-		Args: func(msg string, p Peticion) []string { vistos = append(vistos, p); msgs = append(msgs, msg); return []string{"-c", "echo ok"} }}
+		Args: func(msg string, p Peticion) []string {
+			vistos = append(vistos, p)
+			msgs = append(msgs, msg)
+			return []string{"-c", "echo ok"}
+		}}
 	var texto strings.Builder
 	p := Peticion{Carpeta: t.TempDir(), SesionAgente: "conv-1", Corte: "x1", Traspaso: "[Traspaso] AZUL", Mensajes: []Mensaje{{Rol: "user", Texto: "¿qué palabras?"}}}
 	if err := a.Chat(context.Background(), p, func(e Evento) { texto.WriteString(e.Texto) }); err != nil {

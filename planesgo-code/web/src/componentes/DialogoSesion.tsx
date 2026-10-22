@@ -6,6 +6,7 @@ import { identificador, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
 import * as CO from '../costes';
+import { COMPACT_AT_DEFAULT_K, COMPACT_AT_MAX_K, COMPACT_AT_MIN_K } from '../compaction';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
@@ -263,6 +264,15 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
               </label>
             )}
             <span className="suave pequeno">Cuando el contexto del agente pasa del umbral (o la conversación lleva parada más que la caché), el siguiente mensaje va a una sesión nueva del agente con una «memoria de trabajo» de unos 3k tokens (objetivo, peticiones, ficheros, órdenes, tareas y lo último que dijo) en vez de reenviar todo el historial. El chat no cambia y se puede deshacer. Nunca con adjuntos ni planes.</span>
+            <legend>Historial del agente</legend>
+            <label className="aviso-campo compact-at">Compactar el historial del agente a partir de
+              <span className="con-unidad">
+                <input type="number" min={COMPACT_AT_MIN_K} max={COMPACT_AT_MAX_K} step={10} value={s.compactAtK ?? ''} placeholder={String(COMPACT_AT_DEFAULT_K)}
+                  onChange={e => cambia({ compactAtK: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                <span className="suave">k tokens</span>
+              </span>
+            </label>
+            <span className="suave pequeno">El agente reenvía todo su historial en cada paso: al llegar a este tamaño lo resume y sigue con el resumen. Más bajo gasta menos tokens por paso; más alto conserva más detalle. Vacío: {COMPACT_AT_DEFAULT_K}k (de {COMPACT_AT_MIN_K}k a {COMPACT_AT_MAX_K}k).</span>
           </fieldset>
         </>}
 

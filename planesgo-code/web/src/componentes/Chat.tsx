@@ -6,6 +6,7 @@ import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
+import { compactAtTokens, lastContext } from '../compaction';
 import * as AP from '../aparte';
 import * as W from '../workingMemory';
 import * as TP from '../topics';
@@ -414,7 +415,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         proyecto: proyecto.id, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '', sesion: ses.id, titulo: ses.nombre, autorizadas: ses.autorizadas || [],
         mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '', mensajes: [{ rol: 'user', texto: q }],
-        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language,
+        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language, compactar: compactAtTokens(ses.compactAtK),
       }, e => {
         if (e.texto) texto += e.texto;
         if (e.herramienta && e.herramienta.estado === 'curso') acciones++;
@@ -590,7 +591,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: corte?.punto ? corte.sesion : relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
         ...(corte ? { corte: corte.punto || '', traspaso: corte.traspaso } : {}),
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
-        idioma: navigator.language,
+        idioma: navigator.language, compactar: compactAtTokens(ses.compactAtK), contexto_previo: lastContext(previos),
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
