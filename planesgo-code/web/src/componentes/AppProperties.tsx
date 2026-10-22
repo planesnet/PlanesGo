@@ -5,7 +5,7 @@ import { PropertiesModal, type PropertiesSection } from './Modal';
 
 // Application properties (logo menu): account, updates and about.
 
-export interface UpdateStatus { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; pausada?: boolean }
+export interface UpdateStatus { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; trabajando?: string; pausada?: boolean } // trabajando: qué hay en marcha (entonces no se actualiza)
 
 export type AppSection = 'account' | 'updates' | 'about';
 const APP_SECTIONS: readonly PropertiesSection<AppSection>[] = [{ id: 'account', name: 'Cuenta', icon: 'equipo' },

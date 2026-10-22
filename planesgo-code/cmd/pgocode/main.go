@@ -367,6 +367,7 @@ func main() {
 	act := actualizacion.Nuevo(*urlAct, filepath.Dir(exe), filepath.Join(datos, "actualizacion"), s.Version)
 	act.Electron = os.Getenv("PGO_ELECTRON")
 	act.Ocupado = s.Ocupado
+	act.Trabajando = func() bool { return s.TrabajoEnCurso() != "" }
 	if estudio != nil {
 		s.EstudioOcupado = estudio.Ocupado
 	}

@@ -120,7 +120,8 @@ type Actualizador struct {
 	Electron     string            // versión de Electron en marcha (si el paquete pide otra, hay que reinstalar)
 	Intervalo    time.Duration     // cada cuánto se revisa (15 min; «Buscar ahora» lo adelanta)
 	ClavePub     ed25519.PublicKey // con la que se comprueba version.json (ClavePublica; otra en las pruebas)
-	Ocupado      func() bool       // ¿hay algo en curso?
+	Ocupado      func() bool       // ¿hay algo en curso o se está usando la app? (la automática espera)
+	Trabajando   func() bool       // ¿hay algo en marcha que se cortaría? (entonces nunca, ni pidiéndolo)
 	AlAplicar    func()            // guarda el estado y sale con SalidaActualizar
 	HTTP         *http.Client
 
@@ -223,7 +224,11 @@ func (a *Actualizador) Funciona(ctx context.Context) {
 		case <-a.buscar:
 			a.revisa(ctx)
 		case <-a.aplicar:
-			// El usuario la pide ya (pulsando el aviso): se aplica aunque haya algo en curso.
+			// El usuario la pide ya (pulsando el aviso): se aplica aunque esté usando la app, pero nunca con algo en
+			// marcha (se vuelve a mirar aquí: puede haber empezado algo desde que lo pidió).
+			if a.Trabajando != nil && a.Trabajando() {
+				continue
+			}
 			if a.Estado().Estado == "pendiente" && a.AlAplicar != nil {
 				a.pon(func(e *Estado) { e.Estado = "aplicando" })
 				a.AlAplicar()
@@ -244,7 +249,7 @@ func (a *Actualizador) Funciona(ctx context.Context) {
 			if quietoDesde.IsZero() {
 				quietoDesde = time.Now()
 			}
-			if time.Since(quietoDesde) >= quietoAntes && a.AlAplicar != nil {
+			if time.Since(quietoDesde) >= quietoAntes && a.AlAplicar != nil && (a.Trabajando == nil || !a.Trabajando()) {
 				a.pon(func(e *Estado) { e.Estado = "aplicando" })
 				a.AlAplicar()
 				return

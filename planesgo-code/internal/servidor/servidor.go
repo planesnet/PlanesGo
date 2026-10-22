@@ -423,9 +423,26 @@ func (s *Servidor) repoProyecto(w http.ResponseWriter, r *http.Request, ses *ses
 	jsonOK(w, repo.Lee(r.Context(), carpeta))
 }
 
-// Ocupado dice si hay algo en curso que una actualización interrumpiría.
-func (s *Servidor) Ocupado() bool {
-	return s.activos.Load() > 0 || s.QA.EnCurso() > 0 || s.usandose() || proceso.GruposVivos() > 0 || (s.Procesos != nil && s.Procesos.EnCurso() > 0) || (s.EstudioOcupado != nil && s.EstudioOcupado())
+// Ocupado dice si hay algo en curso que una actualización interrumpiría, o si el usuario está usando la app (la
+// automática espera a que lleve un rato sin usarla).
+func (s *Servidor) Ocupado() bool { return s.TrabajoEnCurso() != "" || s.usandose() }
+
+// TrabajoEnCurso: qué hay en marcha que una actualización cortaría («» si nada). Con algo en marcha no se actualiza
+// bajo ningún concepto, ni aunque lo pida el usuario.
+func (s *Servidor) TrabajoEnCurso() string {
+	switch {
+	case s.activos.Load() > 0:
+		return "un agente está trabajando"
+	case proceso.GruposVivos() > 0:
+		return "un agente tiene tareas en segundo plano"
+	case s.QA.EnCurso() > 0:
+		return "hay una prueba en marcha"
+	case s.Procesos != nil && s.Procesos.EnCurso() > 0:
+		return "hay un programa en marcha"
+	case s.EstudioOcupado != nil && s.EstudioOcupado():
+		return "el Studio TV está emitiendo o grabando"
+	}
+	return ""
 }
 
 func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -435,7 +452,7 @@ func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *se
 	}
 	e := s.Actualizador.Estado()
 	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
-		"revisado": e.Revisado, "ocupado": s.Ocupado(), "pausada": e.Pausada})
+		"revisado": e.Revisado, "ocupado": s.Ocupado(), "trabajando": s.TrabajoEnCurso(), "pausada": e.Pausada})
 }
 
 // sinUsoAntes: tiempo sin que el usuario toque la app (ni tenga nada a medio escribir) antes de actualizar sola.
@@ -489,8 +506,13 @@ func (s *Servidor) pausaActualizacion(w http.ResponseWriter, r *http.Request, se
 	jsonOK(w, map[string]bool{"pausada": p.Pausada})
 }
 
-// aplicaActualizacion: el usuario pulsa el aviso; se instala ya la versión preparada.
+// aplicaActualizacion: el usuario pulsa el aviso; se instala ya la versión preparada, salvo que haya algo en
+// marcha (entonces se instalará sola cuando acabe y lleve un rato sin usarse).
 func (s *Servidor) aplicaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if t := s.TrabajoEnCurso(); t != "" {
+		jsonError(w, http.StatusConflict, "no se puede actualizar ahora: "+t)
+		return
+	}
 	if s.Actualizador == nil || !s.Actualizador.AplicarYa() {
 		jsonError(w, http.StatusConflict, "no hay ninguna actualización preparada")
 		return

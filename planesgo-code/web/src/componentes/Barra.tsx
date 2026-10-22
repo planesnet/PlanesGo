@@ -3,7 +3,7 @@ import { get, post, type Usuario } from '../api';
 import Icono from './Icono';
 import Imputacion, { type SesionMarcador } from './Imputacion';
 import AppProperties, { type AppSection, type UpdateStatus } from './AppProperties';
-import { askConfirm } from './Modal';
+import { askConfirm, showMessage } from './Modal';
 
 type EstadoAct = UpdateStatus;
 
@@ -34,11 +34,17 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
     return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', tecla); };
   }, [abierto]);
 
-  // Pulsar el aviso de actualización pendiente la instala ya (si hay algo en curso, se avisa antes).
+  // Pulsar el aviso de actualización pendiente la instala ya; con algo en marcha, nunca (se instalará sola al acabar).
   const aplicar = async () => {
-    if (act?.ocupado && !(await askConfirm('Se cerrará y volverá a abrir pgocode. Si hay un agente respondiendo, una prueba o un programa en marcha, se detendrá. ¿Actualizar ahora?', { okText: 'Actualizar', level: 'warning' }))) return;
+    const no = (motivo: string) => showMessage(`No se puede actualizar ahora: ${motivo}. Se instalará sola cuando acabe y lleves un rato sin usar la app.`, { level: 'info' });
+    if (act?.trabajando) { no(act.trabajando); return; }
+    if (act?.ocupado && !(await askConfirm('Se cerrará y volverá a abrir pgocode (lo que tengas a medio escribir se conserva). ¿Actualizar ahora?', { okText: 'Actualizar' }))) return;
     setAct(a => a && { ...a, estado: 'aplicando' });
-    try { await post('/api/actualizacion/aplicar', {}); } catch { carga(); }
+    try { await post('/api/actualizacion/aplicar', {}); } catch (e) {
+      const m = (e as Error).message;
+      if (m.includes('no se puede actualizar')) no(m.replace(/^.*no se puede actualizar ahora: /, ''));
+      carga();
+    }
   };
   const pausa = async () => {
     const p = !act?.pausada;
