@@ -1,12 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
-import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
+import { childOf, conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
 import * as AP from '../aparte';
+import * as W from '../workingMemory';
+import * as TP from '../topics';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, TiraFotos, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
@@ -25,7 +27,10 @@ interface Props {
   directorio?: string; // directorio local del proyecto (sus ajustes); ahí se guardan los planes
   versionProcesos: number; alAbrirWeb: AbreWeb; // barra de prueba: programas del proyecto y abrir la web
   // Mensaje que hay que enviar solo en cuanto la sesión indicada esté abierta (p. ej. «Resuelve la issue…»).
-  envioPendiente: { sesion: string; texto: string } | null; alEnviado: () => void;
+  // contexto/madre: primer mensaje de una sesión hija (el contexto mínimo va al agente, no al chat).
+  envioPendiente: { sesion: string; texto: string; contexto?: string; madre?: string } | null; alEnviado: () => void;
+  // Otro tema: crea la sesión hija (ya con sus parámetros), la abre y le manda el mensaje (la madre queda como estaba).
+  alSesionHija: (s: Sesion, envio: { texto: string; contexto: string; madre: string }) => void;
   proyecto: Proyecto | null; sesion: Sesion | null; repo: Repo | null; proveedores: Proveedor[];
   panelAbierto: boolean; alPanel: () => void;
   alCambiarSesion: (s: Sesion) => void; alNuevaSesion: (rama?: string) => void; alAjustes: () => void;
@@ -52,7 +57,7 @@ const CLAVE_SIEMPRE_AL_TURNO = 'pgo:siempreAlTurno';
 const claveAprendidas = (proyecto: number) => 'pgo:aparte:' + proyecto;
 const claveGastoAparte = (sesion: string) => 'pgo:aparte-gasto:' + sesion;
 
-export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion, alSesionHija }: Props) {
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   // Turnos en curso por sesión: cada sesión lleva el suyo y sigue aunque se cambie de sesión o de proyecto (al
@@ -218,7 +223,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   useEffect(() => {
     if (!envioPendiente || !sesion || sesion.id !== envioPendiente.sesion || enCurso || !prov?.disponible) return;
     alEnviado();
-    envia(envioPendiente.texto);
+    envia(envioPendiente.texto, undefined, envioPendiente.contexto !== undefined ? { contexto: envioPendiente.contexto, madre: envioPendiente.madre } : {});
   }, [envioPendiente, sesion?.id, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Al acabar un turno sin error, sale la cola: todos sus mensajes juntos (las órdenes, solas).
@@ -298,6 +303,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
   useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
   useEffect(() => setDestinoManual(null), [sesion?.id]);
+  // Otro tema: el texto para el que el clasificador propone una sesión hija (Intro la acepta; la etiqueta la cambia).
+  const [temaPropuesto, setTemaPropuesto] = useState<string | null>(null);
+  const [comprobandoTema, setComprobandoTema] = useState(false);
+  const propuestaHija = temaPropuesto !== null && temaPropuesto === texto.trim();
+  useEffect(() => { if (temaPropuesto !== null && temaPropuesto !== texto.trim()) setTemaPropuesto(null); }, [texto, temaPropuesto]);
+  useEffect(() => setTemaPropuesto(null), [sesion?.id]);
+  const contextoActual = () => [...mensajes].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto)?.uso?.contexto;
+
+  // Sesión hija: mismos parámetros que la madre, sin historial, con el objetivo y los ficheros de la madre como
+  // contexto mínimo de su primer mensaje. Se abre la hija; la madre queda como estaba.
+  function creaHija(ses: Sesion, t: string) {
+    const contexto = TP.childContext(W.collectWorkingMemory(mensajes.filter(m => !m.error)), TP.CHILD_CONTEXT_MAX, ses.carpeta);
+    setTexto(''); setAdjuntos([]); setTemaPropuesto(null);
+    alSesionHija(childOf(ses, nombreDe(t)), { texto: t, contexto, madre: titulo(ses) });
+  }
 
   // Intro: pgocode decide antes de enviar si va a la conversación (ahora o a la cola) o aparte (ver aparte.ts).
   // forzar: el destino que manda (Alt+Intro → turno en curso); si no, el elegido en la etiqueta o el automático.
@@ -310,13 +330,28 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const listos = adjuntos.filter(a => !a.subiendo && !a.error);
     const ultimo = ultimoDelAgente(mensajes);
     const auto = AP.decide(t, situacion(t));
-    const elegido = forzar || destinoManual;
+    const elegido = forzar || destinoManual || (propuestaHija ? 'hija' : null);
     // Lo que el usuario elige en contra de lo que habría decidido pgocode se aprende (para los parecidos).
     if (elegido && !auto.forzado && !auto.duda && elegido !== auto.destino) {
       ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), t, elegido));
     }
     const d: AP.Decision = elegido ? { destino: elegido, texto: auto.forzado ? auto.texto : t, forzado: true, motivo: forzar ? 'Alt+Intro' : 'elegido por ti' } : auto;
     setDestinoManual(null);
+    if (d.destino === 'hija') { creaHija(ses, d.texto || t); return; }
+    // ¿Otro tema? Solo con contexto relevante y lo que iría a la conversación: el clasificador barato con el tema de
+    // la sesión en 2 o 3 líneas. Si lo es, no se envía: se propone la sesión hija (Intro la acepta).
+    const conTema = !elegido && !d.forzado && d.destino === 'conversacion' && TP.shouldCheckTopic({ context: contextoActual(), text: t,
+      attachments: listos.length, planOrder: PL.interpreta(t) !== null, active: ses.decideAparte !== false, agent: prov?.tipo === 'agente' });
+    let clasificado: AP.Destino | null | undefined;
+    if (conTema) {
+      setComprobandoTema(true);
+      const r = await Promise.race([post<{ tipo: string }>('/api/chat/clasifica', { texto: t, ultimo, sesion: ses.id,
+        tema: TP.topicSummary(W.collectWorkingMemory(mensajes)), solo_tema: !d.duda }).catch(() => null),
+      new Promise<null>(res => setTimeout(() => res(null), 5000))]);
+      setComprobandoTema(false);
+      if (r?.tipo === 'tema') { setTemaPropuesto(t); return; }
+      clasificado = r ? r.tipo as AP.Destino : null;
+    }
     if (d.destino === 'turno') {
       setTexto(''); setAdjuntos([]);
       await alTurno(ses.id, d.texto, listos);
@@ -330,14 +365,17 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     }
     setTexto(''); setAdjuntos([]);
     let destino: AP.Destino = d.destino, motivo = d.motivo;
-    if (d.duda) {
+    if (d.duda && clasificado !== undefined) {
+      destino = clasificado || 'conversacion';
+      motivo = clasificado ? 'lo ha decidido el clasificador (modelo barato)' : 'el clasificador no ha respondido';
+    } else if (d.duda) {
       // Solo con el agente ocupado: un modelo barato con el mensaje y lo último del agente (unos 200 tokens).
       const r = await Promise.race([post<{ tipo: AP.Destino }>('/api/chat/clasifica', { texto: t, ultimo, sesion: ses.id }).catch(() => null),
         new Promise<null>(res => setTimeout(() => res(null), 5000))]);
       destino = r?.tipo || 'conversacion';
       motivo = r ? 'lo ha decidido el clasificador (modelo barato)' : 'el clasificador no ha respondido';
     }
-    if (destino === 'conversacion') {
+    if (destino === 'conversacion' || destino === 'hija') {
       if (siempreAlTurno && conTurno) await alTurno(ses.id, t, listos); else aConversacion(ses.id, t, listos);
       return;
     }
@@ -420,7 +458,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
   // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
-  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean } = {}) {
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string; contexto?: string; madre?: string } = {}) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const ses: Sesion = sesion;
@@ -455,7 +493,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
     const previos = forzado !== undefined ? conversacion(id) : mensajes;
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
-    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}) }];
+    // Relevo: con el contexto del agente grande (o sin caché por llevar parada), el mensaje va a una sesión nueva del
+    // agente con la memoria de trabajo en vez de reenviar todo el historial. El chat no cambia. Nunca con adjuntos,
+    // planes ni preguntas aparte (que no pasan por aquí).
+    const sesionPrevia = opc.sesionAgente ?? ses.sesionAgente;
+    let memoria = '', relevo: Mensaje['relevo'];
+    if (prov.tipo === 'agente' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia) {
+      const limpios = previos.filter(m => !m.error);
+      const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
+      const mem = W.buildWorkingMemory(limpios);
+      const motivo = W.shouldRelay({ agent: ses.agente, setting: ses.renovarContexto, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
+        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length });
+      if (motivo) { memoria = mem; relevo = { de: u!.uso!.contexto!, a: W.estimateTokens(mem.length), anterior: sesionPrevia, motivo }; }
+    }
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}),
+      ...(opc.contexto !== undefined ? { child: { parentName: opc.madre || '', tokens: W.estimateTokens(opc.contexto.length) } } : {}) }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
@@ -463,7 +515,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setEnCursos(x => ({ ...x, [id]: ac }));
     inicioTurno.current[id] = Date.now();
     if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
-    let sesionAgente = ses.sesionAgente;
+    let sesionAgente = sesionPrevia;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
     let aEnviar = t;
@@ -494,6 +546,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       incorporar.current[id] = [];
       setApartes(x => ({ ...x, [id]: (x[id] || []).filter(a => !a.incorporada) }));
     }
+    if (relevo) aEnviar = W.relayMessage(memoria, aEnviar);
+    if (opc.contexto && prov.tipo === 'agente' && !orden) aEnviar = TP.childMessage(opc.contexto, aEnviar);
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     // Avisos de gasto mientras trabaja el agente (no al final): cada umbral una vez por turno, sin interrumpir.
     let gPrevio = gAntes;
@@ -524,7 +578,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
-        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
+        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language,
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
@@ -577,12 +631,26 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
       ultimo(m => { const { vivo: _, ...r } = m; return { ...r, fin: Date.now() }; });
+      // Relevo: lo que ocupa de verdad el contexto de la sesión nueva (la memoria más lo fijo del agente).
+      const ctxNuevo = actual[actual.length - 1].uso?.contexto;
+      if (relevo && ctxNuevo) actual = actual.map((m, k) => k === actual.length - 2 && m.relevo ? { ...m, relevo: { ...m.relevo, a: ctxNuevo } } : m);
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
     }
+  }
+
+  // Deshacer el relevo: el mismo mensaje, a la sesión anterior del agente (con todo su historial). Solo con el último
+  // mensaje del usuario y el agente libre; lo que respondió la sesión nueva se quita del chat.
+  function deshaceRelevo(i: number) {
+    const m = mensajes[i];
+    if (!sesion || enCurso || !m?.relevo) return;
+    const resto = mensajes.slice(0, i);
+    setMensajes(resto);
+    guardaConversacion(sesion.id, resto);
+    envia(m.texto, m.adjuntos || [], { sinRelevo: true, sesionAgente: m.relevo.anterior });
   }
 
   // Estado del plan en las tarjetas de la conversación (se guarda con ella).
@@ -751,6 +819,17 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 ))}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
                 {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en la conversación hasta este turno (sin las preguntas aparte)">{CO.tokens(acumulados[i])} en la conversación</span></div>}
+                {m.child && (
+                  <div className="relay-line suave pequeno" title="Sesión hija: este mensaje era otro tema; llegó al agente con solo el objetivo y los ficheros de la sesión de la que sale, sin su conversación.">
+                    ⑂ Sesión hija de «{m.child.parentName}»: empieza con ~{CO.tokens(m.child.tokens)} tokens de contexto
+                  </div>
+                )}
+                {m.relevo && (
+                  <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>
+                    ↻ Contexto renovado: de {CO.tokens(m.relevo.de)} a {CO.tokens(m.relevo.a)} tokens
+                    {!enCurso && !mensajes.slice(i + 1).some(x => x.rol === 'user') && <> · <button className="enlace" onClick={() => deshaceRelevo(i)} title="Volver a enviar este mensaje a la sesión anterior del agente, con todo su historial (se quita la respuesta de la sesión nueva)">deshacer</button></>}
+                  </div>
+                )}
                 {m.adjuntos && m.adjuntos.length > 0 && (
                   <div className="adjuntos-mensaje">{m.adjuntos.map(a => <span key={a.ruta} className="ficha-adjunto" title={a.ruta}><Icono n="clip" t={12} /> {a.nombre}</span>)}</div>
                 )}
@@ -877,9 +956,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             )}
             {decisionViva && (
               <div className="destino-mensaje">
-                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino, conTurno))}
-                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «//» aparte, «?» estado.`}>
-                  {destinoManual ? AP.etiqueta({ destino: destinoManual === 'turno' && !conTurno ? 'conversacion' : destinoManual, texto: '', motivo: '' }, Boolean(enCurso)) : AP.etiqueta(decisionViva, Boolean(enCurso))}
+                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || (propuestaHija ? 'hija' : decisionViva.destino), conTurno, propuestaHija))}
+                  title={`${destinoManual ? 'Elegido por ti' : propuestaHija ? 'El clasificador (modelo barato) cree que es otro tema: Intro lo manda a una sesión hija nueva con los mismos ajustes y solo el objetivo y los ficheros de esta (esta sesión no cambia)' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «//» aparte, «?» estado.`}>
+                  {destinoManual ? AP.etiqueta({ destino: destinoManual === 'turno' && !conTurno ? 'conversacion' : destinoManual, texto: '', motivo: '', forzado: true }, Boolean(enCurso))
+                    : propuestaHija ? AP.etiqueta({ destino: 'hija', texto: '', motivo: '' }) : comprobandoTema ? '→ ¿Otro tema? Comprobando…' : AP.etiqueta(decisionViva, Boolean(enCurso))}
                 </button>
                 {destinoManual && <span className="suave pequeno">elegido por ti</span>}
                 {prov?.inyecta && (

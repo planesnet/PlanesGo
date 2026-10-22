@@ -3,6 +3,7 @@
 import type { Mensaje } from './api';
 import type { Avisos } from './costes';
 import type { TipoHosting } from './ajustes';
+import type { RelaySetting } from './workingMemory';
 
 export interface Sesion {
   id: string;
@@ -20,11 +21,13 @@ export interface Sesion {
   avisos?: Avisos;        // avisos y límites de coste de la sesión (lo que falte, los del agente)
   mcp?: string[];         // servidores MCP de Claude Code además de «pgo» (por defecto ninguno: ahorran tokens y procesos)
   decideAparte?: boolean; // pgocode decide qué va a la conversación y qué aparte (por defecto, sí)
+  renovarContexto?: RelaySetting; // renovar el contexto del agente con la memoria de trabajo (por defecto, automático)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
   tarea?: string;
+  madre?: string;        // sesión de la que sale (sesión hija: otro tema, con lo mínimo)
   creada: number;
   ultima: number;
 }
@@ -59,6 +62,14 @@ export function borra(login: string, s: Sesion): Sesion[] {
 export function nueva(proyecto: number, carpeta: string, rama: string, agente: string, nombre = ''): Sesion {
   const ahora = Date.now();
   return { id: ahora.toString(36) + Math.random().toString(36).slice(2, 6), nombre, proyecto, carpeta, rama, agente, creada: ahora, ultima: ahora };
+}
+
+// childOf: una sesión hija, con los mismos parámetros que la madre pero sin su historial (ni la sesión del agente,
+// ni su plan en revisión), enlazada a ella.
+export function childOf(m: Sesion, nombre: string): Sesion {
+  const { id: _i, sesionAgente: _a, plan: _p, creada: _c, ultima: _u, nombre: _n, madre: _m, ...params } = m;
+  const n = nueva(m.proyecto, m.carpeta, m.rama, m.agente, nombre);
+  return { ...params, ...n, madre: m.id };
 }
 
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
