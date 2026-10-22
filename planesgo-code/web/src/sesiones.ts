@@ -28,6 +28,7 @@ export interface Sesion {
   tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
   tarea?: string;
   madre?: string;        // sesión de la que sale (sesión hija: otro tema, con lo mínimo)
+  corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;
 }

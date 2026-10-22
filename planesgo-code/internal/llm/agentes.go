@@ -86,6 +86,70 @@ func (a *Agente) Info(ctx context.Context) Info {
 }
 
 func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error {
+	// «Continuar desde aquí»: el agente sigue desde un mensaje anterior. Si no puede cortar su sesión, o el corte
+	// falla, sigue en una sesión nueva con el traspaso de pgocode.
+	if !p.Aparte && (p.Corte != "" || p.Traspaso != "") {
+		if p.Corte != "" && !puntoValido.MatchString(p.Corte) {
+			return errors.New("punto de la conversación no válido")
+		}
+		if p.SesionAgente != "" && !sesionValida.MatchString(p.SesionAgente) {
+			return errors.New("identificador de sesión del agente no válido")
+		}
+		return a.chatDesde(ctx, p, emite)
+	}
+	return a.chatCompleto(ctx, p, emite)
+}
+
+// puntoValido: los ids de los mensajes de los agentes (UUID en Claude, «msg_…» en OpenCode).
+var puntoValido = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// cortaSesion: si el agente puede seguir su propia sesión desde un mensaje anterior (sin traspaso).
+func (a *Agente) cortaSesion() bool { return a.Clave == "claude-code" || a.Clave == "opencode" }
+
+// chatDesde: el turno de «Continuar desde aquí». Primero, con la sesión del agente cortada en el punto (Claude:
+// una copia con --resume-session-at; OpenCode: se quitan los mensajes posteriores); si no se puede, con el traspaso.
+func (a *Agente) chatDesde(ctx context.Context, p Peticion, emite func(Evento)) error {
+	if a.cortaSesion() && p.Corte != "" && p.SesionAgente != "" {
+		var err error
+		if a.Clave == "opencode" {
+			err = cortaOpenCode(ctx, a, p, p.SesionAgente, p.Corte)
+		}
+		if err == nil {
+			// Si el agente falla sin haber respondido nada (p. ej. no encuentra el mensaje), se pasa al traspaso.
+			respondio := false
+			err = a.chatCompleto(ctx, p, func(e Evento) {
+				if e.Texto != "" || e.Herramienta != nil || e.Pensamiento != "" {
+					respondio = true
+				}
+				emite(e)
+			})
+			if err == nil || respondio || ctx.Err() != nil || p.Traspaso == "" {
+				return err
+			}
+		}
+		depuracion.Log(a.Clave, "no se puede seguir la sesión %s desde %s (%v): sesión nueva con el traspaso", p.SesionAgente, p.Corte, err)
+	}
+	q := conTraspaso(p)
+	if q.Traspaso == "" {
+		return errors.New("no se puede continuar desde ese mensaje: falta el resumen de la conversación")
+	}
+	emite(Evento{Texto: "_(Sigo desde el mensaje elegido en una conversación nueva del agente, con un resumen de lo anterior.)_\n\n"})
+	return a.chatCompleto(ctx, q, emite)
+}
+
+// conTraspaso: la petición para una sesión nueva del agente con el traspaso delante del mensaje.
+func conTraspaso(p Peticion) Peticion {
+	q := p
+	q.SesionAgente, q.Corte = "", ""
+	if p.Traspaso != "" && len(p.Mensajes) > 0 {
+		q.Mensajes = append([]Mensaje(nil), p.Mensajes...)
+		u := &q.Mensajes[len(q.Mensajes)-1]
+		u.Texto = p.Traspaso + "\n\n" + u.Texto
+	}
+	return q
+}
+
+func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento)) error {
 	// OpenCode: una conversación de otra carpeta no se retoma (trabajaría allí y lo de fuera le parecería dentro).
 	if a.Clave == "opencode" && p.SesionAgente != "" && p.Carpeta != "" && !sesionOpenCodeEn(ctx, a, p) {
 		depuracion.Log(a.Clave, "la sesión %s no es de %s: se empieza otra", p.SesionAgente, p.Carpeta)
@@ -543,6 +607,11 @@ func Agentes() []Proveedor {
 				}
 				if p.SesionAgente != "" {
 					a = append(a, "--resume", p.SesionAgente)
+					// Continuar desde un mensaje anterior: una copia de la sesión hasta ese mensaje (la original no se
+					// toca); lo posterior no se reenvía (probado con Claude Code 2.1.308).
+					if p.Corte != "" && !p.Aparte {
+						a = append(a, "--resume-session-at", p.Corte, "--fork-session")
+					}
 				}
 				// Pregunta aparte: sobre una copia de la conversación que no se guarda (la original no se entera).
 				if p.Aparte {
@@ -773,6 +842,46 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 		}
 	}
 	return nil
+}
+
+// cortaOpenCode: «Continuar desde aquí» en OpenCode. Quita de la sesión los mensajes posteriores al del punto
+// (con sus partes): el siguiente turno sigue desde él. OpenCode no permite copiar una sesión hasta un mensaje desde
+// su CLI («run --fork» copia la sesión entera), así que se corta la propia sesión; pgocode conserva en su
+// conversación lo de después (atenuado, fuera del contexto del agente).
+func cortaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion, punto string) error {
+	if !idSesionOC.MatchString(sesion) || !idMensajeOC.MatchString(punto) {
+		return errors.New("sesión o mensaje de OpenCode no válidos")
+	}
+	for _, q := range consultasCorteOpenCode(sesion, punto) {
+		cmd := exec.CommandContext(ctx, "opencode", "db", q)
+		cmd.Dir = p.Carpeta
+		cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+		if a.EntornoPara != nil {
+			cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		}
+		// La primera consulta comprueba que el mensaje es de la sesión.
+		if strings.HasPrefix(q, "SELECT") && !strings.Contains(string(out), punto) {
+			return fmt.Errorf("el mensaje %s no está en la sesión %s", punto, sesion)
+		}
+	}
+	return nil
+}
+
+var idMensajeOC = regexp.MustCompile(`^msg_[A-Za-z0-9]+$`)
+
+// consultasCorteOpenCode: comprobar que el mensaje es de la sesión y quitar lo posterior (partes y mensajes; los
+// ids de OpenCode crecen con el tiempo, así que «posterior» es un id mayor).
+func consultasCorteOpenCode(sesion, punto string) []string {
+	despues := `SELECT id FROM message WHERE session_id='` + sesion + `' AND id>'` + punto + `'`
+	return []string{
+		`SELECT id FROM message WHERE session_id='` + sesion + `' AND id='` + punto + `'`,
+		`DELETE FROM part WHERE session_id='` + sesion + `' AND message_id IN (` + despues + `)`,
+		`DELETE FROM message WHERE id IN (` + despues + `)`,
+	}
 }
 
 // borraOpenCode borra una sesión de OpenCode (la copia de una pregunta aparte).

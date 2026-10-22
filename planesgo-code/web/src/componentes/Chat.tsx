@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { childOf, conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
@@ -491,14 +491,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (final) guardaConversacion(id, m);
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
-    const previos = forzado !== undefined ? conversacion(id) : mensajes;
+    let previos = forzado !== undefined ? conversacion(id) : mensajes;
+    // «Continuar desde aquí» pendiente: se aplica con este mensaje. Lo de después queda en la vista, fuera del
+    // contexto del agente; al agente va el punto (o, si no puede cortar su sesión, el traspaso).
+    let corte: AP.CutRequest | undefined;
+    if (ses.corte !== undefined && prov.tipo === 'agente' && ses.corte < previos.length) {
+      corte = AP.cutRequest(previos, ses.corte);
+      previos = AP.markOutside(previos, ses.corte);
+    }
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
     // Relevo: con el contexto del agente grande (o sin caché por llevar parada), el mensaje va a una sesión nueva del
     // agente con la memoria de trabajo en vez de reenviar todo el historial. El chat no cambia. Nunca con adjuntos,
     // planes ni preguntas aparte (que no pasan por aquí).
     const sesionPrevia = opc.sesionAgente ?? ses.sesionAgente;
     let memoria = '', relevo: Mensaje['relevo'];
-    if (prov.tipo === 'agente' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia) {
+    if (prov.tipo === 'agente' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia && !corte) {
       const limpios = previos.filter(m => !m.error);
       const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
       const mem = W.buildWorkingMemory(limpios);
@@ -516,6 +523,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     inicioTurno.current[id] = Date.now();
     if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
     let sesionAgente = sesionPrevia;
+    let punto = ''; // el último mensaje del agente en su sesión (para continuar desde esta respuesta más tarde)
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
     let aEnviar = t;
@@ -578,7 +586,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
-        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
+        // «Continuar desde aquí» manda sobre el relevo: el agente sigue desde el punto elegido (o con su traspaso).
+        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: corte?.punto ? corte.sesion : relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
+        ...(corte ? { corte: corte.punto || '', traspaso: corte.traspaso } : {}),
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language,
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
@@ -599,6 +609,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
           avisosEnVivo();
         }
         if (e.sesion_agente) sesionAgente = e.sesion_agente;
+        if (e.punto) punto = e.punto;
         if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
       }, ac.signal);
@@ -630,7 +641,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       }
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
-      ultimo(m => { const { vivo: _, ...r } = m; return { ...r, fin: Date.now() }; });
+      ultimo(m => { const { vivo: _, ...r } = m; return { ...r, fin: Date.now(), ...(punto && sesionAgente ? { punto: { sesion: sesionAgente, id: punto } } : {}) }; });
       // Relevo: lo que ocupa de verdad el contexto de la sesión nueva (la memoria más lo fijo del agente).
       const ctxNuevo = actual[actual.length - 1].uso?.contexto;
       if (relevo && ctxNuevo) actual = actual.map((m, k) => k === actual.length - 2 && m.relevo ? { ...m, relevo: { ...m.relevo, a: ctxNuevo } } : m);
@@ -638,7 +649,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
-      alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
+      alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now(), corte: undefined });
     }
   }
 
@@ -726,6 +737,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     marcaPlan(ruta, 'descartado');
   }
 
+  // «Continuar desde aquí»: se marca el punto y se aplica al enviar el siguiente mensaje (hasta entonces, se deshace).
+  const continuaDesde = (i: number) => { if (sesion && !enCurso) alCambiarSesion({ ...sesion, corte: i }); };
+  const deshaceCorte = () => { if (sesion) alCambiarSesion({ ...sesion, corte: undefined }); };
+  const veAlCorte = () => { if (sesion?.corte !== undefined) lista.current?.querySelector(`[data-indice="${sesion.corte}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Intro: decide pgocode (o lo elegido en la etiqueta; con «Siempre al turno», al turno en curso); Alt+Intro: al
     // turno en curso (si el agente lo admite; si no, a la cola); Ctrl+Intro y Mayús+Intro: nueva línea.
@@ -802,8 +818,16 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 <p className="suave">{prov?.nombre || 'Elige un agente'}{prov?.tipo === 'agente' ? ` · ${{ lectura: 'solo lectura', editar: 'puede editar', auto: 'auto: ejecuta comandos' }[modoDe(sesion)]}` : ''}</p>
               </div>
             )}
-            {mensajes.map((m, i) => (
-              <div key={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '')}>
+            {mensajes.map((m, i) => {
+              const fuera = AP.isOutside(mensajes, i, sesion.corte);
+              return (<Fragment key={i}>
+              {fuera && !AP.isOutside(mensajes, i - 1, sesion.corte) && (
+                <div className="outside-context-label" role="note">
+                  {m.fuera ? 'Fuera del contexto del agente: lo de aquí abajo ya no lo ve' : 'Fuera del contexto del agente al enviar el siguiente mensaje'}
+                </div>
+              )}
+              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (sesion.corte === i ? ' cut-point' : '')}
+                title={fuera ? 'Fuera del contexto del agente (no lo verá)' : undefined}>
                 {m.texto && !(enCurso && i === mensajes.length - 1) && (
                   <button className="icono copiar-mensaje" onClick={() => copiaTexto(m.texto, i)} title={copiado === i ? 'Copiado' : 'Copiar el mensaje'} aria-label="Copiar el mensaje">
                     <Icono n={copiado === i ? 'hecho' : 'copiar'} t={13} />
@@ -843,8 +867,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                     ✦ {m.skill.modo === 'elegida' ? 'elegida' : 'sugerida'}: {m.skill.nombre} · {m.skill.puntuacion.toFixed(2)}
                   </span>
                 )}
+                {!enCurso && prov?.tipo === 'agente' && AP.canContinueFrom(mensajes, i, sesion.corte) && (
+                  <button className="enlace continue-from-here" onClick={() => continuaDesde(i)}
+                    title="El agente sigue desde esta respuesta y olvida todo lo posterior (baja el contexto que reenvía). Se aplica al enviar el siguiente mensaje; hasta entonces se puede deshacer.">
+                    Continuar desde aquí
+                  </button>
+                )}
               </div>
-            ))}
+              </Fragment>);
+            })}
             {apartesSesion.map(a => (
               <div key={a.id} className="mensaje aparte" role="note" aria-label="Pregunta aparte">
                 <div className="aparte-cabecera">
@@ -945,6 +976,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                     <button className="quita-adjunto" onClick={() => setAdjuntos(l => l.filter(x => x.ruta !== a.ruta))} aria-label={'Quitar ' + a.nombre}>×</button>
                   </span>
                 ))}
+              </div>
+            )}
+            {sesion.corte !== undefined && sesion.corte < mensajes.length && (
+              <div className="cut-notice" role="status">
+                <span>↳ El agente sigue desde <button className="enlace" onClick={veAlCorte} title="Ir al mensaje">este mensaje</button> (lo de después no lo verá).</span>
+                <button className="enlace" onClick={deshaceCorte} disabled={Boolean(enCurso)}>Deshacer</button>
               </div>
             )}
             {verAyuda && <Ayuda alTurno={siempreAlTurno} inyecta={Boolean(prov?.inyecta)} alCerrar={cierraAyuda} />}

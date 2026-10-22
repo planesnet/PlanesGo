@@ -47,6 +47,13 @@ type Peticion struct {
 	// Aparte: una pregunta que no entra en la conversación. Va a una copia de la sesión del agente (Claude:
 	// --fork-session sin guardarla; OpenCode: --fork y se borra al acabar), en solo lectura.
 	Aparte bool
+	// Corte: «Continuar desde aquí». El id del mensaje del agente (el Punto de un turno anterior) desde el que sigue
+	// la conversación: lo de después lo olvida (Claude: --resume-session-at sobre una copia de la sesión;
+	// OpenCode: se quitan de su sesión los mensajes posteriores). SesionAgente es la sesión de ese mensaje.
+	Corte string
+	// Traspaso: la conversación hasta el punto elegido, resumida por pgocode (sin gastar tokens). Si el agente no
+	// puede cortar su sesión (Antigravity), o el corte falla, se empieza otra con esto delante del mensaje.
+	Traspaso string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
@@ -58,7 +65,10 @@ type Evento struct {
 	Herramienta  *Herramienta `json:"herramienta,omitempty"`
 	Uso          *Uso         `json:"uso,omitempty"`
 	SesionAgente string       `json:"sesion_agente,omitempty"`
-	Tarea        *Tarea       `json:"tarea,omitempty"`
+	// Punto: el id del último mensaje del agente en su conversación (va con el consumo de cada respuesta): desde
+	// él se puede continuar más tarde olvidando lo posterior (Peticion.Corte).
+	Punto string `json:"punto,omitempty"`
+	Tarea *Tarea `json:"tarea,omitempty"`
 	// Vivo: lo consumido en el turno hasta ahora (tokens de entrada y salida), mientras trabaja el agente. Con el
 	// último consumo coincide con la suma de los Uso del turno.
 	Vivo *Uso `json:"vivo,omitempty"`
