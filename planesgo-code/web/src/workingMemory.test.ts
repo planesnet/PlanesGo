@@ -60,7 +60,11 @@ test('cuándo hay relevo', () => {
   assert.ok(W.shouldRelay({ ...base, agent: 'opencode', context: 70_000 }));
   // Sin caché (parada) y con al menos la mitad del umbral.
   assert.ok(W.shouldRelay({ ...base, context: 45_000, idleMinutes: 10 }));
-  assert.equal(W.shouldRelay({ ...base, context: 30_000, idleMinutes: 10 }), null);
+  // Con la caché caducada, en cuanto el historial pasa claramente de lo fijo del agente (aunque no llegue al umbral).
+  assert.ok(W.shouldRelay({ ...base, context: 30_000, idleMinutes: 10 }));
+  assert.equal(W.shouldRelay({ ...base, context: 20_000, idleMinutes: 10 }), null, 'Claude: poco más que lo fijo');
+  assert.ok(W.shouldRelay({ ...base, agent: 'opencode', context: 22_000, idleMinutes: 10 }));
+  assert.equal(W.shouldRelay({ ...base, context: 30_000, idleMinutes: 2 }), null, 'con la caché caliente, solo el umbral');
   // Nunca con adjuntos, planes, sin sesión, con «nunca» o si la memoria no ahorra.
   assert.equal(W.shouldRelay({ ...base, attachments: 1 }), null);
   assert.equal(W.shouldRelay({ ...base, planOrder: true }), null);
