@@ -220,12 +220,14 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		return &u
 	}
+	punto := "" // el último mensaje del agente principal (para continuar desde él: --resume-session-at)
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
 			Subtype   string `json:"subtype"`
 			SessionID string `json:"session_id"`
 			Padre     string `json:"parent_tool_use_id"`
+			UUID      string `json:"uuid"`
 			// Tareas (system/task_*): subagentes y órdenes en segundo plano.
 			TaskID       string `json:"task_id"`
 			TaskToolUse  string `json:"tool_use_id"`
@@ -349,6 +351,9 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		switch ev.Type {
 		case "assistant":
+			if ev.UUID != "" {
+				punto = ev.UUID
+			}
 			if u := ev.Message.Usage; ev.Padre == "" && u.Input+u.CacheRead+u.CacheCreation > 0 {
 				contexto = u.Input + u.CacheRead + u.CacheCreation // la última llamada del agente principal
 			}
@@ -411,7 +416,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			}
 			clear(llamadas)
 			emite(Evento{Uso: &Uso{Entrada: turno.Entrada, Salida: turno.Salida, CacheLeida: turno.CacheLeida, CacheEscrita: turno.CacheEscrita,
-				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo()})
+				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo(), Punto: punto})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -574,11 +579,12 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			Type      string `json:"type"`
 			SessionID string `json:"sessionID"`
 			Part      struct {
-				ID     string `json:"id"`
-				Text   string `json:"text"`
-				Tool   string `json:"tool"`
-				CallID string `json:"callID"`
-				State  struct {
+				ID        string `json:"id"`
+				MessageID string `json:"messageID"`
+				Text      string `json:"text"`
+				Tool      string `json:"tool"`
+				CallID    string `json:"callID"`
+				State     struct {
 					Status string          `json:"status"`
 					Input  json.RawMessage `json:"input"`
 					Output string          `json:"output"`
@@ -656,7 +662,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			t := ev.Part.Tokens
 			emite(Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
 				CacheLeida: t.Cache.Read, CacheEscrita: t.Cache.Write, Llamadas: 1,
-				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}})
+				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}, Punto: ev.Part.MessageID})
 		case "error":
 			m := ev.Error.Data.Message
 			if m == "" {

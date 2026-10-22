@@ -25,6 +25,7 @@ export interface Sesion {
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)
   tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
   tarea?: string;
+  corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;
 }
