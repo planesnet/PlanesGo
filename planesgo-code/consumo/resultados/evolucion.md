@@ -11,6 +11,8 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 - **2026-10-22-223833**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 6 con relevo y memoria de trabajo (20k)
 - **2026-10-22-223835**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 5 con el consumo de Claude corregido
 - **2026-10-22-225825**: Prueba 7 (conversación larga) sin estrategia: sin compactar
+- **2026-10-22-230036**: Prueba 7 (conversación larga) con compactación gobernada por pgocode (80k, el umbral de la app)
+- **2026-10-22-230038**: Prueba 7 (conversación larga) con relevo y memoria de trabajo (80k)
 
 ## 1 · Saludo
 
@@ -118,4 +120,6 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 
 | Agente | Modo | Ronda | Tokens | Entrada | Salida | Llamadas | Coste | Tiempo | Aciertos |
 |---|---|---|--:|--:|--:|--:|--:|--:|--:|
+| claude-code | pgocode · compactar:80 | 2026-10-22-230036 | 1200.8k | 1187.2k | 13.6k | 23 | 1.960 $ | 180 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-225825 | 1669.3k | 1659.8k | 9.5k | 21 | 1.865 $ | 118 s | 1/1 |
+| claude-code | pgocode · relevo:80 | 2026-10-22-230038 | 1300.4k | 1289.2k | 11.3k | 27 | 1.908 $ | 152 s | 1/1 |
