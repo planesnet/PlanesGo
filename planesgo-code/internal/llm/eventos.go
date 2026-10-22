@@ -192,7 +192,14 @@ func imagenesDe(c json.RawMessage) []Imagen {
 
 // leeClaudeCode interpreta la salida stream-json de `claude -p`: texto, razonamiento, herramientas con su
 // entrada y su resultado, consumo del turno y el id de sesión para continuar con --resume.
-func leeClaudeCode(r io.Reader, emite func(Evento)) error {
+func leeClaudeCode(r io.Reader, emite func(Evento)) error { return readClaudeCode(r, emite, false) }
+
+// leeClaudeCodeNew: leeClaudeCode para una sesión que empieza (sin --resume): todo lo acumulado de la sesión es
+// de este proceso, también lo que no se ve en la salida (las llamadas de la compactación del historial).
+func leeClaudeCodeNew(r io.Reader, emite func(Evento)) error { return readClaudeCode(r, emite, true) }
+
+// readClaudeCode: newSession, si la sesión empieza en este proceso.
+func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	nombres := map[string]string{}
@@ -208,7 +215,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
 	// «modelUsage» y «total_cost_usd» llevan los subagentes pero son lo acumulado de TODA la sesión (también a través
 	// de --resume). El turno es el acumulado menos el de la vez anterior (guardado por sesión: acumuladoClaude); sin
-	// él, en una sesión retomada, se reconstruye con las llamadas vistas (consumoObservado). En vivo: lo de los
+	// él, en una sesión retomada, se reconstruye con las llamadas vistas (consumoObservado), que no llevan las de la
+	// compactación (no salen en la salida, pero sí en el acumulado: probado con 2.1.308). En vivo: lo de los
 	// result anteriores de este proceso más las llamadas de después (cada mensaje una vez: Claude repite el mensaje
 	// por cada bloque; su salida llega parcial y se completa con el result, cuyo vivo coincide así con la suma).
 	var hecho Uso   // lo emitido en los result de este proceso
@@ -421,8 +429,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				turno = Uso{Entrada: max(total.Entrada-previo.Entrada, 0), Salida: max(total.Salida-previo.Salida, 0),
 					CacheLeida: max(total.CacheLeida-previo.CacheLeida, 0), CacheEscrita: max(total.CacheEscrita-previo.CacheEscrita, 0),
 					Coste: max(total.Coste-previo.Coste, 0)}
-			case total.Entrada <= observado.Entrada+observado.Entrada/100+100:
-				turno = total // sesión nueva: todo lo acumulado es de este turno
+			case newSession || total.Entrada <= observado.Entrada+observado.Entrada/100+100:
+				turno = total // sesión nueva: todo lo acumulado es de este turno (con la compactación, si la hay)
 			default:
 				turno = observado // sesión retomada sin acumulado guardado: lo visto en este proceso
 			}
@@ -1108,9 +1116,12 @@ func (q *quitaBloque) Pasa(t string) string {
 // Lector: cómo interpretar la salida de un agente (su clave), para usarlo fuera de pgocode (cmd/consumo lanza
 // los agentes a pelo para calibrar). nil si no es un agente conocido. Antigravity da el consumo acumulado de su
 // conversación: quien lo use ha de restar el del turno anterior.
-func Lector(clave string) func(io.Reader, func(Evento)) error {
+func Lector(clave string, newSession bool) func(io.Reader, func(Evento)) error {
 	switch clave {
 	case "claude-code":
+		if newSession {
+			return leeClaudeCodeNew
+		}
 		return leeClaudeCode
 	case "antigravity":
 		return leeAntigravity

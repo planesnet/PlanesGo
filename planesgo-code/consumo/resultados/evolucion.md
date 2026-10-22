@@ -6,10 +6,11 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 
 - **2026-10-22-150558**: Punto 1: perfil de herramientas por modo (--tools): 14 herramientas propias en editar/auto y 12 en lectura, en vez de 32
 - **2026-10-22-221022**: Prueba 6 ida y vuelta: línea base
-- **2026-10-22-223829**: Prueba 6 sin estrategia (con el consumo de Claude corregido)
-- **2026-10-22-223831**: Prueba 6 con compactación gobernada por pgocode (20k)
-- **2026-10-22-223833**: Prueba 6 con relevo y memoria de trabajo (20k)
-- **2026-10-22-223835**: Prueba 5 con el consumo de Claude corregido
+- **2026-10-22-223829**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 6 sin estrategia (con el consumo de Claude corregido)
+- **2026-10-22-223831**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 6 con compactación gobernada por pgocode (20k)
+- **2026-10-22-223833**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 6 con relevo y memoria de trabajo (20k)
+- **2026-10-22-223835**: MEDIDA ERRÓNEA (Claude Code: el acumulado de la sesión se restaba dos veces; ver README) · Prueba 5 con el consumo de Claude corregido
+- **2026-10-22-225825**: Prueba 7 (conversación larga) sin estrategia: sin compactar
 
 ## 1 · Saludo
 
@@ -112,3 +113,9 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 | claude-code | pgocode | 2026-10-22-221022 | 537.0k | 529.3k | 7.8k | 24 | 0.487 $ | 113 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-223829 | 378.9k | 373.4k | 5.4k | 24 | 0.358 $ | 114 s | 1/1 |
 | claude-code | pgocode · relevo | 2026-10-22-223833 | 451.8k | 444.0k | 7.8k | 27 | 0.635 $ | 131 s | 1/1 |
+
+## 7 · Conversación larga
+
+| Agente | Modo | Ronda | Tokens | Entrada | Salida | Llamadas | Coste | Tiempo | Aciertos |
+|---|---|---|--:|--:|--:|--:|--:|--:|--:|
+| claude-code | pgocode | 2026-10-22-225825 | 1669.3k | 1659.8k | 9.5k | 21 | 1.865 $ | 118 s | 1/1 |

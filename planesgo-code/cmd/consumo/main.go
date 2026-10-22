@@ -6,7 +6,7 @@
 //
 // Sin ninguna dependencia del ERP: ni Odoo (tampoco el simulado), ni login, ni proyectos.
 //
-// Cada prueba trabaja en una copia propia de consumo/proyecto (un repositorio git nuevo) y se comprueba sola
+// Cada prueba trabaja en una copia propia de consumo/proyecto (o del que diga la prueba; un repositorio git nuevo) y se comprueba sola
 // (texto de la respuesta, una orden que ha de acabar bien, ficheros que no se pueden tocar…): gastar poco y
 // hacerlo mal no cuenta. Gasta tokens de verdad: no entra en «make test».
 //
@@ -48,7 +48,7 @@ import (
 var (
 	modoF       = flag.String("modo", "ambos", "ambos | directo (calibración, sin pgocode) | pgocode")
 	agentesF    = flag.String("agentes", "claude-code,antigravity,opencode", "agentes, separados por comas")
-	pruebasF    = flag.String("pruebas", "1,2,3,4,5,6", "pruebas (sus id), separadas por comas")
+	pruebasF    = flag.String("pruebas", "1,2,3,4,5,6,7", "pruebas (sus id), separadas por comas")
 	repsF       = flag.Int("repeticiones", 3, "repeticiones de cada prueba (se toma la mediana)")
 	salidaF     = flag.String("salida", "", "carpeta de resultados (vacío: consumo/resultados, en el repositorio)")
 	notaF       = flag.String("nota", "", "qué cambia en esta ronda (sale en el informe y en la evolución)")
@@ -79,6 +79,8 @@ type Prueba struct {
 	Permisos string  `json:"permisos"`
 	Mide     string  `json:"mide"`
 	Turnos   []Turno `json:"turnos"`
+	// Proyecto: la carpeta de consumo/ que se copia para la prueba (por defecto, «proyecto»).
+	Proyecto string `json:"proyecto,omitempty"`
 }
 
 type ConfAgente struct {
@@ -185,9 +187,15 @@ type exchange struct {
 	Tasks          []llm.Tarea // sus tareas (la lista de tareas, subagentes…)
 }
 
+// noStrategy («ninguna»): reanudar la sesión y reenviarlo todo, sin compactar. pgocode compacta por defecto a partir
+// de llm.CompactAtDefault (80k): aquí el umbral va al máximo (llm.CompactAtMax, 1M), que en la práctica no se
+// alcanza; si no, «ninguna» sería «compactar:80» en cuanto la conversación pasara de 80k.
 type noStrategy struct{}
 
-func (noStrategy) before(context.Context, *conversation) error { return nil }
+func (noStrategy) before(_ context.Context, c *conversation) error {
+	c.CompactAt = llm.CompactAtMax
+	return nil
+}
 
 // compactStrategy («compactar[:N]»): la compactación gobernada por pgocode, como en la app: cada turno lleva el
 // umbral (CompactAt) y el contexto de la última llamada del turno anterior (LastContext). Por defecto, 20k (el
@@ -219,6 +227,7 @@ type relayResult struct {
 }
 
 func (s relayStrategy) before(ctx context.Context, c *conversation) error {
+	c.CompactAt = llm.CompactAtMax // solo el relevo: sin la compactación de pgocode (ver noStrategy)
 	n := len(c.History)
 	if n == 0 || c.Session == "" {
 		return nil
@@ -538,7 +547,7 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 		c.r.err = err
 		return c.fin()
 	}
-	errLee := llm.Lector(agente)(out, c.evento)
+	errLee := llm.Lector(agente, sesion == "")(out, c.evento)
 	io.Copy(io.Discard, out)
 	errCmd := cmd.Wait()
 	r := c.fin()
@@ -575,11 +584,12 @@ func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf Con
 }
 
 // cumulativeUsage: si el consumo que da el agente al reanudar una sesión es el acumulado de toda la conversación
-// y no el del turno. Claude Code: su «result» (usage, modelUsage y total_cost_usd) suma la sesión entera tras
-// --resume, en los dos modos (internal/llm solo descuenta lo del propio proceso). Antigravity: sin pgocode
-// (pgocode ya lo resta).
+// y no el del turno. Antigravity sin pgocode (pgocode ya lo resta). Claude Code no: su «result» (modelUsage y
+// total_cost_usd) suma la sesión entera tras --resume, pero el lector de internal/llm, que se usa en los dos
+// modos, ya resta el acumulado anterior de la sesión (acumuladoClaude); restarlo aquí otra vez lo descontaba dos
+// veces (las rondas del 22-10-2026 de 22:10 a 22:38).
 func cumulativeUsage(agente, modo string) bool {
-	return agente == "claude-code" || (agente == "antigravity" && modo == "directo")
+	return agente == "antigravity" && modo == "directo"
 }
 
 // limite: un error del agente que dice que no puede seguir (límite de gasto, de uso o sin crédito): no vale la
@@ -749,7 +759,7 @@ func main() {
 		for _, a := range agentes {
 			for _, p := range pruebas {
 				for r := 1; r <= *repsF; r++ {
-					if err := copia(filepath.Join(dirBanco, "proyecto"), carpeta(m, a, p.ID, r)); err != nil {
+					if err := copia(filepath.Join(dirBanco, cmp.Or(p.Proyecto, "proyecto")), carpeta(m, a, p.ID, r)); err != nil {
 						log.Fatal(err)
 					}
 				}

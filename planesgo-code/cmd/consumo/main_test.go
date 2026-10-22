@@ -221,21 +221,22 @@ func TestIdaYVuelta(t *testing.T) {
 	}
 }
 
-// Claude Code al reanudar da el acumulado de la sesión (tokens y coste): se resta el anterior; si baja (otra
-// sesión), se toma entero.
-func TestAcumuladoClaude(t *testing.T) {
-	if !cumulativeUsage("claude-code", "directo") || !cumulativeUsage("claude-code", "pgocode") || cumulativeUsage("antigravity", "pgocode") {
+// Antigravity sin pgocode da el acumulado de la conversación: se resta el anterior; si baja (otra sesión), se toma
+// entero. Claude Code no: el lector de internal/llm ya da lo del turno.
+func TestAcumulado(t *testing.T) {
+	if cumulativeUsage("claude-code", "directo") || cumulativeUsage("claude-code", "pgocode") || cumulativeUsage("antigravity", "pgocode") ||
+		!cumulativeUsage("antigravity", "directo") {
 		t.Fatal("cumulativeUsage")
 	}
 	previo := &llm.Uso{Entrada: 100000, Salida: 1000, CacheLeida: 85000, CacheEscrita: 14000, Coste: 0.15}
-	c := &recoge{agente: "claude-code", previo: previo}
+	c := &recoge{agente: "antigravity", previo: previo}
 	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 155000, Salida: 1500, CacheLeida: 136000, CacheEscrita: 19000, Coste: 0.20, Llamadas: 2, Contexto: 28000}})
 	r := c.fin()
 	if r.Entrada != 55000 || r.Salida != 500 || r.CacheLeida != 51000 || r.CacheEscrita != 5000 || r.Llamadas != 2 || r.Contexto != 28000 ||
 		r.Coste < 0.049 || r.Coste > 0.051 || r.bruto.Entrada != 155000 {
 		t.Errorf("%+v", r.Medida)
 	}
-	c = &recoge{agente: "claude-code", previo: previo}
+	c = &recoge{agente: "antigravity", previo: previo}
 	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 30000, Coste: 0.05}})
 	if r := c.fin(); r.Entrada != 30000 || r.Coste != 0.05 {
 		t.Errorf("otra sesión: %+v", r.Medida)
@@ -355,6 +356,84 @@ func TestCompactionNote(t *testing.T) {
 	} {
 		if got := compactionNote.FindString(in); got != want {
 			t.Errorf("%q: %q", in, got)
+		}
+	}
+}
+
+// La prueba 7 (Conversación larga): su proyecto falla al empezar; con un arreglo de referencia de cada turno
+// cumple las comprobaciones una tras otra, y las de memoria aceptan las respuestas buenas y no las malas.
+func TestConversacionLarga(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("sin python3")
+	}
+	b := banco(t)
+	i := slices.IndexFunc(b.Pruebas, func(p Prueba) bool { return p.ID == 7 })
+	if i < 0 {
+		t.Fatal("falta la prueba 7")
+	}
+	p := b.Pruebas[i]
+	d := filepath.Join(t.TempDir(), "p")
+	if err := copia(filepath.Join("../../consumo", p.Proyecto), d); err != nil {
+		t.Fatal(err)
+	}
+	cambia := func(f, viejo, nuevo string) {
+		t.Helper()
+		bs, err := os.ReadFile(filepath.Join(d, f))
+		if err != nil || !strings.Contains(string(bs), viejo) {
+			t.Fatalf("%s: no está %q", f, viejo)
+		}
+		os.WriteFile(filepath.Join(d, f), []byte(strings.Replace(string(bs), viejo, nuevo, 1)), 0o644)
+	}
+	if comprueba(p.Turnos[1], "", d) == "" {
+		t.Fatal("sin arreglar, las pruebas pasan")
+	}
+	pasos := []func(){
+		func() { cambia("almacen/precios.py", "if importe > minimo:", "if importe >= minimo:") },
+		func() {
+			cambia("almacen/envios.py", "def coste_envio(peso, zona):\n", "def coste_envio(peso, zona, urgente=False):\n"+
+				"    return round(_base(peso, zona) + (RECARGO_URGENTE[zona] if urgente else 0), 2)\n\n\ndef _base(peso, zona):\n")
+		},
+		func() {
+			cambia("almacen/informes.py", "ANCHO = 78\n", "from .envios import coste_envio, zona_de\nfrom .precios import aplica_descuento\n\n"+
+				"ANCHO = 78\n\n\ndef total_pedido(pedido, cp):\n"+
+				"    return round(aplica_descuento(pedido.importe()) + coste_envio(pedido.peso(), zona_de(cp), pedido.urgente), 2)\n")
+		},
+		func() {
+			cambia("almacen/pedidos.py", "        self.historial.append((self.estado, nuevo))\n",
+				"        if nuevo == \"EN_PREPARACION\" and inventario is not None:\n"+
+					"            hechas = []\n            try:\n                for l in self.lineas:\n"+
+					"                    inventario.reserva_stock(l.sku, l.cantidad)\n                    hechas.append(l)\n"+
+					"            except SinStock:\n                for l in hechas:\n                    inventario.libera(l.sku, l.cantidad)\n"+
+					"                raise\n        self.historial.append((self.estado, nuevo))\n")
+			cambia("tests/test_pedidos.py", "\n\nif __name__", "\n    def test_reserva(self):\n        pass\n\n\nif __name__")
+		},
+		func() {
+			cambia("almacen/devoluciones.py", "    return round(importe_productos + coste_envio, 2)",
+				"    if motivo == \"desistimiento\":\n        coste_envio = 0\n    return round(importe_productos + coste_envio, 2)")
+		},
+	}
+	for n, f := range pasos {
+		f()
+		if r := comprueba(p.Turnos[n+1], "", d); r != "" {
+			t.Fatalf("turno %d: %s", n+2, r)
+		}
+	}
+	textos := map[int]struct{ bien, mal []string }{
+		0: {[]string{"Lo hace `Inventario.reserva_stock`: deja siempre 7 unidades (MARGEN_SEGURIDAD)."}, []string{"Lo hace reserva_stock, sin margen."}},
+		6: {[]string{"Usaba `importe > minimo` y ahora `importe >= minimo`.", "Comparaba con > en vez de ≥."}, []string{"Comparaba con > y ahora también."}},
+		7: {[]string{"MARGEN_SEGURIDAD = 7 unidades; el recargo urgente de la zona 3 es 5,25 €.", "5.25 € en la zona 3 y 7 unidades de margen (MARGEN_SEGURIDAD)."},
+			[]string{"MARGEN_SEGURIDAD = 3; zona 3: 5,25 €.", "MARGEN_SEGURIDAD = 7; zona 3: 4 €."}},
+	}
+	for n, c := range textos {
+		for _, x := range c.bien {
+			if f := comprueba(p.Turnos[n], x, d); f != "" {
+				t.Errorf("turno %d, %q: %s", n+1, x, f)
+			}
+		}
+		for _, x := range c.mal {
+			if comprueba(p.Turnos[n], x, d) == "" {
+				t.Errorf("turno %d acepta %q", n+1, x)
+			}
 		}
 	}
 }

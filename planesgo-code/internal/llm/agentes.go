@@ -45,6 +45,8 @@ type Agente struct {
 	EntornoPara func(p Peticion) []string
 	// Lee interpreta la salida; si es nil, la salida se pasa tal cual.
 	Lee func(r io.Reader, emite func(Evento)) error
+	// LeeNueva: el que se usa en vez de Lee cuando la sesión empieza (sin sesión del agente que retomar).
+	LeeNueva func(r io.Reader, emite func(Evento)) error
 	// NoDisponible: el agente existe pero no se puede usar desde aquí (y por qué).
 	NoDisponible string
 	// Entrada: si el agente lee los mensajes por su entrada (uno por línea) también a mitad de turno, cómo se
@@ -381,6 +383,9 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	}
 	proceso.Vigila(cmd.Process.Pid)
 	lee := a.Lee
+	if p.SesionAgente == "" && a.LeeNueva != nil {
+		lee = a.LeeNueva
+	}
 	if lee == nil {
 		lee = leeTexto
 	}
@@ -574,7 +579,7 @@ func leeTexto(r io.Reader, emite func(Evento)) error {
 // Agentes devuelve los agentes conocidos: Claude Code, Antigravity y OpenCode.
 func Agentes() []Proveedor {
 	return []Proveedor{
-		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode, Modos: true,
+		&Agente{Clave: "claude-code", Nombre: "Claude Code", Programa: "claude", Lee: leeClaudeCode, LeeNueva: leeClaudeCodeNew, Modos: true,
 			// Con los modelos actuales Claude Code no trae la lista de tareas (TaskCreate/TaskUpdate) si no se pide:
 			// pgocode la pinta en el chat y la usa para el estado de las preguntas aparte.
 			EntornoDefecto: []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
