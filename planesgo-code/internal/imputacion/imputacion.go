@@ -166,7 +166,7 @@ type Gestor struct {
 	sinTarea  []*Periodo      // periodos cerrados antes de resolver su tarea: se suman al resolverla
 	unificado map[int]bool    // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
 	campos    map[string]bool // campos de IA que tiene account.analytic.line en este Odoo (nil: sin consultar)
-	camposEn  time.Time       // cuándo se consultaron (sin ninguno, se vuelve a preguntar pasados 10 minutos)
+	camposEn  time.Time       // cuándo se consultaron (sin ninguno, se vuelve a preguntar pasado camposReintento)
 	escribe   sync.Mutex      // una escritura en Odoo a la vez
 	// humanos: los tramos de tiempo humano ya imputados por usuario y día (uid|fecha). Una persona solo está en un
 	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
@@ -988,14 +988,17 @@ func (g *Gestor) buscaLinea(ctx context.Context, d *Dia) int {
 	return l[0].ID
 }
 
-// CamposIA: los campos ai_* que existen en account.analytic.line (se pregunta a Odoo una vez). No todos los Odoo
-// los tienen todos: p. ej. ai_model sí y ai_session_id no.
+// camposReintento: sin campos de IA, cada cuánto se vuelve a preguntar (por si se instala el módulo que los añade
+// con la app abierta).
+const camposReintento = 10 * time.Minute
+
+// CamposIA: los campos ai_* que existen en account.analytic.line. Si los hay, se pregunta a Odoo una vez; si no,
+// otra vez pasados camposReintento. No todos los Odoo los tienen todos: p. ej. ai_model sí y ai_session_id no.
 func (g *Gestor) CamposIA(ctx context.Context, ses string) map[string]bool {
 	g.mu.Lock()
 	c, en := g.campos, g.camposEn
 	g.mu.Unlock()
-	// Sin campos de IA se vuelve a preguntar cada 10 minutos: se pueden añadir instalando un módulo sin reiniciar.
-	if c != nil && (len(c) > 0 || g.ahora().Sub(en) < 10*time.Minute) {
+	if c != nil && (len(c) > 0 || g.ahora().Sub(en) < camposReintento) {
 		return c
 	}
 	var r map[string]any

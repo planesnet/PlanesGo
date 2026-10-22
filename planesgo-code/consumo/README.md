@@ -51,7 +51,7 @@ separa las rondas por estrategia. En el informe, la tabla turno a turno marca en
 estrategia en cada turno (relevo, compactación).
 
 - `ninguna` (por defecto): reanudar la sesión del agente, que reenvía todo el historial, sin compactar: con pgocode,
-  el umbral de compactación va al máximo (1M; la app compacta por defecto a partir de 80k).
+  el umbral de compactación va al máximo (1M; la app compacta por defecto a partir de 150k).
 - `compactar[:N]`: la compactación gobernada por pgocode (`internal/llm/compaction.go`): cada turno lleva
   `CompactAt` = N miles de tokens (por defecto 20k, el mínimo, para que salte en una prueba corta) y `LastContext`
   (el contexto de la última llamada del turno anterior). Solo con `-modo pgocode`.
@@ -61,11 +61,17 @@ estrategia en cada turno (relevo, compactación).
   `shouldRelay`, `relayMessage`): `cmd/consumo/relay.mts` las llama con node sobre la conversación del banco en el
   formato `Mensaje` de la interfaz (texto, herramientas y tareas de cada respuesta). Necesita node; solo con
   `-modo pgocode`.
+- `poda`: la poda automática del historial de pgocode (`internal/llm/prune.go`, de momento solo OpenCode): al empezar
+  cada turno retira del historial del agente lo superado (lecturas releídas o editadas, imágenes vistas, órdenes
+  repetidas, salidas largas, el texto de las ediciones y el razonamiento antiguo) y lo que no tiene relación con el
+  mensaje nuevo (embeddings locales con Ollama), sin la compactación de pgocode. `poda-reglas`: lo mismo, solo con
+  las reglas. La nota del turno dice cuánto ha retirado («poda 24.4k»). Solo con `-modo pgocode`.
 
 ```sh
 make consumo ARGS="-agentes claude-code -modo pgocode -pruebas 6 -repeticiones 1 -estrategia relevo"
 make consumo ARGS="-agentes claude-code -modo pgocode -pruebas 6 -repeticiones 1 -estrategia compactar:30"
 make consumo ARGS="-agentes claude-code -modo pgocode -pruebas 7 -repeticiones 1 -estrategia compactar:80"
+make consumo ARGS="-agentes opencode -modo pgocode -pruebas 7 -repeticiones 1 -estrategia poda"
 ```
 
 Para añadir otra, en `cmd/consumo/main.go` se implementa `strategy` (su `before` puede cambiar la sesión y el

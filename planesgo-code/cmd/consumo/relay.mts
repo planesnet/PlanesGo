@@ -12,7 +12,7 @@ const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
 const messages = (input.messages || []).filter((m: { error?: boolean }) => !m.error);
 const memory = W.buildWorkingMemory(messages);
 const reason = W.shouldRelay({
-  agent: input.agent, setting: input.threshold > 0 ? input.threshold : 'auto', context: input.context, idleMinutes: 0,
+  agent: input.agent, mode: 'on', threshold: input.threshold > 0 ? input.threshold : undefined, context: input.context, idleMinutes: 0,
   hasAgentSession: true, attachments: 0, memoryChars: memory.length,
 });
 process.stdout.write(JSON.stringify({

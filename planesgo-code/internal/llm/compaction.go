@@ -6,18 +6,27 @@ import (
 	"strings"
 )
 
-// Compactación del historial gobernada por pgocode: cada agente reenvía todo su historial en cada paso, así que
-// cuanto antes lo resuma, menos tokens gasta cada paso. Cada uno lo hace con lo que ofrece, sin turnos de más:
+// Compactación del historial gobernada por pgocode, solo como red de seguridad: lo que acota el historial es la poda
+// (OpenCode) o el relevo (Claude Code con la caché caducada, Antigravity; ver web/src/contextPolicy.ts). Compactar
+// pronto salió más caro en el banco de consumo (prueba 7: un 5 % más a 80k), así que el umbral por defecto es alto.
+// Cada agente lo hace con lo que ofrece, sin turnos de más:
 //   - Claude Code: su auto-compactación con la ventana y el porcentaje adelantados por variables de entorno
 //     (CLAUDE_CODE_AUTO_COMPACT_WINDOW, que no baja de 100k, y CLAUDE_AUTOCOMPACT_PCT_OVERRIDE para bajar más);
 //   - OpenCode: su compactación automática con un «contexto» del modelo a medida (OPENCODE_CONFIG_CONTENT);
 //   - Antigravity: no tiene umbral configurable en modo print; pgocode le antepone «/compact» al mensaje cuando
 //     el contexto del turno anterior pasa del umbral (resume y contesta en el mismo turno).
+//
+// Con la gestión automática del contexto desactivada (CompactAt = CompactAgentOwn), nada de eso: la compactación,
+// la que traiga el agente.
 const (
-	CompactAtDefault = 150000 // red de seguridad: a 80k costaba más de lo que ahorraba (banco, prueba 7)
-	CompactAtMin     = 20000  // por debajo, las instrucciones y herramientas del agente casi lo llenan solas
+	CompactAtDefault = 150000
+	CompactAgentOwn  = -1
+	CompactAtMin     = 20000 // por debajo, las instrucciones y herramientas del agente casi lo llenan solas
 	CompactAtMax     = 1000000
 )
+
+// agentOwnCompaction: sin compactación adelantada por pgocode.
+func agentOwnCompaction(p Peticion) bool { return p.CompactAt < 0 }
 
 // compactThreshold: el umbral de la petición, con su valor por defecto y dentro de los límites.
 func compactThreshold(p Peticion) int {
@@ -38,6 +47,9 @@ const (
 
 // claudeCompactEnv: las variables que hacen que Claude Code compacte a partir del umbral.
 func claudeCompactEnv(p Peticion) []string {
+	if agentOwnCompaction(p) {
+		return nil
+	}
 	n := compactThreshold(p)
 	w := max(claudeMinWindow, n+claudeOutputReserve+claudeCompactBuffer)
 	pct := float64(n) * 100 / float64(w-claudeOutputReserve)
@@ -46,15 +58,20 @@ func claudeCompactEnv(p Peticion) []string {
 }
 
 // OpenCode 1.19 compacta cuando los tokens de la última llamada llegan a limit.context − min(limit.output, 32k):
-// el «contexto» que se le declara es el umbral más esa reserva de salida.
+// el «contexto» que se le declara es el umbral más esa reserva de salida (0: el del modelo).
 const openCodeOutput = 32000
 
-func openCodeContextLimit(p Peticion) int { return compactThreshold(p) + openCodeOutput }
+func openCodeContextLimit(p Peticion) int {
+	if agentOwnCompaction(p) {
+		return 0
+	}
+	return compactThreshold(p) + openCodeOutput
+}
 
 // antigravityMessage: con el contexto del turno anterior por encima del umbral, el mensaje va tras «/compact»
 // (Antigravity resume la conversación y después contesta al mensaje, en el mismo turno).
 func antigravityMessage(msg string, p Peticion) string {
-	if p.SesionAgente == "" || p.Aparte || p.LastContext < compactThreshold(p) || strings.HasPrefix(strings.TrimSpace(msg), "/") {
+	if agentOwnCompaction(p) || p.SesionAgente == "" || p.Aparte || p.LastContext < compactThreshold(p) || strings.HasPrefix(strings.TrimSpace(msg), "/") {
 		return msg
 	}
 	return "/compact " + msg

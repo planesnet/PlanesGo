@@ -26,7 +26,7 @@ test('duplicateSession: copia los ajustes, no la conversación ni la identidad',
   const s = sesion({
     modelo: 'haiku', sesionAgente: 'abc', permisos: 'plan', modoPrevio: 'editar', plan: '/r/plan.md', autorizadas: ['/otra'],
     avisos: { coste: 5 } as unknown as Sesion['avisos'], mcp: ['playwright'], decideAparte: false, tipo: 'local', hosting: 'odoo.sh' as Sesion['hosting'],
-    esfuerzo: 'high', tareaId: 42, tarea: 'Tarea X', corte: 3, renovarContexto: 20000, compactAtK: 30, madre: 'm',
+    esfuerzo: 'high', tareaId: 42, tarea: 'Tarea X', corte: 3, autoContext: false,
   });
   const c = duplicateSession(s, [s], 1000);
   assert.notEqual(c.id, s.id);

@@ -203,7 +203,7 @@ export default function App() {
   // Ventana de la sesión: crear una (no existe hasta confirmar) o ajustar una existente. «envio»: mensaje que se
   // manda solo al agente en cuanto se cree (p. ej. «Resuelve la issue…»).
   const [dialogo, setDialogo] = useState<{ sesion: S.Sesion; nueva: boolean; envio?: string } | null>(null);
-  const [envioPendiente, setEnvioPendiente] = useState<{ sesion: string; texto: string; contexto?: string; madre?: string } | null>(null);
+  const [envioPendiente, setEnvioPendiente] = useState<{ sesion: string; texto: string } | null>(null);
 
   // Nueva sesión: se abre su ventana. Con rama (cambiar de rama en la cabecera) va ya elegida; si es la misma
   // rama de la sesión abierta (resolver una issue), también su carpeta y su alojamiento.
@@ -229,15 +229,6 @@ export default function App() {
     if (dialogo.nueva && dialogo.envio) setEnvioPendiente({ sesion: s.id, texto: dialogo.envio });
     setDialogo(null);
   }, [usuario, dialogo, proyecto?.id, sesion?.id]);
-
-  // Sesión hija (otro tema): ya viene con los parámetros de la madre; se guarda, se abre y se le manda el mensaje.
-  const abreHija = useCallback((s: S.Sesion, envio: { texto: string; contexto: string; madre: string }) => {
-    if (!usuario) return;
-    const l = S.guarda(usuario.login, s);
-    if (s.proyecto === proyecto?.id) setSesiones(l);
-    setSesion(s);
-    setEnvioPendiente({ sesion: s.id, ...envio });
-  }, [usuario, proyecto?.id]);
 
   // Resolver una issue desde Flujo: sesión nueva en la misma rama; su petición se envía sola al crearla.
   const resuelve = useCallback((p: { nombre: string; texto: string }) => {
@@ -309,7 +300,7 @@ export default function App() {
         onDuplicateSession={duplicateSession}
         alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
       <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
-        alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alSesionHija={abreHija} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
+        alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
     {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login}

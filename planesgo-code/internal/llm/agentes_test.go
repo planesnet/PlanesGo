@@ -519,3 +519,16 @@ esac`
 		t.Errorf("sin herramientas: %s", p)
 	}
 }
+
+// Con adjuntos y sin texto, el mensaje lleva un texto mínimo y la lista de ficheros.
+func TestWithAttachments(t *testing.T) {
+	if got := withAttachments("hola", nil); got != "hola" {
+		t.Errorf("sin adjuntos: %q", got)
+	}
+	if got := withAttachments("mira", []string{"/a/b.png"}); got != "mira\n\nFicheros adjuntos (léelos con tus herramientas):\n- /a/b.png" {
+		t.Errorf("con texto: %q", got)
+	}
+	if got := withAttachments("  ", []string{"/a/b.png"}); !strings.HasPrefix(got, "Te paso estos ficheros.\n\nFicheros adjuntos") {
+		t.Errorf("sin texto: %q", got)
+	}
+}

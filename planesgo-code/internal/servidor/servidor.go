@@ -612,6 +612,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// de la última llamada del turno anterior (ver llm.Peticion).
 		Compactar      int `json:"compactar"`
 		ContextoPrevio int `json:"contexto_previo"`
+		// Podar: poda automática del historial del agente al empezar el turno (ver llm.Peticion.Prune). Sin el
+		// campo, activada.
+		Podar *bool `json:"podar"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -746,7 +749,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
-		CompactAt: p.Compactar, LastContext: p.ContextoPrevio,
+		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar),
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
 		Corte: p.Corte, Traspaso: p.Traspaso}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
@@ -797,6 +800,14 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		envia(map[string]string{"error": err.Error()})
 	}
 	envia(map[string]bool{"fin": true})
+}
+
+// modoPoda: la poda de la sesión (activada salvo que la sesión la desactive).
+func modoPoda(podar *bool) string {
+	if podar != nil && !*podar {
+		return llm.PruneOff
+	}
+	return llm.PruneAuto
 }
 
 // abrir abre una URL en el navegador del sistema (el arnés corre en el equipo del usuario).

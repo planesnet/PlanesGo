@@ -1,6 +1,6 @@
 // Fotos de la conversación: las capturas que devuelven las herramientas (guardadas por pgocode como evidencias) y
-// las imágenes que el agente pone en sus respuestas (Markdown «![…](url)»). Para la tira del chat (de la más
-// reciente a la más antigua) y el visor. Funciones puras: node --test src/fotos.test.ts
+// las imágenes que el agente pone en sus respuestas (Markdown «![…](url)»). Para el visor del chat (de la más
+// reciente a la más antigua: con las flechas se pasa de una a otra). Funciones puras: node --test src/fotos.test.ts
 import type { Mensaje } from './api';
 
 export interface Foto { src: string; titulo?: string }

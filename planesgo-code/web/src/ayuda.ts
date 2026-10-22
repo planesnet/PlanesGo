@@ -16,6 +16,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Intro', que: intro },
       ...(o.inyecta ? [{ clave: 'Alt+Intro', que: 'Al turno en curso, aunque «Siempre al turno» esté desactivado' }] : []),
       { clave: 'Ctrl+Intro · Mayús+Intro', que: 'Nueva línea' },
+      { clave: '↑ ↓', que: 'Mensajes anteriores (en la primera o la última línea): los de la cola se editan en su sitio; los enviados se cargan para mandarlos otra vez. Esc o ↓ al final: vuelve lo que escribías' },
       { clave: 'Esc', que: 'Cerrar esta ayuda, menús y diálogos' },
       { clave: '← →', que: 'Capturas anterior y siguiente (en el visor)' },
     ] },

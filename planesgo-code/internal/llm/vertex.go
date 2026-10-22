@@ -20,8 +20,12 @@ const (
 )
 
 // proveedorDeepSeek: el proveedor de DeepSeek en Vertex AI para OpenCode, con el token de Google del usuario.
-// limite: el «contexto» que se le declara a OpenCode (ver openCodeContextLimit), sin pasar del real del modelo.
+// limite: el «contexto» que se le declara a OpenCode (ver openCodeContextLimit), sin pasar del real del modelo (0: el
+// real).
 func proveedorDeepSeek(limite int) (map[string]any, error) {
+	if limite <= 0 {
+		limite = 163840
+	}
 	t, err := google.Token()
 	if err != nil {
 		return nil, err
@@ -63,7 +67,8 @@ func entornoOpenCode(p Peticion) []string {
 //   - compactación automática con poda de salidas viejas de herramientas;
 //   - como mucho PasosOpenCode pasos por petición (luego responde sin más herramientas);
 //   - para el modelo de la sesión, un «contexto» a medida (limite, ver openCodeContextLimit): compacta al pasar
-//     del umbral de la sesión (si no, crecería hasta el millón y cada paso costaría cientos de miles de tokens).
+//     del umbral de la sesión (si no, crecería hasta el millón y cada paso costaría cientos de miles de tokens);
+//     sin él (limite 0, la gestión del contexto desactivada), el del catálogo de OpenCode.
 const PasosOpenCode = 40
 
 func configOpenCode(modelo string, limite int) map[string]any {
@@ -74,7 +79,7 @@ func configOpenCode(modelo string, limite int) map[string]any {
 	}
 	// Cualquier proveedor del catálogo de OpenCode (models.dev): el límite se mezcla con el suyo. El de DeepSeek en
 	// Vertex AI lo pone pgocode entero (proveedorDeepSeek). La salida no cambia: OpenCode pide como mucho 32k.
-	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov != proveedorDeepSeekVertex {
+	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov != proveedorDeepSeekVertex && limite > 0 {
 		cfg["provider"].(map[string]any)[prov] = map[string]any{"models": map[string]any{
 			id: map[string]any{"limit": map[string]int{"context": limite, "output": openCodeOutput}}}}
 	}
