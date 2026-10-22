@@ -12,7 +12,8 @@ import type { Tarea } from './tareas';
 
 // turno: a la conversación, pero ya, al turno en curso (solo agentes que lo admiten: Claude Code); automático solo
 // con la opción «Siempre al turno».
-export type Destino = 'conversacion' | 'turno' | 'estado' | 'suelta' | 'contexto';
+// hija: otro tema; a una sesión hija con lo mínimo (lo propone el clasificador, ver topics.ts; nunca se aprende).
+export type Destino = 'conversacion' | 'turno' | 'estado' | 'suelta' | 'contexto' | 'hija';
 export interface Decision {
   destino: Destino;
   texto: string;       // sin el prefijo
@@ -78,7 +79,7 @@ function decideBase(texto: string, s: Situacion): Decision {
   if (s.ordenPlan) return conv('orden de planes');
   if (s.adjuntos) return conv('lleva adjuntos');
   const aprendida = s.aprendidas?.[firma(t)];
-  if (aprendida) return { destino: aprendida === 'estado' && !s.ocupado ? 'conversacion' : aprendida, texto: t, motivo: 'como lo corregiste antes' };
+  if (aprendida && aprendida !== 'hija') return { destino: aprendida === 'estado' && !s.ocupado ? 'conversacion' : aprendida, texto: t, motivo: 'como lo corregiste antes' };
   // Con el agente libre no hay cola ni nada que interrumpir: a la conversación (sin gastar en clasificar).
   if (!s.ocupado) return conv('el agente está libre');
   if (ESTADO.test(t.replace(/^[¿¡]/, ''))) return { destino: 'estado', texto: t, motivo: 'pregunta por el estado del trabajo' };
@@ -92,7 +93,7 @@ function decideBase(texto: string, s: Situacion): Decision {
 // aprende: la corrección del usuario (llevar un mensaje a otro sitio) se recuerda para los parecidos.
 export function aprende(a: Aprendidas, texto: string, destino: Destino): Aprendidas {
   const f = firma(texto);
-  if (!f) return a;
+  if (!f || destino === 'hija') return a;
   const n = { ...a, [f]: destino };
   // Como mucho 200 (las últimas).
   const ks = Object.keys(n);
@@ -121,7 +122,7 @@ export function resumenEstado(m: Mensaje | undefined, o: { trabajando: boolean; 
   const vivas = (m.tareas || []).filter((t: Tarea) => t.tipo !== 'lista' && t.estado === 'curso');
   if (vivas.length) l.push(`\n**En marcha:** ${vivas.map(t => `${t.tipo === 'subagente' ? 'subagente' : 'segundo plano'} «${t.titulo || t.subtipo || t.id}»${t.progreso ? ` (${t.progreso})` : ''}`).join(' · ')}`);
   const hs = (m.partes || []).filter(p => p.tipo === 'herramienta').map(p => (p as { h: Herramienta }).h);
-  const editados = [...new Set(hs.filter(h => EDITA.test(h.nombre) && h.resumen).map(h => corto(h.resumen!)))];
+  const editados = changedFiles(m);
   if (editados.length) l.push(`\n**Ficheros cambiados (${editados.length}):** ${editados.slice(-8).map(f => '`' + f + '`').join(', ')}${editados.length > 8 ? '…' : ''}`);
   const ordenes = hs.filter(h => ORDENES.test(h.nombre) && h.resumen);
   if (ordenes.length) l.push(`\n**Última orden:** \`${recorta(ordenes[ordenes.length - 1].resumen!, 120)}\`${ordenes[ordenes.length - 1].estado === 'curso' ? ' (en curso)' : ''}`);
@@ -155,23 +156,31 @@ export const incorporacion = (l: { pregunta: string; respuesta: string }[]) => l
 // sumaUso: el consumo acumulado de las preguntas aparte de una sesión (se suma al gasto de la conversación).
 export const sumaUso = (a: Uso | undefined, b: Uso): Uso => ({ entrada: (a?.entrada || 0) + b.entrada, salida: (a?.salida || 0) + b.salida, coste: (a?.coste || 0) + (b.coste || 0) });
 
-export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', turno: 'Al turno en curso', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto' };
+export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', turno: 'Al turno en curso', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto', hija: 'Sesión hija' };
 
 // Etiqueta del destino mientras se escribe (antes de enviar).
 export function etiqueta(d: Decision, ocupado = false): string {
   if (d.destino === 'conversacion') return d.duda ? '→ Conversación o aparte: lo decide pgocode al enviar' : ocupado ? '→ Conversación (a la cola)' : '→ Conversación';
   if (d.destino === 'turno') return '→ Al turno en curso (el agente lo lee ya)';
+  if (d.destino === 'hija') return d.forzado ? '→ Nueva sesión hija (otro tema, con lo mínimo)' : '→ Parece otro tema: nueva sesión hija';
   return '→ ' + (d.destino === 'estado' ? 'Estado (sin tokens)' : 'Aparte · ' + NOMBRES[d.destino].toLowerCase());
 }
 
 // siguiente: el destino al pulsar la etiqueta (conversación → al turno en curso, si se puede → aparte con contexto
-// → suelta → estado → conversación).
-export const siguiente = (d: Destino, conTurno = false): Destino => {
+// → suelta → estado → conversación). Con la propuesta de otro tema, la sesión hija va justo antes de la conversación.
+export const siguiente = (d: Destino, conTurno = false, conHija = false): Destino => {
   const orden: Destino[] = conTurno ? ['conversacion', 'turno', 'contexto', 'suelta', 'estado'] : ['conversacion', 'contexto', 'suelta', 'estado'];
+  if (conHija) orden.push('hija');
   return orden[(orden.indexOf(d) + 1) % orden.length];
 };
 
-function ultimoTexto(m: Mensaje): string {
+// changedFiles: los ficheros que el agente cambió en un turno (sin repetir, por su ruta corta).
+export function changedFiles(m: Mensaje): string[] {
+  const hs = (m.partes || []).filter(p => p.tipo === 'herramienta').map(p => (p as { h: Herramienta }).h);
+  return [...new Set(hs.filter(h => EDITA.test(h.nombre) && h.resumen).map(h => corto(h.resumen!)))];
+}
+
+export function ultimoTexto(m: Mensaje): string {
   const ps = m.partes || [];
   for (let i = ps.length - 1; i >= 0; i--) {
     const p = ps[i];
@@ -186,4 +195,83 @@ function duracion(s: number) {
   if (s < 60) return Math.round(s) + ' s';
   const m = Math.floor(s / 60);
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+// ——— «Continuar desde aquí» (pruebas: src/corte.test.ts) ———
+// «Continuar desde aquí»: el agente sigue la conversación desde una respuesta anterior y olvida lo de después
+// (vueltas, pruebas fallidas, investigación que no llevó a nada). Así baja el contexto que se reenvía en cada paso.
+//   · Claude Code y OpenCode cortan su propia sesión en el mensaje (el «punto» que se guarda con cada respuesta).
+//   · Si el agente no puede (Antigravity), la respuesta es de antes de guardar puntos o el corte falla: una sesión
+//     nueva del agente cuyo primer mensaje lleva el traspaso que construye pgocode aquí (sin gastar tokens).
+
+// Unos 3k tokens (en español, unos 3,5 caracteres por token).
+export const MAX_HANDOFF = 10000;
+
+// canContinueFrom: si se puede seguir desde el mensaje i: una respuesta del agente acabada, que no es la última,
+// que sigue en el contexto del agente y que no es ya el punto elegido.
+export function canContinueFrom(ms: Mensaje[], i: number, pendiente?: number): boolean {
+  const m = ms[i];
+  if (!m || m.rol !== 'assistant' || m.error || m.nota || m.fuera || i === pendiente) return false;
+  // Tiene que quedar detrás algo que olvidar (en el contexto del agente).
+  return ms.slice(i + 1).some(x => !x.fuera && !x.nota);
+}
+
+// isOutside: si el mensaje i queda fuera del contexto del agente (ya cortado, o lo hará el corte pendiente).
+export const isOutside = (ms: Mensaje[], i: number, pendiente?: number) =>
+  Boolean(ms[i]?.fuera) || (pendiente !== undefined && i > pendiente);
+
+// markOutside: los mensajes posteriores al punto pasan a «fuera del contexto del agente» (se ven atenuados; no se borran).
+export const markOutside = (ms: Mensaje[], corte: number): Mensaje[] =>
+  ms.map((m, i) => (i > corte && !m.fuera ? { ...m, fuera: true } : m));
+
+export interface CutRequest {
+  sesion?: string; // la sesión del agente del punto (Claude la copia hasta él)
+  punto?: string;  // el mensaje del agente desde el que sigue
+  traspaso: string;
+}
+
+// cutRequest: lo que se manda al backend para aplicar el corte en el mensaje «corte».
+export function cutRequest(ms: Mensaje[], corte: number): CutRequest {
+  const m = ms[corte];
+  const traspaso = handoff(ms, corte);
+  return m?.punto ? { sesion: m.punto.sesion, punto: m.punto.id, traspaso } : { traspaso };
+}
+
+// handoff: la conversación hasta el mensaje «hasta» (incluido), para una sesión nueva del agente: lo pedido por el
+// usuario, lo respondido por el agente, los ficheros tocados y el estado. Como mucho «max» caracteres: siempre la
+// primera petición; del resto, lo más reciente que quepa.
+export function handoff(ms: Mensaje[], hasta: number, max = MAX_HANDOFF): string {
+  // Sin lo ya descartado, los errores ni las órdenes que resolvió pgocode sin el agente (con su nota).
+  const previos = ms.slice(0, hasta + 1).filter((m, i) => !m.fuera && !m.error && !m.nota && !(m.rol === 'user' && ms[i + 1]?.nota));
+  const cab = '[Traspaso de pgocode] Seguimos una conversación anterior desde un punto concreto; lo que hubo después se ha descartado. ' +
+    'Esto es lo que había hasta ese punto (tenlo en cuenta como contexto, no hace falta que lo respondas):';
+  const pie = '[Fin del traspaso. Nuevo mensaje del usuario:]';
+  const entradas = previos.map(m => {
+    if (m.rol === 'user') return 'Usuario: ' + recorta(m.texto || '', 1200);
+    const fs = changedFiles(m);
+    return 'Agente: ' + recorta(ultimoTexto(m) || m.texto || '', 1500) + (fs.length ? `\n(Ficheros cambiados: ${fs.slice(-10).join(', ')})` : '');
+  });
+  const ficheros = [...new Set(previos.filter(m => m.rol === 'assistant').flatMap(changedFiles))];
+  const ultima = [...previos].reverse().find(m => m.rol === 'assistant');
+  const lista = ultima?.tareas?.find(t => t.tipo === 'lista');
+  const estado: string[] = [];
+  if (ficheros.length) estado.push(`Ficheros tocados en la conversación (${ficheros.length}): ${ficheros.slice(-25).join(', ')}${ficheros.length > 25 ? '…' : ''}`);
+  if (lista?.elementos?.length) {
+    // Solo la lista de tareas del estado (lo demás ya va en las entradas).
+    const l = resumenEstado(ultima, { trabajando: false }).replace(/\*\*/g, '').split('\n').filter(x => /^Lista de tareas|^- /.test(x.trim()));
+    if (l.length) estado.push('Estado: ' + l.join(' '));
+  }
+  const fijo = [cab, pie, ...estado].join('\n\n').length + 4;
+  // La primera petición siempre; después, desde el final hacia atrás mientras quepa.
+  const elegidas: string[] = [];
+  let resto = max - fijo - (entradas[0]?.length || 0);
+  for (let i = entradas.length - 1; i >= 1; i--) {
+    if (entradas[i].length + 2 > resto) break;
+    elegidas.unshift(entradas[i]);
+    resto -= entradas[i].length + 2;
+  }
+  const omitidos = entradas.length - 1 - elegidas.length;
+  const cuerpo = [entradas[0], ...(omitidos > 0 ? [`(… ${omitidos} mensajes intermedios omitidos …)`] : []), ...elegidas].filter(Boolean);
+  const t = [cab, ...cuerpo, ...estado, pie].join('\n\n');
+  return t.length > max ? t.slice(0, max - pie.length - 3) + '…\n\n' + pie : t;
 }

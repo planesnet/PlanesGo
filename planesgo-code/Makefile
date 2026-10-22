@@ -42,7 +42,7 @@ web-verifica:
 e2e:
 	go run ./cmd/e2e
 
-# Banco de consumo de tokens (consumo/): las 5 pruebas con cada agente, sin pgocode (calibración) y con él.
+# Banco de consumo de tokens (consumo/): las pruebas con cada agente, sin pgocode (calibración) y con él.
 # Gasta tokens de verdad. Opciones: make consumo ARGS="-pruebas 1,2,3 -repeticiones 1"
 consumo:
 	go run ./cmd/consumo $(ARGS)

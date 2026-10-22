@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"planesgo-code/internal/depuracion"
 )
 
 const (
@@ -190,7 +192,14 @@ func imagenesDe(c json.RawMessage) []Imagen {
 
 // leeClaudeCode interpreta la salida stream-json de `claude -p`: texto, razonamiento, herramientas con su
 // entrada y su resultado, consumo del turno y el id de sesión para continuar con --resume.
-func leeClaudeCode(r io.Reader, emite func(Evento)) error {
+func leeClaudeCode(r io.Reader, emite func(Evento)) error { return readClaudeCode(r, emite, false) }
+
+// leeClaudeCodeNew: leeClaudeCode para una sesión que empieza (sin --resume): todo lo acumulado de la sesión es
+// de este proceso, también lo que no se ve en la salida (las llamadas de la compactación del historial).
+func leeClaudeCodeNew(r io.Reader, emite func(Evento)) error { return readClaudeCode(r, emite, true) }
+
+// readClaudeCode: newSession, si la sesión empieza en este proceso.
+func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	nombres := map[string]string{}
@@ -206,7 +215,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
 	// «modelUsage» y «total_cost_usd» llevan los subagentes pero son lo acumulado de TODA la sesión (también a través
 	// de --resume). El turno es el acumulado menos el de la vez anterior (guardado por sesión: acumuladoClaude); sin
-	// él, en una sesión retomada, se reconstruye con las llamadas vistas (consumoObservado). En vivo: lo de los
+	// él, en una sesión retomada, se reconstruye con las llamadas vistas (consumoObservado), que no llevan las de la
+	// compactación (no salen en la salida, pero sí en el acumulado: probado con 2.1.308). En vivo: lo de los
 	// result anteriores de este proceso más las llamadas de después (cada mensaje una vez: Claude repite el mensaje
 	// por cada bloque; su salida llega parcial y se completa con el result, cuyo vivo coincide así con la suma).
 	var hecho Uso   // lo emitido en los result de este proceso
@@ -223,12 +233,14 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		return &u
 	}
+	punto := "" // el último mensaje del agente principal (para continuar desde él: --resume-session-at)
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
 			Subtype   string `json:"subtype"`
 			SessionID string `json:"session_id"`
 			Padre     string `json:"parent_tool_use_id"`
+			UUID      string `json:"uuid"`
 			// Tareas (system/task_*): subagentes y órdenes en segundo plano.
 			TaskID       string `json:"task_id"`
 			TaskToolUse  string `json:"tool_use_id"`
@@ -244,6 +256,11 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			Patch        struct {
 				Status string `json:"status"`
 			} `json:"patch"`
+			// Compactación del historial (system/compact_boundary): tokens antes y después.
+			Compactado struct {
+				Pre  int `json:"pre_tokens"`
+				Post int `json:"post_tokens"`
+			} `json:"compact_metadata"`
 			Message struct {
 				ID      string `json:"id"`
 				Model   string `json:"model"`
@@ -301,6 +318,11 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				emite(Evento{Tarea: t})
 			}
 		}
+		if ev.Type == "system" && ev.Subtype == "compact_boundary" {
+			depuracion.Log("claude-code", "compacta su historial: %d → %d tokens", ev.Compactado.Pre, ev.Compactado.Post)
+			emite(Evento{Texto: compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post)})
+			continue
+		}
 		if ev.Type == "system" && ev.TaskID != "" {
 			switch {
 			case ev.Subtype == "task_started":
@@ -350,6 +372,9 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		switch ev.Type {
 		case "assistant":
+			if ev.UUID != "" {
+				punto = ev.UUID
+			}
 			if u := ev.Message.Usage; ev.Padre == "" && u.Input+u.CacheRead+u.CacheCreation > 0 {
 				contexto = u.Input + u.CacheRead + u.CacheCreation // la última llamada del agente principal
 			}
@@ -404,8 +429,8 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				turno = Uso{Entrada: max(total.Entrada-previo.Entrada, 0), Salida: max(total.Salida-previo.Salida, 0),
 					CacheLeida: max(total.CacheLeida-previo.CacheLeida, 0), CacheEscrita: max(total.CacheEscrita-previo.CacheEscrita, 0),
 					Coste: max(total.Coste-previo.Coste, 0)}
-			case total.Entrada <= observado.Entrada+observado.Entrada/100+100:
-				turno = total // sesión nueva: todo lo acumulado es de este turno
+			case newSession || total.Entrada <= observado.Entrada+observado.Entrada/100+100:
+				turno = total // sesión nueva: todo lo acumulado es de este turno (con la compactación, si la hay)
 			default:
 				turno = observado // sesión retomada sin acumulado guardado: lo visto en este proceso
 			}
@@ -424,7 +449,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			}
 			clear(llamadas)
 			emite(Evento{Uso: &Uso{Entrada: turno.Entrada, Salida: turno.Salida, CacheLeida: turno.CacheLeida, CacheEscrita: turno.CacheEscrita,
-				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo()})
+				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo(), Punto: punto})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -464,6 +489,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	}()
 	vistas := map[int]bool{}
 	llamadasAgy := map[int]bool{}           // pasos con consumo propio: cada uno, una llamada al modelo
+	contexto := 0                           // tokens de entrada de la última llamada
 	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
 	for sc.Scan() {
 		var ev struct {
@@ -473,7 +499,8 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				Indice int    `json:"step_index"`
 				Estado string `json:"state"`
 				Uso    struct {
-					Input int `json:"input_tokens"`
+					Input     int `json:"input_tokens"`
+					CacheRead int `json:"cache_read_tokens"`
 				} `json:"usage"`
 				Tipo  string `json:"step_type"`
 				Texto string `json:"text_delta"`
@@ -516,8 +543,13 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			p := ev.Paso
 			if p.Uso.Input > 0 {
 				llamadasAgy[p.Indice] = true
+				contexto = p.Uso.Input + p.Uso.CacheRead // el de la última llamada
 			}
 			switch {
+			// «checkpoint»: Antigravity ha resumido la conversación (/compact o su compactación automática).
+			case p.Tipo == "checkpoint" && p.Estado == "DONE":
+				depuracion.Log("antigravity", "compacta su historial (paso %d)", p.Indice)
+				emite(Evento{Texto: compactionNotice("Antigravity", 0, 0)})
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
 					emite(Evento{Texto: t})
@@ -556,7 +588,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			res := ev.Resultado
 			// El razonamiento se cobra como salida: va con ella. Llamadas: los pasos con consumo propio.
 			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output + res.Usage.Thinking,
-				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos}})
+				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos, Contexto: contexto}})
 			if res.Estado != "" && res.Estado != "SUCCESS" {
 				if res.Error != "" {
 					return errors.New(res.Error)
@@ -582,13 +614,38 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	sesion := ""
 	var errores []string
 	limite := false // OpenCode llegó a su límite de pasos (y Gemini rechazó su último mensaje)
+	// Compactación: OpenCode escribe el resumen como texto de un paso y después un mensaje sintético
+	// (compaction_continue). El texto y el consumo de cada paso se retienen hasta el paso siguiente (o el final)
+	// para no mostrar el resumen como respuesta; en su lugar, un aviso con el contexto antes y después.
+	var retenidos []Evento
+	suelta := func() {
+		for _, e := range retenidos {
+			emite(e)
+		}
+		retenidos = nil
+	}
+	ctxAnterior, ctxUltimo := 0, 0 // contexto de los dos últimos pasos (el último puede ser el del resumen)
+	compactadoDe := 0              // compactación pendiente de aviso: el contexto de antes
+	avisa := func(post int) {
+		if compactadoDe > 0 {
+			depuracion.Log("opencode", "compacta su historial: %d → %d tokens", compactadoDe, post)
+			emite(Evento{Texto: compactionNotice("OpenCode", compactadoDe, post)})
+			compactadoDe = 0
+		}
+	}
+	defer avisa(0)
+	defer suelta()
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
 			SessionID string `json:"sessionID"`
 			Part      struct {
-				ID     string `json:"id"`
-				Text   string `json:"text"`
+				ID        string `json:"id"`
+				MessageID string `json:"messageID"`
+				Text      string `json:"text"`
+				Meta      struct {
+					CompactionContinue bool `json:"compaction_continue"`
+				} `json:"metadata"`
 				Tool   string `json:"tool"`
 				CallID string `json:"callID"`
 				State  struct {
@@ -636,10 +693,23 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		}
 		switch ev.Type {
 		case "text":
-			if ev.Part.Text != "" {
-				emite(Evento{Texto: ev.Part.Text})
+			if ev.Part.Meta.CompactionContinue {
+				// El paso anterior era el resumen: fuera su texto; su consumo cuenta, pero no es el contexto.
+				for _, e := range retenidos {
+					if e.Uso != nil {
+						e.Uso.Contexto = 0
+						emite(e)
+					}
+				}
+				retenidos = nil
+				compactadoDe = max(ctxAnterior, 1)
+			} else if ev.Part.Text != "" {
+				retenidos = append(retenidos, Evento{Texto: ev.Part.Text})
 			}
+		case "step_start":
+			suelta()
 		case "tool_use":
+			suelta()
 			id := ev.Part.CallID
 			if id == "" {
 				id = ev.Part.ID
@@ -667,10 +737,13 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		case "step_finish":
 			// Cada paso, su consumo ya (el gasto se ve crecer durante el turno) y el tamaño del contexto enviado.
 			t := ev.Part.Tokens
-			emite(Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
+			ctxAnterior, ctxUltimo = ctxUltimo, t.Input+t.Cache.Read+t.Cache.Write
+			avisa(ctxUltimo)
+			retenidos = append(retenidos, Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
 				CacheLeida: t.Cache.Read, CacheEscrita: t.Cache.Write, Llamadas: 1,
-				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}})
+				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}, Punto: ev.Part.MessageID})
 		case "error":
+			suelta()
 			m := ev.Error.Data.Message
 			if m == "" {
 				m = ev.Error.Name
@@ -1043,9 +1116,12 @@ func (q *quitaBloque) Pasa(t string) string {
 // Lector: cómo interpretar la salida de un agente (su clave), para usarlo fuera de pgocode (cmd/consumo lanza
 // los agentes a pelo para calibrar). nil si no es un agente conocido. Antigravity da el consumo acumulado de su
 // conversación: quien lo use ha de restar el del turno anterior.
-func Lector(clave string) func(io.Reader, func(Evento)) error {
+func Lector(clave string, newSession bool) func(io.Reader, func(Evento)) error {
 	switch clave {
 	case "claude-code":
+		if newSession {
+			return leeClaudeCodeNew
+		}
 		return leeClaudeCode
 	case "antigravity":
 		return leeAntigravity

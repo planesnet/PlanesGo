@@ -231,7 +231,7 @@ func TestOpenCodePermiso(t *testing.T) {
 			t.Errorf("permisos sin %s: %s", x, e[0])
 		}
 	}
-	for _, x := range []string{`"compaction":{"auto":true,"prune":true}`, `"steps":40`, `"gemini-4-argon":{"limit":{"context":160000`} {
+	for _, x := range []string{`"compaction":{"auto":true,"prune":true}`, `"steps":40`, `"gemini-4-argon":{"limit":{"context":112000,"output":32000}`} {
 		if !strings.HasPrefix(e[2], "OPENCODE_CONFIG_CONTENT=") || !strings.Contains(e[2], x) {
 			t.Errorf("configuración sin %s: %s", x, e[2])
 		}

@@ -26,7 +26,7 @@ type LineaEsperada struct {
 	Clase       string  // h (hombre) | m (máquina)
 	Agente      string  // en las de máquina
 	Horas       float64 // unit_amount
-	Descripcion string  // si no está vacía, la descripción ha de contenerla
+	Descripcion string  // si no está vacía, la descripción ha de contener cada parte (separadas por « + », en cualquier orden)
 	Tokens      int     // si > 0 y Odoo tiene ai_tokens_total, han de coincidir
 }
 
@@ -330,8 +330,10 @@ func (s *Sim) compara(esperadas []LineaEsperada) []string {
 			if math.Abs(l.Horas-e.Horas) > 1e-4 {
 				f = append(f, fmt.Sprintf("%s: %.4f h, se esperaban %.4f h", l, l.Horas, e.Horas))
 			}
-			if e.Descripcion != "" && !strings.Contains(l.Nombre, e.Descripcion) {
-				f = append(f, fmt.Sprintf("%s: la descripción «%s» no contiene «%s»", l, l.Nombre, e.Descripcion))
+			for _, parte := range strings.Split(e.Descripcion, " + ") {
+				if parte != "" && !strings.Contains(l.Nombre, parte) {
+					f = append(f, fmt.Sprintf("%s: la descripción «%s» no contiene «%s»", l, l.Nombre, parte))
+				}
 			}
 			if e.Tokens > 0 && s.g.CamposIA(context.Background(), s.b.Sesion)["ai_tokens_total"] && l.Tokens != e.Tokens {
 				f = append(f, fmt.Sprintf("%s: %d tokens, se esperaban %d", l, l.Tokens, e.Tokens))
@@ -490,7 +492,7 @@ func Escenarios() []Escenario {
 				s.Revisa()
 			},
 			// A de 09:00 a 09:25 y B de 09:10 a 09:35: la persona estuvo 35 min (no 50) → 45 min.
-			Lineas: []LineaEsperada{{Clase: "h", Horas: 0.75, Descripcion: "«Sesión A», «Sesión B»"}}},
+			Lineas: []LineaEsperada{{Clase: "h", Horas: 0.75, Descripcion: "«Sesión A» + «Sesión B»"}}},
 
 		{Clave: "E07", Nombre: "Dos agentes distintos en la misma tarea",
 			Pasos: func(s *Sim) {
@@ -520,7 +522,7 @@ func Escenarios() []Escenario {
 				s.Revisa()
 			},
 			// El tiempo de máquina es el de cada instancia del agente: 10 + 10 min.
-			Lineas: []LineaEsperada{{Clase: "m", Agente: "Claude Code", Horas: min20, Descripcion: "«Sesión A», «Sesión B»"}}},
+			Lineas: []LineaEsperada{{Clase: "m", Agente: "Claude Code", Horas: min20, Descripcion: "«Sesión A» + «Sesión B»"}}},
 
 		{Clave: "E09", Nombre: "Varias sesiones seguidas el mismo día",
 			Pasos: func(s *Sim) {
@@ -534,7 +536,7 @@ func Escenarios() []Escenario {
 				}
 			},
 			// 3 × 6 min = 18 min → 20 min (bloques de 5): una sola línea con las tres sesiones.
-			Lineas: []LineaEsperada{{Clase: "m", Agente: "Claude Code", Horas: min20, Descripcion: "«Sesión A», «Sesión B», «Sesión C»"}}},
+			Lineas: []LineaEsperada{{Clase: "m", Agente: "Claude Code", Horas: min20, Descripcion: "«Sesión A» + «Sesión B» + «Sesión C»"}}},
 
 		{Clave: "E10", Nombre: "Cambio de tarea en la misma sesión",
 			Pasos: func(s *Sim) {

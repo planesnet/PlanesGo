@@ -575,6 +575,9 @@ func (s *Servidor) proveedores(w http.ResponseWriter, r *http.Request, ses *sesi
 	jsonOK(w, s.Proveedores.Lista(r.Context()))
 }
 
+// maxTraspaso: el tamaño máximo del traspaso de «Continuar desde aquí» (unos 3k tokens).
+const maxTraspaso = 16 << 10
+
 // chat responde en streaming (SSE): eventos {texto}, {sesion_agente}, {error} y {fin}.
 func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	s.activos.Add(1) // mientras haya un chat o un agente en curso no se actualiza
@@ -601,6 +604,14 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Aparte   string `json:"aparte"`
 		Contexto string `json:"contexto"`
 		Idioma   string `json:"idioma"` // del navegador (es-ES, en-GB…): el agente responde en él
+		// «Continuar desde aquí»: el mensaje del agente desde el que sigue (lo posterior lo olvida) y el traspaso
+		// de pgocode por si el agente no puede cortar su sesión (ver llm.Peticion).
+		Corte    string `json:"corte"`
+		Traspaso string `json:"traspaso"`
+		// Compactación del historial del agente: a partir de cuántos tokens (0: el valor por defecto) y el contexto
+		// de la última llamada del turno anterior (ver llm.Peticion).
+		Compactar      int `json:"compactar"`
+		ContextoPrevio int `json:"contexto_previo"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -613,6 +624,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if len(p.Mensajes) == 0 {
 		jsonError(w, http.StatusBadRequest, "no hay mensaje")
 		return
+	}
+	// El traspaso, acotado (unos 3k tokens; la interfaz ya lo recorta a eso).
+	if len(p.Traspaso) > maxTraspaso {
+		p.Traspaso = strings.ToValidUTF8(p.Traspaso[:maxTraspaso], "")
 	}
 	nombre, ok := s.proyecto(w, r, ses, p.Proyecto)
 	if !ok {
@@ -720,7 +735,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Aparte != "" {
 		s.aparte(turno, r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
-			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
+			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
 		return
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
@@ -731,7 +746,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
-		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno}, func(e llm.Evento) {
+		CompactAt: p.Compactar, LastContext: p.ContextoPrevio,
+		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
+		Corte: p.Corte, Traspaso: p.Traspaso}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}

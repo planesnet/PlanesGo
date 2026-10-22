@@ -6,11 +6,11 @@
 //
 // Sin ninguna dependencia del ERP: ni Odoo (tampoco el simulado), ni login, ni proyectos.
 //
-// Cada prueba trabaja en una copia propia de consumo/proyecto (un repositorio git nuevo) y se comprueba sola
+// Cada prueba trabaja en una copia propia de consumo/proyecto (o del que diga la prueba; un repositorio git nuevo) y se comprueba sola
 // (texto de la respuesta, una orden que ha de acabar bien, ficheros que no se pueden tocar…): gastar poco y
 // hacerlo mal no cuenta. Gasta tokens de verdad: no entra en «make test».
 //
-//	go run ./cmd/consumo                                  # todo: 3 agentes × 5 pruebas × 3 repeticiones × 2 modos
+//	go run ./cmd/consumo                                  # todo: 3 agentes × 6 pruebas × 3 repeticiones × 2 modos
 //	go run ./cmd/consumo -pruebas 1,2,3 -repeticiones 1   # ronda rápida
 //	go run ./cmd/consumo -modo pgocode                    # solo con pgocode, comparado con la última calibración
 //
@@ -21,6 +21,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,14 +46,15 @@ import (
 )
 
 var (
-	modoF    = flag.String("modo", "ambos", "ambos | directo (calibración, sin pgocode) | pgocode")
-	agentesF = flag.String("agentes", "claude-code,antigravity,opencode", "agentes, separados por comas")
-	pruebasF = flag.String("pruebas", "1,2,3,4,5", "pruebas (sus id), separadas por comas")
-	repsF    = flag.Int("repeticiones", 3, "repeticiones de cada prueba (se toma la mediana)")
-	salidaF  = flag.String("salida", "", "carpeta de resultados (vacío: consumo/resultados, en el repositorio)")
-	notaF    = flag.String("nota", "", "qué cambia en esta ronda (sale en el informe y en la evolución)")
-	conserva = flag.Bool("conservar", false, "no borra las copias de trabajo al acabar")
-	limiteF  = flag.Duration("limite", 20*time.Minute, "tiempo máximo de cada turno")
+	modoF       = flag.String("modo", "ambos", "ambos | directo (calibración, sin pgocode) | pgocode")
+	agentesF    = flag.String("agentes", "claude-code,antigravity,opencode", "agentes, separados por comas")
+	pruebasF    = flag.String("pruebas", "1,2,3,4,5,6,7", "pruebas (sus id), separadas por comas")
+	repsF       = flag.Int("repeticiones", 3, "repeticiones de cada prueba (se toma la mediana)")
+	salidaF     = flag.String("salida", "", "carpeta de resultados (vacío: consumo/resultados, en el repositorio)")
+	notaF       = flag.String("nota", "", "qué cambia en esta ronda (sale en el informe y en la evolución)")
+	conserva    = flag.Bool("conservar", false, "no borra las copias de trabajo al acabar")
+	limiteF     = flag.Duration("limite", 20*time.Minute, "tiempo máximo de cada turno")
+	estrategiaF = flag.String("estrategia", "ninguna", "cómo se lleva la conversación de un turno al siguiente: "+strategyNames())
 )
 
 // ---- definición de las pruebas ----
@@ -77,6 +79,8 @@ type Prueba struct {
 	Permisos string  `json:"permisos"`
 	Mide     string  `json:"mide"`
 	Turnos   []Turno `json:"turnos"`
+	// Proyecto: la carpeta de consumo/ que se copia para la prueba (por defecto, «proyecto»).
+	Proyecto string `json:"proyecto,omitempty"`
 }
 
 type ConfAgente struct {
@@ -101,6 +105,9 @@ type Medida struct {
 	Coste        float64 `json:"coste"`
 	Segundos     float64 `json:"segundos"`
 	Primera      float64 `json:"primera"` // segundos hasta lo primero que hace el agente (texto o herramienta)
+	// Contexto: los tokens de la última llamada al modelo (todo lo que se reenvía); en una ejecución, el del
+	// último turno.
+	Contexto int `json:"contexto,omitempty"`
 }
 
 func (m *Medida) suma(o Medida) {
@@ -115,6 +122,9 @@ func (m *Medida) suma(o Medida) {
 	if m.Primera == 0 {
 		m.Primera = o.Primera
 	}
+	if o.Contexto > 0 {
+		m.Contexto = o.Contexto
+	}
 }
 
 type Ejecucion struct {
@@ -128,6 +138,231 @@ type Ejecucion struct {
 	Carpeta string `json:"carpeta"`
 	Fecha   string `json:"fecha"`          // la de la ronda
 	Nota    string `json:"nota,omitempty"` // qué cambia en la ronda
+	// Estrategia: cómo se lleva la conversación de un turno al siguiente (vacía en las rondas antiguas: «ninguna»).
+	Estrategia string `json:"estrategia,omitempty"`
+	// Turnos: la medida de cada turno (con lo que gaste la estrategia antes de él), para ver crecer el contexto.
+	Turnos []turnMeasure `json:"turnos,omitempty"`
+}
+
+// turnMeasure: lo que gasta un turno y si cumple su comprobación.
+type turnMeasure struct {
+	Medida
+	Acierto bool `json:"acierto"`
+	// Nota: lo que ha hecho la estrategia en el turno (relevo, compactación…).
+	Nota string `json:"nota,omitempty"`
+}
+
+// ---- estrategias ----
+
+// strategy: cómo pasa la conversación de un turno al siguiente. «ninguna» es lo que hacen los agentes (y
+// pgocode) hoy: reanudar la sesión del agente, que reenvía todo el historial. Las otras (relevo, compactación,
+// recorte…) se añaden en strategies.
+type strategy interface {
+	// before: antes de cada turno. Puede cambiar c.Session y c.Message (p. ej. empezar una sesión nueva con un
+	// resumen de c.History), pedir la compactación al agente (c.CompactAt, c.LastContext) y lanzar turnos
+	// propios con c.Run, cuyo consumo se suma al del turno. c.Note dice qué ha hecho (sale en el informe).
+	before(ctx context.Context, c *conversation) error
+}
+
+// conversation: el estado de una ejecución que ve la estrategia.
+type conversation struct {
+	Agent, Mode string
+	Turn        int    // el turno que va a empezar, desde 0
+	Session     string // la sesión del agente que se reanudará («»: una nueva)
+	Message     string // lo que se enviará
+	History     []exchange
+	// CompactAt y LastContext: los de llm.Peticion en el modo pgocode (ver internal/llm/compaction.go).
+	CompactAt, LastContext int
+	Note                   string // lo que ha hecho la estrategia en este turno
+	// Run: un turno con el agente, fuera de las pruebas (su consumo cuenta en el turno que empieza).
+	Run   func(ctx context.Context, msg, session string) resultadoTurno
+	extra Medida
+}
+
+// exchange: un turno ya hecho (Message: el de la prueba, sin lo que le haya añadido la estrategia).
+type exchange struct {
+	Message, Reply string
+	Usage          Medida
+	Parts          []uiPart    // lo que ha hecho el agente, como lo guarda la interfaz
+	Tasks          []llm.Tarea // sus tareas (la lista de tareas, subagentes…)
+}
+
+// noStrategy («ninguna»): reanudar la sesión y reenviarlo todo, sin compactar. pgocode compacta por defecto a partir
+// de llm.CompactAtDefault (80k): aquí el umbral va al máximo (llm.CompactAtMax, 1M), que en la práctica no se
+// alcanza; si no, «ninguna» sería «compactar:80» en cuanto la conversación pasara de 80k.
+type noStrategy struct{}
+
+func (noStrategy) before(_ context.Context, c *conversation) error {
+	c.CompactAt = llm.CompactAtMax
+	return nil
+}
+
+// compactStrategy («compactar[:N]»): la compactación gobernada por pgocode, como en la app: cada turno lleva el
+// umbral (CompactAt) y el contexto de la última llamada del turno anterior (LastContext). Por defecto, 20k (el
+// mínimo de pgocode), para que salte en una prueba corta.
+type compactStrategy struct{ threshold int }
+
+func (s compactStrategy) before(_ context.Context, c *conversation) error {
+	c.CompactAt = s.threshold
+	if n := len(c.History); n > 0 {
+		c.LastContext = c.History[n-1].Usage.Contexto
+	}
+	return nil
+}
+
+// relayStrategy («relevo[:N]»): el relevo con memoria de trabajo de la interfaz. Si el contexto de la última
+// llamada del turno anterior pasa de N (por defecto 20k), el turno va a una sesión nueva del agente con la memoria
+// de trabajo delante del mensaje. La memoria y la decisión son las de web/src/workingMemory.ts (relay.mts, con
+// node), sobre los mensajes del banco en el formato de la interfaz.
+type relayStrategy struct {
+	threshold int
+	script    string // relay.mts
+}
+
+// relayResult: lo que devuelve relay.mts.
+type relayResult struct {
+	Reason      string `json:"reason"`
+	Message     string `json:"message"`
+	MemoryChars int    `json:"memory_chars"`
+}
+
+func (s relayStrategy) before(ctx context.Context, c *conversation) error {
+	c.CompactAt = llm.CompactAtMax // solo el relevo: sin la compactación de pgocode (ver noStrategy)
+	n := len(c.History)
+	if n == 0 || c.Session == "" {
+		return nil
+	}
+	in, err := json.Marshal(map[string]any{"agent": c.Agent, "threshold": s.threshold, "context": c.History[n-1].Usage.Contexto,
+		"messages": uiMessages(c.History), "message": c.Message})
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "node", "--experimental-strip-types", "--no-warnings", s.script)
+	cmd.Stdin = bytes.NewReader(in)
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("relay.mts: %v: %s", err, recorta(errOut.String(), 400))
+	}
+	var r relayResult
+	if err := json.Unmarshal(out, &r); err != nil {
+		return fmt.Errorf("relay.mts: %v", err)
+	}
+	if r.Reason != "" {
+		c.Session, c.Message = "", r.Message
+		c.Note = fmt.Sprintf("relevo (memoria %s)", miles((r.MemoryChars+3)/4))
+	}
+	return nil
+}
+
+// uiPart y uiMessage: Parte y Mensaje de web/src/api.ts (lo que usa la memoria de trabajo).
+type uiPart struct {
+	Tipo  string           `json:"tipo"` // texto | pensamiento | herramienta
+	Texto string           `json:"texto,omitempty"`
+	H     *llm.Herramienta `json:"h,omitempty"`
+}
+
+type uiMessage struct {
+	Rol    string      `json:"rol"`
+	Texto  string      `json:"texto"`
+	Partes []uiPart    `json:"partes,omitempty"`
+	Tareas []llm.Tarea `json:"tareas,omitempty"`
+}
+
+// uiMessages: la conversación como la tiene la interfaz: cada petición y la respuesta del agente con sus partes.
+func uiMessages(h []exchange) []uiMessage {
+	var l []uiMessage
+	for _, x := range h {
+		l = append(l, uiMessage{Rol: "user", Texto: x.Message},
+			uiMessage{Rol: "assistant", Texto: x.Reply, Partes: x.Parts, Tareas: x.Tasks})
+	}
+	return l
+}
+
+// addPart: como «parte» en Chat.tsx: el texto seguido se junta; la herramienta se actualiza por su id.
+func addPart(ps []uiPart, p uiPart) []uiPart {
+	if p.Tipo != "herramienta" {
+		if n := len(ps); n > 0 && ps[n-1].Tipo == p.Tipo {
+			ps[n-1].Texto += p.Texto
+			return ps
+		}
+		return append(ps, p)
+	}
+	for i := range ps {
+		if v := ps[i].H; v != nil && v.ID == p.H.ID {
+			h := *p.H
+			h.Nombre, h.Resumen, h.Entrada = cmp.Or(h.Nombre, v.Nombre), cmp.Or(v.Resumen, h.Resumen), cmp.Or(v.Entrada, h.Entrada)
+			ps[i].H = &h
+			return ps
+		}
+	}
+	h := *p.H
+	return append(ps, uiPart{Tipo: "herramienta", H: &h})
+}
+
+// mergeTask: como T.fusiona en tareas.ts: una actualización de una tarea (por id); lo vacío conserva lo anterior.
+func mergeTask(l []llm.Tarea, t llm.Tarea) []llm.Tarea {
+	i := slices.IndexFunc(l, func(x llm.Tarea) bool { return x.ID == t.ID })
+	if i < 0 {
+		return append(l, t)
+	}
+	var a, b map[string]any
+	ba, _ := json.Marshal(l[i])
+	bb, _ := json.Marshal(t)
+	json.Unmarshal(ba, &a)
+	json.Unmarshal(bb, &b)
+	for k, v := range b {
+		a[k] = v
+	}
+	bm, _ := json.Marshal(a)
+	var n llm.Tarea
+	json.Unmarshal(bm, &n)
+	l[i] = n
+	return l
+}
+
+// compactionNote: el aviso de pgocode de que el agente ha compactado su historial (ver compactionNotice).
+var compactionNote = regexp.MustCompile(`ha compactado su historial(?:: (?:de \S+ a \S+|tenía \S+) tokens)?`)
+
+// moduleDir: la carpeta del módulo planesgo-code (la pone main).
+var moduleDir = "."
+
+var strategies = map[string]func(n int) strategy{
+	"ninguna":   func(int) strategy { return noStrategy{} },
+	"compactar": func(n int) strategy { return compactStrategy{threshold: cmp.Or(n, 20) * 1000} },
+	"relevo": func(n int) strategy {
+		return relayStrategy{threshold: cmp.Or(n, 20) * 1000, script: filepath.Join(moduleDir, "cmd", "consumo", "relay.mts")}
+	},
+}
+
+// pgocodeOnly: las estrategias que usan lo que hace pgocode (no tienen sentido sin él).
+var pgocodeOnly = map[string]bool{"compactar": true, "relevo": true}
+
+// parseStrategy: «nombre[:N]» (N en miles de tokens).
+func parseStrategy(s string) (name string, n int, err error) {
+	name, arg, hay := strings.Cut(strings.TrimSpace(s), ":")
+	if _, ok := strategies[name]; !ok {
+		return "", 0, fmt.Errorf("estrategia desconocida: %s (hay: %s)", name, strategyNames())
+	}
+	if hay {
+		if n, err = strconv.Atoi(arg); err != nil || n <= 0 || name == "ninguna" {
+			return "", 0, fmt.Errorf("estrategia %q: N ha de ser un número positivo (miles de tokens)", s)
+		}
+	}
+	return name, n, nil
+}
+
+func strategyNames() string {
+	var l []string
+	for k := range strategies {
+		if k != "ninguna" {
+			k += "[:N]"
+		}
+		l = append(l, k)
+	}
+	sort.Strings(l)
+	return strings.Join(l, " | ")
 }
 
 // resultadoTurno: lo que deja un turno (en cualquiera de los dos modos).
@@ -136,10 +371,13 @@ type resultadoTurno struct {
 	texto  string
 	sesion string
 	err    error
+	bruto  llm.Uso // lo que da el agente, sin restar el acumulado anterior
+	parts  []uiPart
+	tasks  []llm.Tarea
 }
 
-// recoge: junta los eventos de un turno. Antigravity da el consumo acumulado de su conversación: se resta el
-// del turno anterior (previo).
+// recoge: junta los eventos de un turno. Si el agente da el consumo acumulado de su conversación (ver
+// cumulativeUsage), se resta el del turno anterior (previo); si baja (otra conversación), se toma entero.
 type recoge struct {
 	r       resultadoTurno
 	inicio  time.Time
@@ -153,8 +391,20 @@ func (c *recoge) evento(e llm.Evento) {
 		c.r.Primera = time.Since(c.inicio).Seconds()
 	}
 	c.r.texto += e.Texto
-	if h := e.Herramienta; h != nil && h.Estado == "curso" && h.Entrada != "" {
-		c.r.Herramientas++
+	if e.Texto != "" {
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "texto", Texto: e.Texto})
+	}
+	if e.Pensamiento != "" {
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "pensamiento", Texto: e.Pensamiento})
+	}
+	if h := e.Herramienta; h != nil {
+		if h.Estado == "curso" && h.Entrada != "" {
+			c.r.Herramientas++
+		}
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "herramienta", H: h})
+	}
+	if e.Tarea != nil {
+		c.r.tasks = mergeTask(c.r.tasks, *e.Tarea)
 	}
 	if e.SesionAgente != "" {
 		c.r.sesion = e.SesionAgente
@@ -166,18 +416,25 @@ func (c *recoge) evento(e llm.Evento) {
 		c.acumula.CacheEscrita += u.CacheEscrita
 		c.acumula.Llamadas += u.Llamadas
 		c.acumula.Coste += u.Coste
+		if u.Contexto > 0 {
+			c.acumula.Contexto = u.Contexto
+		}
 	}
 }
 
 func (c *recoge) fin() resultadoTurno {
 	u := c.acumula
-	if c.agente == "antigravity" && c.previo != nil {
-		u.Entrada -= c.previo.Entrada
-		u.Salida -= c.previo.Salida
-		u.CacheLeida -= c.previo.CacheLeida
+	c.r.bruto = u
+	if p := c.previo; p != nil && u.Entrada >= p.Entrada {
+		u.Entrada -= p.Entrada
+		u.Salida -= p.Salida
+		u.CacheLeida -= p.CacheLeida
+		u.CacheEscrita -= p.CacheEscrita
+		u.Coste -= p.Coste
 	}
-	c.r.Entrada, c.r.Salida, c.r.CacheLeida, c.r.CacheEscrita = max(u.Entrada, 0), max(u.Salida, 0), max(u.CacheLeida, 0), u.CacheEscrita
-	c.r.Llamadas, c.r.Coste = u.Llamadas, u.Coste
+	c.r.Entrada, c.r.Salida, c.r.CacheLeida, c.r.CacheEscrita = max(u.Entrada, 0), max(u.Salida, 0), max(u.CacheLeida, 0), max(u.CacheEscrita, 0)
+	u.Coste = max(u.Coste, 0)
+	c.r.Llamadas, c.r.Coste, c.r.Contexto = u.Llamadas, u.Coste, u.Contexto
 	c.r.Segundos = time.Since(c.inicio).Seconds()
 	return c.r
 }
@@ -290,7 +547,7 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 		c.r.err = err
 		return c.fin()
 	}
-	errLee := llm.Lector(agente)(out, c.evento)
+	errLee := llm.Lector(agente, sesion == "")(out, c.evento)
 	io.Copy(io.Discard, out)
 	errCmd := cmd.Wait()
 	r := c.fin()
@@ -308,11 +565,12 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 
 // conPgocode: un turno con el proveedor de pgocode (internal/llm), con la petición que arma su servidor para la
 // interfaz: idioma del navegador y mensajes a mitad de turno (Claude Code: la entrada por stdin).
-func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string) resultadoTurno {
-	c := &recoge{inicio: time.Now(), agente: agente}
+func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string, previo *llm.Uso, compactAt, lastContext int) resultadoTurno {
+	c := &recoge{inicio: time.Now(), previo: previo, agente: agente}
 	var mu sync.Mutex
 	err := prov.Chat(ctx, llm.Peticion{Modelo: conf.Modelo, Esfuerzo: conf.Esfuerzo, Carpeta: carpeta, Permisos: permisos,
 		SesionAgente: sesion, Mensajes: []llm.Mensaje{{Rol: "user", Texto: msg}}, Idioma: llm.NombreIdioma("es-ES"),
+		CompactAt: compactAt, LastContext: lastContext,
 		AlInyectar: func(func(string) error) {}, Traza: "banco de consumo"}, func(e llm.Evento) {
 		mu.Lock()
 		c.evento(e)
@@ -323,6 +581,15 @@ func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf Con
 		r.err = err
 	}
 	return r
+}
+
+// cumulativeUsage: si el consumo que da el agente al reanudar una sesión es el acumulado de toda la conversación
+// y no el del turno. Antigravity sin pgocode (pgocode ya lo resta). Claude Code no: su «result» (modelUsage y
+// total_cost_usd) suma la sesión entera tras --resume, pero el lector de internal/llm, que se usa en los dos
+// modos, ya resta el acumulado anterior de la sesión (acumuladoClaude); restarlo aquí otra vez lo descontaba dos
+// veces (las rondas del 22-10-2026 de 22:10 a 22:38).
+func cumulativeUsage(agente, modo string) bool {
+	return agente == "antigravity" && modo == "directo"
 }
 
 // limite: un error del agente que dice que no puede seguir (límite de gasto, de uso o sin crédito): no vale la
@@ -358,39 +625,66 @@ func comprueba(t Turno, texto, carpeta string) string {
 
 // ---- ejecución ----
 
-func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueba, rep int, carpeta, datosOC string, prov llm.Proveedor) Ejecucion {
+func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueba, rep int, carpeta, datosOC string, prov llm.Proveedor, est strategy) Ejecucion {
 	e := Ejecucion{Modo: modo, Agente: agente, Prueba: pr.ID, Rep: rep, Carpeta: carpeta, Acierto: true}
-	sesion := ""
+	// El acumulado de la conversación que da el agente, para restarlo en el turno siguiente de la misma sesión
+	// (una estrategia que empieza otra sesión empieza de cero).
 	var previo *llm.Uso
-	for i, t := range pr.Turnos {
-		cx, cancela := context.WithTimeout(ctx, *limiteF)
+	previoSesion := ""
+	acumula := cumulativeUsage(agente, modo)
+	c := &conversation{Agent: agente, Mode: modo}
+	run := func(cx context.Context, msg, sesion string) resultadoTurno {
+		if !acumula || sesion == "" || sesion != previoSesion {
+			previo = nil
+		}
 		var r resultadoTurno
 		if modo == "directo" {
-			r = directo(cx, agente, conf, carpeta, pr.Permisos, t.Mensaje, sesion, previo, datosOC)
+			r = directo(cx, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, datosOC)
 		} else {
-			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, t.Mensaje, sesion)
+			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, c.CompactAt, c.LastContext)
+		}
+		if acumula {
+			b := r.bruto
+			previo, previoSesion = &b, cmp.Or(r.sesion, sesion)
+		}
+		return r
+	}
+	c.Run = func(cx context.Context, msg, sesion string) resultadoTurno {
+		r := run(cx, msg, sesion)
+		c.extra.suma(r.Medida)
+		return r
+	}
+	for i, t := range pr.Turnos {
+		cx, cancela := context.WithTimeout(ctx, *limiteF)
+		c.Turn, c.Message, c.extra, c.Note = i, t.Mensaje, Medida{}, ""
+		var r resultadoTurno
+		if err := est.before(cx, c); err != nil {
+			r.err = fmt.Errorf("estrategia: %w", err)
+		} else {
+			r = run(cx, c.Message, c.Session)
 		}
 		cancela()
-		e.Medida.suma(r.Medida)
-		if agente == "antigravity" && modo == "directo" {
-			// El acumulado de la conversación, para restarlo en el turno siguiente (pgocode ya lo resta).
-			a := llm.Uso{Entrada: r.Entrada, Salida: r.Salida, CacheLeida: r.CacheLeida}
-			if previo != nil {
-				a.Entrada += previo.Entrada
-				a.Salida += previo.Salida
-				a.CacheLeida += previo.CacheLeida
-			}
-			previo = &a
-		}
+		m := c.extra
+		m.suma(r.Medida)
+		m.Contexto = r.Contexto // el de la llamada del turno, no el de la estrategia
+		e.Medida.suma(m)
 		if r.sesion != "" {
-			sesion = r.sesion
+			c.Session = r.sesion
 		}
+		c.History = append(c.History, exchange{Message: t.Mensaje, Reply: r.texto, Usage: m, Parts: r.parts, Tasks: r.tasks})
+		nota := c.Note
+		if x := compactionNote.FindString(r.texto); x != "" {
+			nota = strings.TrimPrefix(strings.TrimSpace(nota+"; "+strings.Replace(x, "ha compactado su historial", "compacta", 1)), "; ")
+		}
+		f := ""
 		if r.err != nil {
-			e.Acierto, e.Fallo = false, fmt.Sprintf("turno %d: %v", i+1, r.err)
-			break
+			f = fmt.Sprintf("turno %d: %v", i+1, r.err)
+		} else if x := comprueba(t, r.texto, carpeta); x != "" {
+			f = fmt.Sprintf("turno %d: %s", i+1, x)
 		}
-		if f := comprueba(t, r.texto, carpeta); f != "" {
-			e.Acierto, e.Fallo = false, fmt.Sprintf("turno %d: %s", i+1, f)
+		e.Turnos = append(e.Turnos, turnMeasure{Medida: m, Acierto: f == "", Nota: nota})
+		if f != "" {
+			e.Acierto, e.Fallo = false, f
 			break
 		}
 	}
@@ -433,6 +727,20 @@ func main() {
 		}
 		pruebas = append(pruebas, banco.Pruebas[i])
 	}
+	moduleDir = modulo
+	nombreEst, nEst, err := parseStrategy(*estrategiaF)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if pgocodeOnly[nombreEst] && slices.Contains(modos, "directo") {
+		log.Fatalf("la estrategia %s solo tiene sentido con pgocode: usa -modo pgocode", nombreEst)
+	}
+	if nombreEst == "relevo" {
+		if _, err := exec.LookPath("node"); err != nil {
+			log.Fatal("la estrategia relevo necesita node (para web/src/workingMemory.ts)")
+		}
+	}
+	nuevaEstrategia := func() strategy { return strategies[nombreEst](nEst) }
 	casa, _ := os.UserHomeDir()
 	salida := *salidaF
 	if salida == "" {
@@ -451,7 +759,7 @@ func main() {
 		for _, a := range agentes {
 			for _, p := range pruebas {
 				for r := 1; r <= *repsF; r++ {
-					if err := copia(filepath.Join(dirBanco, "proyecto"), carpeta(m, a, p.ID, r)); err != nil {
+					if err := copia(filepath.Join(dirBanco, cmp.Or(p.Proyecto, "proyecto")), carpeta(m, a, p.ID, r)); err != nil {
 						log.Fatal(err)
 					}
 				}
@@ -503,8 +811,8 @@ func main() {
 						if fuera {
 							return
 						}
-						e := ejecuta(ctx, m, a, banco.Agentes[a], p, r, carpeta(m, a, p.ID, r), datosOC, provs[a])
-						e.Fecha, e.Nota, e.Carpeta = marca, *notaF, filepath.Base(e.Carpeta)
+						e := ejecuta(ctx, m, a, banco.Agentes[a], p, r, carpeta(m, a, p.ID, r), datosOC, provs[a], nuevaEstrategia())
+						e.Fecha, e.Nota, e.Carpeta, e.Estrategia = marca, *notaF, filepath.Base(e.Carpeta), *estrategiaF
 						estado := "✓"
 						if !e.Acierto {
 							estado = "✗ " + e.Fallo
@@ -529,7 +837,7 @@ func main() {
 		}()
 	}
 	wg.Wait()
-	informe := informe(banco, agentes, pruebas, modos, todas, dirBanco, *repsF)
+	informe := informe(banco, agentes, pruebas, modos, todas, dirBanco, *repsF, *estrategiaF)
 	if len(parado) > 0 {
 		var l []string
 		for a := range parado {
@@ -591,6 +899,7 @@ func resume(l []Ejecucion) resumen {
 	r.Coste = med(func(e Ejecucion) float64 { return e.Coste })
 	r.Segundos = med(func(e Ejecucion) float64 { return e.Segundos })
 	r.Primera = med(func(e Ejecucion) float64 { return e.Primera })
+	r.Contexto = int(med(func(e Ejecucion) float64 { return float64(e.Contexto) }))
 	for _, e := range l {
 		if e.Acierto {
 			r.Aciertos++
@@ -642,10 +951,10 @@ func guardaCalibracion(dir string, banco Banco, agentes []string, todas []Ejecuc
 	}
 }
 
-func informe(banco Banco, agentes []string, pruebas []Prueba, modos []string, todas []Ejecucion, dirBanco string, reps int) string {
+func informe(banco Banco, agentes []string, pruebas []Prueba, modos []string, todas []Ejecucion, dirBanco string, reps int, estrategia string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Banco de consumo · %s\n\n", time.Now().Format("2006-01-02 15:04"))
-	fmt.Fprintf(&b, "Medianas de %d repeticiones. «Entrada» incluye la caché (leída y escrita). Tokens en miles (k).\n\n", reps)
+	fmt.Fprintf(&b, "Medianas de %d repeticiones. «Entrada» incluye la caché (leída y escrita). Tokens en miles (k). Estrategia: `%s`.\n\n", reps, estrategia)
 	for _, a := range agentes {
 		c := banco.Agentes[a]
 		fmt.Fprintf(&b, "- **%s**: modelo `%s`%s\n", a, c.Modelo, map[bool]string{true: ", esfuerzo `" + c.Esfuerzo + "`", false: ""}[c.Esfuerzo != ""])
@@ -699,6 +1008,11 @@ func informe(banco Banco, agentes []string, pruebas []Prueba, modos []string, to
 				}
 			}
 		}
+		if len(p.Turnos) > 1 {
+			for _, a := range agentes {
+				b.WriteString(turnEvolution(p, a, modos, todas))
+			}
+		}
 	}
 	// Fallos, para mirar qué pasó.
 	var fallos []string
@@ -712,6 +1026,71 @@ func informe(banco Banco, agentes []string, pruebas []Prueba, modos []string, to
 		b.WriteString("\n## Fallos\n\n" + strings.Join(fallos, "\n") + "\n")
 	}
 	return b.String()
+}
+
+// turnEvolution: en una prueba de varios turnos, la mediana de cada turno por modo: el contexto (lo que se
+// reenvía en cada llamada), la entrada (con la caché) y el coste, para ver cómo crece la conversación.
+func turnEvolution(p Prueba, agente string, modos []string, todas []Ejecucion) string {
+	porModo := map[string][]Ejecucion{}
+	var conDatos []string
+	for _, m := range modos {
+		for _, e := range filtra(todas, m, agente, p.ID) {
+			if len(e.Turnos) > 0 {
+				porModo[m] = append(porModo[m], e)
+			}
+		}
+		if len(porModo[m]) > 0 {
+			conDatos = append(conDatos, m)
+		}
+	}
+	if len(conDatos) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n**%s, turno a turno** (medianas; «Contexto»: tokens de la última llamada del turno, lo que se reenvía)\n\n| Turno | Mensaje |", agente)
+	sep := "|--:|---|"
+	for _, m := range conDatos {
+		n := nombreModo(m)
+		fmt.Fprintf(&b, " Contexto %s | Entrada %s | Coste %s | Bien %s |", n, n, n, n)
+		sep += "--:|--:|--:|--:|"
+	}
+	b.WriteString("\n" + sep + "\n")
+	for i, t := range p.Turnos {
+		// Lo que ha hecho la estrategia en el turno (relevo, compactación), en alguna de las ejecuciones.
+		var notas []string
+		for _, m := range conDatos {
+			for _, e := range porModo[m] {
+				if i < len(e.Turnos) && e.Turnos[i].Nota != "" && !slices.Contains(notas, e.Turnos[i].Nota) {
+					notas = append(notas, e.Turnos[i].Nota)
+				}
+			}
+		}
+		celda := recorta(t.Mensaje, 50)
+		if len(notas) > 0 {
+			celda += " **[" + strings.Join(notas, "; ") + "]**"
+		}
+		fmt.Fprintf(&b, "| %d | %s |", i+1, strings.ReplaceAll(celda, "|", "/"))
+		for _, m := range conDatos {
+			var l []Ejecucion
+			for _, e := range porModo[m] {
+				if i < len(e.Turnos) {
+					l = append(l, Ejecucion{Medida: e.Turnos[i].Medida, Acierto: e.Turnos[i].Acierto})
+				}
+			}
+			if len(l) == 0 {
+				b.WriteString(" — | — | — | — |")
+				continue
+			}
+			r := resume(l)
+			fmt.Fprintf(&b, " %s | %s | %.3f $ | %d/%d |", miles(r.Contexto), miles(r.Entrada), r.Coste, r.Aciertos, len(porModo[m]))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func nombreModo(m string) string {
+	return map[string]string{"directo": "sin pgocode", "pgocode": "pgocode"}[m]
 }
 
 func porcentaje(a, b int) string { return porcentajeF(float64(a), float64(b)) }
@@ -746,8 +1125,8 @@ func evolucion(dir string, banco Banco) error {
 	}
 	sort.Strings(fs)
 	type clave struct {
-		fecha, agente, modo string
-		prueba              int
+		fecha, agente, modo, estrategia string
+		prueba                          int
 	}
 	grupos := map[clave][]Ejecucion{}
 	notas := map[string]string{}
@@ -766,7 +1145,7 @@ func evolucion(dir string, banco Banco) error {
 			if e.Nota != "" {
 				notas[fecha] = e.Nota
 			}
-			k := clave{fecha, e.Agente, e.Modo, e.Prueba}
+			k := clave{fecha, e.Agente, e.Modo, e.Estrategia, e.Prueba}
 			if _, ok := grupos[k]; !ok {
 				claves = append(claves, k)
 			}
@@ -783,6 +1162,9 @@ func evolucion(dir string, banco Banco) error {
 		}
 		if a.modo != b.modo {
 			return a.modo < b.modo
+		}
+		if a.estrategia != b.estrategia {
+			return a.estrategia < b.estrategia
 		}
 		return a.fecha < b.fecha
 	})
@@ -814,7 +1196,10 @@ func evolucion(dir string, banco Banco) error {
 		if r.Coste > 0 {
 			coste = fmt.Sprintf("%.3f $", r.Coste)
 		}
-		modo := map[string]string{"directo": "sin pgocode", "pgocode": "pgocode"}[k.modo]
+		modo := nombreModo(k.modo)
+		if k.estrategia != "" && k.estrategia != "ninguna" {
+			modo += " · " + k.estrategia
+		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %d | %s | %.0f s | %d/%d |\n", k.agente, modo, k.fecha,
 			miles(r.Entrada+r.Salida), miles(r.Entrada), miles(r.Salida), r.Llamadas, coste, r.Segundos, r.Aciertos, r.Total)
 	}
