@@ -707,6 +707,13 @@ type PruneReport struct {
 	Restored  int             `json:"repuestos,omitempty"` // piezas que vuelven («fallo de página»)
 	Exchanges []PruneExchange `json:"intercambios"`        // todos los intercambios (por su punto)
 	Pieces    []PrunePiece    `json:"piezas"`              // las herramientas de los intercambios
+	// Podable: el historial del agente se puede podar (con Claude Code, si no, la interfaz recurre al relevo).
+	Podable bool `json:"podable,omitempty"`
+	// Pending: tokens (estimados) de lo que está fuera de vigencia y sigue en el contexto del agente (Antigravity:
+	// lo que decide el relevo).
+	Pending int `json:"pendiente,omitempty"`
+	// Status: el estado del recolector (el indicador del chat).
+	Status *CollectorStatus `json:"estado,omitempty"`
 }
 
 // PruneExchange: la vigencia de un intercambio (por su punto: el último mensaje del agente).

@@ -581,7 +581,11 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 					if estado == "ok" && strings.Contains(strings.ToLower(p.Has), "file") {
 						imgs = imagenDeFichero(parametros[p.Indice])
 					}
-					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Salida: recorta(salida, maxSalida), Estado: estado, Imagenes: imgs}})
+					h := &Herramienta{ID: id, Nombre: p.Has, Salida: recorta(salida, maxSalida), Estado: estado, Imagenes: imgs}
+					if len(salida) > len(h.Salida) {
+						h.Size = len(salida)
+					}
+					emite(Evento{Herramienta: h})
 				}
 			}
 		case "result":

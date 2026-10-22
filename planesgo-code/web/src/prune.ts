@@ -24,6 +24,9 @@ export interface PruneReport {
   repuestos?: number;  // piezas que vuelven (un intercambio que vuelve a ser relevante)
   intercambios: ({ punto: string } & Vigencia)[];
   piezas?: ({ id: string } & Vigencia)[];
+  podable?: boolean;   // el historial del agente se puede podar (Claude Code: si no, el relevo de reserva)
+  pendiente?: number;  // tokens fuera de vigencia que siguen en el contexto del agente (saldrían en el próximo barrido)
+  estado?: import('./cleaner').CollectorStatus; // el estado del recolector (el indicador del chat)
 }
 
 // VIG_CUT: con esta vigencia o más, fuera del contexto del agente. VIG_MIN_OPACITY: lo más desvanecido (legible).

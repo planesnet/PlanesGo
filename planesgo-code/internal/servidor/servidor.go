@@ -156,6 +156,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat/clasifica", s.conSesion(s.clasifica))
 	mux.HandleFunc("POST /api/chat/inyecta", s.conSesion(s.inyecta))
 	mux.HandleFunc("GET /api/chat/vigencia", s.conSesion(s.vigencia))
+	mux.HandleFunc("POST /api/chat/vigencia", s.conSesion(s.vigenciaChat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
 	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
 	mux.HandleFunc("GET /api/evidencias", s.conSesion(s.evidencias))
@@ -808,7 +809,31 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 func (s *Servidor) vigencia(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
 	ctx, cancela := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancela()
-	rep := llm.VigenciaReport(ctx, r.URL.Query().Get("sesion_agente"))
+	// «estado=1»: sin esperar al recolector (el indicador del chat mientras trabaja).
+	rep := llm.VigenciaReport(ctx, r.URL.Query().Get("sesion_agente"), r.URL.Query().Get("estado") != "1")
+	if rep == nil {
+		rep = &llm.PruneReport{Exchanges: []llm.PruneExchange{}, Pieces: []llm.PrunePiece{}}
+	}
+	jsonOK(w, rep)
+}
+
+// vigenciaChat: la vigencia de la conversación de pgocode para los agentes que no dejan podar su historial
+// (Antigravity; ver llm.ChatVigencia). La interfaz manda los intercambios desde la última conversación nueva del
+// agente y, si va a enviar, el mensaje nuevo; con «pendiente» decide el relevo.
+func (s *Servidor) vigenciaChat(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
+	var p struct {
+		Clave        string             `json:"clave"`
+		Intercambios []llm.ChatExchange `json:"intercambios"`
+		Mensaje      string             `json:"mensaje"`
+		Podar        *bool              `json:"podar"`
+	}
+	if err := lee(r, &p); err != nil {
+		jsonError(w, http.StatusBadRequest, "petición no válida")
+		return
+	}
+	ctx, cancela := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancela()
+	rep := llm.ChatVigencia(ctx, p.Clave, p.Intercambios, p.Mensaje, modoPoda(p.Podar) == llm.PruneAuto)
 	if rep == nil {
 		rep = &llm.PruneReport{Exchanges: []llm.PruneExchange{}, Pieces: []llm.PrunePiece{}}
 	}
