@@ -13,6 +13,10 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 - **2026-10-22-225825**: Prueba 7 (conversación larga) sin estrategia: sin compactar
 - **2026-10-22-230036**: Prueba 7 (conversación larga) con compactación gobernada por pgocode (80k, el umbral de la app)
 - **2026-10-22-230038**: Prueba 7 (conversación larga) con relevo y memoria de trabajo (80k)
+- **2026-10-22-235448**: poda del historial: ninguna
+- **2026-10-22-235451**: poda del historial: poda
+- **2026-10-22-235454**: poda del historial: poda-reglas
+- **2026-10-23-000002**: poda del historial: poda (sin reponer suelto)
 
 ## 1 · Saludo
 
@@ -123,3 +127,7 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 | claude-code | pgocode · compactar:80 | 2026-10-22-230036 | 1200.8k | 1187.2k | 13.6k | 23 | 1.960 $ | 180 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-225825 | 1669.3k | 1659.8k | 9.5k | 21 | 1.865 $ | 118 s | 1/1 |
 | claude-code | pgocode · relevo:80 | 2026-10-22-230038 | 1300.4k | 1289.2k | 11.3k | 27 | 1.908 $ | 152 s | 1/1 |
+| opencode | pgocode | 2026-10-22-235448 | 1954.2k | 1946.5k | 7.7k | 24 | 0.535 $ | 193 s | 1/1 |
+| opencode | pgocode · poda | 2026-10-22-235451 | 1598.6k | 1590.2k | 8.4k | 24 | 0.598 $ | 237 s | 1/1 |
+| opencode | pgocode · poda | 2026-10-23-000002 | 1762.6k | 1755.3k | 7.3k | 26 | 0.550 $ | 322 s | 1/1 |
+| opencode | pgocode · poda-reglas | 2026-10-22-235454 | 1895.7k | 1887.0k | 8.7k | 27 | 0.620 $ | 264 s | 1/1 |

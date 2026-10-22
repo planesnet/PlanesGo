@@ -23,7 +23,7 @@ import (
 //   - L3: lo que no tiene relación con lo último (similitud por debajo del umbral frente al mensaje nuevo). Sus
 //     herramientas pasan a una línea indicativa; los textos del usuario y del agente, que son pequeños, se quedan.
 //     El original lo guarda pgocode con su embedding: si un mensaje nuevo se le parece («fallo de página»), vuelve
-//     a L2 (se repone).
+//     a L2 (se repone con el siguiente barrido que compense; ver worthIt).
 //
 // Lo que se quita deja una línea que dice qué era y cómo recuperarlo: equivocarse cuesta una relectura, no un
 // error. El marcado (embeddings y estado de cada intercambio) se hace en segundo plano según llega cada cosa
@@ -631,9 +631,13 @@ func pruneChanges(win []*ocMessage, plan prunePlan) pruneDiff {
 	return d
 }
 
-// worthIt: si se barre ahora (lo que sale compensa perder la caché, o hay que reponer algo).
+// worthIt: si se barre ahora: solo si lo que sale (descontado lo que se repone) compensa perder la caché. Reponer
+// por sí solo no basta: cambiar el historial por la mitad hace que todo lo posterior se mande sin caché, y eso
+// cuesta más que la relectura que haría el agente si lo necesita (medido en el banco, prueba 7 con OpenCode: un
+// turno que solo reponía una pieza costó 0,073 $ frente a 0,015 $). Lo que tenga que volver, vuelve con el
+// siguiente barrido que compense.
 func (d pruneDiff) worthIt() bool {
-	return len(d.Restore) > 0 || (d.Saved >= pruneMinTokens && (len(d.Update) > 0 || len(d.Delete) > 0))
+	return d.Saved >= pruneMinTokens && (len(d.Update) > 0 || len(d.Delete) > 0 || len(d.Restore) > 0)
 }
 
 // cosine: similitud entre dos vectores (recortados a las mismas dimensiones).

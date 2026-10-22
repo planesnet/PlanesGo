@@ -288,8 +288,12 @@ func TestPruneChanges(t *testing.T) {
 	// Si el plan ya no quita una parte cambiada, se repone.
 	delete(plan.Edits, r.ID)
 	d3 := pruneChanges(s.msgs, plan)
-	if len(d3.Restore) != 1 || d3.Restore[0] != r.ID || !d3.worthIt() {
-		t.Fatalf("reponer: %+v", d3.Restore)
+	if len(d3.Restore) != 1 || d3.Restore[0] != r.ID || d3.worthIt() {
+		t.Fatalf("reponer (solo, no compensa perder la caché): %+v", d3.Restore)
+	}
+	// Con un barrido que compensa, lo repuesto va con él.
+	if !(pruneDiff{Restore: []string{"a"}, Update: map[string]string{"b": ""}, Saved: pruneMinTokens}).worthIt() {
+		t.Fatal("reponer con un barrido")
 	}
 	// Por debajo del mínimo no compensa.
 	if (pruneDiff{Update: map[string]string{"a": ""}, Saved: pruneMinTokens - 1}).worthIt() {
