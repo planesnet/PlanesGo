@@ -108,7 +108,8 @@ Si dudas, conversacion.`
 
 // Otro tema: una petición de trabajo sobre otro asunto, que va mejor en una sesión hija (con lo mínimo) que en una
 // conversación que ya ha crecido. Se añade a lo anterior solo si la interfaz manda el tema de la sesión.
-const lineaTema = "tema: es una petición de trabajo sobre OTRO asunto, distinto del tema de la sesión (otra funcionalidad u otra parte del proyecto), que no necesita lo hablado hasta ahora. Si continúa, corrige o depende de lo que se está haciendo, NO es tema.\n"
+const lineaTema = "tema: SOLO si pide TRABAJO NUEVO (hacer, añadir, cambiar algo) sobre OTRA funcionalidad u otra parte del proyecto, distinta del tema de la sesión, y se entiende sin lo hablado. Dar un dato, pedir que recuerde algo, preguntar, opinar, continuar, corregir o depender de lo que se está haciendo NO es tema.\n" +
+	"Ejemplos (sesión sobre el diseño de la lista de proyectos): «Añade las etiquetas de Odoo a la lista de tareas» → tema; «Recuerda esta palabra clave: AZUL» → conversacion; «Pon el botón más a la derecha» → conversacion; «¿Qué colores has usado?» → conversacion.\n"
 
 const sistemaSoloTema = `Un usuario escribe a un agente de programación en una sesión que ya trata de un tema. Decide si su mensaje sigue en esa conversación o es otro tema y responde SOLO una palabra:
 conversacion: sigue con el tema de la sesión, lo continúa, lo corrige, responde al agente o depende de lo hablado.

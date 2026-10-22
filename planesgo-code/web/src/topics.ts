@@ -20,14 +20,25 @@ export interface TopicCheckInput {
   agent?: boolean;       // el proveedor es un agente (no un modelo sin historial propio)
 }
 
+// Lo que sigue claramente la conversación: empieza enlazando con ella (recuerda, ahora, también, y, pero, vale…) o
+// se refiere a lo hablado (esto, eso, lo que has…, el método que…). Nunca es otro tema (ni se pregunta).
+const CONTINUES = /^(?:recuerda|ahora|también|tambien|además|ademas|y|pero|vale|ok|bien|sí|si|no|sigue|continúa|continua|perfecto|gracias|entonces|luego|después|despues|otra cosa del|lo mismo)\b/i;
+const REFERS = /\b(?:esto|eso|esta|ese|aquello|lo que (?:has|hiciste|acabas)|lo (?:anterior|de antes)|el (?:método|metodo|fichero|cambio|error|fallo) que|la (?:función|funcion|prueba) que|antes|arriba)\b/i;
+// Una petición de otro tema describe trabajo: unas cuantas palabras como mínimo.
+export const TOPIC_MIN_WORDS = 6;
+
 // shouldCheckTopic: ¿merece la pena preguntar al clasificador si es otro tema? Solo con un agente, contexto relevante
-// y un mensaje que parezca una petición (ni órdenes «/…», ni adjuntos, ni planes, ni mensajes de dos palabras).
+// y un mensaje que parezca una petición de trabajo nueva: ni órdenes «/…», ni adjuntos, ni planes, ni mensajes
+// cortos, ni los que enlazan con la conversación o se refieren a lo hablado (así no hay falsos positivos como
+// «Recuerda esta palabra clave: AZUL»).
 export function shouldCheckTopic(i: TopicCheckInput): boolean {
   const t = i.text.trim();
   if (!i.agent || i.active === false || i.attachments || i.planOrder) return false;
   if ((i.context || 0) < TOPIC_MIN_CONTEXT) return false;
   if (t.startsWith('/') || t.startsWith('>') || t.startsWith('?')) return false;
-  return t.length >= 15 && t.split(/\s+/).length >= 3;
+  const plain = t.replace(/^[¿¡«"']+/, '');
+  if (CONTINUES.test(plain) || REFERS.test(plain)) return false;
+  return t.split(/\s+/).length >= TOPIC_MIN_WORDS;
 }
 
 const squash = (t: string) => t.replace(/\s+/g, ' ').trim();

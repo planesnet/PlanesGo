@@ -31,6 +31,21 @@ test('shouldCheckTopic: solo con agente, contexto relevante y una petición de v
   assert.equal(TP.shouldCheckTopic({ ...ok, text: '/revisa las etiquetas de la lista' }), false, 'orden o skill');
 });
 
+test('shouldCheckTopic: sin falsos positivos con lo que sigue la conversación', () => {
+  const c = (text: string) => TP.shouldCheckTopic({ context: 45_000, text, agent: true });
+  // Lo que se vio en la prueba de integración: un dato para el agente no es otro tema.
+  assert.equal(c('Recuerda esta palabra clave: AZUL'), false);
+  for (const t of ['Ahora cambia también el color del botón de guardar', 'Y pon el mismo estilo en la cabecera del panel',
+    'Pero no toques el fichero de estilos de la cabecera', 'Arregla el método que cambiaste antes para que no falle',
+    'Haz que esto funcione también en la vista de Kanban', 'Añade una prueba de eso en el fichero de pruebas']) {
+    assert.equal(c(t), false, t);
+  }
+  // Una petición de trabajo nueva, descrita, sí se consulta.
+  assert.equal(c('Añadir las etiquetas de Odoo a la lista de tareas'), true);
+  assert.equal(c('Crea un informe de horas por proyecto en formato CSV'), true);
+  assert.equal(c('Añade un filtro por fecha'), false, 'demasiado corta para saber');
+});
+
 test('topicSummary: el tema en 2 o 3 líneas (objetivo, últimas peticiones, ficheros)', () => {
   const s = TP.topicSummary(collectWorkingMemory(conv));
   const l = s.split('\n');
