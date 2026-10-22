@@ -213,6 +213,14 @@ type pruneState struct {
 	// Vig: la vigencia de cada intercambio y pieza (la del último barrido o, tras marcar, la que tendría si el
 	// mensaje nuevo fuera como el último), con lo que está fuera ahora en el historial del agente.
 	Vig *vigState `json:"vigencia,omitempty"`
+	// Prunable: si el historial del agente se puede podar (Claude Code: formato y versión conocidos).
+	Prunable bool `json:"podable,omitempty"`
+	// Lo retirado en la sesión, en el último barrido aplicado y cuándo fue (ms).
+	Removed     int   `json:"retirados,omitempty"`
+	LastRemoved int   `json:"ultimos,omitempty"`
+	LastSweep   int64 `json:"barrido,omitempty"`
+	// Pending: lo que saldría con un barrido ahora (tokens estimados).
+	Pending int `json:"pendiente,omitempty"`
 }
 
 type pruneCollector struct {
@@ -221,6 +229,73 @@ type pruneCollector struct {
 	state pruneState
 	// snapshot: la sesión leída al acabar el último turno (el barrido la usa si sigue valiendo).
 	snapshot []*ocMessage
+	// Lo que ve la interfaz sin esperar al hilo (el indicador del recolector): en qué está y el último informe.
+	mu        sync.Mutex
+	phase     string // «» (al día), «marcando» o «barriendo»
+	pending   int    // piezas que está marcando o cambiando
+	rulesOnly bool   // sin embeddings (Ollama no responde o solo reglas)
+	last      *PruneReport
+	totals    CollectorStatus
+}
+
+// CollectorStatus: el estado del recolector de una sesión (el indicador del chat).
+type CollectorStatus struct {
+	Phase       string `json:"fase"`                 // «» al día, «marcando», «barriendo»
+	Pending     int    `json:"pendientes,omitempty"` // piezas en las que está
+	Engine      string `json:"motor"`                // «ollama» (embeddinggemma) o «reglas»
+	Removed     int    `json:"retirados_sesion,omitempty"`
+	LastRemoved int    `json:"ultimos_retirados,omitempty"`
+	LastSweep   int64  `json:"ultimo_barrido,omitempty"` // ms
+}
+
+// setPhase: en qué está el recolector (lo ve la interfaz).
+func (c *pruneCollector) setPhase(phase string, n int) {
+	c.mu.Lock()
+	c.phase, c.pending = phase, n
+	c.mu.Unlock()
+}
+
+// noteSweep: un barrido aplicado (lo que salió).
+func (c *pruneCollector) noteSweep(removed int) {
+	c.state.Removed += removed
+	c.state.LastRemoved = removed
+	c.state.LastSweep = pruneNow().UnixMilli()
+}
+
+// publish: el último informe y los totales, para la interfaz (sin esperar al hilo).
+func (c *pruneCollector) publish(r *PruneReport) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r != nil {
+		cp := *r
+		c.last = &cp
+	}
+	c.totals = CollectorStatus{Removed: c.state.Removed, LastRemoved: c.state.LastRemoved, LastSweep: c.state.LastSweep}
+}
+
+// status: el estado ahora.
+func (c *pruneCollector) status() CollectorStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := c.totals
+	st.Phase, st.Pending, st.Engine = c.phase, c.pending, "ollama"
+	if c.rulesOnly || ollamaDown() {
+		st.Engine = "reglas"
+	}
+	return st
+}
+
+func (c *pruneCollector) setRulesOnly(v bool) {
+	c.mu.Lock()
+	c.rulesOnly = v
+	c.mu.Unlock()
+}
+
+// ollamaDown: si Ollama acaba de fallar (se vuelve a probar al cabo de 30 s).
+func ollamaDown() bool {
+	muOllamaPoda.Lock()
+	defer muOllamaPoda.Unlock()
+	return time.Now().Before(ollamaCaidoHas)
 }
 
 var (
@@ -237,6 +312,7 @@ func collectorFor(key string) *pruneCollector {
 	}
 	c := &pruneCollector{key: key, jobs: make(chan func(), 256)}
 	c.load()
+	c.publishSaved()
 	collectors[key] = c
 	go c.loop()
 	return c
@@ -293,6 +369,16 @@ func (c *pruneCollector) load() {
 	if c.state.Tiers == nil {
 		c.state.Tiers = map[string]pruneTier{}
 	}
+}
+
+// publishSaved: lo guardado, para la interfaz (al crear el recolector).
+func (c *pruneCollector) publishSaved() {
+	var r *PruneReport
+	if c.state.Vig != nil {
+		r = &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
+		r.Exchanges, r.Pieces = c.state.Vig.report(pruneNow())
+	}
+	c.publish(r)
 }
 
 func (c *pruneCollector) save() {
@@ -375,18 +461,33 @@ func (c *pruneCollector) mark(ctx context.Context, a *Agente, p Peticion, embedd
 		return
 	}
 	c.snapshot = msgs
-	win := pruneWindow(msgs)
+	c.markWin(ctx, pruneWindow(msgs), embeddings, false)
+}
+
+// markWin: la vigencia de la ventana del agente con lo último (y los vectores de lo que falte), sin barrer.
+// claude: solo lo que se aplica en Claude Code (claudePlan).
+func (c *pruneCollector) markWin(ctx context.Context, win []*ocMessage, embeddings, claude bool) {
 	var s *pruneSims
+	xs := pruneExchanges(win)
+	c.setPhase("marcando", len(xs))
 	if embeddings {
 		c.embedAll(ctx, win)
 		// La vigencia hasta el mensaje nuevo: la relación, frente al último (y el anterior si es corto).
-		if xs := pruneExchanges(win); len(xs) > 0 {
+		if len(xs) > 0 {
 			s = c.sims(ctx, win, xs[len(xs)-1].userText())
 		}
 	}
+	c.setRulesOnly(s == nil)
 	plan := planPrune(win, s, pruneYoung, pruneNow())
+	if claude {
+		plan = claudePlan(plan, win)
+	}
 	c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
+	c.state.Pending = max(pruneChanges(win, plan).Saved, 0)
 	c.save()
+	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
+	r.Exchanges, r.Pieces = c.state.Vig.report(pruneNow())
+	c.publish(r)
 }
 
 // pruneNow: el momento de los cálculos (en las pruebas, una fecha forzada).
@@ -478,12 +579,16 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	win := pruneWindow(msgs)
 	var s *pruneSims
 	if p.Prune == PruneAuto {
+		c.setPhase("marcando", 0)
 		ce, cancela := context.WithTimeout(ctx, 15*time.Second)
 		s = c.sims(ce, win, msg)
 		cancela()
+		c.setRulesOnly(s == nil)
 		if s == nil && len(c.state.Tiers) > 0 {
 			s = &pruneSims{PrevTier: c.state.Tiers}
 		}
+	} else {
+		c.setRulesOnly(true)
 	}
 	now := pruneNow()
 	plan := planPrune(win, s, young, now)
@@ -492,8 +597,9 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		depuracion.Log(a.Clave, "poda %s: %d tokens pendientes (no compensa aún)", c.key, d.Saved)
 		// La vigencia, la de ahora; lo que está fuera, lo que ya estaba.
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
+		c.state.Pending = max(d.Saved, 0)
 		c.save()
-		rep := &PruneReport{}
+		rep := &PruneReport{Pending: c.state.Pending}
 		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 		return rep, nil
 	}
@@ -501,6 +607,7 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	if err != nil {
 		return nil, err
 	}
+	c.setPhase("barriendo", len(d.Update)+len(d.Restore)+len(d.Delete))
 	for _, q := range qs {
 		if _, err := ocDB(ctx, a, p, q, false); err != nil {
 			return nil, err
@@ -514,6 +621,8 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	}
 	c.state.Tiers = tiers
 	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
+	c.noteSweep(max(d.Saved, 0))
+	c.state.Pending = 0
 	c.save()
 	depuracion.Log(a.Clave, "poda %s: %d tokens fuera (%d partes cambiadas, %d repuestas, %d quitadas)", c.key, d.Saved,
 		len(d.Update), len(d.Restore), len(d.Delete))
@@ -525,8 +634,8 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 // VigenciaReport: la vigencia de la sesión del agente ahora (en segundo plano, sin barrer): espera a que su
 // recolector acabe lo pendiente (el marcado del último turno) y la vuelve a calcular con la hora actual. Nil si la
 // sesión no tiene recolector ni estado guardado.
-func VigenciaReport(ctx context.Context, ses string) *PruneReport {
-	if !idSesionOC.MatchString(ses) {
+func VigenciaReport(ctx context.Context, ses string, wait bool) *PruneReport {
+	if !sesionValida.MatchString(ses) {
 		return nil
 	}
 	muCollectors.Lock()
@@ -538,14 +647,35 @@ func VigenciaReport(ctx context.Context, ses string) *PruneReport {
 		}
 		c = collectorFor(ses)
 	}
+	// Sin esperar (el indicador mientras trabaja): el último informe publicado y el estado.
+	if !wait {
+		c.mu.Lock()
+		var rep *PruneReport
+		if c.last != nil {
+			cp := *c.last
+			rep = &cp
+		}
+		c.mu.Unlock()
+		if rep == nil {
+			rep = &PruneReport{}
+		}
+		rep.Removed, rep.Restored = 0, 0
+		st := c.status()
+		rep.Status = &st
+		return rep
+	}
 	var rep *PruneReport
 	c.do(ctx, func() {
 		if c.state.Vig == nil {
 			return
 		}
-		rep = &PruneReport{}
+		rep = &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
 		rep.Exchanges, rep.Pieces = c.state.Vig.report(pruneNow())
 	})
+	if rep != nil {
+		st := c.status()
+		rep.Status = &st
+	}
 	return rep
 }
 
@@ -559,10 +689,12 @@ func pruneOpenCode(ctx context.Context, a *Agente, p Peticion) *PruneReport {
 	ce, cancela := context.WithTimeout(ctx, 60*time.Second)
 	defer cancela()
 	err := c.do(ce, func() {
+		defer c.setPhase("", 0)
 		var err error
 		if rep, err = c.sweep(ce, a, p, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung); err != nil {
 			depuracion.Log(a.Clave, "poda %s: %v", p.SesionAgente, err)
 		}
+		c.publish(rep)
 	})
 	if err != nil {
 		depuracion.Log(a.Clave, "poda %s: %v", p.SesionAgente, err)
@@ -576,7 +708,9 @@ func markOpenCode(a *Agente, p Peticion, ses string) {
 		return
 	}
 	c := collectorFor(ses)
+	c.setPhase("marcando", 0)
 	c.later(func() {
+		defer c.setPhase("", 0)
 		ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancela()
 		c.mark(ctx, a, p, p.Prune == PruneAuto)

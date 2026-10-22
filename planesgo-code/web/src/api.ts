@@ -12,7 +12,7 @@ export interface Proveedor {
   esfuerzos?: string[]; modos?: boolean; inyecta?: boolean; // inyecta: admite mensajes durante el turno
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
-export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[]; tokens?: number; vig?: Vigencia } // tokens: los de la conversación hasta esta acción; vig: su vigencia (prune.ts)
+export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[]; tokens?: number; tamano?: number; vig?: Vigencia } // tokens: los de la conversación hasta esta acción; vig: su vigencia (prune.ts)
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number; contexto?: number } // contexto: tokens de la última llamada
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }

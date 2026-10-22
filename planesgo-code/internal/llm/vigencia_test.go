@@ -183,19 +183,19 @@ func TestVigenciaReportBackground(t *testing.T) {
 	}
 	ahora := vigT0
 	pruneNow = func() time.Time { return ahora }
-	if VigenciaReport(context.Background(), "ses_vigencia1") != nil {
+	if VigenciaReport(context.Background(), "ses_vigencia1", true) != nil {
 		t.Fatal("sin estado, sin informe")
 	}
-	if VigenciaReport(context.Background(), "../x") != nil {
+	if VigenciaReport(context.Background(), "../x", true) != nil {
 		t.Fatal("sesión no válida")
 	}
 	markOpenCode(&Agente{Clave: "opencode"}, Peticion{Carpeta: t.TempDir(), Prune: PruneAuto}, "ses_vigencia1")
-	r1 := VigenciaReport(context.Background(), "ses_vigencia1")
+	r1 := VigenciaReport(context.Background(), "ses_vigencia1", true)
 	if r1 == nil || len(r1.Exchanges) != 5 || r1.Exchanges[1].Sim == nil {
 		t.Fatalf("informe: %+v", r1)
 	}
 	ahora = vigT0.Add(3 * time.Hour)
-	r2 := VigenciaReport(context.Background(), "ses_vigencia1")
+	r2 := VigenciaReport(context.Background(), "ses_vigencia1", true)
 	if r2.Exchanges[1].Value <= r1.Exchanges[1].Value || r2.Exchanges[1].Hours != r1.Exchanges[1].Hours+3 {
 		t.Fatalf("tres horas después: %+v → %+v", r1.Exchanges[1].Vigencia, r2.Exchanges[1].Vigencia)
 	}

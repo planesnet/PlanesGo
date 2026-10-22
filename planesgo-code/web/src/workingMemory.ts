@@ -49,7 +49,7 @@ export interface WorkingMemory {
 // collectWorkingMemory: los datos de la memoria (sin formato).
 // Lo que quedó fuera del contexto del agente con «Continuar desde aquí» no cuenta: el agente lo ha olvidado.
 export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
-  const ms = todos.filter(m => !m.fuera);
+  const ms = todos.filter(m => !m.fuera).map(vigentParts);
   const us = requests(ms);
   const goal = us[0]?.texto.trim();
   const files: string[] = [];
@@ -96,6 +96,21 @@ export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
     goal, requests: us.slice(1).map(m => m.texto.trim()), turns,
     files, read: read.filter(r => !files.includes(r)), commands, tasks, decisions: [...new Set(decisions)], lastAnswer,
   };
+}
+
+// VIG_OUT: con esta vigencia o más, fuera (VIG_CUT de prune.ts; aquí sin importarlo para las pruebas con node).
+const VIG_OUT = 3;
+
+// vigentOnly: solo lo vigente (vigencia por debajo de 3): sin los intercambios fuera de vigencia (el mensaje del
+// usuario y la respuesta llevan la misma) ni las herramientas fuera de vigencia de los demás. Para la memoria del
+// relevo por vigencia (Antigravity).
+export function vigentOnly(ms: Mensaje[]): Mensaje[] {
+  return ms.filter(m => !(m.vig && m.vig.vigencia >= VIG_OUT)).map(vigentParts);
+}
+
+function vigentParts(m: Mensaje): Mensaje {
+  if (!m.partes?.some(p => p.tipo === 'herramienta' && (p.h.vig?.vigencia ?? 0) >= VIG_OUT)) return m;
+  return { ...m, partes: m.partes.filter(p => !(p.tipo === 'herramienta' && (p.h.vig?.vigencia ?? 0) >= VIG_OUT)) };
 }
 
 function sentences(t: string): string[] {
@@ -161,6 +176,9 @@ export function relayMessage(memory: string, message: string): string {
 // RELAY_THRESHOLD: con el relevo siempre activo (Antigravity, ver contextPolicy.ts), el contexto a partir del cual el
 // mensaje va a una sesión nueva aunque la caché siga caliente.
 export const RELAY_THRESHOLD = 60_000;
+// PRUNE_MIN_TOKENS: con el relevo por vigencia (modo «vig»), lo que tiene que pesar lo que está fuera de vigencia
+// para relevar (el mismo mínimo que la poda: llm.pruneMinTokens).
+export const PRUNE_MIN_TOKENS = 15_000;
 
 export interface RelayInput {
   agent: string;
@@ -172,6 +190,8 @@ export interface RelayInput {
   planOrder?: boolean;    // orden de planes («/plan …») o ejecución de un plan
   memoryChars: number;    // tamaño de la memoria de trabajo
   threshold?: number;     // con el modo «on», otro umbral (el banco de consumo, estrategia «relevo:N»)
+  outTokens?: number;     // con el modo «vig», lo que está fuera de vigencia (tokens estimados)
+  outMin?: number;        // con el modo «vig», otro mínimo (para probarlo)
 }
 
 // idleMinimum: con la caché caducada, el contexto a partir del cual el relevo sale a cuenta. Seguir la sesión
@@ -192,6 +212,8 @@ export function shouldRelay(i: RelayInput): string | null {
   if (i.idleMinutes >= CACHE_MINUTES && i.context >= idleMinimum(i.agent)) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
   const limit = i.threshold || RELAY_THRESHOLD;
   if (i.mode === 'on' && i.context >= limit) return `el contexto (${fmt(i.context)}) pasa del umbral (${fmt(limit)})`;
+  const outMin = i.outMin || PRUNE_MIN_TOKENS;
+  if (i.mode === 'vig' && (i.outTokens || 0) >= outMin) return `${fmt(i.outTokens!)} de ${fmt(i.context)} están fuera de vigencia`;
   return null;
 }
 

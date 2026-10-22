@@ -183,6 +183,11 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			emite(Evento{Prune: rep})
 		}
 	}
+	// Claude Code: la misma poda, en su historial (prune_claude.go). Si el --resume falla tras podar, se restaura
+	// la copia y se repite sin podar, antes de dar la sesión por perdida.
+	if a.Clave == "claude-code" {
+		return a.chatClaude(ctx, p, emite)
+	}
 	// OpenCode: se apunta su sesión (también la nueva) para repararla si el turno se corta.
 	sesionOC := p.SesionAgente
 	emiteOC := emite
@@ -259,6 +264,45 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 		depuracion.Log(a.Clave, "la sesión %s ya no existe: se empieza otra", p.SesionAgente)
 		p.SesionAgente = ""
 		return a.chat(ctx, p, emite)
+	}
+	return err
+}
+
+// chatClaude: el turno de Claude Code con la poda de su historial (barrido al empezar, marcado continuo de cada
+// salida grande y marcado al acabar).
+func (a *Agente) chatClaude(ctx context.Context, p Peticion, emite func(Evento)) error {
+	rep, bak := pruneClaude(ctx, p)
+	if rep != nil && (len(rep.Exchanges) > 0 || rep.Removed > 0 || rep.Podable) {
+		emite(Evento{Prune: rep})
+	}
+	ses := p.SesionAgente
+	respondio := false
+	emiteC := func(e Evento) {
+		if e.SesionAgente != "" {
+			ses = e.SesionAgente
+		}
+		if e.Texto != "" || e.Herramienta != nil || e.Pensamiento != "" {
+			respondio = true
+		}
+		if h := e.Herramienta; h != nil && h.Estado == "ok" && h.Padre == "" && p.Prune == PruneAuto && !p.Aparte && ses != "" {
+			collectorFor(ses).notePiece(h.ID, claudeToolName(h.Nombre), h.Resumen, h.Salida)
+		}
+		emite(e)
+	}
+	defer func() { markClaude(p, ses) }()
+	err := a.chat(ctx, p, emiteC)
+	if err != nil && bak != nil && !respondio && ctx.Err() == nil {
+		depuracion.Log(a.Clave, "la sesión %s no se retoma tras podar (%v): se restaura la copia y se repite", p.SesionAgente, err)
+		if e := bak.restore(); e != nil {
+			depuracion.Log(a.Clave, "restaurar la copia de %s: %v", p.SesionAgente, e)
+		} else {
+			err = a.chat(ctx, p, emiteC)
+		}
+	}
+	if err != nil && p.SesionAgente != "" && ctx.Err() == nil && !respondio && sesionPerdida(err) {
+		depuracion.Log(a.Clave, "la sesión %s ya no existe: se empieza otra", p.SesionAgente)
+		p.SesionAgente = ""
+		return a.chat(ctx, p, emiteC)
 	}
 	return err
 }

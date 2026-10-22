@@ -6,7 +6,9 @@ import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
-import { autoContextOn, contextPolicy, lastContext } from '../contextPolicy';
+import { autoContextOn, contextPolicy, lastContext, relayAsBackup } from '../contextPolicy';
+import * as CL from '../cleaner';
+import CleanerIndicator from './CleanerIndicator';
 import * as AP from '../aparte';
 import * as W from '../workingMemory';
 import * as PR from '../prune';
@@ -37,6 +39,12 @@ interface Props {
 }
 
 const nombreCarpeta = (c: string) => c.split('/').filter(Boolean).pop() || c;
+
+// umbralVigencia: para probar el relevo por vigencia con poco, un mínimo propio (localStorage «pgo-umbral-vigencia»,
+// en tokens); sin él, el de siempre (W.PRUNE_MIN_TOKENS).
+function umbralVigencia(): number | undefined {
+  try { const n = Number(localStorage.getItem('pgo-umbral-vigencia')); return n > 0 ? n : undefined; } catch { return undefined; }
+}
 
 const MODOS = { lectura: 'Solo lectura', editar: 'Editar ficheros', auto: 'Auto: ejecuta comandos' } as const;
 // El modo de la sesión («plan» ya no es un modo: los de antes cuentan como el que tenían antes, o solo lectura).
@@ -195,28 +203,60 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }, [sesion?.id]);
 
   // Vigencia (prune.ts): cada mensaje y herramienta se desvanece según la suya, salvo con la gestión automática del
-  // contexto desactivada. En segundo plano (OpenCode): al abrir la sesión, al acabar cada turno (cuando pgocode ha
-  // marcado lo nuevo) y cada 10 minutos, porque el tiempo también le resta vigencia.
+  // contexto desactivada. En segundo plano: al abrir la sesión, al acabar cada turno (cuando pgocode ha marcado lo
+  // nuevo) y cada 10 minutos, porque el tiempo también le resta vigencia. OpenCode y Claude Code: la del recolector
+  // de su historial (GET); Antigravity: la de esta conversación (POST, contextPolicy «chat»).
   const vigOn = Boolean(sesion && autoContextOn(sesion));
-  const refrescaVigencia = useCallback(async (s: Sesion, sesionAgente = s.sesionAgente) => {
-    if (!contextPolicy(s.agente, s).prune || !sesionAgente) return;
+  // Hilo de limpieza (CleanerIndicator): el último informe de cada sesión, con el estado del recolector, y si hay una
+  // consulta en curso. Si el historial del agente se puede podar (por su sesión del agente): sin relevo de reserva.
+  const [limpieza, setLimpieza] = useState<Record<string, { r?: PR.PruneReport; busy?: boolean }>>({});
+  const podables = useRef<Record<string, boolean>>({});
+  const ponLimpieza = (id: string, c: { r?: PR.PruneReport; busy?: boolean }) => setLimpieza(x => ({ ...x, [id]: { ...x[id], ...c } }));
+  const pideVigencia = useCallback(async (s: Sesion, sesionAgente: string | undefined, ms: Mensaje[], mensaje?: string, soloEstado = false): Promise<PR.PruneReport | null> => {
+    const pol = contextPolicy(s.agente, s);
+    if (pol.vig === 'none' || (pol.vig === 'agent' && !sesionAgente)) return null;
+    let r: PR.PruneReport;
+    if (pol.vig === 'chat') {
+      const xs = CL.chatExchanges(ms);
+      if (!xs.length) return null;
+      ponLimpieza(s.id, { busy: true });
+      try { r = await post<PR.PruneReport>('/api/chat/vigencia', { clave: 'chat-' + s.id, intercambios: xs, mensaje: mensaje || '' }); }
+      finally { ponLimpieza(s.id, { busy: false }); }
+    } else {
+      if (!soloEstado) ponLimpieza(s.id, { busy: true });
+      try { r = await get<PR.PruneReport>(`/api/chat/vigencia?sesion_agente=${encodeURIComponent(sesionAgente!)}${soloEstado ? '&estado=1' : ''}`); }
+      finally { if (!soloEstado) ponLimpieza(s.id, { busy: false }); }
+    }
+    if (r.podable !== undefined && sesionAgente && !soloEstado) podables.current[sesionAgente] = Boolean(r.podable);
+    ponLimpieza(s.id, { r });
+    return r;
+  }, []);
+  const refrescaVigencia = useCallback(async (s: Sesion, sesionAgente = s.sesionAgente, soloEstado = false) => {
+    if (!autoContextOn(s)) return;
     try {
-      const r = await get<PR.PruneReport>(`/api/chat/vigencia?sesion_agente=${encodeURIComponent(sesionAgente)}`);
-      if (!r.intercambios.length && !r.piezas?.length) return;
+      const r = await pideVigencia(s, sesionAgente, conversacion(s.id), undefined, soloEstado);
+      if (!r || (!r.intercambios.length && !r.piezas?.length)) return;
       if (vivas.current[s.id]) return; // un turno en curso: su barrido trae la suya
       const base = conversacion(s.id);
-      const n = PR.applyPruneReport(base, r);
+      const n = contextPolicy(s.agente, s).vig === 'chat' ? CL.applyChatVigencia(base, r) : PR.applyPruneReport(base, r);
       if (n.every((m, i) => m === base[i])) return;
       guardaConversacion(s.id, n);
       if (idActual.current === s.id) setMensajes(n);
     } catch { /* sin vigencia: se queda la que había */ }
   }, []);
   useEffect(() => {
-    if (!sesion || !vigOn || !sesion.sesionAgente) return;
+    if (!sesion || !vigOn || (!sesion.sesionAgente && contextPolicy(sesion.agente, sesion).vig !== 'chat')) return;
     refrescaVigencia(sesion);
     const t = setInterval(() => refrescaVigencia(sesion), 10 * 60_000);
     return () => clearInterval(t);
   }, [sesion?.id, sesion?.sesionAgente, sesion?.agente, vigOn]);
+  // Mientras el recolector trabaja (marcando o barriendo), su estado cada 1,5 s sin esperarlo; quieto, nada.
+  const faseLimpieza = sesion ? limpieza[sesion.id]?.r?.estado?.fase : undefined;
+  useEffect(() => {
+    if (!sesion || !vigOn || !faseLimpieza) return;
+    const t = setTimeout(() => refrescaVigencia(sesion, sesion.sesionAgente, true), 1500);
+    return () => clearTimeout(t);
+  }, [sesion?.id, faseLimpieza, limpieza[sesion?.id || '']?.r]);
 
   // Desplazamiento: al entrar en una sesión, a lo más reciente; mientras llega la respuesta, siempre abajo,
   // salvo que el usuario haya subido a leer (se respeta hasta que vuelva abajo).
@@ -512,13 +552,24 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // ni preguntas aparte (que no pasan por aquí); «Continuar desde aquí» manda sobre él.
     const sesionPrevia = opc.sesionAgente ?? ses.sesionAgente;
     let memoria = '', relevo: Mensaje['relevo'];
-    if (prov.tipo === 'agente' && politica.relay !== 'off' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia && !corte) {
+    // Con poda (Claude Code), el relevo solo de reserva: si su historial no se puede podar (relayAsBackup).
+    const modoRelevo = relayAsBackup(politica, sesionPrevia ? podables.current[sesionPrevia] : undefined);
+    if (prov.tipo === 'agente' && modoRelevo !== 'off' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia && !corte) {
+      // Relevo por vigencia (Antigravity): la vigencia frente al mensaje nuevo; la memoria, solo con lo vigente.
+      let fueraVig = 0;
+      if (modoRelevo === 'vig') {
+        const r = await Promise.race([pideVigencia(ses, sesionPrevia, previos, t).catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 6000))]);
+        if (r) { previos = CL.applyChatVigencia(previos, r); fueraVig = r.pendiente || 0; }
+      }
       const limpios = previos.filter(m => !m.error);
       const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
-      const mem = W.buildWorkingMemory(limpios);
-      const motivo = W.shouldRelay({ agent: ses.agente, mode: politica.relay, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
-        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length });
-      if (motivo) { memoria = mem; relevo = { de: u!.uso!.contexto!, a: W.estimateTokens(mem.length), anterior: sesionPrevia, motivo }; }
+      const mem = W.buildWorkingMemory(modoRelevo === 'vig' ? W.vigentOnly(limpios) : limpios);
+      const motivo = W.shouldRelay({ agent: ses.agente, mode: modoRelevo, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
+        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length, outTokens: fueraVig, outMin: umbralVigencia() });
+      if (motivo) {
+        memoria = mem; relevo = { de: u!.uso!.contexto!, a: W.estimateTokens(mem.length), anterior: sesionPrevia, motivo };
+        if (modoRelevo === 'vig') previos = CL.markRelayedOut(previos);
+      }
     }
     const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}),
 }];
@@ -608,6 +659,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // retirado, en este turno.
         if (e.poda) {
           const r = e.poda;
+          ponLimpieza(ses.id, { r });
+          if (r.podable !== undefined && sesionPrevia) podables.current[sesionPrevia] = Boolean(r.podable);
           actual = PR.applyPruneReport(actual, r);
           ultimo(m => (r.retirados > 0 || r.repuestos ? { ...m, pruned: { tokens: r.retirados, ...(r.repuestos ? { repuestos: r.repuestos } : {}) } } : m));
         }
@@ -1102,6 +1155,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 </button>
               )}
               <span className="hueco" />
+              {vigOn && prov?.tipo === 'agente' && contextPolicy(sesion.agente, sesion).vig !== 'none' && (
+                <CleanerIndicator agent={sesion.agente} model={sesion.modelo || prov.por_defecto} report={limpieza[sesion.id]?.r}
+                  busy={limpieza[sesion.id]?.busy} messages={mensajes} />
+              )}
               {gastoSesion.turnos > 0 && (
                 <button className={'gasto gasto-' + nivelGasto} onClick={alAjustes}
                   title={[...alertas.map(x => '⚠ ' + x.texto), `Gasto de esta sesión: ${CO.dinero(gastoSesion.coste)} · ${CO.tokens(gastoSesion.entrada)} de entrada y ${CO.tokens(gastoSesion.salida)} de salida en ${gastoSesion.turnos} turnos.`,

@@ -73,6 +73,29 @@ test('cuándo hay relevo', () => {
   assert.equal(W.shouldRelay({ ...ag, planOrder: true }), null);
   assert.equal(W.shouldRelay({ ...ag, hasAgentSession: false }), null);
   assert.equal(W.shouldRelay({ ...ag, memoryChars: 200_000 }), null);
+  // Por vigencia (Antigravity): cuando lo que está fuera de vigencia pesa bastante, no por el tamaño.
+  const vg: W.RelayInput = { ...base, agent: 'antigravity', mode: 'vig', context: 90_000 };
+  assert.equal(W.shouldRelay(vg), null, 'grande pero vigente');
+  assert.match(W.shouldRelay({ ...vg, outTokens: 20_000 })!, /fuera de vigencia/);
+  assert.equal(W.shouldRelay({ ...vg, outTokens: W.PRUNE_MIN_TOKENS - 1 }), null);
+  assert.ok(W.shouldRelay({ ...vg, outTokens: 3000, outMin: 2000 }), 'mínimo forzado');
+  assert.ok(W.shouldRelay({ ...vg, context: 30_000, idleMinutes: 10 }), 'y con la caché caducada');
+});
+
+test('memoria por vigencia: sin los intercambios ni las herramientas fuera de vigencia', () => {
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'Crea el servidor', vig: { vigencia: 0 } },
+    { rol: 'assistant', texto: '', vig: { vigencia: 0 }, partes: [{ tipo: 'herramienta', h: { id: 'a', nombre: 'Read', resumen: 'viejo.go', estado: 'ok', vig: { vigencia: 4, superada: 'lectura superada' } } },
+      { tipo: 'herramienta', h: { id: 'b', nombre: 'Write', resumen: 'main.go', estado: 'ok', vig: { vigencia: 0.5 } } }, { tipo: 'texto', texto: 'Hecho.' }] },
+    { rol: 'user', texto: 'Recuerda la palabra AZUL', vig: { vigencia: 3.6 } },
+    { rol: 'assistant', texto: 'Vale, AZUL.', vig: { vigencia: 3.6 } },
+    { rol: 'user', texto: 'Sigue', vig: { vigencia: 0 } },
+    { rol: 'assistant', texto: 'Sigo.', vig: { vigencia: 0 } },
+  ];
+  const v = W.vigentOnly(ms);
+  assert.equal(v.length, 4);
+  const mem = W.buildWorkingMemory(v);
+  assert.ok(!mem.includes('AZUL') && !mem.includes('viejo.go') && mem.includes('main.go'), mem);
 });
 
 test('memoria de trabajo: sin lo que quedó fuera del contexto con «Continuar desde aquí»', () => {

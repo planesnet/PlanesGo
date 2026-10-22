@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RELAY_THRESHOLD } from '../workingMemory';
+import { PRUNE_MIN_TOKENS } from '../workingMemory';
 import { get, post, type Proveedor } from '../api';
 import { leeAjustes, TIPOS_HOSTING, type TipoHosting } from '../ajustes';
 import { identificador, titulo, type Repo, type Sesion } from '../sesiones';
@@ -253,7 +253,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
               <input type="checkbox" checked={autoContextOn(s)} onChange={e => cambia({ autoContext: e.target.checked ? undefined : false })} />
               Gestión automática del contexto
             </label>
-            <span className="suave pequeno">El agente reenvía todo su historial en cada paso: pgocode lo acota con lo que cada agente permite. OpenCode: al empezar cada turno quita lo que ya no importa (lecturas superadas, salidas largas, lo que no tiene relación con lo último) y lo repone si vuelve a hacer falta. Claude Code: si la conversación lleva parada más que la caché, sigue en una sesión nueva con una «memoria de trabajo» de unos 3k tokens. Antigravity: lo mismo, y también al pasar de {Math.round(RELAY_THRESHOLD / 1000)}k tokens. En todos, el agente resume su historial al llegar a 150k. Desactivado: nada de eso; el agente compacta cuando él decide.</span>
+            <span className="suave pequeno">El agente reenvía todo su historial en cada paso: pgocode lo acota con lo que cada agente permite. OpenCode: al empezar cada turno quita lo que ya no importa (lecturas superadas, salidas largas, lo que no tiene relación con lo último) y lo repone si vuelve a hacer falta. Claude Code: lo mismo, en su historial (entre turnos, con copia de seguridad y teniendo en cuenta la caché); si no se puede, con la conversación parada más que la caché sigue en una sesión nueva con una «memoria de trabajo» de unos 3k tokens. Antigravity no deja tocar su historial: cuando lo que ya no está vigente pasa de {Math.round(PRUNE_MIN_TOKENS / 1000)}k tokens (o la caché ha caducado), sigue en una conversación nueva con la memoria de lo vigente. En todos, el agente resume su historial al llegar a 150k. Desactivado: nada de eso; el agente compacta cuando él decide.</span>
           </fieldset>
         </>}
 

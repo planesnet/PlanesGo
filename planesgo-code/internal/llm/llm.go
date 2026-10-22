@@ -147,6 +147,9 @@ type Herramienta struct {
 	Skill   string `json:"skill,omitempty"`   // la skill que el agente carga con esta herramienta
 	Padre   string `json:"padre,omitempty"`   // herramienta (de subagente) dentro de la que se usa
 	Tokens  int    `json:"tokens,omitempty"`  // lo consumido en el turno al usarla (entrada + salida)
+	// Size: lo que ocupaba la salida entera (caracteres) si se ha recortado: con ello se estima lo que pesa en el
+	// contexto del agente (la vigencia de Antigravity, prune_chat.go).
+	Size int `json:"tamano,omitempty"`
 	// Imágenes que devuelve la herramienta (capturas del navegador, imágenes leídas): las guarda el servidor como
 	// evidencias y por el chat solo viajan sus rutas (Capturas).
 	Imagenes []Imagen `json:"-"`
