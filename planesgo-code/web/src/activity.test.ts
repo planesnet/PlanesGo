@@ -21,3 +21,9 @@ test('pensando, escribiendo y subagentes en marcha', () => {
   assert.equal(A.actividad(m), 'escribiendo la respuesta · subagente «Revisar las pruebas de imputación» en marcha');
   assert.equal(A.actividad(undefined), '');
 });
+
+test('consumo por acción: la diferencia con la anterior; varias en la misma llamada, solo la primera', () => {
+  const t = (id: string, tokens: number) => ({ tipo: 'herramienta', h: { id, nombre: 'Read', estado: 'ok' as const, tokens } });
+  const r = A.consumoPorAccion([t('a', 120_000), { tipo: 'texto' }, t('b', 135_000), t('c', 135_000), t('d', 150_500)], 100_000);
+  assert.deepEqual([...r], [['a', 20_000], ['b', 15_000], ['d', 15_500]]);
+});

@@ -54,3 +54,18 @@ export function actividad(m: Mensaje | undefined): string {
   }
   return l.join(' · ');
 }
+
+// consumoPorAccion: lo que costó cada acción (herramienta) del turno, en tokens: lo acumulado de la conversación al
+// lanzarla menos lo de la acción anterior (o el inicio del turno). Los tokens se gastan por llamada al modelo: si
+// en una llamada lanza varias acciones, la primera lleva el consumo y las demás nada.
+export function consumoPorAccion(partes: { tipo: string; h?: Herramienta }[], inicio: number): Map<string, number> {
+  const r = new Map<string, number>();
+  let prev = inicio;
+  for (const p of partes) {
+    const t = p.tipo === 'herramienta' ? p.h?.tokens : undefined;
+    if (!t || !p.h) continue;
+    if (t > prev) r.set(p.h.id, t - prev);
+    prev = Math.max(prev, t);
+  }
+  return r;
+}

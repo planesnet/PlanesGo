@@ -15,7 +15,7 @@ import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, T
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
-import { actividad } from '../activity';
+import { actividad, consumoPorAccion } from '../activity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as AY from '../ayuda';
@@ -875,7 +875,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   </button>
                 )}
                 {m.partes?.length
-                  ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} /></VigFade.Provider>
+                  ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} inicio={i > 0 ? acumulados[i - 1] : 0} /></VigFade.Provider>
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
@@ -1144,7 +1144,15 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
 // Las partes según el nivel de detalle del proyecto: conciso (solo texto y una línea con las acciones), normal
 // (cada acción plegada) o detallado (todo desplegado).
 // memo (también las de abajo): las partes de los mensajes anteriores no cambian mientras llega la respuesta.
-const Partes = memo(function Partes({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
+// Lo que costó cada acción del turno (por id de herramienta), para la fila de cada una.
+const ConsumoAccion = createContext<Map<string, number>>(new Map());
+
+const Partes = memo(function Partes({ partes, tareas, detalle, inicio = 0 }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle; inicio?: number }) {
+  const consumo = useMemo(() => consumoPorAccion(partes, inicio), [partes, inicio]);
+  return <ConsumoAccion.Provider value={consumo}><PartesDentro partes={partes} tareas={tareas} detalle={detalle} /></ConsumoAccion.Provider>;
+});
+
+const PartesDentro = memo(function PartesDentro({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
   // Las herramientas de un subagente van dentro de su tarea; la herramienta que crea una tarea se pinta como tarea.
   const dentro = (id: string) => partes.filter(p => p.tipo === 'herramienta' && p.h.padre === id);
   const sueltas = partes.filter(p => p.tipo !== 'herramienta' || !p.h.padre);
@@ -1217,6 +1225,14 @@ const ListaTareas = memo(function ListaTareas({ t }: { t: T.Tarea }) {
 // desvanecido (gestión automática del contexto desactivada o fuera del contexto por «Continuar desde aquí»).
 const VigFade = createContext(0);
 
+// El consumo de una acción y lo acumulado de la conversación hasta ella («+3 k · 120 k»), a la vista sin ratón.
+function ConsumoDeAccion({ id, total }: { id: string; total: number }) {
+  const d = useContext(ConsumoAccion).get(id);
+  return <span className="suave pequeno" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}
+    title={(d ? `Esta acción: ${CO.tokens(d)} tokens (la llamada al modelo que la lanzó). ` : 'Lanzada en la misma llamada que la anterior. ') + `Conversación hasta aquí: ${CO.tokens(total)} tokens.`}>
+    {d ? <><b style={{ fontWeight: 600 }}>+{CO.tokens(d)}</b> · </> : null}{CO.tokens(total)}</span>;
+}
+
 const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
   const padre = useContext(VigFade);
   if (p.tipo === 'texto') return <Texto md={p.texto} />;
@@ -1237,7 +1253,7 @@ const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abie
         {vig?.fuera && <span className="vig-out" aria-label="Fuera del contexto del agente">⤓</span>}
         <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}
         <Miniaturas rutas={h.capturas} />
-        {h.tokens ? <span className="suave pequeno" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }} title="Tokens consumidos en la conversación hasta esta acción">{CO.tokens(h.tokens)}</span> : null}
+        {h.tokens ? <ConsumoDeAccion id={h.id} total={h.tokens} /> : null}
       </summary>
       {h.entrada && <pre className="entrada-h">{h.entrada}</pre>}
       {h.salida && <pre className="salida-h">{h.salida}</pre>}
