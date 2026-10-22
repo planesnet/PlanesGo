@@ -5,6 +5,7 @@ import { identificador, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
 import { Agente, Hosting } from './Marca';
 import * as CO from '../costes';
+import { COMPACT_AT_DEFAULT_K, COMPACT_AT_MAX_K, COMPACT_AT_MIN_K } from '../compaction';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
@@ -244,6 +245,17 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
             <legend>Preguntas aparte</legend>
             <label className="casilla"><input type="checkbox" checked={s.decideAparte !== false} onChange={e => cambia({ decideAparte: e.target.checked })} /> Decidir automáticamente qué va al contexto</label>
             <span className="suave pequeno">Con el agente trabajando, pgocode responde aparte (sin que entre en la conversación) lo que no es para el agente: «¿cómo va?» en local y sin tokens; las preguntas sueltas, con un modelo barato. En la duda, va a la conversación. Siempre puedes forzarlo: «?» estado, «//» aparte.</span>
+          </fieldset>
+          <fieldset className="notificaciones">
+            <legend>Historial del agente</legend>
+            <label className="aviso-campo compact-at">Compactar el historial del agente a partir de
+              <span className="con-unidad">
+                <input type="number" min={COMPACT_AT_MIN_K} max={COMPACT_AT_MAX_K} step={10} value={s.compactAtK ?? ''} placeholder={String(COMPACT_AT_DEFAULT_K)}
+                  onChange={e => cambia({ compactAtK: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                <span className="suave">k tokens</span>
+              </span>
+            </label>
+            <span className="suave pequeno">El agente reenvía todo su historial en cada paso: al llegar a este tamaño lo resume y sigue con el resumen. Más bajo gasta menos tokens por paso; más alto conserva más detalle. Vacío: {COMPACT_AT_DEFAULT_K}k (de {COMPACT_AT_MIN_K}k a {COMPACT_AT_MAX_K}k).</span>
           </fieldset>
         </>}
 

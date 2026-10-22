@@ -47,6 +47,12 @@ type Peticion struct {
 	// Aparte: una pregunta que no entra en la conversación. Va a una copia de la sesión del agente (Claude:
 	// --fork-session sin guardarla; OpenCode: --fork y se borra al acabar), en solo lectura.
 	Aparte bool
+	// CompactAt: tokens de contexto a partir de los que el agente compacta su historial (0: CompactAtDefault).
+	// Cada agente lo hace a su manera (ver compaction.go).
+	CompactAt int
+	// LastContext: tokens de contexto de la última llamada del turno anterior (para los agentes a los que pgocode
+	// les pide la compactación él mismo: Antigravity).
+	LastContext int
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,

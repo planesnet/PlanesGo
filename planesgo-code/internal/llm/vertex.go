@@ -20,7 +20,8 @@ const (
 )
 
 // proveedorDeepSeek: el proveedor de DeepSeek en Vertex AI para OpenCode, con el token de Google del usuario.
-func proveedorDeepSeek() (map[string]any, error) {
+// limite: el «contexto» que se le declara a OpenCode (ver openCodeContextLimit), sin pasar del real del modelo.
+func proveedorDeepSeek(limite int) (map[string]any, error) {
 	t, err := google.Token()
 	if err != nil {
 		return nil, err
@@ -33,7 +34,7 @@ func proveedorDeepSeek() (map[string]any, error) {
 			"apiKey":  t,
 		},
 		"models": map[string]any{"deepseek-ai/deepseek-v3.2-maas": map[string]any{
-			"name": "DeepSeek V3.2", "tool_call": true, "limit": map[string]int{"context": 163840, "output": 32768},
+			"name": "DeepSeek V3.2", "tool_call": true, "limit": map[string]int{"context": min(limite, 163840), "output": 32768},
 		}},
 	}, nil
 }
@@ -46,9 +47,9 @@ func entornoOpenCode(p Peticion) []string {
 	if d := datosOpenCode(); d != "" {
 		e = append(e, "XDG_DATA_HOME="+d)
 	}
-	cfg := configOpenCode(p.Modelo)
+	cfg := configOpenCode(p.Modelo, openCodeContextLimit(p))
 	if strings.HasPrefix(p.Modelo, proveedorDeepSeekVertex+"/") {
-		if prov, err := proveedorDeepSeek(); err != nil {
+		if prov, err := proveedorDeepSeek(openCodeContextLimit(p)); err != nil {
 			depuracion.Log("opencode", "sin token de Google para DeepSeek en Vertex: %v", err)
 		} else {
 			cfg["provider"].(map[string]any)[proveedorDeepSeekVertex] = prov
@@ -61,22 +62,21 @@ func entornoOpenCode(p Peticion) []string {
 // Ahorro de tokens en OpenCode (cada paso reenvía todo el historial):
 //   - compactación automática con poda de salidas viejas de herramientas;
 //   - como mucho PasosOpenCode pasos por petición (luego responde sin más herramientas);
-//   - para los modelos de Google, un contexto de ContextoOpenCode tokens: al llegar, compacta (si no, crecería
-//     hasta el millón y cada paso costaría cientos de miles de tokens).
-const (
-	PasosOpenCode    = 40
-	ContextoOpenCode = 160000
-)
+//   - para el modelo de la sesión, un «contexto» a medida (limite, ver openCodeContextLimit): compacta al pasar
+//     del umbral de la sesión (si no, crecería hasta el millón y cada paso costaría cientos de miles de tokens).
+const PasosOpenCode = 40
 
-func configOpenCode(modelo string) map[string]any {
+func configOpenCode(modelo string, limite int) map[string]any {
 	cfg := map[string]any{
 		"compaction": map[string]any{"auto": true, "prune": true},
 		"agent":      map[string]any{"build": map[string]any{"steps": PasosOpenCode}},
 		"provider":   map[string]any{},
 	}
-	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov == "google-vertex" {
+	// Cualquier proveedor del catálogo de OpenCode (models.dev): el límite se mezcla con el suyo. El de DeepSeek en
+	// Vertex AI lo pone pgocode entero (proveedorDeepSeek). La salida no cambia: OpenCode pide como mucho 32k.
+	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov != proveedorDeepSeekVertex {
 		cfg["provider"].(map[string]any)[prov] = map[string]any{"models": map[string]any{
-			id: map[string]any{"limit": map[string]int{"context": ContextoOpenCode, "output": 32000}}}}
+			id: map[string]any{"limit": map[string]int{"context": limite, "output": openCodeOutput}}}}
 	}
 	return cfg
 }

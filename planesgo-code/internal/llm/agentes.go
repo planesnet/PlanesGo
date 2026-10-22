@@ -215,7 +215,6 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	cmd := exec.CommandContext(ctx, a.Programa, args...)
 	inicio := time.Now()
 	id := fmt.Sprintf("%s-%d", a.Clave, inicio.UnixNano()%1e6)
-	depuracion.Log(id, "lanza %s %q en %s [%s] (entorno añadido: %s)", a.Programa, args, p.Carpeta, p.Traza, clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","))
 	cmd.Dir = p.Carpeta
 	entorno := append([]string(nil), p.Entorno...)
 	// PWD con la carpeta de la sesión: algunos agentes (OpenCode) toman su carpeta de PWD, no de la del proceso, y
@@ -223,14 +222,18 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if p.Carpeta != "" {
 		entorno = append(entorno, "PWD="+p.Carpeta)
 	}
+	var propio []string
 	if a.EntornoPara != nil {
-		entorno = append(entorno, a.EntornoPara(p)...)
+		propio = a.EntornoPara(p)
+		entorno = append(entorno, propio...)
 	}
 	for _, kv := range a.EntornoDefecto {
 		if k, _, _ := strings.Cut(kv, "="); os.Getenv(k) == "" {
 			entorno = append(entorno, kv)
 		}
 	}
+	depuracion.Log(id, "lanza %s %q en %s [%s] (entorno añadido: %s; del agente: %s)", a.Programa, args, p.Carpeta, p.Traza,
+		clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","), clavesEntorno(propio))
 	if len(entorno) > 0 {
 		cmd.Env = append(os.Environ(), entorno...)
 	}
@@ -415,6 +418,9 @@ func clavesEntorno(e []string) string {
 	l := make([]string, 0, len(e))
 	for _, v := range e {
 		k, _, _ := strings.Cut(v, "=")
+		if strings.Contains(k, "COMPACT") { // los umbrales de compactación, con su valor (no son secretos)
+			k = v
+		}
 		l = append(l, k)
 	}
 	return strings.Join(l, ",")
@@ -508,7 +514,9 @@ func Agentes() []Proveedor {
 			// Con los modelos actuales Claude Code no trae la lista de tareas (TaskCreate/TaskUpdate) si no se pide:
 			// pgocode la pinta en el chat y la usa para el estado de las preguntas aparte.
 			EntornoDefecto: []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
-			Modelos:        []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
+			// Compacta su historial al pasar del umbral de la sesión (compaction.go).
+			EntornoPara: claudeCompactEnv,
+			Modelos:     []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
 				// La imputación la hace pgocode: sus skills de imputación no se pueden usar.
@@ -589,8 +597,9 @@ func Agentes() []Proveedor {
 				for _, d := range p.Autorizadas {
 					a = append(a, "--add-dir", d)
 				}
-				// El mensaje va pegado a la opción: así nunca se toma como otra opción.
-				return append(a, "--print="+msg)
+				// El mensaje va pegado a la opción: así nunca se toma como otra opción. Con el contexto por encima del
+				// umbral de la sesión, tras «/compact» (compaction.go).
+				return append(a, "--print="+antigravityMessage(msg, p))
 			}},
 		// OpenCode: «run --format json» (eventos de texto, herramientas, consumo y errores); -s continúa la sesión.
 		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode, Modos: true,
@@ -823,7 +832,7 @@ func usoDelTurno(conv string, total Uso) Uso {
 	if ok && total.Entrada >= antes.Entrada && total.Salida >= antes.Salida && total.Segundos >= antes.Segundos {
 		turno = Uso{Entrada: total.Entrada - antes.Entrada, Salida: total.Salida - antes.Salida,
 			Coste: max(total.Coste-antes.Coste, 0), Segundos: total.Segundos - antes.Segundos,
-			CacheLeida: max(total.CacheLeida-antes.CacheLeida, 0), Llamadas: total.Llamadas}
+			CacheLeida: max(total.CacheLeida-antes.CacheLeida, 0), Llamadas: total.Llamadas, Contexto: total.Contexto}
 	}
 	acumulados[conv] = total
 	if f != "" {

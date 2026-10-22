@@ -601,6 +601,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		Aparte   string `json:"aparte"`
 		Contexto string `json:"contexto"`
 		Idioma   string `json:"idioma"` // del navegador (es-ES, en-GB…): el agente responde en él
+		// Compactación del historial del agente: a partir de cuántos tokens (0: el valor por defecto) y el contexto
+		// de la última llamada del turno anterior (ver llm.Peticion).
+		Compactar      int `json:"compactar"`
+		ContextoPrevio int `json:"contexto_previo"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -720,7 +724,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Aparte != "" {
 		s.aparte(turno, r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
-			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
+			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
 		return
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
@@ -731,6 +735,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
+		CompactAt: p.Compactar, LastContext: p.ContextoPrevio,
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
