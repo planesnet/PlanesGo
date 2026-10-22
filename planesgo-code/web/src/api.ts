@@ -1,6 +1,6 @@
 import type { Tarea } from './tareas';
 import type { Copia } from './copias';
-import type { PruneMark, PruneReport } from './prune';
+import type { PruneReport, Vigencia } from './prune';
 // Cliente de la API del backend Go. Toda escritura lleva X-PGO (defensa CSRF) y la cookie de sesión.
 
 export interface Usuario { nombre: string; login: string; odoo?: string; version?: string }
@@ -12,12 +12,12 @@ export interface Proveedor {
   esfuerzos?: string[]; modos?: boolean; inyecta?: boolean; // inyecta: admite mensajes durante el turno
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
-export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[]; tokens?: number } // tokens: los de la conversación hasta esta acción
+export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[]; tokens?: number; vig?: Vigencia } // tokens: los de la conversación hasta esta acción; vig: su vigencia (prune.ts)
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number; contexto?: number } // contexto: tokens de la última llamada
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; prune?: PruneMark; pruned?: { tokens: number; repuestos?: number } } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; prune: lo que pgocode ha retirado de este intercambio del historial del agente (prune.ts); pruned: lo que retiró al empezar este turno
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; vig?: Vigencia; pruned?: { tokens: number; repuestos?: number } } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; vig: la vigencia del intercambio en el contexto del agente (prune.ts); pruned: lo que retiró al empezar este turno
 // Relevo: el mensaje fue a una sesión nueva del agente con la memoria de trabajo (de: tokens de contexto que tenía la
 // sesión anterior; a: los de la memoria, estimados, y al acabar el turno los del contexto real de la sesión nueva);
 // anterior: la sesión del agente de antes (para deshacerlo).

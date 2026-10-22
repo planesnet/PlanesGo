@@ -7,7 +7,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// supersededOf: por qué está superada una parte en el plan («» si no lo está o no es una pieza).
+func supersededOf(plan prunePlan, id string) string {
+	for _, p := range plan.Pieces {
+		if p.PartID == id {
+			return p.F.Superseded
+		}
+	}
+	return ""
+}
 
 // Constructores de una sesión de OpenCode de prueba.
 type sesionPrueba struct {
@@ -106,7 +117,7 @@ func conversacion(n ...int) *sesionPrueba {
 
 func TestPruneRules(t *testing.T) {
 	s := conversacion()
-	plan := planPrune(s.msgs, nil, pruneYoung)
+	plan := planPrune(s.msgs, nil, pruneYoung, time.Time{})
 	if len(plan.Exchanges) != 5 {
 		t.Fatalf("intercambios: %d", len(plan.Exchanges))
 	}
@@ -119,7 +130,7 @@ func TestPruneRules(t *testing.T) {
 	}
 	// La primera lectura de app.go se releyó después: fuera, con su línea.
 	r := parteDe(t, s.msgs, "tool", "read", 0)
-	if e := plan.Edits[r.ID]; !e.Clear || e.Why != "lecturas superadas" {
+	if e := plan.Edits[r.ID]; !e.Clear || supersededOf(plan, r.ID) != "lectura superada" {
 		t.Fatalf("lectura superada: %+v", e)
 	}
 	// La segunda lectura de app.go se editó después: también fuera.
@@ -127,11 +138,13 @@ func TestPruneRules(t *testing.T) {
 		t.Fatal("la lectura editada después sigue")
 	}
 	// La imagen ya vista: fuera (con la marca de OpenCode, que tampoco manda sus adjuntos).
-	if e := plan.Edits[parteDe(t, s.msgs, "tool", "read", 1).ID]; !e.Clear || e.Why != "imágenes ya vistas" {
+	if r := parteDe(t, s.msgs, "tool", "read", 1); !plan.Edits[r.ID].Clear || supersededOf(plan, r.ID) != "imagen ya vista" {
+		e := plan.Edits[r.ID]
 		t.Fatalf("imagen: %+v", e)
 	}
 	// La orden que se repitió: fuera; la repetida (corta) se queda.
-	if e := plan.Edits[parteDe(t, s.msgs, "tool", "bash", 0).ID]; !e.Clear || e.Why != "órdenes repetidas" {
+	if r := parteDe(t, s.msgs, "tool", "bash", 0); !plan.Edits[r.ID].Clear || supersededOf(plan, r.ID) != "orden repetida" {
+		e := plan.Edits[r.ID]
 		t.Fatalf("orden repetida: %+v", e)
 	}
 	if _, ok := plan.Edits[parteDe(t, s.msgs, "tool", "bash", 1).ID]; ok {
@@ -154,8 +167,14 @@ func TestPruneRules(t *testing.T) {
 			}
 		}
 	}
-	if plan.Exchanges[1].Reason != "retirado del contexto: lecturas superadas, imágenes ya vistas, órdenes repetidas" {
-		t.Fatalf("motivo: %q", plan.Exchanges[1].Reason)
+	// Lo superado salta por encima del corte; el intercambio sigue (sin embeddings, solo antigüedad).
+	for _, p := range plan.Pieces {
+		if (p.F.Superseded != "") != (p.V >= vigCut) {
+			t.Fatalf("vigencia de %s: %.2f (%q)", p.PartID, p.V, p.F.Superseded)
+		}
+	}
+	if v := plan.Exchanges[1].V; v <= 0 || v >= 1 || plan.Exchanges[0].V != 0 || plan.Exchanges[4].V != 0 {
+		t.Fatalf("vigencias: %.2f %.2f %.2f", plan.Exchanges[0].V, v, plan.Exchanges[4].V)
 	}
 	// La lectura del CSS (no se volvió a leer) se queda.
 	if _, ok := plan.Edits[parteDe(t, s.msgs, "tool", "read", 3).ID]; ok {
@@ -172,7 +191,7 @@ func TestPruneReasoningAlone(t *testing.T) {
 		s.user("otro")
 		s.assistant(text("vale"))
 	}
-	plan := planPrune(s.msgs, nil, pruneYoung)
+	plan := planPrune(s.msgs, nil, pruneYoung, time.Time{})
 	if _, ok := plan.Edits[parteDe(t, s.msgs, "reasoning", "", 0).ID]; ok {
 		t.Fatal("un mensaje con solo razonamiento se quedaría vacío")
 	}
@@ -198,7 +217,7 @@ func TestPruneLong(t *testing.T) {
 		s.user("otro")
 		s.assistant(text("vale"))
 	}
-	plan := planPrune(s.msgs, nil, pruneYoung)
+	plan := planPrune(s.msgs, nil, pruneYoung, time.Time{})
 	if e := plan.Edits[parteDe(t, s.msgs, "tool", "grep", 0).ID]; e.Output == nil || !strings.Contains(*e.Output, "[Tool output truncated for compaction") {
 		t.Fatalf("salida larga: %+v", e)
 	}
@@ -211,12 +230,12 @@ func TestPruneRelevance(t *testing.T) {
 	for _, x := range xs {
 		sims.Exchange[x.UserID] = 0.1 // nada se parece
 	}
-	plan := planPrune(s.msgs, sims, pruneYoung)
+	plan := planPrune(s.msgs, sims, pruneYoung, time.Time{})
 	if plan.Exchanges[0].Tier != TierL2 || plan.Exchanges[1].Tier != TierL3 || plan.Exchanges[2].Tier != TierL3 || plan.Exchanges[3].Tier != TierL1 {
 		t.Fatalf("el primero y los dos últimos no se sacan: %v %v %v %v", plan.Exchanges[0].Tier, plan.Exchanges[1].Tier, plan.Exchanges[2].Tier, plan.Exchanges[3].Tier)
 	}
-	if !strings.HasPrefix(plan.Exchanges[2].Reason, "fuera del contexto: sin relación con lo último · 0,10") {
-		t.Fatalf("motivo: %q", plan.Exchanges[2].Reason)
+	if x := plan.Exchanges[2]; x.V < vigCut || x.Vig.Sim == nil || *x.Vig.Sim != 0.1 {
+		t.Fatalf("vigencia: %+v", x.Vig)
 	}
 	// En L3, las herramientas pasan a una línea; los textos se quedan.
 	css := parteDe(t, s.msgs, "tool", "read", 3)
@@ -230,18 +249,19 @@ func TestPruneRelevance(t *testing.T) {
 			}
 		}
 	}
-	// Vuelve a parecerse un poco por encima del umbral: estaba en L3, así que necesita el margen para volver.
+	// Vuelve a parecerse lo justo para quedar por debajo del corte: estaba en L3, así que necesita el margen.
 	sims.PrevTier[xs[2].UserID] = TierL3
-	sims.Exchange[xs[2].UserID] = pruneThreshold + 0.01
-	if planPrune(s.msgs, sims, pruneYoung).Exchanges[2].Tier != TierL3 {
+	limite := vigRelPivot - (vigCut-vigAgeStep)/vigRelK // la relación con la que el intercambio 2 queda en 3
+	sims.Exchange[xs[2].UserID] = limite + 0.01
+	if planPrune(s.msgs, sims, pruneYoung, time.Time{}).Exchanges[2].Tier != TierL3 {
 		t.Fatal("sin margen, vuelve")
 	}
-	sims.Exchange[xs[2].UserID] = pruneThreshold + pruneReviveMargin + 0.01
-	if planPrune(s.msgs, sims, pruneYoung).Exchanges[2].Tier != TierL2 {
+	sims.Exchange[xs[2].UserID] = limite + pruneReviveMargin + 0.01
+	if planPrune(s.msgs, sims, pruneYoung, time.Time{}).Exchanges[2].Tier != TierL2 {
 		t.Fatal("con margen, no vuelve")
 	}
 	// Sin similitudes (Ollama no responde): lo que estaba fuera sigue fuera.
-	if p := planPrune(s.msgs, &pruneSims{PrevTier: map[string]pruneTier{xs[2].UserID: TierL3}}, pruneYoung); p.Exchanges[2].Tier != TierL3 || p.Exchanges[1].Tier != TierL2 {
+	if p := planPrune(s.msgs, &pruneSims{PrevTier: map[string]pruneTier{xs[2].UserID: TierL3}}, pruneYoung, time.Time{}); p.Exchanges[2].Tier != TierL3 || p.Exchanges[1].Tier != TierL2 {
 		t.Fatal("sin Ollama")
 	}
 	// Por piezas: en un intercambio relacionado, una lectura grande sin relación sale sola.
@@ -249,15 +269,15 @@ func TestPruneRelevance(t *testing.T) {
 	for _, x := range xs {
 		sims.Exchange[x.UserID] = 0.9
 	}
-	plan = planPrune(s.msgs, sims, pruneYoung)
-	if e := plan.Edits[css.ID]; plan.Exchanges[2].Tier != TierL2 || !e.Clear || plan.Exchanges[2].Reason != "retirado del contexto: piezas sin relación" {
-		t.Fatalf("pieza: %v %+v %q", plan.Exchanges[2].Tier, e, plan.Exchanges[2].Reason)
+	plan = planPrune(s.msgs, sims, pruneYoung, time.Time{})
+	if e := plan.Edits[css.ID]; plan.Exchanges[2].Tier != TierL2 || !e.Clear || supersededOf(plan, css.ID) != "" {
+		t.Fatalf("pieza: %v %+v", plan.Exchanges[2].Tier, e)
 	}
 }
 
 func TestPruneChanges(t *testing.T) {
 	s := conversacion()
-	plan := planPrune(s.msgs, nil, pruneYoung)
+	plan := planPrune(s.msgs, nil, pruneYoung, time.Time{})
 	d := pruneChanges(s.msgs, plan)
 	if len(d.Update) == 0 || len(d.Delete) != 2 || len(d.Restore) != 0 || d.Saved < 5000 {
 		t.Fatalf("cambios: %d %d %d %d", len(d.Update), len(d.Delete), len(d.Restore), d.Saved)
@@ -427,7 +447,7 @@ func TestPruneSweep(t *testing.T) {
 		}
 		var l3 bool
 		for _, x := range rep.Exchanges {
-			if x.Tier == "L3" && strings.Contains(x.Reason, "sin relación") {
+			if x.Out && x.Value >= vigCut && x.Sim != nil && *x.Sim == 0 {
 				l3 = true
 			}
 		}

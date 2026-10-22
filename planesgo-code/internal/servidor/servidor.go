@@ -155,6 +155,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/chat/clasifica", s.conSesion(s.clasifica))
 	mux.HandleFunc("POST /api/chat/inyecta", s.conSesion(s.inyecta))
+	mux.HandleFunc("GET /api/chat/vigencia", s.conSesion(s.vigencia))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
 	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
 	mux.HandleFunc("GET /api/evidencias", s.conSesion(s.evidencias))
@@ -800,6 +801,18 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		envia(map[string]string{"error": err.Error()})
 	}
 	envia(map[string]bool{"fin": true})
+}
+
+// vigencia: la vigencia de cada intercambio y pieza de la sesión del agente, ahora (en segundo plano, sin barrer;
+// ver llm.VigenciaReport). Espera a que acabe el marcado del último turno. Sin datos, listas vacías.
+func (s *Servidor) vigencia(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
+	ctx, cancela := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancela()
+	rep := llm.VigenciaReport(ctx, r.URL.Query().Get("sesion_agente"))
+	if rep == nil {
+		rep = &llm.PruneReport{Exchanges: []llm.PruneExchange{}, Pieces: []llm.PrunePiece{}}
+	}
+	jsonOK(w, rep)
 }
 
 // modoPoda: la poda de la sesión (activada salvo que la sesión la desactive).

@@ -1,12 +1,12 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { chat, get, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
-import { contextPolicy, lastContext } from '../contextPolicy';
+import { autoContextOn, contextPolicy, lastContext } from '../contextPolicy';
 import * as AP from '../aparte';
 import * as W from '../workingMemory';
 import * as PR from '../prune';
@@ -193,6 +193,30 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     idActual.current = sesion?.id;
     setMensajes(sesion ? vivas.current[sesion.id] || conversacion(sesion.id) : []);
   }, [sesion?.id]);
+
+  // Vigencia (prune.ts): cada mensaje y herramienta se desvanece según la suya, salvo con la gestión automática del
+  // contexto desactivada. En segundo plano (OpenCode): al abrir la sesión, al acabar cada turno (cuando pgocode ha
+  // marcado lo nuevo) y cada 10 minutos, porque el tiempo también le resta vigencia.
+  const vigOn = Boolean(sesion && autoContextOn(sesion));
+  const refrescaVigencia = useCallback(async (s: Sesion, sesionAgente = s.sesionAgente) => {
+    if (!contextPolicy(s.agente, s).prune || !sesionAgente) return;
+    try {
+      const r = await get<PR.PruneReport>(`/api/chat/vigencia?sesion_agente=${encodeURIComponent(sesionAgente)}`);
+      if (!r.intercambios.length && !r.piezas?.length) return;
+      if (vivas.current[s.id]) return; // un turno en curso: su barrido trae la suya
+      const base = conversacion(s.id);
+      const n = PR.applyPruneReport(base, r);
+      if (n.every((m, i) => m === base[i])) return;
+      guardaConversacion(s.id, n);
+      if (idActual.current === s.id) setMensajes(n);
+    } catch { /* sin vigencia: se queda la que había */ }
+  }, []);
+  useEffect(() => {
+    if (!sesion || !vigOn || !sesion.sesionAgente) return;
+    refrescaVigencia(sesion);
+    const t = setInterval(() => refrescaVigencia(sesion), 10 * 60_000);
+    return () => clearInterval(t);
+  }, [sesion?.id, sesion?.sesionAgente, sesion?.agente, vigOn]);
 
   // Desplazamiento: al entrar en una sesión, a lo más reciente; mientras llega la respuesta, siempre abajo,
   // salvo que el usuario haya subido a leer (se respeta hasta que vuelva abajo).
@@ -643,6 +667,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t || listos.map(a => a.nombre).join(", ")), sesionAgente, ultima: Date.now(), corte: undefined });
+      if (!ac.signal.aborted && sesionAgente) refrescaVigencia(ses, sesionAgente);
     }
   }
 
@@ -838,11 +863,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   {m.fuera ? 'Fuera del contexto del agente: lo de aquí abajo ya no lo ve' : 'Fuera del contexto del agente al enviar el siguiente mensaje'}
                 </div>
               )}
-              {m.prune && m.rol === 'user' && !fuera && (
-                <div className={'prune-label' + (m.prune.nivel === 'L3' ? ' out' : '')} role="note">{m.prune.motivo}</div>
-              )}
-              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (fuera ? '' : PR.pruneClass(m)) + (sesion.corte === i ? ' cut-point' : '')}
-                title={fuera ? 'Fuera del contexto del agente (no lo verá)' : m.prune ? m.prune.motivo : undefined}>
+              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (sesion.corte === i ? ' cut-point' : '')}
+                style={!fuera && vigOn && PR.vigOpacity(m.vig) < 1 ? { opacity: PR.vigOpacity(m.vig) } : undefined}
+                title={fuera ? 'Fuera del contexto del agente (no lo verá)' : vigOn && m.vig ? PR.vigTitle(m.vig) : undefined}>
+                {!fuera && vigOn && m.vig?.fuera && <span className="vig-out" aria-label="Fuera del contexto del agente">⤓</span>}
                 {m.pruned && PR.prunedLine(m.pruned) && <div className="pruned-line" role="note">{PR.prunedLine(m.pruned)}</div>}
                 {m.texto && !(enCurso && i === mensajes.length - 1) && (
                   <button className="icono copiar-mensaje" onClick={() => copiaTexto(m.texto, i)} title={copiado === i ? 'Copiado' : 'Copiar el mensaje'} aria-label="Copiar el mensaje">
@@ -850,7 +874,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   </button>
                 )}
                 {m.partes?.length
-                  ? <Partes partes={m.partes} tareas={m.tareas} detalle={detalle} />
+                  ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} /></VigFade.Provider>
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
@@ -1188,7 +1212,12 @@ const ListaTareas = memo(function ListaTareas({ t }: { t: T.Tarea }) {
   );
 });
 
+// VigFade: la opacidad del mensaje (por su vigencia) para que cada herramienta se desvanezca según la suya; 0: sin
+// desvanecido (gestión automática del contexto desactivada o fuera del contexto por «Continuar desde aquí»).
+const VigFade = createContext(0);
+
 const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abierta: boolean }) {
+  const padre = useContext(VigFade);
   if (p.tipo === 'texto') return <Texto md={p.texto} />;
   if (p.tipo === 'pensamiento') return <details className="pensamiento" open={abierta}><summary>Razonamiento</summary><div>{p.texto}</div></details>;
   const h = p.h;
@@ -1198,10 +1227,13 @@ const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abie
       {h.salida && <pre className="salida-h">{h.salida}</pre>}
     </details>
   );
+  const vig = padre > 0 && h.vig ? h.vig : undefined;
+  const op = vig ? PR.relativeOpacity(PR.vigOpacity(vig), padre) : 1;
   return (
-    <details className={'herramienta ' + h.estado} open={abierta}>
-      <summary>
+    <details className={'herramienta ' + h.estado} open={abierta} style={op < 1 ? { opacity: op } : undefined}>
+      <summary title={vig ? PR.vigTitle(vig) : undefined}>
         <span className="punto-h" aria-label={h.estado} />
+        {vig?.fuera && <span className="vig-out" aria-label="Fuera del contexto del agente">⤓</span>}
         <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}
         <Miniaturas rutas={h.capturas} />
         {h.tokens ? <span className="suave pequeno" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }} title="Tokens consumidos en la conversación hasta esta acción">{CO.tokens(h.tokens)}</span> : null}

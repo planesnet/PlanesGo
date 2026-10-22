@@ -58,9 +58,9 @@ func TestPruneReal(t *testing.T) {
 				antes += tokensOf(pt.Data)
 			}
 		}
-		reglas := pruneChanges(win, planPrune(win, nil, pruneYoung))
+		reglas := pruneChanges(win, planPrune(win, nil, pruneYoung, time.Time{}))
 		s := c.sims(ctx, win, xs[k].userText())
-		plan := planPrune(win, s, pruneYoung)
+		plan := planPrune(win, s, pruneYoung, time.Time{})
 		emb := pruneChanges(win, plan)
 		l3 := 0
 		for _, x := range plan.Exchanges {
@@ -71,7 +71,7 @@ func TestPruneReal(t *testing.T) {
 		t.Logf("msg %2d %-50.50q historial %6d · reglas -%6d · con embeddings -%6d (L3 %d/%d)", k, xs[k].userText(), antes, reglas.Saved, emb.Saved, l3, len(plan.Exchanges))
 		if os.Getenv("PGO_PRUEBA_PODA_DETALLE") == fmt.Sprint(k) {
 			for _, x := range plan.Exchanges {
-				t.Logf("  %s %s sim %.2f %q", x.Tier, x.UserID, x.Sim, x.Reason)
+				t.Logf("  %s %s sim %.2f vigencia %.2f", x.Tier, x.UserID, x.Sim, x.V)
 				for _, m := range x.Messages {
 					for _, pt := range m.Parts {
 						if e, ok := plan.Edits[pt.ID]; ok {

@@ -102,7 +102,7 @@ func loadOpenCodeSession(ctx context.Context, a *Agente, p Peticion, ses string)
 		return nil, err
 	}
 	q := `SELECT m.id AS mid, json_extract(m.data,'$.role') AS role, CASE WHEN json_type(m.data,'$.summary')='true' THEN 1 ELSE 0 END AS summary, ` +
-		`coalesce(json_extract(m.data,'$.parentID'),'') AS parent, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
+		`coalesce(json_extract(m.data,'$.parentID'),'') AS parent, m.time_created AS mt, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
 		`CASE WHEN o.data IS NULL OR o.data=p.data THEN '' ELSE p.data END AS cur ` +
 		`FROM message m LEFT JOIN part p ON p.message_id=m.id LEFT JOIN ` + pruneTable + ` o ON o.id=p.id ` +
 		`WHERE m.session_id='` + ses + `' ORDER BY m.time_created, m.id, p.id`
@@ -117,6 +117,7 @@ func parseSessionRows(out []byte) ([]*ocMessage, error) {
 	var filas []struct {
 		Mid, Role, Parent, Pid, Data, Cur string
 		Summary                           any
+		Mt                                int64
 	}
 	if len(strings.TrimSpace(string(out))) == 0 {
 		return nil, nil
@@ -134,7 +135,7 @@ func parseSessionRows(out []byte) ([]*ocMessage, error) {
 			case bool:
 				s = v
 			}
-			msgs = append(msgs, &ocMessage{ID: f.Mid, Role: f.Role, Parent: f.Parent, Summary: s})
+			msgs = append(msgs, &ocMessage{ID: f.Mid, Role: f.Role, Parent: f.Parent, Summary: s, Time: f.Mt})
 		}
 		if f.Pid != "" {
 			m := msgs[len(msgs)-1]
@@ -209,8 +210,9 @@ type pruneState struct {
 	Vectors map[string][]float32 `json:"vectores"`
 	// Tiers: el nivel de cada intercambio (por su mensaje del usuario) en el último barrido aplicado.
 	Tiers map[string]pruneTier `json:"niveles"`
-	// Applied: lo que ve la interfaz (lo que está fuera ahora en el historial del agente).
-	Applied []PruneExchange `json:"aplicado"`
+	// Vig: la vigencia de cada intercambio y pieza (la del último barrido o, tras marcar, la que tendría si el
+	// mensaje nuevo fuera como el último), con lo que está fuera ahora en el historial del agente.
+	Vig *vigState `json:"vigencia,omitempty"`
 }
 
 type pruneCollector struct {
@@ -373,10 +375,35 @@ func (c *pruneCollector) mark(ctx context.Context, a *Agente, p Peticion, embedd
 		return
 	}
 	c.snapshot = msgs
+	win := pruneWindow(msgs)
+	var s *pruneSims
 	if embeddings {
-		c.embedAll(ctx, pruneWindow(msgs))
+		c.embedAll(ctx, win)
+		// La vigencia hasta el mensaje nuevo: la relación, frente al último (y el anterior si es corto).
+		if xs := pruneExchanges(win); len(xs) > 0 {
+			s = c.sims(ctx, win, xs[len(xs)-1].userText())
+		}
 	}
+	plan := planPrune(win, s, pruneYoung, pruneNow())
+	c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 	c.save()
+}
+
+// pruneNow: el momento de los cálculos (en las pruebas, una fecha forzada).
+var pruneNow = time.Now
+
+// outNow: si un intercambio está fuera ahora (en el último barrido aplicado).
+func (c *pruneCollector) outNow(x *pruneExchange) bool { return c.state.Tiers[x.UserID] == TierL3 }
+
+func partByID(win []*ocMessage, id string) *ocPart {
+	for _, m := range win {
+		for _, p := range m.Parts {
+			if p.ID == id {
+				return p
+			}
+		}
+	}
+	return &ocPart{}
 }
 
 func (c *pruneCollector) embedAll(ctx context.Context, win []*ocMessage) {
@@ -458,14 +485,16 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 			s = &pruneSims{PrevTier: c.state.Tiers}
 		}
 	}
-	plan := planPrune(win, s, young)
+	now := pruneNow()
+	plan := planPrune(win, s, young, now)
 	d := pruneChanges(win, plan)
-	rep := &PruneReport{Exchanges: c.state.Applied}
 	if !d.worthIt() {
 		depuracion.Log(a.Clave, "poda %s: %d tokens pendientes (no compensa aún)", c.key, d.Saved)
-		if rep.Exchanges == nil {
-			rep.Exchanges = []PruneExchange{}
-		}
+		// La vigencia, la de ahora; lo que está fuera, lo que ya estaba.
+		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
+		c.save()
+		rep := &PruneReport{}
+		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 		return rep, nil
 	}
 	qs, err := pruneStatements(d)
@@ -483,11 +512,41 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 			tiers[x.UserID] = TierL3
 		}
 	}
-	c.state.Tiers, c.state.Applied = tiers, plan.report()
+	c.state.Tiers = tiers
+	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
 	c.save()
 	depuracion.Log(a.Clave, "poda %s: %d tokens fuera (%d partes cambiadas, %d repuestas, %d quitadas)", c.key, d.Saved,
 		len(d.Update), len(d.Restore), len(d.Delete))
-	return &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Exchanges: c.state.Applied}, nil
+	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore)}
+	rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
+	return rep, nil
+}
+
+// VigenciaReport: la vigencia de la sesión del agente ahora (en segundo plano, sin barrer): espera a que su
+// recolector acabe lo pendiente (el marcado del último turno) y la vuelve a calcular con la hora actual. Nil si la
+// sesión no tiene recolector ni estado guardado.
+func VigenciaReport(ctx context.Context, ses string) *PruneReport {
+	if !idSesionOC.MatchString(ses) {
+		return nil
+	}
+	muCollectors.Lock()
+	c := collectors[ses]
+	muCollectors.Unlock()
+	if c == nil {
+		if _, err := os.Stat(filepath.Join(pruneDirFunc(), ses+".json")); err != nil {
+			return nil
+		}
+		c = collectorFor(ses)
+	}
+	var rep *PruneReport
+	c.do(ctx, func() {
+		if c.state.Vig == nil {
+			return
+		}
+		rep = &PruneReport{}
+		rep.Exchanges, rep.Pieces = c.state.Vig.report(pruneNow())
+	})
+	return rep
 }
 
 // pruneOpenCode: el barrido al empezar el turno de OpenCode (en el hilo del recolector de su sesión).

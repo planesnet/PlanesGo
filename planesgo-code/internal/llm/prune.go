@@ -7,23 +7,25 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Poda automática del historial del agente, decidida por pgocode (de momento, OpenCode).
 //
 // Los agentes reenvían todo su historial en cada paso. pgocode, que está por encima, sabe qué ya no importa y lo
 // retira antes de cada turno, sin que el usuario marque nada ni el agente reciba instrucciones de más. Funciona como
-// un recolector de basura con generaciones, con tres niveles como la memoria:
+// un recolector de basura: cada intercambio y cada pieza (lectura, salida, imagen, edición) tiene una vigencia
+// (vigencia.go), un número ≥ 0 que sube con la antigüedad, el tiempo y la falta de relación con lo último, y salta
+// si la pieza está superada. Los niveles de antes quedan como consecuencia:
 //
-//   - L1: el turno en curso y los dos últimos intercambios (la generación joven). No se tocan nunca.
-//   - L2: lo relacionado con lo último. Sigue en el contexto, pero sin lo que ya está superado: lecturas de un
-//     fichero que después se releyó o editó, imágenes ya vistas, salidas de órdenes repetidas, salidas largas (quedan
-//     sus primeras y últimas líneas), el texto viejo y nuevo de las ediciones y el razonamiento. Y, por piezas, las
-//     lecturas o salidas grandes sin relación con lo último (dos granos de embedding: intercambio y pieza).
-//   - L3: lo que no tiene relación con lo último (similitud por debajo del umbral frente al mensaje nuevo). Sus
-//     herramientas pasan a una línea indicativa; los textos del usuario y del agente, que son pequeños, se quedan.
-//     El original lo guarda pgocode con su embedding: si un mensaje nuevo se le parece («fallo de página»), vuelve
-//     a L2 (se repone con el siguiente barrido que compense; ver worthIt).
+//   - L1: el turno en curso y los dos últimos intercambios (vigencia 0). No se tocan nunca.
+//   - L2: vigencia por debajo de 3. Sigue en el contexto, pero sin lo superado (que salta por encima de 3):
+//     lecturas de un fichero que después se releyó o editó, imágenes ya vistas, salidas de órdenes repetidas, el
+//     texto de las ediciones antiguas y el razonamiento; las salidas largas, con sus primeras y últimas líneas. Y
+//     las lecturas o salidas grandes con vigencia propia (por su relación) de 3 o más (dos granos de embedding).
+//   - L3: vigencia de 3 o más. Sus herramientas pasan a la marca nativa; los textos del usuario y del agente, que
+//     son pequeños, se quedan. El original lo guarda pgocode con su embedding: si un mensaje nuevo se le parece
+//     («fallo de página»), su vigencia baja y vuelve (se repone con el siguiente barrido que compense; ver worthIt).
 //
 // Lo que se quita deja una línea que dice qué era y cómo recuperarlo: equivocarse cuesta una relectura, no un
 // error. El marcado (embeddings y estado de cada intercambio) se hace en segundo plano según llega cada cosa
@@ -47,11 +49,12 @@ const (
 )
 
 const (
-	// pruneThreshold: similitud mínima para seguir en el contexto, con vectores de 256 dimensiones (Matrioska de
+	// pruneThreshold: el umbral de la poda por niveles de antes de la vigencia (con él se calibra): similitud
+	// mínima para seguir en el contexto, con vectores de 256 dimensiones (Matrioska de
 	// embeddinggemma). Calibrado con la conversación de INTRADEMA: 0,30 con 768 dimensiones equivale a 0,38 con 256
 	// (el 91 % de las decisiones coinciden; con 256 las similitudes salen de media 0,08 más altas).
 	pruneThreshold = 0.38
-	// pruneReviveMargin: lo que tiene que pasar del umbral un intercambio de L3 para volver (evita que oscile de un
+	// pruneReviveMargin: lo que tiene que subir la relación de un intercambio de L3 para volver (evita que oscile de un
 	// turno a otro y se pierda la caché cada vez).
 	pruneReviveMargin = 0.04
 	// pruneMinTokens: solo se barre si lo que sale pasa de esto; si no, no compensa perder la caché.
@@ -77,6 +80,7 @@ const (
 type ocMessage struct {
 	ID, Role, Parent string
 	Summary          bool
+	Time             int64 // cuándo se creó (ms; 0 si no se sabe)
 	Parts            []*ocPart
 }
 
@@ -191,7 +195,18 @@ type pruneExchange struct {
 	Messages      []*ocMessage
 	Tier          pruneTier
 	Sim           float64 // -1: sin similitud
-	Reason        string
+	Vig           vigFactors
+	V             float64 // vigencia
+}
+
+// time: cuándo acabó el intercambio (su último mensaje; 0 si no se sabe).
+func (x *pruneExchange) time() int64 {
+	for i := len(x.Messages) - 1; i >= 0; i-- {
+		if t := x.Messages[i].Time; t > 0 {
+			return t
+		}
+	}
+	return 0
 }
 
 // userText y answerText: lo que escribió el usuario y la respuesta final del agente.
@@ -321,7 +336,6 @@ type pruneEdit struct {
 	Clear     bool
 	Output    *string // nueva salida (salidas largas: principio y final)
 	TrimInput bool    // ediciones y escrituras: sin el texto
-	Why       string  // para el motivo que ve el usuario («» si no se muestra)
 }
 
 // ClearedText: el texto con que OpenCode sustituye lo que retira (y pgocode, en las entradas de las ediciones).
@@ -344,10 +358,22 @@ type pruneSims struct {
 type prunePlan struct {
 	Edits     map[string]pruneEdit
 	Exchanges []*pruneExchange
+	Pieces    []*pieceVig
 }
 
-// planPrune decide qué se quita (sin tocar nada). young: intercambios de L1 (los últimos).
-func planPrune(win []*ocMessage, sims *pruneSims, young int) prunePlan {
+// pieceVig: la vigencia de una pieza del plan (una herramienta).
+type pieceVig struct {
+	PartID, CallID string
+	X              *pruneExchange
+	F              vigFactors
+	V              float64
+	Note           string // «salida recortada»
+	Out            bool   // fuera del contexto con el plan
+}
+
+// planPrune decide qué se quita (sin tocar nada) con la vigencia de cada intercambio y pieza (vigencia.go): con
+// vigCut o más, fuera. young: intercambios jóvenes (los últimos, vigencia 0). now: el momento del barrido.
+func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prunePlan {
 	xs := pruneExchanges(win)
 	plan := prunePlan{Edits: map[string]pruneEdit{}, Exchanges: xs}
 	// Lo que pasa después de cada parte: lecturas, ediciones y órdenes posteriores (en cualquier nivel).
@@ -378,126 +404,142 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int) prunePlan {
 			lastTodo = n
 		}
 	}
-	first := 0
+	// La vigencia de cada intercambio: fuera (L3) con vigCut o más. Lo que ya estaba fuera necesita bajar un poco
+	// más para volver (pruneReviveMargin: que no oscile de un turno a otro y se pierda la caché cada vez); sin su
+	// relación (Ollama no responde), sigue fuera (reponerlo rompería la caché).
 	for i, x := range xs {
+		x.Vig = vigFactors{Ago: len(xs) - i, Young: young, At: x.time()}
 		switch {
 		case i >= len(xs)-young:
-			x.Tier = TierL1
-		case i == first || sims == nil:
-			x.Tier = TierL2
+			x.Tier, x.Vig.Pinned = TierL1, true
+		case i == 0:
+			x.Tier, x.Vig.Pinned = TierL2, true
 		default:
-			s, ok := sims.Exchange[x.UserID]
-			if !ok {
-				// Sin su similitud (Ollama no responde): lo que estaba fuera sigue fuera (reponerlo rompería la caché).
-				if sims.PrevTier[x.UserID] == TierL3 {
-					x.Tier, x.Reason = TierL3, "fuera del contexto: sin relación con lo último"
+			corte := vigCut
+			if sims != nil {
+				if s, ok := sims.Exchange[x.UserID]; ok {
+					x.Sim, x.Vig.Sim = s, simPtr(s)
 				}
-				break
+				if sims.PrevTier[x.UserID] == TierL3 {
+					if x.Vig.Sim != nil {
+						corte -= vigRelK * pruneReviveMargin
+					} else {
+						corte = 0
+					}
+				}
 			}
-			x.Sim = s
-			limite := pruneThreshold
-			if sims.PrevTier[x.UserID] == TierL3 {
-				limite += pruneReviveMargin
-			}
-			if s < limite {
+			if vigencia(x.Vig, now) >= corte {
 				x.Tier = TierL3
-				x.Reason = "fuera del contexto: sin relación con lo último · " + strings.Replace(fmt.Sprintf("%.2f", s), ".", ",", 1)
 			}
 		}
+		x.V = vigencia(x.Vig, now)
 	}
-	whys := make([]map[string]bool, len(xs))
 	for n, q := range orden {
 		x := xs[q.x]
-		if x.Tier == TierL1 {
-			continue
-		}
 		m := x.Messages[q.m]
 		p := part(q)
-		e, ok := pruneRule(p, m, x.Tier, n, lastRead, lastWrite, lastCmd, lastTodo)
-		if !ok && x.Tier == TierL2 && sims != nil && p.isPiece() {
-			if s, hay := sims.Piece[p.ID]; hay && s < pruneThreshold {
-				e, ok = pruneEdit{Clear: true, Why: "piezas sin relación"}, true
+		if x.Tier == TierL1 {
+			if p.isTool() { // no se tocan: vigencia 0
+				plan.Pieces = append(plan.Pieces, &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: x.Vig})
 			}
-		}
-		if !ok {
 			continue
 		}
-		plan.Edits[p.ID] = e
-		if e.Why != "" {
-			if whys[q.x] == nil {
-				whys[q.x] = map[string]bool{}
+		if p.v.Type == "reasoning" {
+			if e, ok := pruneReasoning(m); ok {
+				plan.Edits[p.ID] = e
 			}
-			whys[q.x][e.Why] = true
+			continue
 		}
-	}
-	for i, x := range xs {
-		if x.Tier == TierL2 && len(whys[i]) > 0 {
-			var l []string
-			for _, w := range []string{"lecturas superadas", "imágenes ya vistas", "órdenes repetidas", "salidas largas recortadas", "piezas sin relación"} {
-				if whys[i][w] {
-					l = append(l, w)
-				}
+		if !p.isTool() {
+			continue
+		}
+		// La pieza: su fecha, su relación propia si es grande (si no, la del intercambio) y si está superada.
+		f := x.Vig
+		if m.Time > 0 {
+			f.At = m.Time
+		}
+		propia := false
+		if sims != nil && p.isPiece() {
+			if s, ok := sims.Piece[p.ID]; ok {
+				f.Sim, f.Pinned, propia = simPtr(s), false, true
 			}
-			x.Reason = "retirado del contexto: " + strings.Join(l, ", ")
 		}
+		e, superada := pruneSuperseded(p, n, lastRead, lastWrite, lastCmd, lastTodo)
+		f.Superseded = superada
+		pv := &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
+		pv.V = max(vigencia(f, now), x.V)
+		switch {
+		case superada != "":
+			pv.Out = e.Clear || e.TrimInput
+		case x.Tier == TierL3 || (propia && vigencia(f, now) >= vigCut):
+			// Fuera: la salida, a la marca nativa; las ediciones, sin su texto; lo pequeño se queda (la línea que lo
+			// sustituye ocuparía lo mismo).
+			switch {
+			case isEditTool(p.v.Tool):
+				e = pruneEdit{TrimInput: true}
+			case len(p.v.State.Output) < pruneSmall && len(p.v.State.Attachments) == 0:
+				e = pruneEdit{}
+			default:
+				e = pruneEdit{Clear: true}
+			}
+			pv.Out = e.Clear || e.TrimInput
+		case p.v.Tool != "read" && p.v.Tool != "todowrite":
+			// Sigue, pero las salidas largas, con solo sus primeras y últimas líneas.
+			if c, ok := cutLong(p.output()); ok {
+				e = pruneEdit{Output: &c}
+				pv.Note = "salida recortada"
+			}
+		}
+		if e.Clear || e.TrimInput || e.Output != nil || e.Delete {
+			plan.Edits[p.ID] = e
+		}
+		plan.Pieces = append(plan.Pieces, pv)
 	}
 	return plan
 }
 
-// pruneRule: las reglas seguras de una parte de L2, o en L3 su línea indicativa.
-func pruneRule(p *ocPart, m *ocMessage, tier pruneTier, n int, lastRead, lastWrite, lastCmd map[string]int, lastTodo int) (pruneEdit, bool) {
-	if p.v.Type == "reasoning" {
-		// El razonamiento de turnos anteriores, salvo si es lo único del mensaje (quedaría vacío y Gemini lo rechaza).
-		for _, o := range m.Parts {
-			if o.v.Type == "tool" || (o.v.Type == "text" && strings.TrimSpace(o.v.Text) != "") {
-				return pruneEdit{Delete: true}, true
-			}
+func isEditTool(t string) bool {
+	return t == "edit" || t == "write" || t == "patch" || t == "apply_patch" || t == "multiedit"
+}
+
+// pruneReasoning: el razonamiento de turnos anteriores fuera, salvo si es lo único del mensaje (quedaría vacío y
+// Gemini lo rechaza).
+func pruneReasoning(m *ocMessage) (pruneEdit, bool) {
+	for _, o := range m.Parts {
+		if o.v.Type == "tool" || (o.v.Type == "text" && strings.TrimSpace(o.v.Text) != "") {
+			return pruneEdit{Delete: true}, true
 		}
-		return pruneEdit{}, false
 	}
-	if !p.isTool() {
-		return pruneEdit{}, false
+	return pruneEdit{}, false
+}
+
+// pruneSuperseded: si una herramienta (fuera de los jóvenes) está superada, por qué y qué se hace con ella: lecturas
+// de un fichero que después se releyó o editó, imágenes ya vistas, órdenes repetidas, listas de tareas
+// sustituidas y el texto de las ediciones antiguas.
+func pruneSuperseded(p *ocPart, n int, lastRead, lastWrite, lastCmd map[string]int, lastTodo int) (pruneEdit, string) {
+	if isEditTool(p.v.Tool) {
+		return pruneEdit{TrimInput: true}, "edición antigua"
 	}
-	trim := p.v.Tool == "edit" || p.v.Tool == "write" || p.v.Tool == "patch" || p.v.Tool == "apply_patch" || p.v.Tool == "multiedit"
-	if tier == TierL3 {
-		if trim {
-			return pruneEdit{TrimInput: true}, true
-		}
-		if len(p.v.State.Output) < pruneSmall && len(p.v.State.Attachments) == 0 {
-			return pruneEdit{}, false
-		}
-		return pruneEdit{Clear: true}, true
-	}
-	out := p.output()
 	switch p.v.Tool {
-	case "edit", "write", "patch", "apply_patch", "multiedit":
-		return pruneEdit{TrimInput: true}, true
 	case "read":
 		f := p.filePath()
-		if (lastRead[f] > n) || lastWrite[f] > n {
-			return pruneEdit{Clear: true, Why: "lecturas superadas"}, true
+		if lastRead[f] > n || lastWrite[f] > n {
+			return pruneEdit{Clear: true}, "lectura superada"
 		}
-		if len(p.v.State.Attachments) > 0 {
-			return pruneEdit{Clear: true, Why: "imágenes ya vistas"}, true
-		}
-		return pruneEdit{}, false
 	case "bash":
 		if lastCmd[strings.TrimSpace(resumen(p.v.State.Input))] > n && len(p.v.State.Output) >= pruneSmall {
-			return pruneEdit{Clear: true, Why: "órdenes repetidas"}, true
+			return pruneEdit{Clear: true}, "orden repetida"
 		}
 	case "todowrite":
 		if lastTodo > n && len(p.v.State.Output) >= pruneSmall {
-			return pruneEdit{Clear: true}, true
+			return pruneEdit{Clear: true}, "lista de tareas superada"
 		}
-		return pruneEdit{}, false
+		return pruneEdit{}, ""
 	}
 	if len(p.v.State.Attachments) > 0 {
-		return pruneEdit{Clear: true, Why: "imágenes ya vistas"}, true
+		return pruneEdit{Clear: true}, "imagen ya vista"
 	}
-	if c, ok := cutLong(out); ok {
-		return pruneEdit{Output: &c, Why: "salidas largas recortadas"}, true
-	}
-	return pruneEdit{}, false
+	return pruneEdit{}, ""
 }
 
 // cutLong: una salida larga con solo sus primeras y últimas líneas.
@@ -658,33 +700,17 @@ func cosine(a, b []float32) float64 {
 // shortMessage: un mensaje que no dice de qué va («compila y actualiza»): hereda el anterior.
 func shortMessage(s string) bool { return len(strings.Fields(s)) < pruneShortWords }
 
-// PruneReport: lo que ve la interfaz al empezar el turno (Evento.Prune).
+// PruneReport: lo que ve la interfaz al empezar el turno (Evento.Prune) y, en segundo plano, al volver a calcular
+// la vigencia (VigenciaReport): la de cada intercambio y pieza.
 type PruneReport struct {
 	Removed   int             `json:"retirados"`           // tokens que salen del historial en este turno
 	Restored  int             `json:"repuestos,omitempty"` // piezas que vuelven («fallo de página»)
-	Exchanges []PruneExchange `json:"intercambios"`        // los intercambios con algo fuera del contexto
+	Exchanges []PruneExchange `json:"intercambios"`        // todos los intercambios (por su punto)
+	Pieces    []PrunePiece    `json:"piezas"`              // las herramientas de los intercambios
 }
 
-// PruneExchange: un intercambio con algo fuera del contexto del agente (por su punto: el último mensaje del agente).
+// PruneExchange: la vigencia de un intercambio (por su punto: el último mensaje del agente).
 type PruneExchange struct {
-	Point      string  `json:"punto"`
-	Tier       string  `json:"nivel"` // L2 (algo retirado) | L3 (fuera)
-	Reason     string  `json:"motivo"`
-	Similarity float64 `json:"similitud,omitempty"`
-}
-
-// report: los intercambios del plan con algo fuera.
-func (p prunePlan) report() []PruneExchange {
-	l := []PruneExchange{}
-	for _, x := range p.Exchanges {
-		if x.Reason == "" || x.Point == "" {
-			continue
-		}
-		e := PruneExchange{Point: x.Point, Tier: string(x.Tier), Reason: x.Reason}
-		if x.Tier == TierL3 {
-			e.Similarity = math.Round(x.Sim*100) / 100
-		}
-		l = append(l, e)
-	}
-	return l
+	Point string `json:"punto"`
+	Vigencia
 }
