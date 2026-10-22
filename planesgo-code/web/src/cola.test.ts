@@ -157,3 +157,20 @@ test('flujo: cada sesión tiene su propia cola', () => {
   c.efecto('s2');
   assert.deepEqual(c.enviados, ['s1:uno', 's1:dos', 's2:otra']);
 });
+
+test('con adjuntos y sin texto, se encola (y sale sin líneas vacías)', () => {
+  let c = C.encola(C.vacia<string>(), '', ['foto.png']);
+  assert.deepEqual(c.mensajes, [{ texto: '', adjuntos: ['foto.png'] }]);
+  c = C.encola(c, 'mira esto');
+  assert.deepEqual(C.siguiente(c, false).enviar, { texto: 'mira esto', adjuntos: ['foto.png'] });
+  assert.equal(C.encola(C.vacia<string>(), '  ', []).mensajes.length, 0, 'sin texto ni adjuntos, no');
+});
+
+test('edita: el mensaje en su sitio (o por su texto si la cola cambió); null si ya salió', () => {
+  const c = C.encola(C.encola(C.vacia<string>(), 'uno', ['a.png']), 'dos');
+  assert.deepEqual(C.edita(c, 1, 'dos', 'dos bis')!.mensajes.map(m => m.texto), ['uno', 'dos bis']);
+  assert.deepEqual(C.edita(C.quita(c, 0), 1, 'dos', 'otro')!.mensajes.map(m => m.texto), ['otro']);
+  assert.equal(C.edita(C.quita(c, 1), 1, 'dos', 'x'), null);
+  assert.deepEqual(C.edita(c, 1, 'dos', '  ')!.mensajes.map(m => m.texto), ['uno'], 'vacío y sin adjuntos: fuera');
+  assert.deepEqual(C.edita(c, 0, 'uno', '')!.mensajes[0], { texto: '', adjuntos: ['a.png'] }, 'con adjuntos se queda');
+});

@@ -18,4 +18,5 @@ test('la ayuda refleja las teclas de envío según el agente y la opción', () =
   assert.ok(claves({ alTurno: true, inyecta: true }).some(e => e.clave === 'Alt+Intro'));
   assert.ok(!claves({ alTurno: true, inyecta: false }).some(e => e.clave === 'Alt+Intro'));
   assert.ok(claves({ alTurno: true, inyecta: true }).some(e => e.clave.startsWith('/help')));
+  assert.match(claves({ alTurno: false, inyecta: false }).find(e => e.clave === '↑ ↓')!.que, /cola/);
 });

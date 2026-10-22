@@ -43,8 +43,3 @@ test('la línea del turno', () => {
   assert.equal(P.prunedLine({ tokens: 0, repuestos: 3 }), '↺ pgocode ha repuesto 3 piezas que vuelven a ser relevantes');
   assert.equal(P.prunedLine({ tokens: 0 }), '');
 });
-
-test('la poda está activada por defecto', () => {
-  assert.equal(P.autoPruneOn({}), true);
-  assert.equal(P.autoPruneOn({ autoPrune: false }), false);
-});

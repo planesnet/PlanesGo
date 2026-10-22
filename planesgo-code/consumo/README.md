@@ -51,7 +51,7 @@ separa las rondas por estrategia. En el informe, la tabla turno a turno marca en
 estrategia en cada turno (relevo, compactación).
 
 - `ninguna` (por defecto): reanudar la sesión del agente, que reenvía todo el historial, sin compactar: con pgocode,
-  el umbral de compactación va al máximo (1M; la app compacta por defecto a partir de 80k).
+  el umbral de compactación va al máximo (1M; la app compacta por defecto a partir de 150k).
 - `compactar[:N]`: la compactación gobernada por pgocode (`internal/llm/compaction.go`): cada turno lleva
   `CompactAt` = N miles de tokens (por defecto 20k, el mínimo, para que salte en una prueba corta) y `LastContext`
   (el contexto de la última llamada del turno anterior). Solo con `-modo pgocode`.

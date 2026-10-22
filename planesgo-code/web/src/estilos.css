@@ -749,16 +749,9 @@ button.miga-item:hover { background: var(--hover); }
 .miniatura:hover { border-color: var(--acento); }
 .mas-miniaturas { font-size: 11px; color: var(--suave); cursor: pointer; }
 /* Imágenes de las respuestas del agente: en miniatura (al pulsar, el visor) */
-.miniatura-respuesta { padding: 0; display: inline-block; vertical-align: top; width: 132px; height: 84px; margin: 4px 6px 4px 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--linea); background: var(--panel); cursor: zoom-in; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.miniatura-respuesta { padding: 0; display: inline-block; vertical-align: top; width: 96px; height: 60px; margin: 4px 6px 4px 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--linea); background: var(--panel); cursor: zoom-in; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .miniatura-respuesta img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
 .miniatura-respuesta:hover { border-color: var(--acento); }
-/* Tira con todas las fotos de la conversación (la más reciente, primero) */
-/* La fila de la conversación del chat (rejilla de 3 filas): la tira de fotos encima de los mensajes, en un solo bloque. */
-.conversation-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.conversation-pane > .mensajes { flex: 1; min-height: 0; }
-.tira-fotos { flex: none; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 6px 12px; border-bottom: 1px solid var(--linea); background: var(--fondo); }
-.tira-fotos > span { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
-.tira-fotos .miniatura { flex: none; width: 72px; height: 46px; cursor: zoom-in; }
 .acciones > summary, .herramienta > summary { display: flex; align-items: center; gap: 6px; }
 .fondo-modal.visor-capturas { display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; background: rgba(0,0,0,.72); }
 .visor-capturas figure { margin: 0; max-width: 96vw; display: grid; gap: 8px; justify-items: center; }
@@ -852,8 +845,6 @@ button.miga-item:hover { background: var(--hover); }
 .aviso-campo { display: grid; gap: 2px; font-size: 12px; }
 .con-unidad { display: flex; align-items: center; gap: 4px; }
 .con-unidad input { width: 100%; min-width: 0; }
-.compact-at .con-unidad input { width: 7em; }
-.compact-at .con-unidad .suave { white-space: nowrap; }
 
 /* Duplicar una pestaña del navegador interno (al pasar el ratón por la pestaña) */
 .pestana-web .duplicar-pestana { opacity: 0; }
@@ -884,6 +875,8 @@ button.miga-item:hover { background: var(--hover); }
 /* Adónde irá el mensaje (encima del cuadro, a la derecha): se puede cambiar con un clic antes de enviar. */
 .destino-mensaje { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 11.5px; margin: 0 4px -2px; }
 .destino-mensaje .enlace { font-size: 11.5px; }
+/* Historial con ↑ ↓: editando un mensaje de la cola */
+.history-notice { text-align: right; font-size: 11.5px; margin: 0 4px -2px; }
 /* Lo que el usuario mandó al agente durante su turno (lo leyó antes de acabar). */
 .inyectado { font-size: 12.5px; color: var(--suave); border-left: 2px solid var(--acento); padding: 2px 8px; white-space: pre-wrap; }
 .relay-line { margin-top: 4px; font-size: 12px; color: var(--suave); }

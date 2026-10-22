@@ -231,7 +231,7 @@ func TestOpenCodePermiso(t *testing.T) {
 			t.Errorf("permisos sin %s: %s", x, e[0])
 		}
 	}
-	for _, x := range []string{`"compaction":{"auto":true,"prune":true}`, `"steps":40`, `"gemini-4-argon":{"limit":{"context":112000,"output":32000}`} {
+	for _, x := range []string{`"compaction":{"auto":true,"prune":true}`, `"steps":40`, `"gemini-4-argon":{"limit":{"context":182000,"output":32000}`} {
 		if !strings.HasPrefix(e[2], "OPENCODE_CONFIG_CONTENT=") || !strings.Contains(e[2], x) {
 			t.Errorf("configuración sin %s: %s", x, e[2])
 		}
@@ -517,5 +517,18 @@ esac`
 	}
 	if p := permisosOpenCode("ninguna", nil); !strings.Contains(p, `"read":"deny"`) || !strings.Contains(p, `"bash":"deny"`) || !strings.Contains(p, `"edit":"deny"`) {
 		t.Errorf("sin herramientas: %s", p)
+	}
+}
+
+// Con adjuntos y sin texto, el mensaje lleva un texto mínimo y la lista de ficheros.
+func TestWithAttachments(t *testing.T) {
+	if got := withAttachments("hola", nil); got != "hola" {
+		t.Errorf("sin adjuntos: %q", got)
+	}
+	if got := withAttachments("mira", []string{"/a/b.png"}); got != "mira\n\nFicheros adjuntos (léelos con tus herramientas):\n- /a/b.png" {
+		t.Errorf("con texto: %q", got)
+	}
+	if got := withAttachments("  ", []string{"/a/b.png"}); !strings.HasPrefix(got, "Te paso estos ficheros.\n\nFicheros adjuntos") {
+		t.Errorf("sin texto: %q", got)
 	}
 }

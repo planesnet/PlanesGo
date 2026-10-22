@@ -74,18 +74,13 @@ func (s *Servidor) clasifica(w http.ResponseWriter, r *http.Request, ses *sesion
 		Texto  string `json:"texto"`
 		Ultimo string `json:"ultimo"` // lo último que ha dicho el agente
 		Sesion string `json:"sesion"`
-		// Ramas por tema: el tema de la sesión en 2 o 3 líneas (de la memoria de trabajo). Con él, el clasificador
-		// también puede decir «tema» (otro asunto: mejor en una sesión hija). SoloTema: con el agente libre, solo
-		// interesa si es otro tema (lo demás va a la conversación).
-		Tema     string `json:"tema"`
-		SoloTema bool   `json:"solo_tema"`
 	}
 	if err := lee(r, &p); err != nil || strings.TrimSpace(p.Texto) == "" {
 		jsonError(w, http.StatusBadRequest, "petición no válida")
 		return
 	}
 	inicio := time.Now()
-	tipo, u, err := clasificaMensaje(r.Context(), p.Texto, p.Ultimo, p.Tema, p.SoloTema)
+	tipo, u, err := clasificaMensaje(r.Context(), p.Texto, p.Ultimo)
 	if s.Imputacion != nil && p.Sesion != "" {
 		c := map[string]any{"tipo": tipo, "modelo": llm.ModeloClasifica, "ms": time.Since(inicio).Milliseconds(), "entrada": u.Entrada, "salida": u.Salida, "coste": u.Coste}
 		if err != nil {
@@ -106,44 +101,20 @@ contexto: es una pregunta sobre el trabajo o la conversación que no le pide nad
 suelta: es una pregunta que no tiene que ver con el trabajo (cultura general, otro tema).
 Si dudas, conversacion.`
 
-// Otro tema: una petición de trabajo sobre otro asunto, que va mejor en una sesión hija (con lo mínimo) que en una
-// conversación que ya ha crecido. Se añade a lo anterior solo si la interfaz manda el tema de la sesión.
-const lineaTema = "tema: SOLO si pide TRABAJO NUEVO (hacer, añadir, cambiar algo) sobre OTRA funcionalidad u otra parte del proyecto, distinta del tema de la sesión, y se entiende sin lo hablado. Dar un dato, pedir que recuerde algo, preguntar, opinar, continuar, corregir o depender de lo que se está haciendo NO es tema.\n" +
-	"Ejemplos (sesión sobre el diseño de la lista de proyectos): «Añade las etiquetas de Odoo a la lista de tareas» → tema; «Recuerda esta palabra clave: AZUL» → conversacion; «Pon el botón más a la derecha» → conversacion; «¿Qué colores has usado?» → conversacion.\n"
-
-const sistemaSoloTema = `Un usuario escribe a un agente de programación en una sesión que ya trata de un tema. Decide si su mensaje sigue en esa conversación o es otro tema y responde SOLO una palabra:
-conversacion: sigue con el tema de la sesión, lo continúa, lo corrige, responde al agente o depende de lo hablado.
-` + lineaTema + `Si dudas, conversacion.`
-
-var tiposClasifica = []string{"conversacion", "contexto", "suelta", "tema"}
+var tiposClasifica = []string{"conversacion", "contexto", "suelta"}
 
 var clasificaGemini = llm.Gemini
 
-func clasificaMensaje(ctx context.Context, texto, ultimo, tema string, soloTema bool) (string, llm.Uso, error) {
+func clasificaMensaje(ctx context.Context, texto, ultimo string) (string, llm.Uso, error) {
 	q := "Mensaje del usuario:\n" + recortaTexto(texto, 1500)
 	if strings.TrimSpace(ultimo) != "" {
 		q = "Lo último que dijo el agente:\n" + recortaTexto(ultimo, 600) + "\n\n" + q
 	}
-	sistema := sistemaClasifica
-	tema = strings.TrimSpace(tema)
-	if tema != "" {
-		q = "Tema de la sesión:\n" + recortaTexto(tema, 800) + "\n\n" + q
-		if soloTema {
-			sistema = sistemaSoloTema
-		} else {
-			sistema = strings.Replace(sistemaClasifica, "Si dudas", lineaTema+"Si dudas", 1)
-		}
-	}
-	resp, u, err := clasificaGemini(ctx, llm.ModeloClasifica, sistema, q, 5, 0)
+	resp, u, err := clasificaGemini(ctx, llm.ModeloClasifica, sistemaClasifica, q, 5, 0)
 	if err != nil {
 		return "conversacion", u, err
 	}
-	t := tipoClasifica(resp)
-	// Sin tema no hay «tema»; y con el agente libre, lo que no es otro tema va a la conversación.
-	if (t == "tema" && tema == "") || (soloTema && t != "tema") {
-		t = "conversacion"
-	}
-	return t, u, nil
+	return tipoClasifica(resp), u, nil
 }
 
 // tipoClasifica: la palabra de la respuesta (sin tildes ni signos); cualquier otra cosa, a la conversación.

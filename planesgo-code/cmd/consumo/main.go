@@ -175,7 +175,7 @@ type conversation struct {
 	CompactAt, LastContext int
 	// Prune: la poda del historial (llm.Peticion.Prune; «» en las demás estrategias).
 	Prune string
-	Note                   string // lo que ha hecho la estrategia en este turno
+	Note  string // lo que ha hecho la estrategia en este turno
 	// Run: un turno con el agente, fuera de las pruebas (su consumo cuenta en el turno que empieza).
 	Run   func(ctx context.Context, msg, session string) resultadoTurno
 	extra Medida
@@ -190,8 +190,8 @@ type exchange struct {
 }
 
 // noStrategy («ninguna»): reanudar la sesión y reenviarlo todo, sin compactar. pgocode compacta por defecto a partir
-// de llm.CompactAtDefault (80k): aquí el umbral va al máximo (llm.CompactAtMax, 1M), que en la práctica no se
-// alcanza; si no, «ninguna» sería «compactar:80» en cuanto la conversación pasara de 80k.
+// de llm.CompactAtDefault (150k): aquí el umbral va al máximo (llm.CompactAtMax, 1M), que en la práctica no se
+// alcanza; si no, «ninguna» sería «compactar:150» en cuanto la conversación pasara de 150k.
 type noStrategy struct{}
 
 func (noStrategy) before(_ context.Context, c *conversation) error {

@@ -5,8 +5,8 @@ import Icono from './Icono';
 
 // Capturas de evidencia: las imágenes que devuelven las herramientas de los agentes (pruebas en el navegador…),
 // guardadas por pgocode en la carpeta de la sesión. En el chat, miniaturas junto a cada herramienta (como en
-// Claude), las imágenes de las respuestas también en miniatura y una tira con todas las de la conversación; en la
-// TV, la galería del proyecto. Al pulsar, el visor a tamaño completo (el mismo en el chat y en la TV).
+// Claude) y las imágenes de las respuestas también en miniatura; en la TV, la galería del proyecto. Al pulsar, el
+// visor a tamaño completo (el mismo en el chat y en la TV); en el chat, con todas las fotos de la conversación.
 
 export interface Captura { ruta: string; t: string; sesion: string; titulo?: string; herramienta?: string; resumen?: string; agente?: string; rama?: string }
 
@@ -129,20 +129,5 @@ export function FotoRespuesta({ src, alt }: { src?: string; alt?: string }) {
       </button>
       {visor && <Visor fotos={[{ src, pie: alt }]} inicial={0} alCerrar={() => setVisor(false)} />}
     </>
-  );
-}
-
-// TiraFotos: todas las fotos de la conversación en curso, de la más reciente a la más antigua.
-export function TiraFotos({ fotos, alAbrir }: { fotos: FotoVisor[]; alAbrir: (i: number) => void }) {
-  if (!fotos.length) return null;
-  return (
-    <div className="tira-fotos" aria-label="Fotos de la conversación" title="Las capturas y las imágenes de esta conversación, de la más reciente a la más antigua. Pulsa una para verla en grande.">
-      <span className="suave pequeno"><Icono n="imagen" t={13} /> Fotos de la conversación ({fotos.length})</span>
-      {fotos.map((f, i) => (
-        <button key={f.src} className="miniatura" title={f.pie || 'Ver la foto'} onClick={() => alAbrir(i)}>
-          <img src={f.src} alt={f.pie || 'Foto'} loading="lazy" />
-        </button>
-      ))}
-    </div>
   );
 }

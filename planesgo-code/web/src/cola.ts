@@ -7,11 +7,22 @@ export interface Cola<A = unknown> { mensajes: EnCola<A>[]; parada: boolean }
 
 export const vacia = <A>(): Cola<A> => ({ mensajes: [], parada: false });
 
-// encola: añade al final; un texto vacío no se encola.
+// encola: añade al final; sin texto ni adjuntos no se encola (con adjuntos, aunque no haya texto).
 export function encola<A>(c: Cola<A>, texto: string, adjuntos: A[] = []): Cola<A> {
   const t = texto.trim();
-  if (!t) return c;
+  if (!t && !adjuntos.length) return c;
   return { ...c, mensajes: [...c.mensajes, { texto: t, adjuntos }] };
+}
+
+// edita: el mensaje de la cola que se cargó con ↑ (inputHistory.ts), con su texto nuevo y sus adjuntos. Se busca
+// en su sitio y, si la cola ha cambiado, por su texto original; null si ya no está (ya salió). Sin texto ni
+// adjuntos, sale de la cola.
+export function edita<A>(c: Cola<A>, i: number, original: string, texto: string): Cola<A> | null {
+  const j = c.mensajes[i]?.texto === original ? i : c.mensajes.findIndex(m => m.texto === original);
+  if (j < 0) return null;
+  const t = texto.trim();
+  if (!t && !c.mensajes[j].adjuntos.length) return quita(c, j);
+  return { ...c, mensajes: c.mensajes.map((m, k) => (k === j ? { ...m, texto: t } : m)) };
 }
 
 export function quita<A>(c: Cola<A>, i: number): Cola<A> {
@@ -28,7 +39,7 @@ export function siguiente<A>(c: Cola<A>, ocupado: boolean, esOrden: (t: string) 
     while (n < c.mensajes.length && !esOrden(c.mensajes[n].texto)) n++;
   }
   const juntos = c.mensajes.slice(0, n);
-  const enviar = { texto: juntos.map(m => m.texto).join('\n\n'), adjuntos: juntos.flatMap(m => m.adjuntos) };
+  const enviar = { texto: juntos.map(m => m.texto).filter(Boolean).join('\n\n'), adjuntos: juntos.flatMap(m => m.adjuntos) };
   return { enviar, cola: { ...c, mensajes: c.mensajes.slice(n) } };
 }
 

@@ -12,8 +12,7 @@ import type { Tarea } from './tareas';
 
 // turno: a la conversación, pero ya, al turno en curso (solo agentes que lo admiten: Claude Code); automático solo
 // con la opción «Siempre al turno».
-// hija: otro tema; a una sesión hija con lo mínimo (lo propone el clasificador, ver topics.ts; nunca se aprende).
-export type Destino = 'conversacion' | 'turno' | 'estado' | 'suelta' | 'contexto' | 'hija';
+export type Destino = 'conversacion' | 'turno' | 'estado' | 'suelta' | 'contexto';
 export interface Decision {
   destino: Destino;
   texto: string;       // sin el prefijo
@@ -79,7 +78,7 @@ function decideBase(texto: string, s: Situacion): Decision {
   if (s.ordenPlan) return conv('orden de planes');
   if (s.adjuntos) return conv('lleva adjuntos');
   const aprendida = s.aprendidas?.[firma(t)];
-  if (aprendida && aprendida !== 'hija') return { destino: aprendida === 'estado' && !s.ocupado ? 'conversacion' : aprendida, texto: t, motivo: 'como lo corregiste antes' };
+  if (aprendida) return { destino: aprendida === 'estado' && !s.ocupado ? 'conversacion' : aprendida, texto: t, motivo: 'como lo corregiste antes' };
   // Con el agente libre no hay cola ni nada que interrumpir: a la conversación (sin gastar en clasificar).
   if (!s.ocupado) return conv('el agente está libre');
   if (ESTADO.test(t.replace(/^[¿¡]/, ''))) return { destino: 'estado', texto: t, motivo: 'pregunta por el estado del trabajo' };
@@ -93,7 +92,7 @@ function decideBase(texto: string, s: Situacion): Decision {
 // aprende: la corrección del usuario (llevar un mensaje a otro sitio) se recuerda para los parecidos.
 export function aprende(a: Aprendidas, texto: string, destino: Destino): Aprendidas {
   const f = firma(texto);
-  if (!f || destino === 'hija') return a;
+  if (!f) return a;
   const n = { ...a, [f]: destino };
   // Como mucho 200 (las últimas).
   const ks = Object.keys(n);
@@ -156,21 +155,19 @@ export const incorporacion = (l: { pregunta: string; respuesta: string }[]) => l
 // sumaUso: el consumo acumulado de las preguntas aparte de una sesión (se suma al gasto de la conversación).
 export const sumaUso = (a: Uso | undefined, b: Uso): Uso => ({ entrada: (a?.entrada || 0) + b.entrada, salida: (a?.salida || 0) + b.salida, coste: (a?.coste || 0) + (b.coste || 0) });
 
-export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', turno: 'Al turno en curso', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto', hija: 'Sesión hija' };
+export const NOMBRES: Record<Destino, string> = { conversacion: 'En la conversación', turno: 'Al turno en curso', estado: 'Estado', suelta: 'Suelta', contexto: 'Con contexto' };
 
 // Etiqueta del destino mientras se escribe (antes de enviar).
 export function etiqueta(d: Decision, ocupado = false): string {
   if (d.destino === 'conversacion') return d.duda ? '→ Conversación o aparte: lo decide pgocode al enviar' : ocupado ? '→ Conversación (a la cola)' : '→ Conversación';
   if (d.destino === 'turno') return '→ Al turno en curso (el agente lo lee ya)';
-  if (d.destino === 'hija') return d.forzado ? '→ Nueva sesión hija (otro tema, con lo mínimo)' : '→ Parece otro tema: nueva sesión hija';
   return '→ ' + (d.destino === 'estado' ? 'Estado (sin tokens)' : 'Aparte · ' + NOMBRES[d.destino].toLowerCase());
 }
 
 // siguiente: el destino al pulsar la etiqueta (conversación → al turno en curso, si se puede → aparte con contexto
-// → suelta → estado → conversación). Con la propuesta de otro tema, la sesión hija va justo antes de la conversación.
-export const siguiente = (d: Destino, conTurno = false, conHija = false): Destino => {
+// → suelta → estado → conversación).
+export const siguiente = (d: Destino, conTurno = false): Destino => {
   const orden: Destino[] = conTurno ? ['conversacion', 'turno', 'contexto', 'suelta', 'estado'] : ['conversacion', 'contexto', 'suelta', 'estado'];
-  if (conHija) orden.push('hija');
   return orden[(orden.indexOf(d) + 1) % orden.length];
 };
 

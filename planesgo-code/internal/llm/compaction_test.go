@@ -51,6 +51,10 @@ func TestClaudeCompactEnv(t *testing.T) {
 	if env := a.EntornoPara(Peticion{}); len(env) != 2 {
 		t.Errorf("entorno: %v", env)
 	}
+	// Sin gestión del contexto: la compactación de Claude Code, sin tocar.
+	if env := a.EntornoPara(Peticion{CompactAt: CompactAgentOwn}); len(env) != 0 {
+		t.Errorf("sin gestión: %v", env)
+	}
 }
 
 func TestOpenCodeCompactConfig(t *testing.T) {
@@ -79,6 +83,10 @@ func TestOpenCodeCompactConfig(t *testing.T) {
 	if c := limite(conf(Peticion{Modelo: "deepseek/deepseek-v4-pro"}), "deepseek", "deepseek-v4-pro"); c-openCodeOutput != CompactAtDefault {
 		t.Errorf("deepseek: contexto %v", c)
 	}
+	// Sin gestión del contexto: el límite del catálogo de OpenCode (pgocode no declara ninguno).
+	if p := conf(Peticion{Modelo: "google-vertex/gemini-4-argon", CompactAt: CompactAgentOwn})["provider"].(map[string]any); len(p) != 0 {
+		t.Errorf("sin gestión: %v", p)
+	}
 }
 
 func TestAntigravityCompact(t *testing.T) {
@@ -91,17 +99,18 @@ func TestAntigravityCompact(t *testing.T) {
 		p    Peticion
 		want string
 	}{
-		{Peticion{SesionAgente: "c1", LastContext: 90000}, "/compact hola"},
-		{Peticion{SesionAgente: "c1", LastContext: 70000}, "hola"},
+		{Peticion{SesionAgente: "c1", LastContext: 160000}, "/compact hola"},
+		{Peticion{SesionAgente: "c1", LastContext: 140000}, "hola"},
+		{Peticion{SesionAgente: "c1", LastContext: 160000, CompactAt: CompactAgentOwn}, "hola"}, // sin gestión
 		{Peticion{SesionAgente: "c1", LastContext: 30000, CompactAt: 25000}, "/compact hola"},
-		{Peticion{LastContext: 90000}, "hola"},                                   // conversación nueva
-		{Peticion{SesionAgente: "c1", LastContext: 90000, Aparte: true}, "hola"}, // pregunta aparte
+		{Peticion{LastContext: 160000}, "hola"},                                   // conversación nueva
+		{Peticion{SesionAgente: "c1", LastContext: 160000, Aparte: true}, "hola"}, // pregunta aparte
 	} {
 		if got := msg(c.p); got != c.want {
 			t.Errorf("%+v: %q, quiero %q", c.p, got, c.want)
 		}
 	}
-	if got := antigravityMessage("/plan algo", Peticion{SesionAgente: "c1", LastContext: 90000}); got != "/plan algo" {
+	if got := antigravityMessage("/plan algo", Peticion{SesionAgente: "c1", LastContext: 160000}); got != "/plan algo" {
 		t.Errorf("orden: %q", got)
 	}
 }

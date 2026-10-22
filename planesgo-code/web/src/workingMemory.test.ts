@@ -54,26 +54,25 @@ test('mensaje del relevo: la memoria delante, o detrás si empieza por una orden
 });
 
 test('cuándo hay relevo', () => {
-  const base: W.RelayInput = { agent: 'claude-code', context: 90_000, idleMinutes: 0, hasAgentSession: true, memoryChars: 4000 };
-  assert.ok(W.shouldRelay(base));
-  assert.equal(W.shouldRelay({ ...base, context: 70_000 }), null);
-  assert.ok(W.shouldRelay({ ...base, agent: 'opencode', context: 70_000 }));
-  // Sin caché (parada) y con al menos la mitad del umbral.
-  assert.ok(W.shouldRelay({ ...base, context: 45_000, idleMinutes: 10 }));
-  // Con la caché caducada, en cuanto el historial pasa claramente de lo fijo del agente (aunque no llegue al umbral).
+  const base: W.RelayInput = { agent: 'claude-code', mode: 'idle', context: 90_000, idleMinutes: 0, hasAgentSession: true, memoryChars: 4000 };
+  // Claude Code: con la caché caliente, nunca (aunque el contexto sea grande).
+  assert.equal(W.shouldRelay(base), null);
+  assert.equal(W.shouldRelay({ ...base, context: 300_000 }), null);
+  // Con la caché caducada, en cuanto el historial pasa claramente de lo fijo del agente.
   assert.ok(W.shouldRelay({ ...base, context: 30_000, idleMinutes: 10 }));
   assert.equal(W.shouldRelay({ ...base, context: 20_000, idleMinutes: 10 }), null, 'Claude: poco más que lo fijo');
-  assert.ok(W.shouldRelay({ ...base, agent: 'opencode', context: 22_000, idleMinutes: 10 }));
-  assert.equal(W.shouldRelay({ ...base, context: 30_000, idleMinutes: 2 }), null, 'con la caché caliente, solo el umbral');
-  // Nunca con adjuntos, planes, sin sesión, con «nunca» o si la memoria no ahorra.
-  assert.equal(W.shouldRelay({ ...base, attachments: 1 }), null);
-  assert.equal(W.shouldRelay({ ...base, planOrder: true }), null);
-  assert.equal(W.shouldRelay({ ...base, hasAgentSession: false }), null);
-  assert.equal(W.shouldRelay({ ...base, setting: 'nunca' }), null);
-  assert.equal(W.shouldRelay({ ...base, memoryChars: 200_000 }), null);
-  // Umbral propio.
-  assert.ok(W.shouldRelay({ ...base, context: 25_000, setting: 20_000 }));
-  assert.equal(W.relayThreshold('antigravity', 'auto'), 60_000);
+  // Antigravity: también con la caché caliente, al pasar del umbral.
+  const ag: W.RelayInput = { ...base, agent: 'antigravity', mode: 'on' };
+  assert.ok(W.shouldRelay(ag));
+  assert.equal(W.shouldRelay({ ...ag, context: W.RELAY_THRESHOLD - 1 }), null);
+  assert.ok(W.shouldRelay({ ...ag, context: 22_000, idleMinutes: 10 }));
+  assert.ok(W.shouldRelay({ ...ag, context: 25_000, threshold: 20_000 }), 'umbral propio (banco)');
+  // Nunca sin modo (OpenCode, o la gestión desactivada), con adjuntos, planes, sin sesión o si la memoria no ahorra.
+  assert.equal(W.shouldRelay({ ...ag, mode: 'off', idleMinutes: 10 }), null);
+  assert.equal(W.shouldRelay({ ...ag, attachments: 1 }), null);
+  assert.equal(W.shouldRelay({ ...ag, planOrder: true }), null);
+  assert.equal(W.shouldRelay({ ...ag, hasAgentSession: false }), null);
+  assert.equal(W.shouldRelay({ ...ag, memoryChars: 200_000 }), null);
 });
 
 test('memoria de trabajo: sin lo que quedó fuera del contexto con «Continuar desde aquí»', () => {

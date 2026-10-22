@@ -15,11 +15,13 @@ import (
 
 // odooFalso: un Odoo en memoria con sus líneas de parte.
 type odooFalso struct {
-	mu     sync.Mutex
-	lineas map[int]map[string]any
-	sig    int
-	falla  bool
-	sinSes bool // Odoo sin el campo ai_session_id (como el de Planes)
+	mu      sync.Mutex
+	lineas  map[int]map[string]any
+	sig     int
+	falla   bool
+	sinSes  bool // Odoo sin el campo ai_session_id (como el de Planes)
+	sinIA   bool // Odoo sin ningún campo ai_* (sin el módulo que los añade)
+	nCampos int  // consultas a fields_get
 }
 
 func nuevoOdoo() *odooFalso { return &odooFalso{lineas: map[int]map[string]any{}, sig: 100} }
@@ -38,6 +40,10 @@ func (o *odooFalso) CallKW(_ context.Context, _, modelo, metodo string, args []a
 		if o.sinSes {
 			delete(m, "ai_session_id")
 		}
+		if o.sinIA {
+			m = map[string]any{"name": map[string]any{}}
+		}
+		o.nCampos++
 		r = m
 	case "project.task.search_read":
 		r = []any{}
@@ -443,4 +449,34 @@ func TestTurnoTrasMedianoche(t *testing.T) {
 		}
 		return ayer == 10.0/60 && hoy == 10.0/60 // 10 min antes y 10 después (bloques de 5)
 	})
+}
+
+// Sin campos de IA (sin el módulo que los añade), se vuelve a preguntar pasados 10 minutos: si se instala con la app
+// abierta, los ve sin reiniciar. Con ellos, se pregunta una sola vez.
+func TestCamposIAReintento(t *testing.T) {
+	o := nuevoOdoo()
+	o.sinIA = true
+	r := &reloj{t: time.Date(2026, 10, 23, 10, 0, 0, 0, time.Local)}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	ctx := context.Background()
+	if c := g.CamposIA(ctx, "s"); len(c) != 0 {
+		t.Fatalf("sin módulo: %v", c)
+	}
+	r.pasa(9 * time.Minute)
+	g.CamposIA(ctx, "s")
+	if o.nCampos != 1 {
+		t.Fatalf("antes de 10 min no se vuelve a preguntar: %d consultas", o.nCampos)
+	}
+	o.mu.Lock()
+	o.sinIA = false // se instala el módulo
+	o.mu.Unlock()
+	r.pasa(2 * time.Minute)
+	if c := g.CamposIA(ctx, "s"); !c["ai_model"] || o.nCampos != 2 {
+		t.Fatalf("pasados 10 min: %v (%d consultas)", c, o.nCampos)
+	}
+	r.pasa(time.Hour)
+	g.CamposIA(ctx, "s")
+	if o.nCampos != 2 {
+		t.Errorf("con campos, una sola vez: %d consultas", o.nCampos)
+	}
 }

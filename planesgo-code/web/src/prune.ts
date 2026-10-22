@@ -56,6 +56,3 @@ export function prunedLine(p: { tokens: number; repuestos?: number }): string {
 
 // pruneClass: la clase CSS de un mensaje con marca (L3, atenuado; L2, un poco).
 export const pruneClass = (m: Mensaje) => (m.prune ? (m.prune.nivel === 'L3' ? ' pruned-out' : ' pruned-rules') : '');
-
-// autoPruneOn: si la sesión poda el historial (por defecto, sí).
-export const autoPruneOn = (s: { autoPrune?: boolean }) => s.autoPrune !== false;

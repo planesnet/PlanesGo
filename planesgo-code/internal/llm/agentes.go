@@ -278,17 +278,11 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	if p.SesionAgente != "" && !sesionValida.MatchString(p.SesionAgente) {
 		return errors.New("identificador de sesión del agente no válido")
 	}
-	msg := p.Mensajes[len(p.Mensajes)-1].Texto
+	msg := withAttachments(p.Mensajes[len(p.Mensajes)-1].Texto, p.Adjuntos)
 	// Idioma: Claude Code lo recibe como instrucción de sistema (--append-system-prompt); los demás no tienen
 	// cómo, así que va al principio del primer mensaje de la conversación (queda en su historial, sin repetirlo).
 	if p.Idioma != "" && a.Clave != "claude-code" && p.SesionAgente == "" {
 		msg = InstruccionIdioma(p.Idioma) + "\n\n" + msg
-	}
-	if len(p.Adjuntos) > 0 {
-		msg += "\n\nFicheros adjuntos (léelos con tus herramientas):"
-		for _, f := range p.Adjuntos {
-			msg += "\n- " + f
-		}
 	}
 	args := a.Args(msg, p)
 	if a.porEntrada(p) {
@@ -1109,4 +1103,20 @@ func NombreIdioma(codigo string) string {
 		return n
 	}
 	return codigo
+}
+
+// withAttachments: el mensaje con la lista de ficheros adjuntos detrás. Sin texto (solo adjuntos), un texto mínimo
+// para que el agente sepa que son para él.
+func withAttachments(msg string, files []string) string {
+	if len(files) == 0 {
+		return msg
+	}
+	if strings.TrimSpace(msg) == "" {
+		msg = "Te paso estos ficheros."
+	}
+	msg += "\n\nFicheros adjuntos (léelos con tus herramientas):"
+	for _, f := range files {
+		msg += "\n- " + f
+	}
+	return msg
 }
