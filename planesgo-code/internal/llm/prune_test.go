@@ -408,8 +408,9 @@ func TestPruneSweep(t *testing.T) {
 	rows, _ := json.Marshal(filas)
 	var mu sync.Mutex
 	var sentencias []string
+	drainCollectors()
 	viejoDB, viejoEmb, viejoDir := ocDB, pruneEmbed, pruneDirFunc
-	defer func() { ocDB, pruneEmbed, pruneDirFunc = viejoDB, viejoEmb, viejoDir }()
+	defer func() { drainCollectors(); ocDB, pruneEmbed, pruneDirFunc = viejoDB, viejoEmb, viejoDir }()
 	dir := t.TempDir()
 	pruneDirFunc = func() string { return dir }
 	tablaPreparada.Store(datosOpenCode(), true)
@@ -474,8 +475,9 @@ func TestPruneSweepPending(t *testing.T) {
 	}
 	rows, _ := json.Marshal(filas)
 	escritas := 0
+	drainCollectors()
 	viejoDB, viejoDir := ocDB, pruneDirFunc
-	defer func() { ocDB, pruneDirFunc = viejoDB, viejoDir }()
+	defer func() { drainCollectors(); ocDB, pruneDirFunc = viejoDB, viejoDir }()
 	dir := t.TempDir()
 	pruneDirFunc = func() string { return dir }
 	tablaPreparada.Store(datosOpenCode(), true)
