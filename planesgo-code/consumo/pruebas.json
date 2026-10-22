@@ -1,0 +1,50 @@
+{
+  "agentes": {
+    "claude-code": {"modelo": "opus", "esfuerzo": "medium"},
+    "antigravity": {"modelo": "gemini-4-argon-medium", "esfuerzo": "medium"},
+    "opencode": {"modelo": "google-vertex/gemini-4-argon"}
+  },
+  "pruebas": [
+    {
+      "id": 1, "nombre": "Saludo", "permisos": "lectura",
+      "mide": "Coste fijo de cada llamada (instrucciones, herramientas, MCP y skills), sin trabajo",
+      "turnos": [
+        {"mensaje": "Responde solo: OK", "texto": "^\\W*OK\\W*$"}
+      ]
+    },
+    {
+      "id": 2, "nombre": "Lectura", "permisos": "lectura",
+      "mide": "Una herramienta y una respuesta corta",
+      "turnos": [
+        {"mensaje": "¿Qué puerto tiene configurado el servidor en config.json? Responde solo con el número.", "texto": "\\b8473\\b"}
+      ]
+    },
+    {
+      "id": 3, "nombre": "Búsqueda", "permisos": "lectura",
+      "mide": "Si busca con precisión o lee de más (hay distractores: IRPF, recargo, desglose)",
+      "turnos": [
+        {"mensaje": "¿En qué fichero y en qué línea se calcula el importe del IVA de una línea de factura? Responde solo «ruta:línea».",
+         "texto": "impuestos/calculo\\.py\\D{0,12}(1[7-9]|2[01])\\b"}
+      ]
+    },
+    {
+      "id": 4, "nombre": "Arreglo", "permisos": "auto",
+      "mide": "Ciclo de editar, ejecutar y corregir; salidas de órdenes",
+      "turnos": [
+        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
+         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]}
+      ]
+    },
+    {
+      "id": 5, "nombre": "Conversación", "permisos": "auto",
+      "mide": "Crecimiento del contexto en 3 turnos y aprovechamiento de la caché",
+      "turnos": [
+        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
+         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]},
+        {"mensaje": "Añade a tests/test_lineas.py una prueba para una línea con un descuento del 100 % (subtotal 0) y comprueba que pasa.",
+         "orden": "python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 4}},
+        {"mensaje": "Resume en tres líneas lo que has cambiado en esta conversación.", "texto": "lineas\\.py"}
+      ]
+    }
+  ]
+}

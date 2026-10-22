@@ -4,7 +4,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 DIST       := dist
 PLATAFORMAS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all test vet web pgocode studio-tv escritorio paquete publicar clave-firma instalar apparmor dist clean \
+.PHONY: all test vet consumo web pgocode studio-tv escritorio paquete publicar clave-firma instalar apparmor dist clean \
 	verifica formato prueba-rapida integracion web-verifica e2e arbol-limpio
 
 all: vet test web pgocode studio-tv
@@ -41,6 +41,11 @@ web-verifica:
 # datos temporales, recorre la API y lo para todo al acabar. Con más detalle: go run ./cmd/e2e -v
 e2e:
 	go run ./cmd/e2e
+
+# Banco de consumo de tokens (consumo/): las 5 pruebas con cada agente, sin pgocode (calibración) y con él.
+# Gasta tokens de verdad. Opciones: make consumo ARGS="-pruebas 1,2,3 -repeticiones 1"
+consumo:
+	go run ./cmd/consumo $(ARGS)
 
 # Lo rápido mientras se programa: vet y pruebas sin -race
 prueba-rapida: vet

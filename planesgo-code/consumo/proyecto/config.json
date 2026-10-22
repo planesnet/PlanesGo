@@ -1,0 +1,7 @@
+{
+  "nombre": "facturacion-demo",
+  "servidor": {"host": "127.0.0.1", "puerto": 8473},
+  "moneda": "EUR",
+  "decimales": 2,
+  "serie_por_defecto": "F"
+}
