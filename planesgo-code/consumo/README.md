@@ -43,10 +43,28 @@ Las copias de trabajo van a `~/.cache/pgocode-consumo/<fecha>/` y se borran al a
 ## Estrategias
 
 `-estrategia` dice cómo pasa la conversación de un turno al siguiente; se guarda en cada ejecución y la evolución
-separa las rondas por estrategia. Hoy solo hay `ninguna` (reanudar la sesión del agente, que reenvía todo el
-historial). Para añadir otra (relevo, compactación, recorte…), en `cmd/consumo/main.go` se implementa `strategy`
-(su `before` puede cambiar la sesión y el mensaje del turno y lanzar turnos propios, cuyo consumo cuenta) y se
-registra en `strategies`.
+separa las rondas por estrategia. En el informe, la tabla turno a turno marca entre corchetes lo que ha hecho la
+estrategia en cada turno (relevo, compactación).
+
+- `ninguna` (por defecto): reanudar la sesión del agente, que reenvía todo el historial (lo de hoy).
+- `compactar[:N]`: la compactación gobernada por pgocode (`internal/llm/compaction.go`): cada turno lleva
+  `CompactAt` = N miles de tokens (por defecto 20k, el mínimo, para que salte en una prueba corta) y `LastContext`
+  (el contexto de la última llamada del turno anterior). Solo con `-modo pgocode`.
+- `relevo[:N]`: el relevo con memoria de trabajo de la interfaz: si el contexto de la última llamada del turno
+  anterior pasa de N miles (por defecto 20k), el turno va a una sesión nueva del agente con la memoria de trabajo
+  delante del mensaje. La memoria y la decisión son las de `web/src/workingMemory.ts` (`buildWorkingMemory`,
+  `shouldRelay`, `relayMessage`): `cmd/consumo/relay.mts` las llama con node sobre la conversación del banco en el
+  formato `Mensaje` de la interfaz (texto, herramientas y tareas de cada respuesta). Necesita node; solo con
+  `-modo pgocode`.
+
+```sh
+make consumo ARGS="-agentes claude-code -modo pgocode -pruebas 6 -repeticiones 1 -estrategia relevo"
+make consumo ARGS="-agentes claude-code -modo pgocode -pruebas 6 -repeticiones 1 -estrategia compactar:30"
+```
+
+Para añadir otra, en `cmd/consumo/main.go` se implementa `strategy` (su `before` puede cambiar la sesión y el
+mensaje del turno, pedir la compactación y lanzar turnos propios, cuyo consumo cuenta) y se registra en
+`strategies`.
 
 ## Cómo se lanza cada agente
 

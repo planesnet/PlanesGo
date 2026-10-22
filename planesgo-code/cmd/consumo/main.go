@@ -146,6 +146,8 @@ type Ejecucion struct {
 type turnMeasure struct {
 	Medida
 	Acierto bool `json:"acierto"`
+	// Nota: lo que ha hecho la estrategia en el turno (relevo, compactación…).
+	Nota string `json:"nota,omitempty"`
 }
 
 // ---- estrategias ----
@@ -155,7 +157,8 @@ type turnMeasure struct {
 // recorte…) se añaden en strategies.
 type strategy interface {
 	// before: antes de cada turno. Puede cambiar c.Session y c.Message (p. ej. empezar una sesión nueva con un
-	// resumen de c.History) y lanzar turnos propios con c.Run, cuyo consumo se suma al del turno.
+	// resumen de c.History), pedir la compactación al agente (c.CompactAt, c.LastContext) y lanzar turnos
+	// propios con c.Run, cuyo consumo se suma al del turno. c.Note dice qué ha hecho (sale en el informe).
 	before(ctx context.Context, c *conversation) error
 }
 
@@ -166,28 +169,187 @@ type conversation struct {
 	Session     string // la sesión del agente que se reanudará («»: una nueva)
 	Message     string // lo que se enviará
 	History     []exchange
+	// CompactAt y LastContext: los de llm.Peticion en el modo pgocode (ver internal/llm/compaction.go).
+	CompactAt, LastContext int
+	Note                   string // lo que ha hecho la estrategia en este turno
 	// Run: un turno con el agente, fuera de las pruebas (su consumo cuenta en el turno que empieza).
 	Run   func(ctx context.Context, msg, session string) resultadoTurno
 	extra Medida
 }
 
-// exchange: un turno ya hecho.
+// exchange: un turno ya hecho (Message: el de la prueba, sin lo que le haya añadido la estrategia).
 type exchange struct {
 	Message, Reply string
 	Usage          Medida
+	Parts          []uiPart    // lo que ha hecho el agente, como lo guarda la interfaz
+	Tasks          []llm.Tarea // sus tareas (la lista de tareas, subagentes…)
 }
 
 type noStrategy struct{}
 
 func (noStrategy) before(context.Context, *conversation) error { return nil }
 
-var strategies = map[string]func() strategy{
-	"ninguna": func() strategy { return noStrategy{} },
+// compactStrategy («compactar[:N]»): la compactación gobernada por pgocode, como en la app: cada turno lleva el
+// umbral (CompactAt) y el contexto de la última llamada del turno anterior (LastContext). Por defecto, 20k (el
+// mínimo de pgocode), para que salte en una prueba corta.
+type compactStrategy struct{ threshold int }
+
+func (s compactStrategy) before(_ context.Context, c *conversation) error {
+	c.CompactAt = s.threshold
+	if n := len(c.History); n > 0 {
+		c.LastContext = c.History[n-1].Usage.Contexto
+	}
+	return nil
+}
+
+// relayStrategy («relevo[:N]»): el relevo con memoria de trabajo de la interfaz. Si el contexto de la última
+// llamada del turno anterior pasa de N (por defecto 20k), el turno va a una sesión nueva del agente con la memoria
+// de trabajo delante del mensaje. La memoria y la decisión son las de web/src/workingMemory.ts (relay.mts, con
+// node), sobre los mensajes del banco en el formato de la interfaz.
+type relayStrategy struct {
+	threshold int
+	script    string // relay.mts
+}
+
+// relayResult: lo que devuelve relay.mts.
+type relayResult struct {
+	Reason      string `json:"reason"`
+	Message     string `json:"message"`
+	MemoryChars int    `json:"memory_chars"`
+}
+
+func (s relayStrategy) before(ctx context.Context, c *conversation) error {
+	n := len(c.History)
+	if n == 0 || c.Session == "" {
+		return nil
+	}
+	in, err := json.Marshal(map[string]any{"agent": c.Agent, "threshold": s.threshold, "context": c.History[n-1].Usage.Contexto,
+		"messages": uiMessages(c.History), "message": c.Message})
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "node", "--experimental-strip-types", "--no-warnings", s.script)
+	cmd.Stdin = bytes.NewReader(in)
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("relay.mts: %v: %s", err, recorta(errOut.String(), 400))
+	}
+	var r relayResult
+	if err := json.Unmarshal(out, &r); err != nil {
+		return fmt.Errorf("relay.mts: %v", err)
+	}
+	if r.Reason != "" {
+		c.Session, c.Message = "", r.Message
+		c.Note = fmt.Sprintf("relevo (memoria %s)", miles((r.MemoryChars+3)/4))
+	}
+	return nil
+}
+
+// uiPart y uiMessage: Parte y Mensaje de web/src/api.ts (lo que usa la memoria de trabajo).
+type uiPart struct {
+	Tipo  string           `json:"tipo"` // texto | pensamiento | herramienta
+	Texto string           `json:"texto,omitempty"`
+	H     *llm.Herramienta `json:"h,omitempty"`
+}
+
+type uiMessage struct {
+	Rol    string      `json:"rol"`
+	Texto  string      `json:"texto"`
+	Partes []uiPart    `json:"partes,omitempty"`
+	Tareas []llm.Tarea `json:"tareas,omitempty"`
+}
+
+// uiMessages: la conversación como la tiene la interfaz: cada petición y la respuesta del agente con sus partes.
+func uiMessages(h []exchange) []uiMessage {
+	var l []uiMessage
+	for _, x := range h {
+		l = append(l, uiMessage{Rol: "user", Texto: x.Message},
+			uiMessage{Rol: "assistant", Texto: x.Reply, Partes: x.Parts, Tareas: x.Tasks})
+	}
+	return l
+}
+
+// addPart: como «parte» en Chat.tsx: el texto seguido se junta; la herramienta se actualiza por su id.
+func addPart(ps []uiPart, p uiPart) []uiPart {
+	if p.Tipo != "herramienta" {
+		if n := len(ps); n > 0 && ps[n-1].Tipo == p.Tipo {
+			ps[n-1].Texto += p.Texto
+			return ps
+		}
+		return append(ps, p)
+	}
+	for i := range ps {
+		if v := ps[i].H; v != nil && v.ID == p.H.ID {
+			h := *p.H
+			h.Nombre, h.Resumen, h.Entrada = cmp.Or(h.Nombre, v.Nombre), cmp.Or(v.Resumen, h.Resumen), cmp.Or(v.Entrada, h.Entrada)
+			ps[i].H = &h
+			return ps
+		}
+	}
+	h := *p.H
+	return append(ps, uiPart{Tipo: "herramienta", H: &h})
+}
+
+// mergeTask: como T.fusiona en tareas.ts: una actualización de una tarea (por id); lo vacío conserva lo anterior.
+func mergeTask(l []llm.Tarea, t llm.Tarea) []llm.Tarea {
+	i := slices.IndexFunc(l, func(x llm.Tarea) bool { return x.ID == t.ID })
+	if i < 0 {
+		return append(l, t)
+	}
+	var a, b map[string]any
+	ba, _ := json.Marshal(l[i])
+	bb, _ := json.Marshal(t)
+	json.Unmarshal(ba, &a)
+	json.Unmarshal(bb, &b)
+	for k, v := range b {
+		a[k] = v
+	}
+	bm, _ := json.Marshal(a)
+	var n llm.Tarea
+	json.Unmarshal(bm, &n)
+	l[i] = n
+	return l
+}
+
+// compactionNote: el aviso de pgocode de que el agente ha compactado su historial (ver compactionNotice).
+var compactionNote = regexp.MustCompile(`ha compactado su historial(?:: (?:de \S+ a \S+|tenía \S+) tokens)?`)
+
+// moduleDir: la carpeta del módulo planesgo-code (la pone main).
+var moduleDir = "."
+
+var strategies = map[string]func(n int) strategy{
+	"ninguna":   func(int) strategy { return noStrategy{} },
+	"compactar": func(n int) strategy { return compactStrategy{threshold: cmp.Or(n, 20) * 1000} },
+	"relevo": func(n int) strategy {
+		return relayStrategy{threshold: cmp.Or(n, 20) * 1000, script: filepath.Join(moduleDir, "cmd", "consumo", "relay.mts")}
+	},
+}
+
+// pgocodeOnly: las estrategias que usan lo que hace pgocode (no tienen sentido sin él).
+var pgocodeOnly = map[string]bool{"compactar": true, "relevo": true}
+
+// parseStrategy: «nombre[:N]» (N en miles de tokens).
+func parseStrategy(s string) (name string, n int, err error) {
+	name, arg, hay := strings.Cut(strings.TrimSpace(s), ":")
+	if _, ok := strategies[name]; !ok {
+		return "", 0, fmt.Errorf("estrategia desconocida: %s (hay: %s)", name, strategyNames())
+	}
+	if hay {
+		if n, err = strconv.Atoi(arg); err != nil || n <= 0 || name == "ninguna" {
+			return "", 0, fmt.Errorf("estrategia %q: N ha de ser un número positivo (miles de tokens)", s)
+		}
+	}
+	return name, n, nil
 }
 
 func strategyNames() string {
 	var l []string
 	for k := range strategies {
+		if k != "ninguna" {
+			k += "[:N]"
+		}
 		l = append(l, k)
 	}
 	sort.Strings(l)
@@ -201,6 +363,8 @@ type resultadoTurno struct {
 	sesion string
 	err    error
 	bruto  llm.Uso // lo que da el agente, sin restar el acumulado anterior
+	parts  []uiPart
+	tasks  []llm.Tarea
 }
 
 // recoge: junta los eventos de un turno. Si el agente da el consumo acumulado de su conversación (ver
@@ -218,8 +382,20 @@ func (c *recoge) evento(e llm.Evento) {
 		c.r.Primera = time.Since(c.inicio).Seconds()
 	}
 	c.r.texto += e.Texto
-	if h := e.Herramienta; h != nil && h.Estado == "curso" && h.Entrada != "" {
-		c.r.Herramientas++
+	if e.Texto != "" {
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "texto", Texto: e.Texto})
+	}
+	if e.Pensamiento != "" {
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "pensamiento", Texto: e.Pensamiento})
+	}
+	if h := e.Herramienta; h != nil {
+		if h.Estado == "curso" && h.Entrada != "" {
+			c.r.Herramientas++
+		}
+		c.r.parts = addPart(c.r.parts, uiPart{Tipo: "herramienta", H: h})
+	}
+	if e.Tarea != nil {
+		c.r.tasks = mergeTask(c.r.tasks, *e.Tarea)
 	}
 	if e.SesionAgente != "" {
 		c.r.sesion = e.SesionAgente
@@ -380,11 +556,12 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 
 // conPgocode: un turno con el proveedor de pgocode (internal/llm), con la petición que arma su servidor para la
 // interfaz: idioma del navegador y mensajes a mitad de turno (Claude Code: la entrada por stdin).
-func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string, previo *llm.Uso) resultadoTurno {
+func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string, previo *llm.Uso, compactAt, lastContext int) resultadoTurno {
 	c := &recoge{inicio: time.Now(), previo: previo, agente: agente}
 	var mu sync.Mutex
 	err := prov.Chat(ctx, llm.Peticion{Modelo: conf.Modelo, Esfuerzo: conf.Esfuerzo, Carpeta: carpeta, Permisos: permisos,
 		SesionAgente: sesion, Mensajes: []llm.Mensaje{{Rol: "user", Texto: msg}}, Idioma: llm.NombreIdioma("es-ES"),
+		CompactAt: compactAt, LastContext: lastContext,
 		AlInyectar: func(func(string) error) {}, Traza: "banco de consumo"}, func(e llm.Evento) {
 		mu.Lock()
 		c.evento(e)
@@ -445,6 +622,7 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 	var previo *llm.Uso
 	previoSesion := ""
 	acumula := cumulativeUsage(agente, modo)
+	c := &conversation{Agent: agente, Mode: modo}
 	run := func(cx context.Context, msg, sesion string) resultadoTurno {
 		if !acumula || sesion == "" || sesion != previoSesion {
 			previo = nil
@@ -453,7 +631,7 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 		if modo == "directo" {
 			r = directo(cx, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, datosOC)
 		} else {
-			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, msg, sesion, previo)
+			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, c.CompactAt, c.LastContext)
 		}
 		if acumula {
 			b := r.bruto
@@ -461,7 +639,6 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 		}
 		return r
 	}
-	c := &conversation{Agent: agente, Mode: modo}
 	c.Run = func(cx context.Context, msg, sesion string) resultadoTurno {
 		r := run(cx, msg, sesion)
 		c.extra.suma(r.Medida)
@@ -469,7 +646,7 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 	}
 	for i, t := range pr.Turnos {
 		cx, cancela := context.WithTimeout(ctx, *limiteF)
-		c.Turn, c.Message, c.extra = i, t.Mensaje, Medida{}
+		c.Turn, c.Message, c.extra, c.Note = i, t.Mensaje, Medida{}, ""
 		var r resultadoTurno
 		if err := est.before(cx, c); err != nil {
 			r.err = fmt.Errorf("estrategia: %w", err)
@@ -484,14 +661,18 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 		if r.sesion != "" {
 			c.Session = r.sesion
 		}
-		c.History = append(c.History, exchange{Message: t.Mensaje, Reply: r.texto, Usage: m})
+		c.History = append(c.History, exchange{Message: t.Mensaje, Reply: r.texto, Usage: m, Parts: r.parts, Tasks: r.tasks})
+		nota := c.Note
+		if x := compactionNote.FindString(r.texto); x != "" {
+			nota = strings.TrimPrefix(strings.TrimSpace(nota+"; "+strings.Replace(x, "ha compactado su historial", "compacta", 1)), "; ")
+		}
 		f := ""
 		if r.err != nil {
 			f = fmt.Sprintf("turno %d: %v", i+1, r.err)
 		} else if x := comprueba(t, r.texto, carpeta); x != "" {
 			f = fmt.Sprintf("turno %d: %s", i+1, x)
 		}
-		e.Turnos = append(e.Turnos, turnMeasure{Medida: m, Acierto: f == ""})
+		e.Turnos = append(e.Turnos, turnMeasure{Medida: m, Acierto: f == "", Nota: nota})
 		if f != "" {
 			e.Acierto, e.Fallo = false, f
 			break
@@ -536,10 +717,20 @@ func main() {
 		}
 		pruebas = append(pruebas, banco.Pruebas[i])
 	}
-	nuevaEstrategia, ok := strategies[*estrategiaF]
-	if !ok {
-		log.Fatalf("estrategia desconocida: %s (hay: %s)", *estrategiaF, strategyNames())
+	moduleDir = modulo
+	nombreEst, nEst, err := parseStrategy(*estrategiaF)
+	if err != nil {
+		log.Fatal(err)
 	}
+	if pgocodeOnly[nombreEst] && slices.Contains(modos, "directo") {
+		log.Fatalf("la estrategia %s solo tiene sentido con pgocode: usa -modo pgocode", nombreEst)
+	}
+	if nombreEst == "relevo" {
+		if _, err := exec.LookPath("node"); err != nil {
+			log.Fatal("la estrategia relevo necesita node (para web/src/workingMemory.ts)")
+		}
+	}
+	nuevaEstrategia := func() strategy { return strategies[nombreEst](nEst) }
 	casa, _ := os.UserHomeDir()
 	salida := *salidaF
 	if salida == "" {
@@ -855,7 +1046,20 @@ func turnEvolution(p Prueba, agente string, modos []string, todas []Ejecucion) s
 	}
 	b.WriteString("\n" + sep + "\n")
 	for i, t := range p.Turnos {
-		fmt.Fprintf(&b, "| %d | %s |", i+1, strings.ReplaceAll(recorta(t.Mensaje, 50), "|", "/"))
+		// Lo que ha hecho la estrategia en el turno (relevo, compactación), en alguna de las ejecuciones.
+		var notas []string
+		for _, m := range conDatos {
+			for _, e := range porModo[m] {
+				if i < len(e.Turnos) && e.Turnos[i].Nota != "" && !slices.Contains(notas, e.Turnos[i].Nota) {
+					notas = append(notas, e.Turnos[i].Nota)
+				}
+			}
+		}
+		celda := recorta(t.Mensaje, 50)
+		if len(notas) > 0 {
+			celda += " **[" + strings.Join(notas, "; ") + "]**"
+		}
+		fmt.Fprintf(&b, "| %d | %s |", i+1, strings.ReplaceAll(celda, "|", "/"))
 		for _, m := range conDatos {
 			var l []Ejecucion
 			for _, e := range porModo[m] {

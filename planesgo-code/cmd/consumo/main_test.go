@@ -108,7 +108,7 @@ func TestEstrategias(t *testing.T) {
 		t.Fatal("falta la estrategia «ninguna»")
 	}
 	c := &conversation{Session: "s1", Message: "hola"}
-	if err := strategies["ninguna"]().before(context.Background(), c); err != nil || c.Session != "s1" || c.Message != "hola" {
+	if err := strategies["ninguna"](0).before(context.Background(), c); err != nil || c.Session != "s1" || c.Message != "hola" {
 		t.Errorf("«ninguna» no ha de cambiar nada: %+v %v", c, err)
 	}
 }
@@ -239,5 +239,122 @@ func TestAcumuladoClaude(t *testing.T) {
 	c.evento(llm.Evento{Uso: &llm.Uso{Entrada: 30000, Coste: 0.05}})
 	if r := c.fin(); r.Entrada != 30000 || r.Coste != 0.05 {
 		t.Errorf("otra sesión: %+v", r.Medida)
+	}
+}
+
+// «-estrategia nombre[:N]»: N en miles de tokens; por defecto, 20k.
+func TestParseStrategy(t *testing.T) {
+	for _, x := range []struct {
+		in   string
+		name string
+		n    int
+		ok   bool
+	}{{"ninguna", "ninguna", 0, true}, {"compactar", "compactar", 0, true}, {"compactar:30", "compactar", 30, true},
+		{"relevo:25", "relevo", 25, true}, {"relevo:0", "", 0, false}, {"relevo:x", "", 0, false}, {"ninguna:5", "", 0, false}, {"otra", "", 0, false}} {
+		name, n, err := parseStrategy(x.in)
+		if (err == nil) != x.ok || name != x.name || n != x.n {
+			t.Errorf("%q: %q %d %v", x.in, name, n, err)
+		}
+	}
+	if s := strategies["compactar"](0).(compactStrategy); s.threshold != 20000 {
+		t.Errorf("compactar por defecto: %d", s.threshold)
+	}
+	if s := strategies["relevo"](30).(relayStrategy); s.threshold != 30000 || !strings.HasSuffix(s.script, "relay.mts") {
+		t.Errorf("relevo:30: %+v", s)
+	}
+	if !pgocodeOnly["compactar"] || !pgocodeOnly["relevo"] || pgocodeOnly["ninguna"] {
+		t.Error("pgocodeOnly")
+	}
+}
+
+// «compactar»: cada turno lleva el umbral y el contexto de la última llamada del turno anterior.
+func TestCompactStrategy(t *testing.T) {
+	s := compactStrategy{threshold: 20000}
+	c := &conversation{Session: "s1", Message: "hola"}
+	if s.before(context.Background(), c); c.CompactAt != 20000 || c.LastContext != 0 || c.Session != "s1" || c.Message != "hola" {
+		t.Errorf("primer turno: %+v", c)
+	}
+	c.History = []exchange{{Usage: Medida{Contexto: 18000}}, {Usage: Medida{Contexto: 23000}}}
+	if s.before(context.Background(), c); c.LastContext != 23000 || c.Session != "s1" {
+		t.Errorf("tercer turno: %+v", c)
+	}
+}
+
+// Las partes de la respuesta se juntan como en la interfaz (texto seguido; herramienta por su id) y las tareas
+// se fusionan por su id.
+func TestUIMessages(t *testing.T) {
+	c := &recoge{agente: "claude-code"}
+	c.evento(llm.Evento{Texto: "Voy "})
+	c.evento(llm.Evento{Texto: "a arreglarlo."})
+	c.evento(llm.Evento{Herramienta: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.py", Entrada: "{}", Estado: "curso"}})
+	c.evento(llm.Evento{Herramienta: &llm.Herramienta{ID: "1", Estado: "ok", Salida: "hecho"}})
+	c.evento(llm.Evento{Tarea: &llm.Tarea{ID: "l", Tipo: "lista", Elementos: []llm.Elemento{{Texto: "Arreglar", Estado: "curso"}}}})
+	c.evento(llm.Evento{Tarea: &llm.Tarea{ID: "l", Elementos: []llm.Elemento{{Texto: "Arreglar", Estado: "hecho"}}}})
+	c.evento(llm.Evento{Texto: "Hecho."})
+	r := c.fin()
+	if len(r.parts) != 3 || r.parts[0].Texto != "Voy a arreglarlo." || r.parts[1].H.Nombre != "Edit" || r.parts[1].H.Resumen != "facturacion/lineas.py" ||
+		r.parts[1].H.Estado != "ok" || r.parts[2].Texto != "Hecho." || r.Herramientas != 1 {
+		t.Fatalf("%+v", r.parts)
+	}
+	if len(r.tasks) != 1 || r.tasks[0].Tipo != "lista" || r.tasks[0].Elementos[0].Estado != "hecho" {
+		t.Errorf("tareas: %+v", r.tasks)
+	}
+	ms := uiMessages([]exchange{{Message: "Arregla", Reply: r.texto, Parts: r.parts, Tasks: r.tasks}})
+	b, _ := json.Marshal(ms)
+	for _, x := range []string{`"rol":"user","texto":"Arregla"`, `"tipo":"herramienta","h":{"id":"1","nombre":"Edit","resumen":"facturacion/lineas.py"`, `"tareas":[{"id":"l","tipo":"lista"`} {
+		if !strings.Contains(string(b), x) {
+			t.Errorf("falta %s en %s", x, b)
+		}
+	}
+}
+
+// «relevo»: con node, la memoria y la decisión de web/src/workingMemory.ts. Por debajo del umbral, nada; por
+// encima, sesión nueva con la memoria (las peticiones, los ficheros editados) delante del mensaje.
+func TestRelayStrategy(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("sin node")
+	}
+	s := relayStrategy{threshold: 20000, script: "relay.mts"}
+	h := []exchange{
+		{Message: "Las pruebas fallan. Arregla el fallo del descuento sin tocar las pruebas.", Reply: "Arreglado: el descuento es un porcentaje.",
+			Parts: []uiPart{{Tipo: "herramienta", H: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.py", Estado: "ok"}},
+				{Tipo: "herramienta", H: &llm.Herramienta{ID: "2", Nombre: "Bash", Resumen: "python3 -m unittest discover -s tests", Estado: "ok"}},
+				{Tipo: "texto", Texto: "Arreglado: el descuento es un porcentaje."}},
+			Usage: Medida{Contexto: 17000}},
+	}
+	c := &conversation{Agent: "claude-code", Session: "s1", Message: "Renombra subtotal a base_imponible.", History: h}
+	if err := s.before(context.Background(), c); err != nil || c.Session != "s1" || c.Message != "Renombra subtotal a base_imponible." || c.Note != "" {
+		t.Fatalf("por debajo del umbral: %+v %v", c, err)
+	}
+	c.History[0].Usage.Contexto = 21000
+	if err := s.before(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Session != "" || !strings.HasPrefix(c.Note, "relevo") {
+		t.Fatalf("por encima del umbral: %+v", c)
+	}
+	for _, x := range []string{"[Memoria de trabajo", "Arregla el fallo del descuento", "facturacion/lineas.py",
+		"ok: `python3 -m unittest discover -s tests`", "[Fin de la memoria de trabajo]\n\nRenombra subtotal a base_imponible."} {
+		if !strings.Contains(c.Message, x) {
+			t.Errorf("falta %q en:\n%s", x, c.Message)
+		}
+	}
+	// Sin sesión del agente (el primer turno), nunca.
+	c = &conversation{Agent: "claude-code", Message: "hola", History: h}
+	if err := s.before(context.Background(), c); err != nil || c.Message != "hola" {
+		t.Errorf("sin sesión: %+v %v", c, err)
+	}
+}
+
+// El aviso de compactación de pgocode (compactionNotice) se reconoce en la respuesta.
+func TestCompactionNote(t *testing.T) {
+	for in, want := range map[string]string{
+		"Hecho.\n\n_(Claude Code ha compactado su historial: de 21k a 6k tokens.)_\n\n": "ha compactado su historial: de 21k a 6k tokens",
+		"_(Antigravity ha compactado su historial.)_":                                   "ha compactado su historial",
+		"Nada que compactar.": "",
+	} {
+		if got := compactionNote.FindString(in); got != want {
+			t.Errorf("%q: %q", in, got)
+		}
 	}
 }

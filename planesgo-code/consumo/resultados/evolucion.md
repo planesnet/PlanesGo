@@ -6,6 +6,10 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 
 - **2026-10-22-150558**: Punto 1: perfil de herramientas por modo (--tools): 14 herramientas propias en editar/auto y 12 en lectura, en vez de 32
 - **2026-10-22-221022**: Prueba 6 ida y vuelta: línea base
+- **2026-10-22-223829**: Prueba 6 sin estrategia (con el consumo de Claude corregido)
+- **2026-10-22-223831**: Prueba 6 con compactación gobernada por pgocode (20k)
+- **2026-10-22-223833**: Prueba 6 con relevo y memoria de trabajo (20k)
+- **2026-10-22-223835**: Prueba 5 con el consumo de Claude corregido
 
 ## 1 · Saludo
 
@@ -89,9 +93,11 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 | antigravity | pgocode | 2026-10-22-135316 | 197.2k | 195.1k | 2.1k | 10 | — | 101 s | 3/3 |
 | claude-code | sin pgocode | 2026-10-22-134756 | 496.6k | 492.9k | 3.7k | 8 | 0.586 $ | 30 s | 1/1 |
 | claude-code | sin pgocode | 2026-10-22-135316 | 431.5k | 427.5k | 4.1k | 7 | 0.542 $ | 29 s | 3/3 |
+| claude-code | sin pgocode | 2026-10-22-223835 | 183.2k | 181.4k | 1.8k | 7 | 0.212 $ | 27 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-134756 | 373.6k | 369.4k | 4.1k | 7 | 0.449 $ | 27 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-135316 | 376.5k | 372.2k | 4.3k | 7 | 0.462 $ | 29 s | 3/3 |
 | claude-code | pgocode | 2026-10-22-150558 | 284.1k | 280.3k | 3.8k | 7 | 0.435 $ | 28 s | 3/3 |
+| claude-code | pgocode | 2026-10-22-223835 | 122.7k | 120.8k | 2.0k | 7 | 0.180 $ | 34 s | 1/1 |
 | opencode | sin pgocode | 2026-10-22-134756 | 170.1k | 168.6k | 1.5k | 9 | 0.100 $ | 55 s | 1/1 |
 | opencode | sin pgocode | 2026-10-22-135316 | 196.7k | 194.9k | 1.8k | 10 | 0.106 $ | 115 s | 3/3 |
 | opencode | pgocode | 2026-10-22-134756 | 196.3k | 194.4k | 1.9k | 10 | 0.112 $ | 62 s | 1/1 |
@@ -102,4 +108,7 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 | Agente | Modo | Ronda | Tokens | Entrada | Salida | Llamadas | Coste | Tiempo | Aciertos |
 |---|---|---|--:|--:|--:|--:|--:|--:|--:|
 | claude-code | sin pgocode | 2026-10-22-221022 | 763.5k | 755.8k | 7.7k | 24 | 0.571 $ | 106 s | 1/1 |
+| claude-code | pgocode · compactar | 2026-10-22-223831 | 387.2k | 372.8k | 14.4k | 27 | 1.010 $ | 257 s | 1/1 |
 | claude-code | pgocode | 2026-10-22-221022 | 537.0k | 529.3k | 7.8k | 24 | 0.487 $ | 113 s | 1/1 |
+| claude-code | pgocode | 2026-10-22-223829 | 378.9k | 373.4k | 5.4k | 24 | 0.358 $ | 114 s | 1/1 |
+| claude-code | pgocode · relevo | 2026-10-22-223833 | 451.8k | 444.0k | 7.8k | 27 | 0.635 $ | 131 s | 1/1 |
