@@ -12,11 +12,11 @@ export interface Proveedor {
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
 export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[] }
-export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number }
+export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number; contexto?: number } // contexto: tokens de la última llamada
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[] }
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number } // fin: cuándo acabó el turno (ms)
 
 // Sube un fichero adjunto a la carpeta de la sesión (para pasárselo al agente).
 export async function subeAdjunto(proyecto: number, carpeta: string, sesion: string, f: File): Promise<Adjunto> {

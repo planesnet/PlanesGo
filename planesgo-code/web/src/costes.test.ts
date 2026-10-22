@@ -44,3 +44,12 @@ test('formatos', () => {
   assert.equal(C.tokens(1_027_899), '1,0 M');
   assert.equal(C.tokens(45_300), '45 k');
 });
+
+test('aviso de contexto antes de enviar: grande, y sin caché si lleva rato parada', () => {
+  assert.equal(C.avisoContexto(undefined, 60, 'opencode'), null);
+  assert.equal(C.avisoContexto(80_000, 60, 'opencode'), null, 'pequeña: nada');
+  assert.equal(C.avisoContexto(120_000, 1, 'opencode'), null, 'mediana y con caché: nada');
+  assert.match(C.avisoContexto(136_000, 21, 'opencode')!, /136 k tokens de historial sin caché \(~0,27 \$\).*21 min parada/);
+  assert.doesNotMatch(C.avisoContexto(136_000, 21, 'claude-code')!, /\$/, 'sin precio conocido no se estima');
+  assert.match(C.avisoContexto(180_000, 1, 'claude-code')!, /Conversación grande/);
+});

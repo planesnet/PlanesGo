@@ -140,6 +140,9 @@ type Uso struct {
 	Salida   int     `json:"salida"`  // tokens de salida
 	Coste    float64 `json:"coste,omitempty"`
 	Segundos float64 `json:"segundos,omitempty"`
+	// Contexto: los tokens que se enviaron en la última llamada al modelo (todo el historial): lo que costará el
+	// siguiente mensaje, sin caché si la conversación lleva un rato parada.
+	Contexto int `json:"contexto,omitempty"`
 }
 
 // Info describe un proveedor para el selector del chat.

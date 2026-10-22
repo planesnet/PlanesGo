@@ -635,6 +635,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			p.Carpeta = cs[0]
 		}
 	}
+	// Nunca con la carpeta personal (ni la raíz) como carpeta de trabajo: el agente recorrería todo el equipo y
+	// leería lo que encontrase (pasó: un turno de OpenCode leyó el registro de pgocode y gastó 2,48 $).
+	if casa, _ := os.UserHomeDir(); p.Carpeta != "" && (filepath.Clean(p.Carpeta) == "/" || filepath.Clean(p.Carpeta) == filepath.Clean(casa) || dentroDe(filepath.Clean(p.Carpeta), casa)) {
+		jsonError(w, http.StatusBadRequest, "la carpeta de la sesión es tu carpeta personal (o una superior): elige la del proyecto en los ajustes de la sesión")
+		return
+	}
 	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)
 	autorizadas := carpetasAutorizadas(p.Autorizadas)
 	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).

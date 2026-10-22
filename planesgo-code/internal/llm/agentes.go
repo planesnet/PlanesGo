@@ -350,14 +350,18 @@ func permisosOpenCode(modo string, autorizadas []string) string {
 	for _, d := range autorizadas {
 		fuera[strings.TrimRight(d, "/")+"/**"] = "allow"
 	}
-	p := map[string]any{"webfetch": "allow", "external_directory": fuera, "skill": sk}
+	// Lecturas que llenan el contexto sin aportar (registros, dependencias): denegadas (probado con OpenCode 1.19:
+	// los patrones van relativos a la carpeta; «*» abarca subcarpetas).
+	leer := map[string]string{"*": "allow", "*.log": "deny", "*.log.*": "deny", "node_modules/*": "deny", "*/node_modules/*": "deny"}
+	// doom_loop denegado en todos los modos: la misma llamada repetida una y otra vez se corta (gasta tokens).
+	p := map[string]any{"webfetch": "allow", "external_directory": fuera, "skill": sk, "read": leer, "doom_loop": "deny"}
 	switch modo {
 	case "auto":
-		p["edit"], p["bash"], p["doom_loop"] = "allow", "allow", "allow"
+		p["edit"], p["bash"] = "allow", "allow"
 	case "editar":
-		p["edit"], p["bash"], p["doom_loop"] = "allow", "deny", "deny"
+		p["edit"], p["bash"] = "allow", "deny"
 	default:
-		p["edit"], p["bash"], p["doom_loop"] = "deny", "deny", "deny"
+		p["edit"], p["bash"] = "deny", "deny"
 	}
 	b, _ := json.Marshal(p)
 	return string(b)

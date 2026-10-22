@@ -63,6 +63,13 @@ export function nueva(proyecto: number, carpeta: string, rama: string, agente: s
 
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
 
+// identificador: lo que hace falta para encontrar una sesión en los registros (tiempos/*.jsonl y depuracion.log,
+// por su id de pgocode) y su conversación en el agente (por su sesión propia).
+export function identificador(s: Sesion): string {
+  return [`Sesión de pgocode: ${s.id}`, `Agente: ${s.agente}${s.sesionAgente ? ` · sesión del agente: ${s.sesionAgente}` : ' · sin sesión del agente todavía'}`,
+    `Proyecto: ${s.proyecto} · carpeta: ${s.carpeta}${s.rama ? ` · rama: ${s.rama}` : ''}`, `Nombre: ${titulo(s)}`].join('\n');
+}
+
 // Nombre a partir del primer mensaje: la primera línea, recortada.
 export function nombreDe(texto: string): string {
   const l = texto.trim().split('\n')[0].replace(/\s+/g, ' ');

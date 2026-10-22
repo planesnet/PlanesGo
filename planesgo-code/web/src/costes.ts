@@ -68,3 +68,22 @@ export function nuevos(antes: Gasto, despues: Gasto, a: Avisos): { nivel: Exclud
 
 export const dinero = (x: number) => (x < 0.01 && x > 0 ? '<0,01' : x.toFixed(2).replace('.', ',')) + ' $';
 export const tokens = (n: number) => n >= 1_000_000 ? (n / 1_000_000).toFixed(1).replace('.', ',') + ' M' : n >= 1000 ? Math.round(n / 1000) + ' k' : String(n);
+
+// Precio por millón de tokens de entrada sin caché (para estimar lo que cuesta reenviar el historial); los que no
+// están no se estiman (Claude con suscripción, Antigravity sin coste).
+const ENTRADA_SIN_CACHE: Record<string, number> = { opencode: 2 };
+// La caché implícita de los modelos dura unos minutos: pasado esto, el historial se reenvía a precio completo.
+export const CACHE_MIN = 5;
+
+// avisoContexto: antes de enviar, si la conversación es grande, cuánto se reenviará (y si irá sin caché porque lleva
+// un rato parada). null: nada que avisar.
+export function avisoContexto(contexto: number | undefined, minutosParada: number, agente: string): string | null {
+  if (!contexto || contexto < 100_000) return null;
+  const precio = ENTRADA_SIN_CACHE[agente];
+  if (minutosParada >= CACHE_MIN) {
+    const coste = precio ? ` (~${dinero(contexto * precio / 1e6)})` : '';
+    return `Este mensaje reenviará ${tokens(contexto)} tokens de historial sin caché${coste}: la conversación lleva ${Math.round(minutosParada)} min parada. Para algo nuevo o mecánico, mejor una sesión nueva.`;
+  }
+  if (contexto >= 150_000) return `Conversación grande: cada paso del agente reenvía ${tokens(contexto)} tokens. Para algo nuevo, mejor una sesión nueva.`;
+  return null;
+}

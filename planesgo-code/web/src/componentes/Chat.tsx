@@ -263,6 +263,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       aConversacion(id, t, adj);
     }
   }
+  // Antes de enviar: si la conversación es grande (y sin caché por llevar un rato parada), cuánto se reenviará.
+  const avisoContexto = useMemo(() => {
+    if (enCurso || !sesion) return null;
+    const u = [...mensajes].reverse().find(m => m.rol === 'assistant' && m.uso);
+    return u ? CO.avisoContexto(u.uso?.contexto, u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente) : null;
+  }, [mensajes, enCurso, sesion?.agente, Boolean(texto.trim())]); // eslint-disable-line react-hooks/exhaustive-deps
   // Destino elegido a mano en la etiqueta (o con Ctrl+Intro): manda sobre la decisión automática.
   const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
   useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
@@ -459,6 +465,20 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       setApartes(x => ({ ...x, [id]: (x[id] || []).filter(a => !a.incorporada) }));
     }
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
+    // Avisos de gasto mientras trabaja el agente (no al final): cada umbral una vez por turno, sin interrumpir.
+    let gPrevio = gAntes;
+    let avisadoTurno = false;
+    const avisosEnVivo = () => {
+      const g = CO.gasto(actual);
+      const l = CO.nuevos(gPrevio, g, { ...aSes, avisoTurno: undefined });
+      const turno = { coste: g.coste - gAntes.coste, tokens: g.entrada + g.salida - gAntes.entrada - gAntes.salida };
+      if (!avisadoTurno && ((aSes.avisoTurno && turno.coste >= aSes.avisoTurno) || turno.tokens >= 2_000_000)) {
+        avisadoTurno = true;
+        l.push({ nivel: 'aviso', texto: `Este turno lleva ${CO.dinero(turno.coste)} y ${CO.tokens(turno.tokens)} tokens (y sigue).` });
+      }
+      gPrevio = g;
+      avisa(l);
+    };
     // Añade un trozo a las partes del mensaje: el texto seguido se junta; la herramienta se actualiza por su id.
     const parte = (p: Parte) => ultimo(m => {
       const ps = [...(m.partes || [])];
@@ -484,9 +504,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta });
         if (e.tarea) ultimo(m => ({ ...m, tareas: T.fusiona(m.tareas, e.tarea!) }));
-        // Puede haber varios consumos en un turno (Claude con tareas en segundo plano hace más de un «result»).
-        if (e.uso) ultimo(m => ({ ...m, uso: m.uso ? { entrada: m.uso.entrada + e.uso!.entrada, salida: m.uso.salida + e.uso!.salida,
-          coste: (m.uso.coste || 0) + (e.uso!.coste || 0) || undefined, segundos: (m.uso.segundos || 0) + (e.uso!.segundos || 0) || undefined } : e.uso }));
+        // Puede haber varios consumos en un turno (OpenCode da uno por paso; Claude con tareas en segundo plano, más
+        // de un «result»): se suman, salvo el contexto, que es el de la última llamada.
+        if (e.uso) {
+          ultimo(m => ({ ...m, uso: m.uso ? { entrada: m.uso.entrada + e.uso!.entrada, salida: m.uso.salida + e.uso!.salida,
+            coste: (m.uso.coste || 0) + (e.uso!.coste || 0) || undefined, segundos: (m.uso.segundos || 0) + (e.uso!.segundos || 0) || undefined,
+            contexto: e.uso!.contexto || m.uso.contexto } : e.uso }));
+          avisosEnVivo();
+        }
         if (e.sesion_agente) sesionAgente = e.sesion_agente;
         if (e.error) fallo = true;
         if (e.error) ultimo(m => ({ ...m, texto: (m.texto ? m.texto + '\n\n' : '') + '⚠ ' + e.error, error: true }));
@@ -519,9 +544,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       }
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
+      ultimo(m => ({ ...m, fin: Date.now() }));
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
-      avisa(CO.nuevos(gAntes, CO.gasto(actual), aSes));
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
@@ -802,6 +827,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                     <button className="quita-adjunto" onClick={() => setAdjuntos(l => l.filter(x => x.ruta !== a.ruta))} aria-label={'Quitar ' + a.nombre}>×</button>
                   </span>
                 ))}
+              </div>
+            )}
+            {decisionViva && avisoContexto && (
+              <div className="aviso-contexto" role="note">
+                <span>⚠ {avisoContexto}</span>
+                <button className="enlace" onClick={() => alNuevaSesion(sesion.rama)}>Nueva sesión</button>
               </div>
             )}
             {decisionViva && (

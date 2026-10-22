@@ -46,15 +46,39 @@ func entornoOpenCode(p Peticion) []string {
 	if d := datosOpenCode(); d != "" {
 		e = append(e, "XDG_DATA_HOME="+d)
 	}
+	cfg := configOpenCode(p.Modelo)
 	if strings.HasPrefix(p.Modelo, proveedorDeepSeekVertex+"/") {
 		if prov, err := proveedorDeepSeek(); err != nil {
 			depuracion.Log("opencode", "sin token de Google para DeepSeek en Vertex: %v", err)
 		} else {
-			b, _ := json.Marshal(map[string]any{"provider": map[string]any{proveedorDeepSeekVertex: prov}})
-			e = append(e, "OPENCODE_CONFIG_CONTENT="+string(b))
+			cfg["provider"].(map[string]any)[proveedorDeepSeekVertex] = prov
 		}
 	}
-	return e
+	b, _ := json.Marshal(cfg)
+	return append(e, "OPENCODE_CONFIG_CONTENT="+string(b))
+}
+
+// Ahorro de tokens en OpenCode (cada paso reenvía todo el historial):
+//   - compactación automática con poda de salidas viejas de herramientas;
+//   - como mucho PasosOpenCode pasos por petición (luego responde sin más herramientas);
+//   - para los modelos de Google, un contexto de ContextoOpenCode tokens: al llegar, compacta (si no, crecería
+//     hasta el millón y cada paso costaría cientos de miles de tokens).
+const (
+	PasosOpenCode    = 40
+	ContextoOpenCode = 160000
+)
+
+func configOpenCode(modelo string) map[string]any {
+	cfg := map[string]any{
+		"compaction": map[string]any{"auto": true, "prune": true},
+		"agent":      map[string]any{"build": map[string]any{"steps": PasosOpenCode}},
+		"provider":   map[string]any{},
+	}
+	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov == "google-vertex" {
+		cfg["provider"].(map[string]any)[prov] = map[string]any{"models": map[string]any{
+			id: map[string]any{"limit": map[string]int{"context": ContextoOpenCode, "output": 32000}}}}
+	}
+	return cfg
 }
 
 // modelosOpenCode: Gemini y DeepSeek en Vertex AI; y los de la API de DeepSeek si hay clave.

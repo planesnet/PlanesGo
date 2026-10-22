@@ -270,8 +270,9 @@ func TestMedianoche(t *testing.T) {
 	espera(t, func() bool { return o.n() >= 1 })
 	r.pasa(4 * time.Minute)
 	g.revisa()
-	if _, ab := g.Estado(); len(ab) != 0 {
-		t.Fatal("a medianoche el periodo se cierra")
+	// El de ayer se cierra; el turno (sin acabar) sigue en un periodo de hoy que empieza a las 00:00.
+	if _, ab := g.Estado(); len(ab) != 1 || ab[0].Inicio.Day() != 22 || ab[0].Inicio.Hour() != 0 || !ab[0].Agente {
+		t.Fatalf("a medianoche el periodo se cierra y el turno sigue en el día nuevo: %+v", ab)
 	}
 }
 
@@ -409,5 +410,37 @@ func TestHombreYMaquinaIndependientes(t *testing.T) {
 	espera(t, func() bool {
 		m, h := o.con("pgocode-m-claude-code"), o.con("pgocode-h")
 		return len(m) == 1 && len(h) == 1 && m[0]["unit_amount"] == 40.0/60 && h[0]["unit_amount"] == 0.25
+	})
+}
+
+// Un turno que pasa de la medianoche: el de ayer se cierra a las 00:00 y el tiempo de después va a un periodo de
+// hoy con el mismo agente (no se pierde ni va a un periodo sin agente).
+func TestTurnoTrasMedianoche(t *testing.T) {
+	o := nuevoOdoo()
+	r := &reloj{t: time.Date(2026, 10, 21, 23, 50, 0, 0, time.Local)}
+	g := &Gestor{Odoo: o, Ahora: r.ahora}
+	fin := g.Empieza(tr("s1"))
+	r.pasa(20 * time.Minute) // hasta las 00:10
+	g.revisa()
+	g.mu.Lock()
+	p := g.periodos["s1"]
+	g.mu.Unlock()
+	if p == nil || p.Inicio.Day() != 22 || p.turnos != 1 || p.T.Modelo != "Claude Code opus" {
+		t.Fatalf("periodo de hoy: %+v", p)
+	}
+	fin()
+	r.pasa(10 * time.Minute)
+	g.revisa()
+	espera(t, func() bool {
+		ayer, hoy := 0.0, 0.0
+		for _, v := range o.con("pgocode-m-claude-code") {
+			switch v["date"] {
+			case "2026-10-21":
+				ayer = v["unit_amount"].(float64)
+			case "2026-10-22":
+				hoy = v["unit_amount"].(float64)
+			}
+		}
+		return ayer == 10.0/60 && hoy == 10.0/60 // 10 min antes y 10 después (bloques de 5)
 	})
 }

@@ -161,6 +161,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	}
 	vivas := map[string]viva{}
 	lista := &listaClaude{}
+	contexto := 0
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -194,6 +195,11 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					Content   json.RawMessage `json:"content"`
 					IsError   bool            `json:"is_error"`
 				} `json:"content"`
+				Usage struct {
+					Input         int `json:"input_tokens"`
+					CacheCreation int `json:"cache_creation_input_tokens"`
+					CacheRead     int `json:"cache_read_input_tokens"`
+				} `json:"usage"`
 			} `json:"message"`
 			ResultadoHerr json.RawMessage `json:"tool_use_result"`
 			IsError       bool            `json:"is_error"`
@@ -267,6 +273,9 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		}
 		switch ev.Type {
 		case "assistant":
+			if u := ev.Message.Usage; ev.Padre == "" && u.Input+u.CacheRead+u.CacheCreation > 0 {
+				contexto = u.Input + u.CacheRead + u.CacheCreation // la última llamada del agente principal
+			}
 			for _, c := range ev.Message.Content {
 				switch c.Type {
 				case "text":
@@ -304,7 +313,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			coste := max(ev.Coste-costeAntes, 0)
 			costeAntes = max(ev.Coste, costeAntes)
 			emite(Evento{Uso: &Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
-				Coste: coste, Segundos: ev.Duracion / 1000}})
+				Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -437,8 +446,6 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	sesion := ""
-	uso := &Uso{}
-	hayUso := false
 	var errores []string
 	for sc.Scan() {
 		var ev struct {
@@ -512,11 +519,10 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 				emite(Evento{Tarea: t})
 			}
 		case "step_finish":
+			// Cada paso, su consumo ya (el gasto se ve crecer durante el turno) y el tamaño del contexto enviado.
 			t := ev.Part.Tokens
-			uso.Entrada += t.Input + t.Cache.Read + t.Cache.Write
-			uso.Salida += t.Output + t.Reasoning
-			uso.Coste += ev.Part.Cost
-			hayUso = true
+			emite(Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
+				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}})
 		case "error":
 			m := ev.Error.Data.Message
 			if m == "" {
@@ -524,9 +530,6 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			}
 			errores = append(errores, m)
 		}
-	}
-	if hayUso {
-		emite(Evento{Uso: uso})
 	}
 	if len(errores) > 0 {
 		return errors.New("OpenCode: " + strings.Join(errores, "; "))

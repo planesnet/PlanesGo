@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
-import { lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
+import { identificador, lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
 import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Hosting } from './Marca';
@@ -401,9 +401,3 @@ export function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; 
   );
 }
 
-// identificador: lo que hace falta para encontrar una sesión en los registros (tiempos/*.jsonl y depuracion.log,
-// por su id de pgocode) y su conversación en el agente (por su sesión propia).
-function identificador(s: Sesion): string {
-  return [`Sesión de pgocode: ${s.id}`, `Agente: ${s.agente}${s.sesionAgente ? ` · sesión del agente: ${s.sesionAgente}` : ' · sin sesión del agente todavía'}`,
-    `Proyecto: ${s.proyecto} · carpeta: ${s.carpeta}${s.rama ? ` · rama: ${s.rama}` : ''}`, `Nombre: ${titulo(s)}`].join('\n');
-}

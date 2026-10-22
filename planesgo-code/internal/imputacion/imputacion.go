@@ -94,6 +94,7 @@ type Periodo struct {
 	Estado     string        `json:"estado"` // trabajando | activo | en-espera | error
 	Error      string        `json:"error,omitempty"`
 	turnos     int
+	sigue      *Periodo // el periodo que lo continúa (un turno que pasa de la medianoche)
 }
 
 // Dia: lo acumulado de un día, proyecto, tarea y clase (h: hombre; m: máquina de un agente) = una línea en Odoo.
@@ -373,6 +374,9 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 	return func() {
 		una.Do(func() {
 			g.mu.Lock()
+			for p.sigue != nil { // el turno pasó la medianoche: acaba en el periodo del día nuevo
+				p = p.sigue
+			}
 			ahora := g.ahora()
 			dur := time.Duration(0)
 			if p.turnos--; p.turnos <= 0 {
@@ -717,7 +721,17 @@ func (g *Gestor) revisa() {
 			g.cierraTramo(p) // la presencia acabó (pasados sus 15 minutos y 5 sin intervenir)
 		}
 		if (p.turnos == 0 && p.HumDesde.IsZero() && !ahora.Before(p.Ultima.Add(Espera))) || medianoche {
+			turnos := p.turnos
 			g.cierraPeriodo(p, map[bool]string{true: "fin del día", false: "sin trabajo ni presencia"}[medianoche])
+			// Un turno que pasa de la medianoche sigue en un periodo del día nuevo (con su agente y su modelo): si no,
+			// su tiempo de máquina después de las 00:00 se perdería y su consumo iría a un periodo sin agente.
+			if medianoche && turnos > 0 {
+				m0 := time.Date(y, m, d+1, 0, 0, 0, 0, p.Inicio.Location())
+				np := &Periodo{Sesion: p.Sesion, T: p.T, TareaID: p.TareaID, Inicio: m0, Ultima: m0, TurnoDesde: m0, turnos: turnos, Estado: "trabajando"}
+				p.sigue = np
+				g.periodos[p.Sesion] = np
+				g.anota("periodo-abre", np, map[string]any{"titulo": np.T.Titulo, "por": "turno tras la medianoche"})
+			}
 			cambio = true
 		}
 	}

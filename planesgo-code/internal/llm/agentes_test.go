@@ -175,8 +175,21 @@ func TestOpenCodePermiso(t *testing.T) {
 		t.Errorf("error: %v", err)
 	}
 	a := Agentes()[2].(*Agente)
-	if e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"}); len(e) != 2 || !strings.Contains(e[0], `"bash":"allow"`) || !strings.HasPrefix(e[1], "XDG_DATA_HOME=") {
+	e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"})
+	if len(e) != 3 || !strings.Contains(e[0], `"bash":"allow"`) || !strings.HasPrefix(e[1], "XDG_DATA_HOME=") {
 		t.Errorf("auto: %v", e)
+	}
+	// Ahorro de tokens: lecturas de registros y dependencias denegadas, bucles cortados, compactación, límite de
+	// pasos y de contexto para el modelo de Google.
+	for _, x := range []string{`"*.log":"deny"`, `"node_modules/*":"deny"`, `"doom_loop":"deny"`} {
+		if !strings.Contains(e[0], x) {
+			t.Errorf("permisos sin %s: %s", x, e[0])
+		}
+	}
+	for _, x := range []string{`"compaction":{"auto":true,"prune":true}`, `"steps":40`, `"gemini-4-argon":{"limit":{"context":160000`} {
+		if !strings.HasPrefix(e[2], "OPENCODE_CONFIG_CONTENT=") || !strings.Contains(e[2], x) {
+			t.Errorf("configuración sin %s: %s", x, e[2])
+		}
 	}
 	if e := a.EntornoPara(Peticion{}); !strings.Contains(e[0], `"edit":"deny"`) || strings.Contains(e[0], "ask") {
 		t.Errorf("lectura: %v", e)
