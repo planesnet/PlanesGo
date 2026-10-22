@@ -15,6 +15,7 @@ interface Props {
   alAjustes: (p: Proyecto, a: AjustesProyecto) => void;
   alElegirSesion: (p: Proyecto, s: Sesion) => void;
   alAjustesSesion: (s: Sesion) => void; alNuevaSesion: (p: Proyecto) => void; alCambiarSesion: (s: Sesion) => void; alBorrarSesion: (s: Sesion) => void;
+  onDuplicateSession: (p: Proyecto, s: Sesion) => void;
 }
 
 // Proyectos recientes de cada usuario (los últimos que ha abierto, el más reciente primero).
@@ -287,7 +288,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
 }
 
 // Sesiones de un proyecto, como en Claude: icono del hosting, título, rama y menú ⋮ (renombrar, borrar, ajustes).
-function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion, alAjustesSesion }: Props & { proyecto: Proyecto; lista: Sesion[]; hostingDe: (id: number) => string | undefined }) {
+function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambiarSesion, alBorrarSesion, alAjustesSesion, onDuplicateSession }: Props & { proyecto: Proyecto; lista: Sesion[]; hostingDe: (id: number) => string | undefined }) {
   // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
   const [renombrando, setRenombrando] = useState<string | null>(null);
@@ -314,6 +315,8 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
               { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
               // Para analizar la sesión (registro de tiempos, depuracion.log, conversación del agente) a partir de sus ids.
               { icono: 'copiar', texto: 'Copiar identificador', accion: () => navigator.clipboard.writeText(identificador(s)).catch(() => {}) },
+              // Misma configuración, conversación vacía: el agente empieza de cero.
+              { icono: 'nuevo', texto: 'Duplicar sin historial', accion: () => onDuplicateSession(proyecto, s) },
               { icono: 'borrar', texto: 'Borrar', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`, { okText: 'Borrar', danger: true })) alBorrarSesion(s); } },
               null,
               { icono: 'ajustes', texto: 'Ajustes', accion: () => alAjustesSesion(s) },
