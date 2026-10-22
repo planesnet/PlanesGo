@@ -2,6 +2,7 @@ package llm
 
 import (
 	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -330,5 +331,43 @@ func TestClaudeConsumoAlRetomar(t *testing.T) {
 	}
 	if real := 0.00011744 - 6.129e-05; math.Abs(u.Coste-real) > real*0.25 { // proporcional: aproximado
 		t.Errorf("coste sin acumulado %.8f, real %.8f", u.Coste, real)
+	}
+}
+
+// Compactación automática (muestras reales, haiku, Claude Code 2.1.308, umbral de 20k por entorno): la sesión
+// sigue con el mismo id, «modelUsage» y «total_cost_usd» siguen acumulando y llevan la llamada del resumen, que no
+// sale en la salida. Con el acumulado guardado, el turno que compacta cuenta su resumen (46.681 de entrada, aunque
+// la única llamada visible sea de 5.775); y una sesión nueva que compacta a mitad de turno lo cuenta todo
+// (80.268, de los que solo se ven 50.570).
+func TestClaudeConsumoAlCompactar(t *testing.T) {
+	turno := func(f string, read func(io.Reader, func(Evento)) error) Uso {
+		var u Uso
+		for _, e := range lee(t, f, func(r *os.File, emite func(Evento)) error { return read(r, emite) }) {
+			if e.Uso != nil {
+				u.Entrada += e.Uso.Entrada
+				u.Salida += e.Uso.Salida
+				u.Coste += e.Uso.Coste
+				u.Contexto = e.Uso.Contexto
+			}
+		}
+		return u
+	}
+	near := func(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	acumulados = nil
+	if u := turno("claude-12-compacta-1.jsonl", leeClaudeCodeNew); u.Entrada != 71144 || u.Salida != 490 || !near(u.Coste, 0.00545779) {
+		t.Errorf("primer turno: %+v", u)
+	}
+	if u := turno("claude-12-compacta-2.jsonl", leeClaudeCode); u.Entrada != 46681 || u.Salida != 1487 ||
+		!near(u.Coste, 0.0080869-0.00545779) || u.Contexto != 5775 {
+		t.Errorf("turno que compacta: %+v", u)
+	}
+	if u := turno("claude-12-compacta-3.jsonl", leeClaudeCode); u.Entrada != 6094 || u.Salida != 7 || !near(u.Coste, 0.00857313-0.0080869) {
+		t.Errorf("turno después de compactar: %+v", u)
+	}
+	acumulados = nil
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if u := turno("claude-13-compacta-nueva.jsonl", leeClaudeCodeNew); u.Entrada != 80268 || u.Salida != 3431 || !near(u.Coste, 0.00922649) {
+		t.Errorf("sesión nueva que compacta: %+v", u)
 	}
 }
