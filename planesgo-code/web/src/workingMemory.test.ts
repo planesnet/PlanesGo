@@ -71,3 +71,17 @@ test('cuándo hay relevo', () => {
   assert.ok(W.shouldRelay({ ...base, context: 25_000, setting: 20_000 }));
   assert.equal(W.relayThreshold('antigravity', 'auto'), 60_000);
 });
+
+test('memoria de trabajo: sin lo que quedó fuera del contexto con «Continuar desde aquí»', () => {
+  const cortada: Mensaje[] = [
+    ...conv.slice(0, 2),
+    { ...conv[2], texto: 'Recuerda la palabra clave VERDE.', fuera: true },
+    { ...conv[3], fuera: true },
+    { rol: 'user', texto: '¿Qué palabras clave recuerdas?' },
+    { rol: 'assistant', texto: 'Ninguna.' },
+  ];
+  const w = W.collectWorkingMemory(cortada);
+  assert.deepEqual(w.requests, ['¿Qué palabras clave recuerdas?']);
+  assert.deepEqual(w.files, ['cmd/servidor/main.go']);
+  assert.ok(!W.buildWorkingMemory(cortada).includes('VERDE'));
+});

@@ -65,13 +65,14 @@ test('childMessage: el contexto delante del mensaje (detrás si es una orden «/
 
 test('childOf: mismos parámetros que la madre, sin historial y enlazada a ella', () => {
   const m: Sesion = { ...nueva(7, '/repo', 'main', 'claude-code', 'Diseño'), modelo: 'haiku', permisos: 'editar', esfuerzo: 'low', hosting: 'local' as Sesion['hosting'],
-    mcp: ['x'], autorizadas: ['/otra'], tareaId: 3, tarea: 'T', renovarContexto: 'nunca', sesionAgente: 'abc', plan: 'planes/1.md' };
+    mcp: ['x'], autorizadas: ['/otra'], tareaId: 3, tarea: 'T', renovarContexto: 'nunca', compactAtK: 30, sesionAgente: 'abc', plan: 'planes/1.md', corte: 3 };
   const c = childOf(m, 'Añadir las etiquetas');
   assert.notEqual(c.id, m.id);
   assert.equal(c.madre, m.id);
   assert.equal(c.nombre, 'Añadir las etiquetas');
-  for (const k of ['proyecto', 'carpeta', 'rama', 'agente', 'modelo', 'permisos', 'esfuerzo', 'hosting', 'mcp', 'autorizadas', 'tareaId', 'tarea', 'renovarContexto'] as const) assert.deepEqual(c[k], m[k], k);
+  for (const k of ['proyecto', 'carpeta', 'rama', 'agente', 'modelo', 'permisos', 'esfuerzo', 'hosting', 'mcp', 'autorizadas', 'tareaId', 'tarea', 'renovarContexto', 'compactAtK'] as const) assert.deepEqual(c[k], m[k], k);
   assert.equal(c.sesionAgente, undefined);
+  assert.equal(c.corte, undefined, 'el «Continuar desde aquí» pendiente es de la conversación de la madre');
   assert.equal(c.plan, undefined);
 });
 

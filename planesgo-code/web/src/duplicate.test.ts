@@ -26,7 +26,7 @@ test('duplicateSession: copia los ajustes, no la conversación ni la identidad',
   const s = sesion({
     modelo: 'haiku', sesionAgente: 'abc', permisos: 'plan', modoPrevio: 'editar', plan: '/r/plan.md', autorizadas: ['/otra'],
     avisos: { coste: 5 } as unknown as Sesion['avisos'], mcp: ['playwright'], decideAparte: false, tipo: 'local', hosting: 'odoo.sh' as Sesion['hosting'],
-    esfuerzo: 'high', tareaId: 42, tarea: 'Tarea X',
+    esfuerzo: 'high', tareaId: 42, tarea: 'Tarea X', corte: 3, renovarContexto: 20000, compactAtK: 30, madre: 'm',
   });
   const c = duplicateSession(s, [s], 1000);
   assert.notEqual(c.id, s.id);
@@ -35,8 +35,8 @@ test('duplicateSession: copia los ajustes, no la conversación ni la identidad',
   assert.equal(c.ultima, 1000);
   assert.equal(c.sesionAgente, undefined);
   assert.equal(c.plan, undefined);
-  assert.ok(!('sesionAgente' in c) && !('plan' in c));
-  const { id: _a, nombre: _b, sesionAgente: _c, plan: _d, creada: _e, ultima: _f, ...ajustes } = s;
+  assert.ok(!('sesionAgente' in c) && !('plan' in c) && !('corte' in c), 'ni la sesión del agente, ni el plan, ni el corte pendiente');
+  const { id: _a, nombre: _b, sesionAgente: _c, plan: _d, corte: _k, creada: _e, ultima: _f, ...ajustes } = s;
   const { id: _g, nombre: _h, creada: _i, ultima: _j, ...copiados } = c;
   assert.deepEqual(copiados, ajustes);
   // Copia profunda: cambiar la copia no toca el original.

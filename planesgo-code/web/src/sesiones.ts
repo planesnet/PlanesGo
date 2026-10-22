@@ -67,9 +67,9 @@ export function nueva(proyecto: number, carpeta: string, rama: string, agente: s
 }
 
 // childOf: una sesión hija, con los mismos parámetros que la madre pero sin su historial (ni la sesión del agente,
-// ni su plan en revisión), enlazada a ella.
+// ni su plan en revisión, ni su «Continuar desde aquí» pendiente), enlazada a ella.
 export function childOf(m: Sesion, nombre: string): Sesion {
-  const { id: _i, sesionAgente: _a, plan: _p, creada: _c, ultima: _u, nombre: _n, madre: _m, ...params } = m;
+  const { id: _i, sesionAgente: _a, plan: _p, corte: _k, creada: _c, ultima: _u, nombre: _n, madre: _m, ...params } = m;
   const n = nueva(m.proyecto, m.carpeta, m.rama, m.agente, nombre);
   return { ...params, ...n, madre: m.id };
 }

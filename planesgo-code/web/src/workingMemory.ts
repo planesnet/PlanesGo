@@ -46,7 +46,9 @@ export interface WorkingMemory {
 }
 
 // collectWorkingMemory: los datos de la memoria (sin formato).
-export function collectWorkingMemory(ms: Mensaje[]): WorkingMemory {
+// Lo que quedó fuera del contexto del agente con «Continuar desde aquí» no cuenta: el agente lo ha olvidado.
+export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
+  const ms = todos.filter(m => !m.fuera);
   const us = requests(ms);
   const goal = us[0]?.texto.trim();
   const files: string[] = [];
