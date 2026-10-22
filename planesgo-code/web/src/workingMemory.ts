@@ -178,15 +178,25 @@ export interface RelayInput {
   memoryChars: number;    // tamaño de la memoria de trabajo
 }
 
+// idleMinimum: con la caché caducada, el contexto a partir del cual el relevo sale a cuenta. Seguir la sesión
+// obliga a volver a escribir en caché TODO el historial; el relevo, solo lo fijo del agente (instrucciones y
+// herramientas: unos 17k en Claude Code, menos en los demás) más la memoria. Medido con el banco de consumo: con la
+// caché caliente el relevo cuesta más que seguir (escribe caché que no hacía falta), así que en caliente solo salta
+// con el umbral.
+export function idleMinimum(agent: string): number {
+  return agent === 'claude-code' ? 25_000 : 20_000;
+}
+
 // shouldRelay: por qué el próximo mensaje debe ir a una sesión nueva con la memoria de trabajo (null: no).
-// Salta si el contexto pasa del umbral o si la caché ha caducado (y el contexto es al menos la mitad del umbral);
-// nunca con adjuntos, órdenes de planes o sin sesión del agente, ni si la memoria no ahorra al menos la mitad.
+// Salta si el contexto pasa del umbral o si la caché ha caducado y el historial pasa claramente de lo fijo del agente
+// (idleMinimum); nunca con adjuntos, órdenes de planes o sin sesión del agente, ni si la memoria no ahorra al menos
+// la mitad.
 export function shouldRelay(i: RelayInput): string | null {
   const limit = relayThreshold(i.agent, i.setting);
   if (limit === null || !i.hasAgentSession || i.attachments || i.planOrder || !i.context || !i.memoryChars) return null;
   if (i.memoryChars / 4 > i.context / 2) return null;
   if (i.context >= limit) return `el contexto (${fmt(i.context)}) pasa del umbral (${fmt(limit)})`;
-  if (i.idleMinutes >= CACHE_MINUTES && i.context >= limit / 2) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
+  if (i.idleMinutes >= CACHE_MINUTES && i.context >= idleMinimum(i.agent)) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
   return null;
 }
 
