@@ -695,7 +695,20 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 		`length(coalesce(json_extract(x.data,'$.text'),''))>0) OR json_extract(x.data,'$.type')='tool'))`
 	previas := `SELECT (SELECT u.id FROM message u WHERE u.session_id='` + sesion + `' AND json_extract(u.data,'$.role')='user' AND ` +
 		`u.time_created<=r.time_created ORDER BY u.time_created DESC LIMIT 1) FROM message r WHERE r.id IN (` + rotas + `)`
+	// Pasos vacíos dentro de una respuesta con contenido: a veces Gemini devuelve un paso sin nada (un razonamiento
+	// en blanco) y OpenCode lo guarda; al reenviar el historial, Vertex lo rechaza («must include at least one parts
+	// field») aunque el resto de la respuesta esté bien. Se quitan las partes de texto o razonamiento vacías y los
+	// pasos que se quedan sin nada (un step-start sin contenido hasta el siguiente o hasta el final).
+	en := `message_id IN (SELECT id FROM message WHERE session_id='` + sesion + `')`
+	vacias := `DELETE FROM part WHERE ` + en + ` AND json_extract(data,'$.type') IN ('reasoning','text') AND ` +
+		`length(coalesce(json_extract(data,'$.text'),''))=0`
+	pasosVacios := `DELETE FROM part WHERE ` + en + ` AND json_extract(data,'$.type')='step-start' AND NOT EXISTS (` +
+		`SELECT 1 FROM part q WHERE q.message_id=part.message_id AND q.id>part.id AND json_extract(q.data,'$.type')<>'step-start' AND ` +
+		`q.id < coalesce((SELECT min(r.id) FROM part r WHERE r.message_id=part.message_id AND r.id>part.id AND ` +
+		`json_extract(r.data,'$.type')='step-start'),'~'))`
 	for _, q := range []string{
+		vacias,
+		pasosVacios,
 		"DELETE FROM part WHERE message_id IN (" + previas + ") OR message_id IN (" + rotas + ")",
 		"DELETE FROM message WHERE id IN (" + previas + ") OR id IN (" + rotas + ")",
 	} {
