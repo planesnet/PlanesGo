@@ -815,8 +815,6 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 ))}
               </div>
             )}
-            {/* Barra de prueba: lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
-            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
             {cola.length > 0 && (
               <ol className="cola" aria-label="Mensajes en cola">
                 {cola.map((c, i) => (
@@ -855,6 +853,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 )}
               </ol>
             )}
+            {/* Barra de prueba (debajo de la cola): lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
+            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
             {adjuntos.length > 0 && (
               <div className="adjuntos-pendientes">
                 {adjuntos.map(a => (
