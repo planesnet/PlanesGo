@@ -4,8 +4,8 @@
 //   · suelta: nada que ver con el trabajo; un modelo barato sin historial.
 //   · contexto: sobre el trabajo, sin pedir nada; una copia de la sesión del agente que después se tira.
 // Solo se manda aparte lo que está claro: en la duda, a la conversación (que el agente no se pierda una orden es
-// más importante que algo de ruido en su contexto). Prefijos: «?» estado, «//» aparte, «!» a la conversación
-// (por la cola) y «>» directo a la conversación actual (al turno en curso si el agente lo admite).
+// más importante que algo de ruido en su contexto). Prefijos: «?» estado, «//» aparte y «>» directo a la
+// conversación actual (al turno en curso si el agente lo admite).
 // Funciones puras para poder probarlas: node --test src/aparte.test.ts
 import type { Herramienta, Mensaje, Uso } from './api';
 import type { Tarea } from './tareas';
@@ -53,7 +53,7 @@ export interface Situacion {
 }
 
 // decide: adónde va un mensaje. Con la opción «Siempre al turno» y el agente trabajando, lo que iría a la cola de
-// la conversación le llega ya, a mitad de turno (salvo con adjuntos, órdenes de planes o «!», que van a la cola).
+// la conversación le llega ya, a mitad de turno (salvo con adjuntos u órdenes de planes, que van a la cola).
 export function decide(texto: string, s: Situacion): Decision {
   const d = decideBase(texto, s);
   if (d.destino === 'conversacion' && !d.duda && !d.forzado && s.ocupado && s.alTurno && !s.adjuntos && !s.ordenPlan) {
@@ -67,7 +67,6 @@ function decideBase(texto: string, s: Situacion): Decision {
   // Prefijos: los pide el usuario, se respetan siempre.
   // «>»: straight into the current conversation; with the agent working, into its current turn (if it accepts it).
   if (t.startsWith('>')) return { destino: s.ocupado && s.canInject ? 'turno' : 'conversacion', texto: t.slice(1).trim(), forzado: true, motivo: 'prefijo «>»' };
-  if (/^!(\s|$)/.test(t)) return { destino: 'conversacion', texto: t.slice(1).trim(), forzado: true, motivo: 'prefijo «!»' };
   if (/^\?(\s|$)/.test(t) || t === '?') return { destino: 'estado', texto: t.slice(1).trim(), forzado: true, motivo: 'prefijo «?»' };
   if (t.startsWith('//')) {
     const r = t.slice(2).trim();

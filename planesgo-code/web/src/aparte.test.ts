@@ -61,11 +61,11 @@ test('prefijos: «?» estado y «//» aparte, siempre (también con el agente li
   assert.equal(A.decide('// ¿qué hora es?', { ...ocupado, activo: false }).destino, 'suelta', 'los prefijos valen aunque esté desactivado');
 });
 
-test('prefijo «!»: a la conversación, aunque parezca una pregunta de estado o esté desactivado', () => {
-  assert.deepEqual(A.decide('! ¿cómo va?', ocupado), { destino: 'conversacion', texto: '¿cómo va?', forzado: true, motivo: 'prefijo «!»' });
-  assert.equal(A.decide('! el puerto es 8069', { ...ocupado, activo: false }).texto, 'el puerto es 8069');
-  assert.equal(A.decide('¡Perfecto!', ocupado).destino, 'conversacion', '«¡» no es el prefijo');
-  assert.ok(!A.decide('!importante', ocupado).forzado, 'el prefijo va seguido de un espacio');
+test('«!» ya no es un prefijo: es lo mismo que Intro (el texto va tal cual)', () => {
+  const d = A.decide('! el puerto es 8069', { ...ocupado, activo: false });
+  assert.equal(d.texto, '! el puerto es 8069');
+  assert.ok(!d.forzado);
+  assert.equal(A.decide('¡Perfecto!', ocupado).destino, 'conversacion');
 });
 
 test('etiqueta y cambio de destino', () => {
@@ -144,10 +144,10 @@ test('opción «Siempre al turno»: con el agente trabajando, lo de la conversac
   assert.equal(A.decide('añade también los tests', s).destino, 'turno');
   assert.equal(A.decide('añade también los tests', { ...s, ocupado: false }).destino, 'conversacion');
   assert.equal(A.decide('añade también los tests', { ...s, alTurno: false }).destino, 'conversacion');
-  // A la cola: con adjuntos, órdenes de planes o «!»; y lo que va aparte sigue aparte.
+  // A la cola: con adjuntos u órdenes de planes; y lo que va aparte sigue aparte.
   assert.equal(A.decide('mira esto', { ...s, adjuntos: 1 }).destino, 'conversacion');
   assert.equal(A.decide('/plan algo', { ...s, ordenPlan: true }).destino, 'conversacion');
-  assert.equal(A.decide('! sigue', s).destino, 'conversacion');
+  assert.equal(A.decide('! sigue', s).destino, 'turno', '«!» ya no es un prefijo');
   assert.equal(A.decide('¿cómo va?', s).destino, 'estado');
 });
 

@@ -9,7 +9,8 @@ import * as CO from '../costes';
 import * as AP from '../aparte';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
-import { Miniaturas, ProyectoCapturas } from './Capturas';
+import { Miniaturas, ProyectoCapturas, TiraFotos, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
+import { fotosDe } from '../fotos';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as AY from '../ayuda';
@@ -220,10 +221,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     envia(envioPendiente.texto);
   }, [envioPendiente, sesion?.id, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Al acabar un turno sin error, sale el primero de la cola.
+  // Al acabar un turno sin error, sale la cola: todos sus mensajes juntos (las órdenes, solas).
   useEffect(() => {
     if (!sesion || !prov?.disponible) return;
-    const { enviar, cola: resto } = C.siguiente(colaSesion, Boolean(enCurso));
+    const { enviar, cola: resto } = C.siguiente(colaSesion, Boolean(enCurso), t => t.startsWith('/') || PL.interpreta(t) !== null);
     if (!enviar) return;
     ponCola(sesion.id, () => resto);
     envia(enviar.texto, enviar.adjuntos);
@@ -248,9 +249,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // Opción «Siempre al turno» (de cada usuario, para todas las sesiones): con el agente trabajando, lo que va a la
   // conversación le llega ya, a mitad de turno, en vez de esperar en la cola.
-  // Por defecto, sí: el prefijo «!» lo deja en la cola.
+  // Por defecto, sí.
   const [siempreAlTurno, setSiempreAlTurno] = useState(() => leeLS(CLAVE_SIEMPRE_AL_TURNO, true));
   const [verAyuda, setVerAyuda] = useState(false);
+  // Fotos de la conversación (capturas de las herramientas e imágenes de las respuestas), de la más reciente a la
+  // más antigua: la tira de arriba y el visor, que deja pasar de una a otra.
+  const fotos = useMemo<FotoVisor[]>(() => proyecto ? fotosDe(mensajes, r => urlCaptura(proyecto.id, r)).map(f => ({ src: f.src, pie: f.titulo })) : [],
+    [mensajes, proyecto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fotosRef = useRef(fotos);
+  fotosRef.current = fotos;
+  const [fotoAbierta, setFotoAbierta] = useState<{ fotos: FotoVisor[]; i: number } | null>(null);
+  const abreFoto = useCallback((src: string) => {
+    const l = fotosRef.current;
+    const i = l.findIndex(f => f.src === src);
+    setFotoAbierta(i >= 0 ? { fotos: l, i } : { fotos: [{ src }], i: 0 });
+  }, []);
   const cierraAyuda = useCallback(() => setVerAyuda(false), []);
   // La decisión de adónde irá lo que se escribe (se ve en la etiqueta encima del cuadro, antes de enviar).
   const situacion = (t: string): AP.Situacion => ({ ocupado: Boolean(enCurso), ultimo: ultimoDelAgente(mensajes), hayConversacion: mensajes.length > 0,
@@ -709,6 +722,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       ) : (
         <>
           <ProyectoCapturas.Provider value={proyecto.id}>
+          <VisorConversacion.Provider value={abreFoto}>
+          <TiraFotos fotos={fotos} alAbrir={i => setFotoAbierta({ fotos, i })} />
+          {fotoAbierta && <Visor fotos={fotoAbierta.fotos} inicial={fotoAbierta.i} alCerrar={() => setFotoAbierta(null)} />}
           <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar} onCopy={copiaSeleccion}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
@@ -778,6 +794,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             ))}
             <div ref={fin} />
           </div>
+          </VisorConversacion.Provider>
           </ProyectoCapturas.Provider>
           <div className="redactor">
             {!sesion.hosting && (
@@ -858,12 +875,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {decisionViva && (
               <div className="destino-mensaje">
                 <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino, conTurno))}
-                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «!» a la cola, «//» aparte, «?» estado.`}>
+                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «//» aparte, «?» estado.`}>
                   {destinoManual ? AP.etiqueta({ destino: destinoManual === 'turno' && !conTurno ? 'conversacion' : destinoManual, texto: '', motivo: '' }, Boolean(enCurso)) : AP.etiqueta(decisionViva, Boolean(enCurso))}
                 </button>
                 {destinoManual && <span className="suave pequeno">elegido por ti</span>}
                 {prov?.inyecta && (
-                  <label className="casilla suave pequeno" title="Con el agente trabajando, lo que escribas le llega ya (lo lee antes de acabar su turno, también mientras esperan sus tareas en segundo plano) en vez de esperar en la cola. Con adjuntos, órdenes de planes o «!», a la cola.">
+                  <label className="casilla suave pequeno" title="Con el agente trabajando, lo que escribas le llega ya (lo lee antes de acabar su turno, también mientras esperan sus tareas en segundo plano) en vez de esperar en la cola. Con adjuntos u órdenes de planes, a la cola.">
                     <input type="checkbox" checked={siempreAlTurno} onChange={e => { setSiempreAlTurno(e.target.checked); ponLS(CLAVE_SIEMPRE_AL_TURNO, e.target.checked); }} /> Siempre al turno
                   </label>
                 )}
@@ -897,12 +914,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? (conTurno && siempreAlTurno ? 'Escribe; le llega ya al agente… («!» a la cola · /help)' : 'Escribe; irá a la cola… («>» al turno, «?» estado, «//» aparte · /help)')
+                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? (conTurno && siempreAlTurno ? 'Escribe; le llega ya al agente… (/help)' : 'Escribe; irá a la cola… («>» al turno, «?» estado, «//» aparte · /help)')
                   : 'Escribe… (/plan para crear un plan · /help para la ayuda)'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
                 ? (texto.trim()
-                  ? <button className="redondo primario" onClick={() => decideYEnvia()} disabled={subiendo} title={conTurno && siempreAlTurno ? 'Intro: al turno en curso (el agente lo lee ya) · prefijo «!»: a la cola' : 'Intro: a la cola (se enviará cuando termine el agente) o, si no es para el agente, aparte'} aria-label={conTurno && siempreAlTurno ? 'Enviar al turno en curso' : 'Poner en cola'}><Icono n="enviar" t={16} /></button>
+                  ? <button className="redondo primario" onClick={() => decideYEnvia()} disabled={subiendo} title={conTurno && siempreAlTurno ? 'Intro: al turno en curso (el agente lo lee ya)' : 'Intro: a la cola (se enviará cuando termine el agente) o, si no es para el agente, aparte'} aria-label={conTurno && siempreAlTurno ? 'Enviar al turno en curso' : 'Poner en cola'}><Icono n="enviar" t={16} /></button>
                   : <button className="redondo" onClick={para} title={cola.length ? 'Parar (la cola vuelve al cuadro de texto)' : 'Parar'} aria-label="Parar"><Icono n="parar" t={16} /></button>)
                 : <button className="redondo primario" onClick={() => decideYEnvia()} disabled={!texto.trim() || !prov?.disponible || subiendo} title="Enviar (Intro)" aria-label="Enviar"><Icono n="enviar" t={16} /></button>}
             </div>

@@ -21,7 +21,6 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
     ] },
     { titulo: 'Prefijos del mensaje', entradas: [
       { clave: '>', que: o.inyecta ? 'Directo a la conversación actual: con el agente trabajando, le llega ya al turno en curso' : 'Directo a la conversación actual (sin que pgocode lo lleve aparte)' },
-      { clave: '!', que: 'A la conversación por la cola (con el agente trabajando, espera a que acabe el turno)' },
       { clave: '//', que: 'Pregunta aparte: no entra en la conversación' },
       { clave: '?', que: 'Estado del trabajo, sin gastar tokens' },
     ] },

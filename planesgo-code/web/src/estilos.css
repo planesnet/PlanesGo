@@ -743,6 +743,14 @@ button.miga-item:hover { background: var(--hover); }
 .miniatura img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
 .miniatura:hover { border-color: var(--acento); }
 .mas-miniaturas { font-size: 11px; color: var(--suave); cursor: pointer; }
+/* Imágenes de las respuestas del agente: en miniatura (al pulsar, el visor) */
+.miniatura-respuesta { padding: 0; display: inline-block; vertical-align: top; width: 132px; height: 84px; margin: 4px 6px 4px 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--linea); background: var(--panel); cursor: zoom-in; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.miniatura-respuesta img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.miniatura-respuesta:hover { border-color: var(--acento); }
+/* Tira con todas las fotos de la conversación (la más reciente, primero) */
+.tira-fotos { flex: none; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 6px 12px; border-bottom: 1px solid var(--linea); background: var(--fondo); }
+.tira-fotos > span { flex: none; white-space: nowrap; }
+.tira-fotos .miniatura { flex: none; width: 60px; height: 40px; cursor: zoom-in; }
 .acciones > summary, .herramienta > summary { display: flex; align-items: center; gap: 6px; }
 .fondo-modal.visor-capturas { display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; background: rgba(0,0,0,.72); }
 .visor-capturas figure { margin: 0; max-width: 96vw; display: grid; gap: 8px; justify-items: center; }

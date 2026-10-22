@@ -14,12 +14,26 @@ test('encola en orden y no encola textos vacíos', () => {
   assert.deepEqual(c.mensajes[0].adjuntos, ['a.png']);
 });
 
-test('con el agente ocupado no sale nada; libre, sale el primero', () => {
-  const c = C.encola(C.encola(C.vacia<string>(), 'uno'), 'dos');
+test('con el agente ocupado no sale nada; libre, salen todos juntos en un mensaje', () => {
+  const c = C.encola(C.encola(C.encola(C.vacia<string>(), 'uno', ['a.png']), 'dos'), 'tres', ['b.png']);
   assert.equal(C.siguiente(c, true).enviar, undefined);
   const r = C.siguiente(c, false);
-  assert.equal(r.enviar?.texto, 'uno');
-  assert.deepEqual(textos(r.cola), ['dos']);
+  assert.equal(r.enviar?.texto, 'uno\n\ndos\n\ntres');
+  assert.deepEqual(r.enviar?.adjuntos, ['a.png', 'b.png']);
+  assert.deepEqual(textos(r.cola), []);
+});
+
+test('una orden sale sola y corta el grupo', () => {
+  let c = C.vacia<string>();
+  for (const t of ['uno', 'dos', '/plan algo', 'tres', 'cuatro']) c = C.encola(c, t);
+  let r = C.siguiente(c, false);
+  assert.equal(r.enviar?.texto, 'uno\n\ndos');
+  r = C.siguiente(r.cola, false);
+  assert.equal(r.enviar?.texto, '/plan algo');
+  r = C.siguiente(r.cola, false);
+  assert.equal(r.enviar?.texto, 'tres\n\ncuatro');
+  const plan = C.encola(C.encola(C.vacia<string>(), 'hola'), 'ejecuta el plan 2');
+  assert.equal(C.siguiente(plan, false, t => /plan \d/.test(t)).enviar?.texto, 'hola');
 });
 
 test('cola vacía: no hay siguiente', () => {
@@ -95,17 +109,15 @@ class ChatSimulado {
   }
 }
 
-test('flujo: los mensajes en cola se envían uno a uno al acabar cada turno', () => {
+test('flujo: los mensajes en cola salen juntos, en un solo turno, al acabar el actual', () => {
   const c = new ChatSimulado();
   c.escribe('s1', 'primero');
   c.escribe('s1', 'segundo');
   c.escribe('s1', 'tercero');
   assert.deepEqual(c.enviados, ['s1:primero']);
   c.termina('s1');
-  assert.deepEqual(c.enviados, ['s1:primero', 's1:segundo']);
+  assert.deepEqual(c.enviados, ['s1:primero', 's1:segundo\n\ntercero']);
   c.termina('s1');
-  c.termina('s1');
-  assert.deepEqual(c.enviados, ['s1:primero', 's1:segundo', 's1:tercero']);
   assert.equal(c.enCurso, null);
 });
 

@@ -18,11 +18,18 @@ export function quita<A>(c: Cola<A>, i: number): Cola<A> {
   return { ...c, mensajes: c.mensajes.filter((_, j) => j !== i) };
 }
 
-// siguiente: con el agente libre y la cola en marcha, el mensaje que toca enviar y la cola sin él.
-export function siguiente<A>(c: Cola<A>, ocupado: boolean): { enviar?: EnCola<A>; cola: Cola<A> } {
+// siguiente: con el agente libre y la cola en marcha, lo que toca enviar y la cola sin ello. Los mensajes en cola
+// salen juntos, en uno solo (una petición en vez de varias: el agente no relee la conversación por cada uno). Una
+// orden («/plan …», «/skill …», «ejecuta el plan 2») sale sola: cambia lo que hace pgocode con el mensaje.
+export function siguiente<A>(c: Cola<A>, ocupado: boolean, esOrden: (t: string) => boolean = t => t.startsWith('/')): { enviar?: EnCola<A>; cola: Cola<A> } {
   if (ocupado || c.parada || c.mensajes.length === 0) return { cola: c };
-  const [primero, ...resto] = c.mensajes;
-  return { enviar: primero, cola: { ...c, mensajes: resto } };
+  let n = 1;
+  if (!esOrden(c.mensajes[0].texto)) {
+    while (n < c.mensajes.length && !esOrden(c.mensajes[n].texto)) n++;
+  }
+  const juntos = c.mensajes.slice(0, n);
+  const enviar = { texto: juntos.map(m => m.texto).join('\n\n'), adjuntos: juntos.flatMap(m => m.adjuntos) };
+  return { enviar, cola: { ...c, mensajes: c.mensajes.slice(n) } };
 }
 
 // Al empezar un turno (a mano o desde la cola) la cola vuelve a estar en marcha; si falla o se para, se detiene.

@@ -5,7 +5,8 @@ import Icono from './Icono';
 
 // Capturas de evidencia: las imágenes que devuelven las herramientas de los agentes (pruebas en el navegador…),
 // guardadas por pgocode en la carpeta de la sesión. En el chat, miniaturas junto a cada herramienta (como en
-// Claude); en la TV, la galería del proyecto. Al pulsar, el visor a tamaño completo.
+// Claude), las imágenes de las respuestas también en miniatura y una tira con todas las de la conversación; en la
+// TV, la galería del proyecto. Al pulsar, el visor a tamaño completo (el mismo en el chat y en la TV).
 
 export interface Captura { ruta: string; t: string; sesion: string; titulo?: string; herramienta?: string; resumen?: string; agente?: string; rama?: string }
 
@@ -14,46 +15,55 @@ export const ProyectoCapturas = createContext(0);
 
 export const urlCaptura = (proyecto: number, ruta: string) => `/api/evidencia?proyecto=${proyecto}&ruta=${encodeURIComponent(ruta)}`;
 
+// Una foto para el visor: su dirección y el pie (qué es).
+export interface FotoVisor { src: string; pie?: string }
+
+// El visor de la conversación: abre una foto (por su dirección) con todas las de la conversación alrededor. Sin
+// él (fuera del chat), cada miniatura abre su propio visor.
+export const VisorConversacion = createContext<((src: string) => void) | null>(null);
+
 // Miniaturas (como mucho `max`; el resto, «+N»).
 export function Miniaturas({ rutas, max = 3 }: { rutas?: string[]; max?: number }) {
   const proyecto = useContext(ProyectoCapturas);
+  const conversacion = useContext(VisorConversacion);
   const [visor, setVisor] = useState<number | null>(null);
   if (!rutas?.length || !proyecto) return null;
+  const abre = (i: number) => conversacion ? conversacion(urlCaptura(proyecto, rutas[Math.min(i, rutas.length - 1)])) : setVisor(i);
   return (
     <span className="miniaturas" onClick={e => e.preventDefault()}>
       {rutas.slice(0, max).map((r, i) => (
-        <button key={r} className="miniatura" onClick={e => { e.preventDefault(); e.stopPropagation(); setVisor(i); }} title="Ver la captura">
+        <button key={r} className="miniatura" onClick={e => { e.preventDefault(); e.stopPropagation(); abre(i); }} title="Ver la captura">
           <img src={urlCaptura(proyecto, r)} alt="Captura" loading="lazy" />
         </button>
       ))}
-      {rutas.length > max && <span className="mas-miniaturas" onClick={e => { e.preventDefault(); e.stopPropagation(); setVisor(max); }}>+{rutas.length - max}</span>}
-      {visor !== null && <Visor proyecto={proyecto} capturas={rutas.map(r => ({ ruta: r, t: '', sesion: '' }))} inicial={visor} alCerrar={() => setVisor(null)} />}
+      {rutas.length > max && <span className="mas-miniaturas" onClick={e => { e.preventDefault(); e.stopPropagation(); abre(max); }}>+{rutas.length - max}</span>}
+      {visor !== null && <Visor fotos={rutas.map(r => ({ src: urlCaptura(proyecto, r) }))} inicial={visor} alCerrar={() => setVisor(null)} />}
     </span>
   );
 }
 
 // Visor a tamaño completo, con anterior y siguiente (flechas del teclado) y cerrar (Escape).
-export function Visor({ proyecto, capturas, inicial, alCerrar }: { proyecto: number; capturas: Captura[]; inicial: number; alCerrar: () => void }) {
+export function Visor({ fotos, inicial, alCerrar }: { fotos: FotoVisor[]; inicial: number; alCerrar: () => void }) {
   const [i, setI] = useState(inicial);
-  const c = capturas[i];
+  const c = fotos[i];
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
       if (e.key === 'Escape') alCerrar();
       if (e.key === 'ArrowLeft') setI(x => Math.max(0, x - 1));
-      if (e.key === 'ArrowRight') setI(x => Math.min(capturas.length - 1, x + 1));
+      if (e.key === 'ArrowRight') setI(x => Math.min(fotos.length - 1, x + 1));
     };
     document.addEventListener('keydown', tecla);
     return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar, capturas.length]);
+  }, [alCerrar, fotos.length]);
   if (!c) return null;
   return createPortal(
     <div className="fondo-modal visor-capturas" onMouseDown={e => { if (e.target === e.currentTarget) alCerrar(); }}>
       <figure>
-        <img src={urlCaptura(proyecto, c.ruta)} alt="Captura" />
+        <img src={c.src} alt={c.pie || 'Foto'} />
         <figcaption>
           <button className="icono" onClick={() => setI(x => Math.max(0, x - 1))} disabled={i === 0} aria-label="Anterior"><Icono n="atras" t={16} /></button>
-          <span className="recorta">{i + 1} / {capturas.length}{c.titulo ? ' · ' + c.titulo : ''}{c.herramienta ? ' · ' + c.herramienta : ''}{c.t ? ' · ' + fecha(c.t) : ''}</span>
-          <button className="icono" onClick={() => setI(x => Math.min(capturas.length - 1, x + 1))} disabled={i === capturas.length - 1} aria-label="Siguiente"><span className="espejo"><Icono n="atras" t={16} /></span></button>
+          <span className="recorta">{i + 1} / {fotos.length}{c.pie ? ' · ' + c.pie : ''}</span>
+          <button className="icono" onClick={() => setI(x => Math.min(fotos.length - 1, x + 1))} disabled={i === fotos.length - 1} aria-label="Siguiente"><span className="espejo"><Icono n="atras" t={16} /></span></button>
           <button className="icono" onClick={alCerrar} aria-label="Cerrar"><Icono n="cerrar" t={16} /></button>
         </figcaption>
       </figure>
@@ -99,7 +109,40 @@ export function Galeria({ proyecto }: { proyecto: number }) {
           </div>
         </section>
       ))}
-      {visor !== null && <Visor proyecto={proyecto} capturas={l} inicial={visor} alCerrar={() => setVisor(null)} />}
+      {visor !== null && <Visor fotos={l.map(c => ({ src: urlCaptura(proyecto, c.ruta), pie: [c.titulo, c.herramienta, c.t && fecha(c.t)].filter(Boolean).join(' · ') }))}
+        inicial={visor} alCerrar={() => setVisor(null)} />}
+    </div>
+  );
+}
+
+// FotoRespuesta: una imagen que el agente pone en su respuesta (Markdown), en miniatura; al pulsar, el visor. Si no
+// se puede cargar (una ruta del equipo, una web caída), su texto.
+export function FotoRespuesta({ src, alt }: { src?: string; alt?: string }) {
+  const conversacion = useContext(VisorConversacion);
+  const [visor, setVisor] = useState(false);
+  const [rota, setRota] = useState(false);
+  if (!src || rota) return <span className="suave">[{alt || 'imagen'}{src ? ': ' + src : ''}]</span>;
+  return (
+    <>
+      <button className="miniatura-respuesta" title={(alt ? alt + ' · ' : '') + 'Ver la imagen'} onClick={() => conversacion ? conversacion(src) : setVisor(true)}>
+        <img src={src} alt={alt || 'Imagen'} loading="lazy" onError={() => setRota(true)} />
+      </button>
+      {visor && <Visor fotos={[{ src, pie: alt }]} inicial={0} alCerrar={() => setVisor(false)} />}
+    </>
+  );
+}
+
+// TiraFotos: todas las fotos de la conversación en curso, de la más reciente a la más antigua.
+export function TiraFotos({ fotos, alAbrir }: { fotos: FotoVisor[]; alAbrir: (i: number) => void }) {
+  if (!fotos.length) return null;
+  return (
+    <div className="tira-fotos" aria-label="Fotos de la conversación">
+      <span className="suave pequeno">{fotos.length} {fotos.length === 1 ? 'foto' : 'fotos'}</span>
+      {fotos.map((f, i) => (
+        <button key={f.src} className="miniatura" title={f.pie || 'Ver la foto'} onClick={() => alAbrir(i)}>
+          <img src={f.src} alt={f.pie || 'Foto'} loading="lazy" />
+        </button>
+      ))}
     </div>
   );
 }
