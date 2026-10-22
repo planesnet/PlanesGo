@@ -19,6 +19,7 @@ const trazos: Record<string, JSX.Element> = {
   tv: <><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M8 21h8M12 17v4" /></>,
   web: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
   cerrar: <path d="M6 6l12 12M18 6L6 18" />,
+  imagen: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M21 16l-5-5-9 8" /></>,
   warning: <><path d="M12 4L2.5 20h19L12 4z" /><path d="M12 10v4M12 17h.01" /></>,
   error: <><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,

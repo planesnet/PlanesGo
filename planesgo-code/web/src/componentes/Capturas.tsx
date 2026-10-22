@@ -136,8 +136,8 @@ export function FotoRespuesta({ src, alt }: { src?: string; alt?: string }) {
 export function TiraFotos({ fotos, alAbrir }: { fotos: FotoVisor[]; alAbrir: (i: number) => void }) {
   if (!fotos.length) return null;
   return (
-    <div className="tira-fotos" aria-label="Fotos de la conversación">
-      <span className="suave pequeno">{fotos.length} {fotos.length === 1 ? 'foto' : 'fotos'}</span>
+    <div className="tira-fotos" aria-label="Fotos de la conversación" title="Las capturas y las imágenes de esta conversación, de la más reciente a la más antigua. Pulsa una para verla en grande.">
+      <span className="suave pequeno"><Icono n="imagen" t={13} /> Fotos de la conversación ({fotos.length})</span>
       {fotos.map((f, i) => (
         <button key={f.src} className="miniatura" title={f.pie || 'Ver la foto'} onClick={() => alAbrir(i)}>
           <img src={f.src} alt={f.pie || 'Foto'} loading="lazy" />

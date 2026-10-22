@@ -723,8 +723,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         <>
           <ProyectoCapturas.Provider value={proyecto.id}>
           <VisorConversacion.Provider value={abreFoto}>
-          <TiraFotos fotos={fotos} alAbrir={i => setFotoAbierta({ fotos, i })} />
           {fotoAbierta && <Visor fotos={fotoAbierta.fotos} inicial={fotoAbierta.i} alCerrar={() => setFotoAbierta(null)} />}
+          {/* Un solo bloque en la fila de la conversación: la tira de fotos (si hay) y los mensajes. */}
+          <div className="conversation-pane">
+          <TiraFotos fotos={fotos} alAbrir={i => setFotoAbierta({ fotos, i })} />
           <div className="mensajes" aria-live="polite" ref={lista} onScroll={alDesplazar} onCopy={copiaSeleccion}>
             {mensajes.length === 0 && (
               <div className="vacio pequeno">
@@ -793,6 +795,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </div>
             ))}
             <div ref={fin} />
+          </div>
           </div>
           </VisorConversacion.Provider>
           </ProyectoCapturas.Provider>
