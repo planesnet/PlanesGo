@@ -3,6 +3,7 @@
 import type { Mensaje } from './api';
 import type { Avisos } from './costes';
 import type { TipoHosting } from './ajustes';
+import type { RelaySetting } from './workingMemory';
 
 export interface Sesion {
   id: string;
@@ -20,6 +21,7 @@ export interface Sesion {
   avisos?: Avisos;        // avisos y límites de coste de la sesión (lo que falte, los del agente)
   mcp?: string[];         // servidores MCP de Claude Code además de «pgo» (por defecto ninguno: ahorran tokens y procesos)
   decideAparte?: boolean; // pgocode decide qué va a la conversación y qué aparte (por defecto, sí)
+  renovarContexto?: RelaySetting; // renovar el contexto del agente con la memoria de trabajo (por defecto, automático)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)

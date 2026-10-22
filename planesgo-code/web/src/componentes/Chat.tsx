@@ -7,6 +7,7 @@ import * as PL from '../plan';
 import * as T from '../tareas';
 import * as CO from '../costes';
 import * as AP from '../aparte';
+import * as W from '../workingMemory';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, TiraFotos, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
@@ -420,7 +421,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
   // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
-  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean } = {}) {
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string } = {}) {
     const t = (forzado ?? texto).trim();
     if (!t || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
     const ses: Sesion = sesion;
@@ -455,7 +456,20 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
     const previos = forzado !== undefined ? conversacion(id) : mensajes;
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
-    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}) }];
+    // Relevo: con el contexto del agente grande (o sin caché por llevar parada), el mensaje va a una sesión nueva del
+    // agente con la memoria de trabajo en vez de reenviar todo el historial. El chat no cambia. Nunca con adjuntos,
+    // planes ni preguntas aparte (que no pasan por aquí).
+    const sesionPrevia = opc.sesionAgente ?? ses.sesionAgente;
+    let memoria = '', relevo: Mensaje['relevo'];
+    if (prov.tipo === 'agente' && !orden && !opc.crudo && !opc.sinRelevo && sesionPrevia) {
+      const limpios = previos.filter(m => !m.error);
+      const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
+      const mem = W.buildWorkingMemory(limpios);
+      const motivo = W.shouldRelay({ agent: ses.agente, setting: ses.renovarContexto, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
+        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length });
+      if (motivo) { memoria = mem; relevo = { de: u!.uso!.contexto!, a: W.estimateTokens(mem.length), anterior: sesionPrevia, motivo }; }
+    }
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}) }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
@@ -463,7 +477,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setEnCursos(x => ({ ...x, [id]: ac }));
     inicioTurno.current[id] = Date.now();
     if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
-    let sesionAgente = ses.sesionAgente;
+    let sesionAgente = sesionPrevia;
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
     let aEnviar = t;
@@ -494,6 +508,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       incorporar.current[id] = [];
       setApartes(x => ({ ...x, [id]: (x[id] || []).filter(a => !a.incorporada) }));
     }
+    if (relevo) aEnviar = W.relayMessage(memoria, aEnviar);
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     // Avisos de gasto mientras trabaja el agente (no al final): cada umbral una vez por turno, sin interrumpir.
     let gPrevio = gAntes;
@@ -524,7 +539,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
-        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '',
+        permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language,
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
@@ -577,12 +592,26 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
       ultimo(m => { const { vivo: _, ...r } = m; return { ...r, fin: Date.now() }; });
+      // Relevo: lo que ocupa de verdad el contexto de la sesión nueva (la memoria más lo fijo del agente).
+      const ctxNuevo = actual[actual.length - 1].uso?.contexto;
+      if (relevo && ctxNuevo) actual = actual.map((m, k) => k === actual.length - 2 && m.relevo ? { ...m, relevo: { ...m.relevo, a: ctxNuevo } } : m);
       pon(actual, true);
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t), sesionAgente, ultima: Date.now() });
     }
+  }
+
+  // Deshacer el relevo: el mismo mensaje, a la sesión anterior del agente (con todo su historial). Solo con el último
+  // mensaje del usuario y el agente libre; lo que respondió la sesión nueva se quita del chat.
+  function deshaceRelevo(i: number) {
+    const m = mensajes[i];
+    if (!sesion || enCurso || !m?.relevo) return;
+    const resto = mensajes.slice(0, i);
+    setMensajes(resto);
+    guardaConversacion(sesion.id, resto);
+    envia(m.texto, m.adjuntos || [], { sinRelevo: true, sesionAgente: m.relevo.anterior });
   }
 
   // Estado del plan en las tarjetas de la conversación (se guarda con ella).
@@ -751,6 +780,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 ))}
                 {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
                 {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en la conversación hasta este turno (sin las preguntas aparte)">{CO.tokens(acumulados[i])} en la conversación</span></div>}
+                {m.relevo && (
+                  <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>
+                    ↻ Contexto renovado: de {CO.tokens(m.relevo.de)} a {CO.tokens(m.relevo.a)} tokens
+                    {!enCurso && !mensajes.slice(i + 1).some(x => x.rol === 'user') && <> · <button className="enlace" onClick={() => deshaceRelevo(i)} title="Volver a enviar este mensaje a la sesión anterior del agente, con todo su historial (se quita la respuesta de la sesión nueva)">deshacer</button></>}
+                  </div>
+                )}
                 {m.adjuntos && m.adjuntos.length > 0 && (
                   <div className="adjuntos-mensaje">{m.adjuntos.map(a => <span key={a.ruta} className="ficha-adjunto" title={a.ruta}><Icono n="clip" t={12} /> {a.nombre}</span>)}</div>
                 )}
