@@ -1,13 +1,13 @@
 # Banco de consumo de tokens
 
-Mide cuántos tokens gasta cada agente (Claude Code, Antigravity, OpenCode) en 5 tareas fijas, **sin pgocode**
+Mide cuántos tokens gasta cada agente (Claude Code, Antigravity, OpenCode) en 6 tareas fijas, **sin pgocode**
 (el CLI del agente a pelo: es la calibración) y **con pgocode** (con su capa de agentes, `internal/llm`, como los
 lanza la app), para comparar y para ver si una mejora de pgocode ahorra de verdad.
 
 No depende del ERP: ni Odoo (tampoco el simulado), ni login, ni proyectos.
 
 ```sh
-make consumo                                        # todo: 3 agentes × 5 pruebas × 3 repeticiones × 2 modos
+make consumo                                        # todo: 3 agentes × 6 pruebas × 3 repeticiones × 2 modos
 make consumo ARGS="-pruebas 1,2,3 -repeticiones 1"  # ronda rápida (menos de 1 $)
 make consumo ARGS="-modo pgocode"                   # solo con pgocode, frente a la última calibración
 make consumo ARGS="-agentes claude-code"            # un solo agente
@@ -17,7 +17,7 @@ Gasta tokens de verdad: no entra en `make test`.
 
 ## Qué hay aquí
 
-- `pruebas.json`: los agentes (modelo y esfuerzo) y las 5 pruebas, con sus turnos y cómo se comprueba cada uno
+- `pruebas.json`: los agentes (modelo y esfuerzo) y las 6 pruebas, con sus turnos y cómo se comprueba cada uno
   (expresión regular de la respuesta, orden que ha de acabar bien, ficheros que no se pueden tocar…).
 - `proyecto/`: el proyecto de prueba (una librería de facturación en Python con un fallo en el descuento de las
   líneas). Cada ejecución trabaja en una copia propia, como repositorio git nuevo.
@@ -30,12 +30,23 @@ Gasta tokens de verdad: no entra en `make test`.
 | 3 | Búsqueda | lectura | Si busca con precisión o lee de más |
 | 4 | Arreglo | auto | Editar, ejecutar las pruebas y corregir |
 | 5 | Conversación | auto | Tres turnos: crecimiento del contexto y caché |
+| 6 | Ida y vuelta | auto | Diez turnos cortos que dependen de los anteriores (arreglo, prueba, redondeo, renombrado, parámetro, preguntas): cuánto crece el contexto en un ir y venir |
 
 ## Resultados
 
-En `~/.local/share/pgocode/consumo/`: `<fecha>.jsonl` (cada ejecución, según acaba) y `<fecha>.md` (el informe:
-medianas por agente y prueba, con y sin pgocode, y la diferencia). Las copias de trabajo van a
-`~/.cache/pgocode-consumo/<fecha>/` y se borran al acabar (`-conservar` las deja).
+En el repositorio, para seguir la evolución: `consumo/resultados/<fecha>.jsonl` (cada ejecución, según acaba,
+con la medida de cada turno), `<fecha>.md` (el informe: medianas por agente y prueba, con y sin pgocode, y la
+diferencia) y `evolucion.md` (todas las rondas). En las pruebas de varios turnos, el informe añade la evolución
+turno a turno: el contexto (tokens de la última llamada, lo que se reenvía), la entrada y el coste de cada uno.
+Las copias de trabajo van a `~/.cache/pgocode-consumo/<fecha>/` y se borran al acabar (`-conservar` las deja).
+
+## Estrategias
+
+`-estrategia` dice cómo pasa la conversación de un turno al siguiente; se guarda en cada ejecución y la evolución
+separa las rondas por estrategia. Hoy solo hay `ninguna` (reanudar la sesión del agente, que reenvía todo el
+historial). Para añadir otra (relevo, compactación, recorte…), en `cmd/consumo/main.go` se implementa `strategy`
+(su `before` puede cambiar la sesión y el mensaje del turno y lanzar turnos propios, cuyo consumo cuenta) y se
+registra en `strategies`.
 
 ## Cómo se lanza cada agente
 

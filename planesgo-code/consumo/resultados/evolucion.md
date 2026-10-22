@@ -5,6 +5,7 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 ## Rondas con nota
 
 - **2026-10-22-150558**: Punto 1: perfil de herramientas por modo (--tools): 14 herramientas propias en editar/auto y 12 en lectura, en vez de 32
+- **2026-10-22-221022**: Prueba 6 ida y vuelta: línea base
 
 ## 1 · Saludo
 
@@ -95,3 +96,10 @@ Medianas de cada ronda (`<fecha>.jsonl`: los datos originales). Tokens = entrada
 | opencode | sin pgocode | 2026-10-22-135316 | 196.7k | 194.9k | 1.8k | 10 | 0.106 $ | 115 s | 3/3 |
 | opencode | pgocode | 2026-10-22-134756 | 196.3k | 194.4k | 1.9k | 10 | 0.112 $ | 62 s | 1/1 |
 | opencode | pgocode | 2026-10-22-135316 | 194.9k | 193.3k | 1.6k | 10 | 0.109 $ | 73 s | 3/3 |
+
+## 6 · Ida y vuelta
+
+| Agente | Modo | Ronda | Tokens | Entrada | Salida | Llamadas | Coste | Tiempo | Aciertos |
+|---|---|---|--:|--:|--:|--:|--:|--:|--:|
+| claude-code | sin pgocode | 2026-10-22-221022 | 763.5k | 755.8k | 7.7k | 24 | 0.571 $ | 106 s | 1/1 |
+| claude-code | pgocode | 2026-10-22-221022 | 537.0k | 529.3k | 7.8k | 24 | 0.487 $ | 113 s | 1/1 |
