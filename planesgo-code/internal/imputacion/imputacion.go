@@ -166,6 +166,7 @@ type Gestor struct {
 	sinTarea  []*Periodo      // periodos cerrados antes de resolver su tarea: se suman al resolverla
 	unificado map[int]bool    // usuarios a los que ya se les han unificado las líneas sueltas en esta ejecución
 	campos    map[string]bool // campos de IA que tiene account.analytic.line en este Odoo (nil: sin consultar)
+	camposEn  time.Time       // cuándo se consultaron (sin ninguno, se vuelve a preguntar pasados 10 minutos)
 	escribe   sync.Mutex      // una escritura en Odoo a la vez
 	// humanos: los tramos de tiempo humano ya imputados por usuario y día (uid|fecha). Una persona solo está en un
 	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
@@ -991,9 +992,10 @@ func (g *Gestor) buscaLinea(ctx context.Context, d *Dia) int {
 // los tienen todos: p. ej. ai_model sí y ai_session_id no.
 func (g *Gestor) CamposIA(ctx context.Context, ses string) map[string]bool {
 	g.mu.Lock()
-	c := g.campos
+	c, en := g.campos, g.camposEn
 	g.mu.Unlock()
-	if c != nil {
+	// Sin campos de IA se vuelve a preguntar cada 10 minutos: se pueden añadir instalando un módulo sin reiniciar.
+	if c != nil && (len(c) > 0 || g.ahora().Sub(en) < 10*time.Minute) {
 		return c
 	}
 	var r map[string]any
@@ -1008,7 +1010,7 @@ func (g *Gestor) CamposIA(ctx context.Context, ses string) map[string]bool {
 		}
 	}
 	g.mu.Lock()
-	g.campos = c
+	g.campos, g.camposEn = c, g.ahora()
 	g.mu.Unlock()
 	depuracion.Log("imputacion", "campos de IA en Odoo: %v", c)
 	return c

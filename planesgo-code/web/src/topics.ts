@@ -7,6 +7,8 @@
 import type { WorkingMemory } from './workingMemory';
 
 // Por debajo de esto (tokens de la última llamada del agente) no merece la pena: la conversación aún es pequeña.
+// Desactivadas: la poda automática del historial resuelve el cambio de tema sin llamadas al clasificador.
+export const TOPICS_ENABLED = false;
 export const TOPIC_MIN_CONTEXT = 30_000;
 // Contexto mínimo de la sesión hija (caracteres; ~1,5k tokens).
 export const CHILD_CONTEXT_MAX = 6_000;

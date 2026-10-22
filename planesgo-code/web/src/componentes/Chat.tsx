@@ -341,7 +341,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     if (d.destino === 'hija') { creaHija(ses, d.texto || t); return; }
     // ¿Otro tema? Solo con contexto relevante y lo que iría a la conversación: el clasificador barato con el tema de
     // la sesión en 2 o 3 líneas. Si lo es, no se envía: se propone la sesión hija (Intro la acepta).
-    const conTema = !elegido && !d.forzado && d.destino === 'conversacion' && TP.shouldCheckTopic({ context: contextoActual(), text: t,
+    const conTema = TP.TOPICS_ENABLED && !elegido && !d.forzado && d.destino === 'conversacion' && TP.shouldCheckTopic({ context: contextoActual(), text: t,
       attachments: listos.length, planOrder: PL.interpreta(t) !== null, active: ses.decideAparte !== false, agent: prov?.tipo === 'agente' });
     let clasificado: AP.Destino | null | undefined;
     if (conTema) {

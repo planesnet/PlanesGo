@@ -91,8 +91,8 @@ func TestAntigravityCompact(t *testing.T) {
 		p    Peticion
 		want string
 	}{
-		{Peticion{SesionAgente: "c1", LastContext: 90000}, "/compact hola"},
-		{Peticion{SesionAgente: "c1", LastContext: 70000}, "hola"},
+		{Peticion{SesionAgente: "c1", LastContext: 160000}, "/compact hola"},
+		{Peticion{SesionAgente: "c1", LastContext: 140000}, "hola"},
 		{Peticion{SesionAgente: "c1", LastContext: 30000, CompactAt: 25000}, "/compact hola"},
 		{Peticion{LastContext: 90000}, "hola"},                                   // conversación nueva
 		{Peticion{SesionAgente: "c1", LastContext: 90000, Aparte: true}, "hola"}, // pregunta aparte

@@ -14,8 +14,8 @@ import (
 //   - Antigravity: no tiene umbral configurable en modo print; pgocode le antepone «/compact» al mensaje cuando
 //     el contexto del turno anterior pasa del umbral (resume y contesta en el mismo turno).
 const (
-	CompactAtDefault = 80000
-	CompactAtMin     = 20000 // por debajo, las instrucciones y herramientas del agente casi lo llenan solas
+	CompactAtDefault = 150000 // red de seguridad: a 80k costaba más de lo que ahorraba (banco, prueba 7)
+	CompactAtMin     = 20000  // por debajo, las instrucciones y herramientas del agente casi lo llenan solas
 	CompactAtMax     = 1000000
 )
 

@@ -2,7 +2,7 @@
 // cuántos miles de tokens de contexto compacta cada sesión y el contexto del último turno que se le pasa.
 import type { Mensaje } from './api';
 
-export const COMPACT_AT_DEFAULT_K = 80; // = llm.CompactAtDefault
+export const COMPACT_AT_DEFAULT_K = 150; // = llm.CompactAtDefault
 export const COMPACT_AT_MIN_K = 20;
 export const COMPACT_AT_MAX_K = 1000;
 
