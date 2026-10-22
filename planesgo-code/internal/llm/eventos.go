@@ -555,6 +555,12 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	return sc.Err()
 }
 
+// errLimitePasos: OpenCode ha llegado a su límite de pasos de la petición y Gemini ha rechazado el mensaje con el
+// que OpenCode le pide que acabe sin herramientas. El trabajo está hecho; falta la respuesta (Chat la pide).
+type errLimitePasos struct{ error }
+
+func (e *errLimitePasos) Unwrap() error { return e.error }
+
 // leeOpenCode interpreta «opencode run --format json»: text (al acabar cada bloque), tool_use (herramienta ya
 // terminada, con entrada y salida), step_finish (tokens y coste), error; sessionID para continuar con --session.
 func leeOpenCode(r io.Reader, emite func(Evento)) error {
@@ -562,6 +568,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	sesion := ""
 	var errores []string
+	limite := false // OpenCode llegó a su límite de pasos (y Gemini rechazó su último mensaje)
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -658,6 +665,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			// Al llegar al límite de pasos, OpenCode añade al final un mensaje del modelo («responde sin
 			// herramientas») y Gemini rechaza las peticiones que acaban así (OpenCode 1.19): se explica.
 			if strings.Contains(m, "ending with a model turn") {
+				limite = true
 				m = fmt.Sprintf("OpenCode ha llegado al límite de %d pasos por petición y, con Gemini, lo corta con un error en vez de "+
 					"resumir. El trabajo hecho hasta aquí se conserva: escribe «sigue» para continuar", PasosOpenCode)
 			}
@@ -665,7 +673,11 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 		}
 	}
 	if len(errores) > 0 {
-		return errors.New("OpenCode: " + strings.Join(errores, "; "))
+		err := errors.New("OpenCode: " + strings.Join(errores, "; "))
+		if limite {
+			err = &errLimitePasos{err}
+		}
+		return err
 	}
 	return sc.Err()
 }

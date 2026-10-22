@@ -485,3 +485,37 @@ func TestLimitePasosOpenCode(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// OpenCode llega al límite de pasos (Gemini rechaza su mensaje final): pgocode le pide, sin herramientas y en la
+// misma sesión, que resuma lo hecho; el turno acaba con esa respuesta y sin error.
+func TestLimitePasosOpenCodeResume(t *testing.T) {
+	var mu sync.Mutex
+	var pedidas []Peticion
+	guion := `case "$1" in
+*límite*) echo '{"type":"text","sessionID":"ses_abc123","part":{"text":"He añadido las etiquetas; falta mostrarlas en el Kanban."}}' ;;
+*) echo '{"type":"step_start","sessionID":"ses_abc123","part":{}}'
+   echo '{"type":"error","sessionID":"ses_abc123","error":{"name":"APIError","data":{"message":"Requests ending with a model turn are not supported."}}}' ;;
+esac`
+	a := &Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "sh", Lee: leeOpenCode,
+		Args: func(msg string, p Peticion) []string {
+			mu.Lock()
+			pedidas = append(pedidas, p)
+			mu.Unlock()
+			return []string{"-c", guion, "sh", msg}
+		}}
+	var texto strings.Builder
+	err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), Permisos: "auto", Mensajes: []Mensaje{{Rol: "user", Texto: "añade las etiquetas"}}},
+		func(e Evento) { texto.WriteString(e.Texto) })
+	if err != nil {
+		t.Fatalf("el turno acaba sin error: %v", err)
+	}
+	if !strings.Contains(texto.String(), "falta mostrarlas en el Kanban") || !strings.Contains(texto.String(), "límite de 40 pasos") {
+		t.Errorf("texto: %q", texto.String())
+	}
+	if len(pedidas) != 2 || pedidas[1].SesionAgente != "ses_abc123" || pedidas[1].Permisos != "ninguna" {
+		t.Fatalf("peticiones: %+v", pedidas)
+	}
+	if p := permisosOpenCode("ninguna", nil); !strings.Contains(p, `"read":"deny"`) || !strings.Contains(p, `"bash":"deny"`) || !strings.Contains(p, `"edit":"deny"`) {
+		t.Errorf("sin herramientas: %s", p)
+	}
+}

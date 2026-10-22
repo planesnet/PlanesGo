@@ -145,6 +145,20 @@ func (a *Agente) Chat(ctx context.Context, p Peticion, emite func(Evento)) error
 					depuracion.Log(a.Clave, "reparar la sesión %s tras cortar el turno: %v", sesionOC, e)
 				}
 			}()
+		case errors.As(err, new(*errLimitePasos)):
+			// Límite de pasos: el trabajo se conserva, pero el turno se quedaría sin respuesta. Se le pide (sin
+			// herramientas, una sola llamada) que resuma lo hecho y lo que falta; con «sigue» continúa.
+			depuracion.Log(a.Clave, "la sesión %s llegó al límite de %d pasos: se pide el resumen", sesionOC, PasosOpenCode)
+			reparaOpenCode(ctx, a, p, sesionOC) // por si quedó una respuesta vacía
+			emiteOC(Evento{Texto: fmt.Sprintf("\n\n_(OpenCode ha llegado al límite de %d pasos de esta petición: le pido que resuma.)_\n\n", PasosOpenCode)})
+			q := p
+			q.SesionAgente, q.Permisos, q.Adjuntos = sesionOC, "ninguna", nil
+			q.Mensajes = []Mensaje{{Rol: "user", Texto: "Has llegado al límite de pasos de esta petición. Sin usar herramientas, resume en pocas líneas " +
+				"qué has hecho y qué queda por hacer. Para seguir, te escribiré «sigue»."}}
+			if e := a.chat(ctx, q, emiteOC); e != nil {
+				return err
+			}
+			return nil
 		case err != nil && historialRoto(err):
 			depuracion.Log(a.Clave, "la sesión %s tiene una respuesta vacía: se repara y se repite", sesionOC)
 			if reparaOpenCode(ctx, a, p, sesionOC) == nil {
@@ -369,6 +383,10 @@ func permisosOpenCode(modo string, autorizadas []string) string {
 	// doom_loop denegado en todos los modos: la misma llamada repetida una y otra vez se corta (gasta tokens).
 	p := map[string]any{"webfetch": "allow", "external_directory": fuera, "skill": sk, "read": leer, "doom_loop": "deny"}
 	switch modo {
+	case "ninguna": // sin herramientas: solo responde (el cierre tras el límite de pasos)
+		for _, h := range []string{"edit", "bash", "read", "glob", "grep", "list", "webfetch", "websearch", "task", "todowrite", "skill", "patch", "codesearch"} {
+			p[h] = "deny"
+		}
 	case "auto":
 		p["edit"], p["bash"] = "allow", "allow"
 	case "editar":
