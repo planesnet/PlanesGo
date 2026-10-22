@@ -3,10 +3,10 @@ package llm
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
