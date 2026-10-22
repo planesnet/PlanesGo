@@ -162,6 +162,21 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 	vivas := map[string]viva{}
 	lista := &listaClaude{}
 	contexto := 0
+	// Consumo real del turno, también en vivo: «usage» del result solo cuenta el agente principal; «modelUsage» es
+	// el acumulado del proceso con los subagentes. En vivo: lo acumulado al último result más las llamadas de
+	// después (cada mensaje una vez: Claude repite el mensaje por cada bloque; su salida llega parcial y se
+	// completa con el result, cuyo vivo coincide así con la suma de los consumos emitidos).
+	var base Uso
+	llamadas := map[string][2]int{}
+	cerradas := map[string]bool{}
+	vivo := func() *Uso {
+		u := Uso{Entrada: base.Entrada, Salida: base.Salida}
+		for _, l := range llamadas {
+			u.Entrada += l[0]
+			u.Salida += l[1]
+		}
+		return &u
+	}
 	for sc.Scan() {
 		var ev struct {
 			Type      string `json:"type"`
@@ -184,6 +199,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				Status string `json:"status"`
 			} `json:"patch"`
 			Message struct {
+				ID      string `json:"id"`
 				Content []struct {
 					Type      string          `json:"type"`
 					Text      string          `json:"text"`
@@ -199,8 +215,15 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 					Input         int `json:"input_tokens"`
 					CacheCreation int `json:"cache_creation_input_tokens"`
 					CacheRead     int `json:"cache_read_input_tokens"`
+					Output        int `json:"output_tokens"`
 				} `json:"usage"`
 			} `json:"message"`
+			ModelUsage map[string]struct {
+				Input         int `json:"inputTokens"`
+				Output        int `json:"outputTokens"`
+				CacheRead     int `json:"cacheReadInputTokens"`
+				CacheCreation int `json:"cacheCreationInputTokens"`
+			} `json:"modelUsage"`
 			ResultadoHerr json.RawMessage `json:"tool_use_result"`
 			IsError       bool            `json:"is_error"`
 			Result        string          `json:"result"`
@@ -252,6 +275,16 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 			}
 			continue
 		}
+		if u := ev.Message.Usage; ev.Type == "assistant" && ev.Message.ID != "" && !cerradas[ev.Message.ID] {
+			antes, n := llamadas[ev.Message.ID], [2]int{u.Input + u.CacheCreation + u.CacheRead, u.Output}
+			n[1] = max(n[1], antes[1])
+			if n != antes {
+				llamadas[ev.Message.ID] = n
+				emite(Evento{Vivo: vivo()})
+			}
+		}
+		v := vivo()
+		tokens := v.Entrada + v.Salida // lo consumido en el turno hasta cada herramienta
 		// Lo que hacen los subagentes va dentro de su tarea: sus herramientas, con Padre (su texto no se muestra).
 		if ev.Padre != "" {
 			for _, c := range ev.Message.Content {
@@ -259,7 +292,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 				case ev.Type == "assistant" && c.Type == "tool_use":
 					nombres[c.ID] = c.Name
 					emite(Evento{Herramienta: &Herramienta{ID: c.ID, Nombre: c.Name, Resumen: resumen(c.Input),
-						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Padre: ev.Padre}})
+						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Padre: ev.Padre, Tokens: tokens}})
 				case ev.Type == "user" && c.Type == "tool_result":
 					estado := "ok"
 					if c.IsError {
@@ -294,7 +327,7 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 						ordenes[c.ID] = in.Orden
 					}
 					emite(Evento{Herramienta: &Herramienta{ID: c.ID, Nombre: c.Name, Resumen: resumen(c.Input),
-						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Skill: skillDe(c.Name, c.Input)}})
+						Entrada: recorta(string(c.Input), maxEntrada), Estado: "curso", Skill: skillDe(c.Name, c.Input), Tokens: tokens}})
 				}
 			}
 		case "user":
@@ -312,8 +345,30 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error {
 		case "result":
 			coste := max(ev.Coste-costeAntes, 0)
 			costeAntes = max(ev.Coste, costeAntes)
-			emite(Evento{Uso: &Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
-				Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}})
+			turno := Uso{Entrada: ev.Usage.Input + ev.Usage.CacheCreation + ev.Usage.CacheRead, Salida: ev.Usage.Output,
+				CacheLeida: ev.Usage.CacheRead, CacheEscrita: ev.Usage.CacheCreation}
+			if len(ev.ModelUsage) > 0 {
+				var total Uso
+				for _, m := range ev.ModelUsage {
+					total.Entrada += m.Input + m.CacheCreation + m.CacheRead
+					total.Salida += m.Output
+					total.CacheLeida += m.CacheRead
+					total.CacheEscrita += m.CacheCreation
+				}
+				turno = Uso{Entrada: max(total.Entrada-base.Entrada, 0), Salida: max(total.Salida-base.Salida, 0),
+					CacheLeida: max(total.CacheLeida-base.CacheLeida, 0), CacheEscrita: max(total.CacheEscrita-base.CacheEscrita, 0)}
+			}
+			base.Entrada += turno.Entrada
+			base.Salida += turno.Salida
+			base.CacheLeida += turno.CacheLeida
+			base.CacheEscrita += turno.CacheEscrita
+			turno.Llamadas = len(llamadas)
+			for id := range llamadas {
+				cerradas[id] = true
+			}
+			clear(llamadas)
+			emite(Evento{Uso: &Uso{Entrada: turno.Entrada, Salida: turno.Salida, CacheLeida: turno.CacheLeida, CacheEscrita: turno.CacheEscrita,
+				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo()})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -352,6 +407,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 		}
 	}()
 	vistas := map[int]bool{}
+	llamadasAgy := map[int]bool{} // pasos con consumo propio: cada uno, una llamada al modelo
 	for sc.Scan() {
 		var ev struct {
 			Event          string `json:"event"`
@@ -359,10 +415,13 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			Paso           struct {
 				Indice int    `json:"step_index"`
 				Estado string `json:"state"`
-				Tipo   string `json:"step_type"`
-				Texto  string `json:"text_delta"`
-				Has    string `json:"tool_name"`
-				Info   struct {
+				Uso    struct {
+					Input int `json:"input_tokens"`
+				} `json:"usage"`
+				Tipo  string `json:"step_type"`
+				Texto string `json:"text_delta"`
+				Has   string `json:"tool_name"`
+				Info  struct {
 					Parametros json.RawMessage `json:"parameters"`
 					Salida     string          `json:"output"`
 					Error      string          `json:"error"`
@@ -384,6 +443,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 					Input     int `json:"input_tokens"`
 					CacheRead int `json:"cache_read_tokens"`
 					Output    int `json:"output_tokens"`
+					Thinking  int `json:"thinking_tokens"`
 				} `json:"usage"`
 			} `json:"result"`
 		}
@@ -397,6 +457,9 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			}
 		case "step_update":
 			p := ev.Paso
+			if p.Uso.Input > 0 {
+				llamadasAgy[p.Indice] = true
+			}
 			switch {
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
@@ -428,7 +491,9 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			}
 		case "result":
 			res := ev.Resultado
-			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output, Segundos: res.Segundos}})
+			// El razonamiento se cobra como salida: va con ella. Llamadas: los pasos con consumo propio.
+			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output + res.Usage.Thinking,
+				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos}})
 			if res.Estado != "" && res.Estado != "SUCCESS" {
 				if res.Error != "" {
 					return errors.New(res.Error)
@@ -522,6 +587,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			// Cada paso, su consumo ya (el gasto se ve crecer durante el turno) y el tamaño del contexto enviado.
 			t := ev.Part.Tokens
 			emite(Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
+				CacheLeida: t.Cache.Read, CacheEscrita: t.Cache.Write, Llamadas: 1,
 				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}})
 		case "error":
 			m := ev.Error.Data.Message
@@ -880,4 +946,19 @@ func (q *quitaBloque) Pasa(t string) string {
 		break
 	}
 	return b.String()
+}
+
+// Lector: cómo interpretar la salida de un agente (su clave), para usarlo fuera de pgocode (cmd/consumo lanza
+// los agentes a pelo para calibrar). nil si no es un agente conocido. Antigravity da el consumo acumulado de su
+// conversación: quien lo use ha de restar el del turno anterior.
+func Lector(clave string) func(io.Reader, func(Evento)) error {
+	switch clave {
+	case "claude-code":
+		return leeClaudeCode
+	case "antigravity":
+		return leeAntigravity
+	case "opencode":
+		return leeOpenCode
+	}
+	return nil
 }

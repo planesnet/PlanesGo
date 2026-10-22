@@ -53,3 +53,13 @@ test('aviso de contexto antes de enviar: grande, y sin caché si lleva rato para
   assert.doesNotMatch(C.avisoContexto(136_000, 21, 'claude-code')!, /\$/, 'sin precio conocido no se estima');
   assert.match(C.avisoContexto(180_000, 1, 'claude-code')!, /Conversación grande/);
 });
+
+test('gasto: mientras trabaja, los tokens del turno van por lo consumido hasta ahora (vivo); el coste, por el uso', () => {
+  const ms = [
+    { rol: 'assistant' as const, texto: '', uso: { entrada: 1000, salida: 100, coste: 0.5 } },
+    { rol: 'assistant' as const, texto: '', uso: { entrada: 300, salida: 10, coste: 0.1 }, vivo: { entrada: 500, salida: 20 } },
+  ];
+  const g = C.gasto(ms);
+  assert.equal(g.entrada + g.salida, 1620);
+  assert.equal(g.coste, 0.6);
+});

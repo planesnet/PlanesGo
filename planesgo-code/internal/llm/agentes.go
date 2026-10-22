@@ -277,9 +277,22 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 			depuracion.Log(id, "mensaje a mitad de turno (%d caracteres)", len(t))
 			return envia(t)
 		})
+		// Con subagentes en segundo plano la entrada sigue abierta tras la respuesta: lo que se mande entonces le
+		// llega ya al agente principal (que puede pasárselo a ellos), y no al acabar todo. Se cierra con la
+		// primera respuesta que acabe sin ninguno vivo (al terminar el último, el agente da otra).
+		vivos := map[string]bool{}
 		previo := emite
 		emite = func(e Evento) {
-			if e.Uso != nil {
+			if t := e.Tarea; t != nil && t.Tipo != "lista" {
+				if t.Estado == "curso" {
+					if t.Tipo == "subagente" {
+						vivos[t.ID] = true
+					}
+				} else {
+					delete(vivos, t.ID)
+				}
+			}
+			if e.Uso != nil && len(vivos) == 0 {
 				cierra()
 			}
 			previo(e)
@@ -365,6 +378,18 @@ func permisosOpenCode(modo string, autorizadas []string) string {
 	}
 	b, _ := json.Marshal(p)
 	return string(b)
+}
+
+// herramientasClaude: el perfil de herramientas propias de Claude Code según el modo. Fuera: las que pgocode hace
+// por su cuenta o no se pueden usar sin nadie delante (worktrees, cron, avisos, monitor, preguntas al usuario,
+// equipos, plugins, flujos, LSP, cuadernos). En solo lectura (y en las preguntas aparte), sin Edit ni Write.
+// Las de los servidores MCP no cuentan aquí (van por --mcp-config).
+func herramientasClaude(permisos string, aparte bool) []string {
+	h := []string{"Task", "Bash", "Read", "Skill", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskStop", "ToolSearch", "WebFetch", "WebSearch"}
+	if !aparte && (permisos == "editar" || permisos == "auto") {
+		h = append(h, "Edit", "Write")
+	}
+	return h
 }
 
 // clavesEntorno: los nombres de las variables añadidas (sin sus valores: llevan tokens).
@@ -475,6 +500,9 @@ func Agentes() []Proveedor {
 				for _, d := range p.Autorizadas {
 					a = append(a, "--add-dir", d)
 				}
+				// Solo las herramientas propias que usa pgocode: las definiciones de todas van en cada llamada al modelo
+				// (con las 32 de Claude Code 2.1, un «OK» cuesta 20,5k tokens de entrada; con este perfil, 15k).
+				a = append(a, "--tools", strings.Join(herramientasClaude(p.Permisos, p.Aparte), ","))
 				// Solo los servidores MCP que pide la sesión (y «pgo»): el resto ni arranca ni gasta tokens.
 				if f := configMCP(p.Carpeta, p.MCP); f != "" {
 					a = append(a, "--strict-mcp-config", "--mcp-config", f)
@@ -522,12 +550,12 @@ func Agentes() []Proveedor {
 			Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"--output-format", "stream-json"}
-				// Solo lectura: modo plan (no cambia ficheros); «editar»: accept-edits; «auto»: auto.
+				// Solo lectura: modo plan (no cambia ficheros); «editar» y «auto»: accept-edits. «--mode auto» no está
+				// en todas las cuentas: sin él, agy vuelve al modo por defecto, que sin consola deniega las escrituras
+				// (probado con agy 1.4.4); accept-edits edita y ejecuta órdenes.
 				switch p.Permisos {
-				case "editar":
+				case "editar", "auto":
 					a = append(a, "--mode", "accept-edits")
-				case "auto":
-					a = append(a, "--mode", "auto")
 				default:
 					a = append(a, "--mode", "plan")
 				}
@@ -776,7 +804,8 @@ func usoDelTurno(conv string, total Uso) Uso {
 	turno := total
 	if ok && total.Entrada >= antes.Entrada && total.Salida >= antes.Salida && total.Segundos >= antes.Segundos {
 		turno = Uso{Entrada: total.Entrada - antes.Entrada, Salida: total.Salida - antes.Salida,
-			Coste: max(total.Coste-antes.Coste, 0), Segundos: total.Segundos - antes.Segundos}
+			Coste: max(total.Coste-antes.Coste, 0), Segundos: total.Segundos - antes.Segundos,
+			CacheLeida: max(total.CacheLeida-antes.CacheLeida, 0), Llamadas: total.Llamadas}
 	}
 	acumulados[conv] = total
 	if f != "" {

@@ -11,12 +11,12 @@ export interface Proveedor {
   esfuerzos?: string[]; modos?: boolean; inyecta?: boolean; // inyecta: admite mensajes durante el turno
 }
 // Lo que hace el agente, igual para todos (Claude Code, Antigravity, OpenCode): texto, razonamiento y herramientas.
-export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[] }
+export interface Herramienta { id: string; nombre: string; resumen?: string; entrada?: string; salida?: string; estado: 'curso' | 'ok' | 'error'; skill?: string; padre?: string; capturas?: string[]; tokens?: number } // tokens: los de la conversación hasta esta acción
 export interface Uso { entrada: number; salida: number; coste?: number; segundos?: number; contexto?: number } // contexto: tokens de la última llamada
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number } // fin: cuándo acabó el turno (ms)
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja
 
 // Sube un fichero adjunto a la carpeta de la sesión (para pasárselo al agente).
 export async function subeAdjunto(proyecto: number, carpeta: string, sesion: string, f: File): Promise<Adjunto> {
@@ -54,7 +54,7 @@ export const post = <T,>(ruta: string, cuerpo: unknown) =>
     body: JSON.stringify(cuerpo),
   }).then(r => respuesta<T>(r));
 
-export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; tarea?: Tarea; uso?: Uso; sesion_agente?: string; error?: string; fin?: boolean }
+export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; tarea?: Tarea; uso?: Uso; vivo?: Uso; sesion_agente?: string; error?: string; fin?: boolean }
 
 // Avisos del backend: cambios en los programas y URL que abrir en el navegador integrado.
 export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };

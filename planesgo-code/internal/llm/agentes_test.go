@@ -95,6 +95,48 @@ func TestModeloEsfuerzoClaudeCode(t *testing.T) {
 	}
 }
 
+// Perfil de herramientas de Claude Code (--tools): sin Edit ni Write en solo lectura y en las preguntas aparte;
+// nunca las que pgocode no usa.
+func TestHerramientasClaudeCode(t *testing.T) {
+	a := Agentes()[0].(*Agente)
+	herr := func(p Peticion) []string {
+		args := a.Args("hola", p)
+		i := slices.Index(args, "--tools")
+		if i < 0 {
+			t.Fatalf("sin --tools: %q", args)
+		}
+		return strings.Split(args[i+1], ",")
+	}
+	for _, c := range []struct {
+		p     Peticion
+		edita bool
+	}{{Peticion{}, false}, {Peticion{Permisos: "lectura"}, false}, {Peticion{Permisos: "editar"}, true},
+		{Peticion{Permisos: "auto"}, true}, {Peticion{Permisos: "auto", Aparte: true}, false}} {
+		h := herr(c.p)
+		if slices.Contains(h, "Edit") != c.edita || slices.Contains(h, "Write") != c.edita {
+			t.Errorf("%+v: %v", c.p, h)
+		}
+		for _, x := range []string{"Bash", "Read", "Task", "Skill", "ToolSearch"} {
+			if !slices.Contains(h, x) {
+				t.Errorf("%+v: falta %s", c.p, x)
+			}
+		}
+		for _, x := range []string{"CronCreate", "EnterWorktree", "PushNotification", "Workflow", "NotebookEdit"} {
+			if slices.Contains(h, x) {
+				t.Errorf("%+v: sobra %s", c.p, x)
+			}
+		}
+	}
+}
+
+// Antigravity: «auto» va como accept-edits (--mode auto no está en todas las cuentas y sin él no edita).
+func TestModoAutoAntigravity(t *testing.T) {
+	a := Agentes()[1].(*Agente)
+	if j := strings.Join(a.Args("hola", Peticion{Permisos: "auto"}), " "); !strings.Contains(j, "--mode accept-edits") {
+		t.Errorf("auto: %s", j)
+	}
+}
+
 // Antigravity: el mensaje va pegado a --print=, solo lectura es el modo plan y la conversación se continúa.
 func TestArgsAntigravity(t *testing.T) {
 	a := Agentes()[1].(*Agente)
@@ -322,5 +364,76 @@ func TestMensajesAMitadDeTurno(t *testing.T) {
 	defer mu.Unlock()
 	if enviar != nil {
 		t.Error("al cerrar la entrada se avisa con nil")
+	}
+}
+
+// Con un subagente en segundo plano vivo al acabar la respuesta, la entrada sigue abierta (lo que se manda llega
+// ya al agente principal); se cierra con la respuesta que acaba cuando ya no queda ninguno.
+func TestMensajesConSubagenteEnSegundoPlano(t *testing.T) {
+	guion := `read a; echo "sub"; echo "fin"; read b; echo "texto:$b"; echo "subfin"; echo "fin"; cat >/dev/null; echo "cerrada"`
+	a := &Agente{Clave: "falso", Nombre: "Falso", Programa: "sh",
+		Args:    func(msg string, p Peticion) []string { return []string{"-c", guion} },
+		Entrada: func(t string) []byte { return []byte(t + "\n") },
+		Lee: func(r io.Reader, emite func(Evento)) error {
+			sc := bufio.NewScanner(r)
+			for sc.Scan() {
+				switch l := sc.Text(); {
+				case l == "sub":
+					emite(Evento{Tarea: &Tarea{ID: "t1", Tipo: "subagente", Estado: "curso", SegundoPlano: true}})
+				case l == "subfin":
+					emite(Evento{Tarea: &Tarea{ID: "t1", Estado: "ok"}})
+				case l == "fin":
+					emite(Evento{Uso: &Uso{Entrada: 1}})
+				default:
+					emite(Evento{Texto: strings.TrimPrefix(l, "texto:") + "|"})
+				}
+			}
+			return nil
+		}}
+	var mu sync.Mutex
+	var enviar func(string) error
+	listo := make(chan struct{}, 1)
+	p := Peticion{Carpeta: t.TempDir(), Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}, AlInyectar: func(f func(string) error) {
+		mu.Lock()
+		enviar = f
+		mu.Unlock()
+		if f != nil {
+			listo <- struct{}{}
+		}
+	}}
+	var texto strings.Builder
+	usos := make(chan struct{}, 2)
+	hecho := make(chan error, 1)
+	go func() {
+		hecho <- a.chat(context.Background(), p, func(e Evento) {
+			mu.Lock()
+			texto.WriteString(e.Texto)
+			mu.Unlock()
+			if e.Uso != nil {
+				usos <- struct{}{}
+			}
+		})
+	}()
+	<-listo
+	<-usos // la primera respuesta ha acabado, con el subagente aún vivo
+	mu.Lock()
+	f := enviar
+	mu.Unlock()
+	if f == nil {
+		t.Fatal("la entrada se cerró con un subagente en segundo plano vivo")
+	}
+	if err := f("KIWI"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-hecho:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("el agente no termina: la entrada no se cerró al acabar el subagente")
+	}
+	if g := texto.String(); g != "KIWI|cerrada|" {
+		t.Errorf("texto %q", g)
 	}
 }

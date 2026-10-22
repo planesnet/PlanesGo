@@ -138,3 +138,24 @@ test('incorporar: va al final del próximo mensaje', () => {
   assert.match(t, /Pregunta: ¿qué puerto\?\nRespuesta: El 8069\./);
   assert.ok(t.startsWith('\n\n[Preguntas que hice aparte'));
 });
+
+test('opción «Siempre al turno»: con el agente trabajando, lo de la conversación va ya al turno', () => {
+  const s = { ocupado: true, alTurno: true, hayConversacion: true };
+  assert.equal(A.decide('añade también los tests', s).destino, 'turno');
+  assert.equal(A.decide('añade también los tests', { ...s, ocupado: false }).destino, 'conversacion');
+  assert.equal(A.decide('añade también los tests', { ...s, alTurno: false }).destino, 'conversacion');
+  // A la cola: con adjuntos, órdenes de planes o «!»; y lo que va aparte sigue aparte.
+  assert.equal(A.decide('mira esto', { ...s, adjuntos: 1 }).destino, 'conversacion');
+  assert.equal(A.decide('/plan algo', { ...s, ordenPlan: true }).destino, 'conversacion');
+  assert.equal(A.decide('! sigue', s).destino, 'conversacion');
+  assert.equal(A.decide('¿cómo va?', s).destino, 'estado');
+});
+
+test('prefijo «>»: directo a la conversación actual (al turno en curso si el agente lo admite)', () => {
+  const s = { ocupado: true, canInject: true, hayConversacion: true };
+  assert.deepEqual(A.decide('>¿cómo va?', s), { destino: 'turno', texto: '¿cómo va?', forzado: true, motivo: 'prefijo «>»' });
+  assert.equal(A.decide('> mira el log', { ...s, activo: false }).destino, 'turno');
+  assert.equal(A.decide('>sigue', { ...s, canInject: false }).destino, 'conversacion');
+  assert.equal(A.decide('>sigue', { ...s, ocupado: false }).destino, 'conversacion');
+  assert.equal(A.decide('>sigue', { ...s, ocupado: false }).texto, 'sigue');
+});

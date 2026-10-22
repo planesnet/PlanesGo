@@ -268,3 +268,33 @@ func TestListaClaudeTodoWrite(t *testing.T) {
 		t.Errorf("lista vacía: %+v", x)
 	}
 }
+
+// Consumo real con un subagente (muestra real): «usage» del result solo cuenta el agente principal (113.731 de
+// entrada); el consumo del turno sale de «modelUsage» y lleva también el del subagente. El último «vivo»
+// coincide con la suma de los consumos y cada herramienta lleva lo consumido hasta ella.
+func TestClaudeConsumoConSubagente(t *testing.T) {
+	var suma Uso
+	var ultimo *Uso
+	var herr []int
+	for _, e := range lee(t, "claude-10-subagente-consumo.jsonl", func(r *os.File, emite func(Evento)) error { return leeClaudeCode(r, emite) }) {
+		if e.Uso != nil {
+			suma.Entrada += e.Uso.Entrada
+			suma.Salida += e.Uso.Salida
+		}
+		if e.Vivo != nil {
+			ultimo = e.Vivo
+		}
+		if e.Herramienta != nil && e.Herramienta.Estado == "curso" {
+			herr = append(herr, e.Herramienta.Tokens)
+		}
+	}
+	if suma.Entrada != 170275 || suma.Salida != 608 {
+		t.Errorf("consumo del turno: %+v", suma)
+	}
+	if ultimo == nil || ultimo.Entrada != suma.Entrada || ultimo.Salida != suma.Salida {
+		t.Errorf("último vivo %+v, consumo %+v", ultimo, suma)
+	}
+	if len(herr) != 2 || herr[0] <= 0 || herr[1] <= herr[0] {
+		t.Errorf("tokens de las herramientas: %v", herr)
+	}
+}

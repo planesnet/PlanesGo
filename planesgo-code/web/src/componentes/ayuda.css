@@ -1,0 +1,9 @@
+/* Ayuda del chat («/help»): con las variables de color del tema. */
+.ayuda-chat { border: 1px solid var(--linea); border-radius: 8px; padding: 8px 12px; margin: 0 0 8px; background: var(--superficie); max-height: 50vh; overflow: auto; font-size: 13px; }
+.ayuda-chat > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.ayuda-secciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 20px; }
+.ayuda-chat h3 { font-size: 12px; margin: 6px 0 4px; opacity: .7; text-transform: uppercase; letter-spacing: .03em; }
+.ayuda-chat dl { margin: 0; }
+.ayuda-chat dl > div { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 8px; padding: 2px 0; }
+.ayuda-chat dd { margin: 0; }
+.ayuda-chat kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--linea); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; white-space: nowrap; }

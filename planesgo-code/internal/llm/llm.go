@@ -59,6 +59,9 @@ type Evento struct {
 	Uso          *Uso         `json:"uso,omitempty"`
 	SesionAgente string       `json:"sesion_agente,omitempty"`
 	Tarea        *Tarea       `json:"tarea,omitempty"`
+	// Vivo: lo consumido en el turno hasta ahora (tokens de entrada y salida), mientras trabaja el agente. Con el
+	// último consumo coincide con la suma de los Uso del turno.
+	Vivo *Uso `json:"vivo,omitempty"`
 	// Adoptados: programas que el agente dejó en marcha (en segundo plano) y que pgocode se queda al acabar
 	// su respuesta, para no esperarlos ni gastar otro turno (siguen en Programas y en la barra de ejecución).
 	Adoptados []Adoptado `json:"adoptados,omitempty"`
@@ -122,6 +125,7 @@ type Herramienta struct {
 	Estado  string `json:"estado"`            // curso | ok | error
 	Skill   string `json:"skill,omitempty"`   // la skill que el agente carga con esta herramienta
 	Padre   string `json:"padre,omitempty"`   // herramienta (de subagente) dentro de la que se usa
+	Tokens  int    `json:"tokens,omitempty"`  // lo consumido en el turno al usarla (entrada + salida)
 	// Imágenes que devuelve la herramienta (capturas del navegador, imágenes leídas): las guarda el servidor como
 	// evidencias y por el chat solo viajan sus rutas (Capturas).
 	Imagenes []Imagen `json:"-"`
@@ -143,6 +147,11 @@ type Uso struct {
 	// Contexto: los tokens que se enviaron en la última llamada al modelo (todo el historial): lo que costará el
 	// siguiente mensaje, sin caché si la conversación lleva un rato parada.
 	Contexto int `json:"contexto,omitempty"`
+	// Desglose (si el agente lo da): de la entrada, lo leído de caché y lo escrito en ella; y las llamadas al
+	// modelo del turno (con las de los subagentes).
+	CacheLeida   int `json:"cache_leida,omitempty"`
+	CacheEscrita int `json:"cache_escrita,omitempty"`
+	Llamadas     int `json:"llamadas,omitempty"`
 }
 
 // Info describe un proveedor para el selector del chat.

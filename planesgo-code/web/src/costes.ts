@@ -33,10 +33,12 @@ export interface Gasto { coste: number; entrada: number; salida: number; turnos:
 export function gasto(mensajes: Mensaje[]): Gasto {
   const g = { coste: 0, entrada: 0, salida: 0, turnos: 0 };
   for (const m of mensajes) {
-    if (m.rol !== 'assistant' || !m.uso) continue;
-    g.coste += m.uso.coste || 0;
-    g.entrada += m.uso.entrada || 0;
-    g.salida += m.uso.salida || 0;
+    // Mientras trabaja el agente, sus tokens van por lo consumido hasta ahora (vivo); al acabar coincide con el uso.
+    const u = m.vivo || m.uso;
+    if (m.rol !== 'assistant' || !u) continue;
+    g.coste += m.uso?.coste || 0;
+    g.entrada += u.entrada || 0;
+    g.salida += u.salida || 0;
     g.turnos++;
   }
   return g;
