@@ -171,7 +171,20 @@ type Gestor struct {
 	// sitio: si varias sesiones se solapan, ese rato se imputa como humano una sola vez (a la primera).
 	humanos   map[string][]Tramo
 	arrancado bool
+	enMarcha  sync.WaitGroup // escrituras y tareas lanzadas en segundo plano (Espera las aguarda)
 }
+
+// lanza f en segundo plano, apuntada para Espera.
+func (g *Gestor) lanza(f func()) {
+	g.enMarcha.Add(1)
+	go func() {
+		defer g.enMarcha.Done()
+		f()
+	}()
+}
+
+// Espera a que acabe lo lanzado en segundo plano (escrituras en Odoo, tareas, diario). Para las pruebas.
+func (g *Gestor) Espera() { g.enMarcha.Wait() }
 
 func (g *Gestor) ahora() time.Time {
 	if g.Ahora != nil {
@@ -310,7 +323,9 @@ func (g *Gestor) creciendo(p *Periodo) (maq, hom bool) {
 
 // Arranca: retoma el estado del fichero local y pone en marcha el reloj (cierre de periodos, escritura de las
 // líneas del día cada 3 minutos y reintentos).
-func (g *Gestor) Arranca(ctx context.Context) {
+func (g *Gestor) Arranca(ctx context.Context) { g.arrancaCon(ctx, true) }
+
+func (g *Gestor) arrancaCon(ctx context.Context, reloj bool) {
 	g.mu.Lock()
 	if g.arrancado {
 		g.mu.Unlock()
@@ -323,6 +338,7 @@ func (g *Gestor) Arranca(ctx context.Context) {
 			Periodos []*Periodo
 			Dias     []*Dia
 			Humanos  map[string][]Tramo
+			SinTarea []*Periodo
 		}
 		if b, err := os.ReadFile(g.FicheroEstado); err == nil && json.Unmarshal(b, &e) == nil {
 			hoy := g.ahora().Format("2006-01-02")
@@ -334,6 +350,7 @@ func (g *Gestor) Arranca(ctx context.Context) {
 			if e.Humanos != nil {
 				g.humanos = e.Humanos
 			}
+			g.sinTarea = append(g.sinTarea, e.SinTarea...)
 			for _, p := range e.Periodos {
 				turno := !p.TurnoDesde.IsZero()
 				if turno { // el turno en curso termina donde terminó la ejecución anterior
@@ -353,6 +370,9 @@ func (g *Gestor) Arranca(ctx context.Context) {
 		g.Tiempos.Anota("arranca", map[string]any{"periodos": n})
 	}
 	g.revisa() // cierra lo que ya pasó la espera y escribe
+	if !reloj {
+		return
+	}
 	go func() {
 		tic := time.NewTicker(15 * time.Second)
 		defer tic.Stop()
@@ -392,7 +412,7 @@ func (g *Gestor) Empieza(t Trabajo) (fin func()) {
 			g.estado(p)
 			g.marcaSucias(p)
 			g.mu.Unlock()
-			go g.escribeSucias() // fin de turno: las líneas del día al día
+			g.lanza(g.escribeSucias) // fin de turno: las líneas del día al día
 			g.guarda()
 			g.avisa()
 		})
@@ -461,14 +481,14 @@ func (g *Gestor) trabajo(t Trabajo, turno, humano bool) *Periodo {
 	g.mu.Unlock()
 	if nuevo {
 		g.diario("abre", p, "")
-		go g.preparaYEscribe(p)
+		g.lanza(func() { g.preparaYEscribe(p) })
 	} else if turno && !g.tieneMaquina(p) {
-		go g.preparaYEscribe(p)
+		g.lanza(func() { g.preparaYEscribe(p) })
 	}
 	g.guarda()
 	g.avisa()
 	if t.UID > 0 && t.OdooSesion != "" {
-		go g.unificaUnaVez(t.UID, t.OdooSesion)
+		g.lanza(func() { g.unificaUnaVez(t.UID, t.OdooSesion) })
 	}
 	return p
 }
@@ -666,7 +686,8 @@ func (g *Gestor) cierraPeriodo(p *Periodo, motivo string) {
 	g.anota("periodo-cierra", p, map[string]any{"motivo": motivo, "inicio": p.Inicio.Format(time.RFC3339Nano), "fin": fin.Format(time.RFC3339Nano),
 		"maquina_s": math.Round(maq*1000) / 1000, "hombre_s": math.Round(hom*1000) / 1000, "tramos": tramos, "sin_tarea": p.TareaID == 0,
 		"tokens": p.Entrada + p.Salida, "coste": p.Coste})
-	go g.diario("cierra", p, fmt.Sprintf("%s (máquina %.0f s, hombre %.0f s)", motivo, maq, hom))
+	msg := fmt.Sprintf("%s (máquina %.0f s, hombre %.0f s)", motivo, maq, hom)
+	g.lanza(func() { g.diario("cierra", p, msg) })
 }
 
 // sumaPeriodo (con el cerrojo): añade un periodo cerrado (congelado) a sus líneas del día.
@@ -735,6 +756,13 @@ func (g *Gestor) revisa() {
 			cambio = true
 		}
 	}
+	// Un turno en marcha sigue trabajando ahora: si pgocode se cae, al retomar cuenta hasta aquí (si no, el turno
+	// cortado se perdía entero y la línea del día, al reescribirse, bajaba).
+	for _, p := range g.periodos {
+		if p.turnos > 0 {
+			p.Ultima = minT(ahora, g.limite(p))
+		}
+	}
 	// Las líneas que crecen se ponen al día cada 3 minutos.
 	for _, p := range g.periodos {
 		maq, hom := g.creciendo(p)
@@ -779,6 +807,13 @@ func (g *Gestor) ActualizaSesionOdoo(uid int, sesion string) {
 	for _, d := range g.dias {
 		if d.UID == uid {
 			d.OdooSesion = sesion
+		}
+	}
+	// También los periodos ya cerrados que esperan su tarea: si no, se reintentarían para siempre con la sesión
+	// caducada y su tiempo no llegaría nunca a Odoo.
+	for _, p := range g.sinTarea {
+		if p.T.UID == uid {
+			p.T.OdooSesion = sesion
 		}
 	}
 	g.mu.Unlock()
@@ -1155,7 +1190,8 @@ func (g *Gestor) guarda() {
 		Periodos []*Periodo
 		Dias     []*Dia
 		Humanos  map[string][]Tramo
-	}{Humanos: map[string][]Tramo{}}
+		SinTarea []*Periodo // cerrados que esperan su tarea (Odoo no respondía): si no, se perderían al reiniciar
+	}{Humanos: map[string][]Tramo{}, SinTarea: g.sinTarea}
 	hoy := g.ahora().Format("2006-01-02")
 	for k, v := range g.humanos {
 		if strings.HasSuffix(k, "|"+hoy) {
