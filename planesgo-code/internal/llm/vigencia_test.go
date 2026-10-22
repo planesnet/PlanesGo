@@ -21,7 +21,7 @@ func TestVigenciaFormula(t *testing.T) {
 	}
 	// Antigüedad: sube poco a poco con cada intercambio.
 	a, b := vigencia(base, vigT0), vigencia(vigFactors{Ago: 6, Young: 2, At: base.At}, vigT0)
-	if a != vigAgeStep*3 || b <= a || b-a > 0.1 {
+	if math.Abs(a-math.Round(vigAge(3)*100)/100) > 1e-9 || b <= a || b-a > 0.1 {
 		t.Fatalf("antigüedad: %v → %v", a, b)
 	}
 	// Tiempo: suave (logarítmico en horas).
@@ -86,7 +86,7 @@ func TestVigenciaTime(t *testing.T) {
 	}
 	// Una relación que deja el intercambio 2 (hace 3 intercambios, 2 horas) justo por debajo del corte.
 	h := vigHours(xs[2].time(), vigT0)
-	sims.Exchange[xs[2].UserID] = vigRelPivot - (vigCut-0.05-vigAgeStep-vigTimeK*math.Log1p(h))/vigRelK
+	sims.Exchange[xs[2].UserID] = vigRelPivot - (vigCut-0.05-vigAge(1)-vigTimeK*math.Log1p(h))/vigRelK
 	if x := planPrune(s.msgs, sims, pruneYoung, vigT0).Exchanges[2]; x.Tier != TierL2 || x.V >= vigCut {
 		t.Fatalf("ahora: %v %v", x.Tier, x.V)
 	}

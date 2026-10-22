@@ -251,7 +251,7 @@ func TestPruneRelevance(t *testing.T) {
 	}
 	// Vuelve a parecerse lo justo para quedar por debajo del corte: estaba en L3, así que necesita el margen.
 	sims.PrevTier[xs[2].UserID] = TierL3
-	limite := vigRelPivot - (vigCut-vigAgeStep)/vigRelK // la relación con la que el intercambio 2 queda en 3
+	limite := vigRelPivot - (vigCut-vigAge(1))/vigRelK // la relación con la que el intercambio 2 queda en 3
 	sims.Exchange[xs[2].UserID] = limite + 0.01
 	if planPrune(s.msgs, sims, pruneYoung, time.Time{}).Exchanges[2].Tier != TierL3 {
 		t.Fatal("sin margen, vuelve")

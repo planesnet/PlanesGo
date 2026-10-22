@@ -10,21 +10,23 @@ import (
 // imagen, adjunto) y cada intercambio, como un número real ≥ 0. 0 es absolutamente vital; 1, 2, 3… cada vez más
 // viejo y menos importante. Con vigCut (3) o más, fuera del contexto del agente (lo que antes era L3).
 //
-//	vigencia = vigAgeStep·(intercambios desde entonces − los jóvenes)
+//	vigencia = vigAgeK·log_φ(1 + intercambios desde entonces − los jóvenes)   (φ: el número áureo)
 //	         + vigTimeK·ln(1 + horas desde entonces)
 //	         + vigRelK·(vigRelPivot − relación con lo último)   (sin embeddings, este término no está)
 //	         + vigSupersededJump si está superada (lectura vieja, orden repetida, imagen ya vista, edición antigua)
 //
 // Vale 0 (salvo lo superado) el turno en curso, los dos últimos intercambios y el primero (las instrucciones).
 // Calibrada con la conversación real de INTRADEMA (43 mensajes en 12 horas) para que el corte en 3 coincida con la
-// poda por niveles que había (TestVigenciaCalibration): el 93,6 % de los intercambios y el 99,1 % de las partes
-// cambiadas. La relación manda, y la antigüedad y el tiempo empujan poco a poco. Más empinada (vigRelK 30) coincide
+// poda por niveles que había (TestVigenciaCalibration): el 95,0 % de los intercambios y el 99,3 % de las partes
+// cambiadas (con la antigüedad lineal de antes, el 93,6 %). La relación manda, y la antigüedad y el tiempo empujan poco a poco. Más empinada (vigRelK 30) coincide
 // algo más (95 %), pero el desvanecido pasa a ser casi todo o nada.
 
 const (
 	vigCut = 3.0
-	// vigAgeStep: lo que suma cada intercambio de antigüedad (más allá de los jóvenes).
-	vigAgeStep = 0.04
+	// vigAgeK: la antigüedad crece como la serie de Fibonacci: un escalón cada vez que los intercambios desde
+	// entonces se multiplican por φ (1, 2, 3, 5, 8, 13, 21…). Mucha diferencia entre lo reciente y poca entre lo
+	// antiguo, como la curva del olvido; por sí sola casi nunca llega al corte (lo que manda es la relación).
+	vigAgeK = 0.12
 	// vigTimeK: lo que suma el tiempo: ln(1+h) (1 h: 0,10; 6 h: 0,29; un día: 0,48; una semana: 0,77).
 	vigTimeK = 0.15
 	// vigRelK y vigRelPivot: la relación con lo último (similitud coseno con 256 dimensiones). En el pivote no suma
@@ -46,6 +48,17 @@ type vigFactors struct {
 	Superseded string   `json:"superada,omitempty"` // por qué está superada («» si no)
 }
 
+// phi: el número áureo.
+var phi = (1 + math.Sqrt(5)) / 2
+
+// vigAge: lo que suma la antigüedad de n intercambios (más allá de los jóvenes): vigAgeK·log_φ(1+n).
+func vigAge(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return vigAgeK * math.Log1p(float64(n)) / math.Log(phi)
+}
+
 // vigHours: las horas desde at (0 si no hay fecha).
 func vigHours(at int64, now time.Time) float64 {
 	if at <= 0 {
@@ -58,7 +71,7 @@ func vigHours(at int64, now time.Time) float64 {
 func vigencia(f vigFactors, now time.Time) float64 {
 	v := 0.0
 	if !f.Pinned {
-		v = vigAgeStep*float64(max(f.Ago-f.Young, 0)) + vigTimeK*math.Log1p(vigHours(f.At, now))
+		v = vigAge(f.Ago-f.Young) + vigTimeK*math.Log1p(vigHours(f.At, now))
 		if f.Sim != nil {
 			v += vigRelK * (vigRelPivot - *f.Sim)
 		}

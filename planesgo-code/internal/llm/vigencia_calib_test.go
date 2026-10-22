@@ -170,7 +170,7 @@ func TestVigenciaCalibration(t *testing.T) {
 		for piv := 0.38; piv <= 0.9; piv += 0.01 {
 			ok := 0
 			for _, r := range recs {
-				v := vigAgeStep*float64(max(r.ago-r.young, 0)) + vigTimeK*math.Log1p(r.hours) + kr*(piv-r.sim)
+				v := vigAge(r.ago-r.young) + vigTimeK*math.Log1p(r.hours) + kr*(piv-r.sim)
 				if (v >= vigCut) == r.old {
 					ok++
 				}
@@ -182,14 +182,14 @@ func TestVigenciaCalibration(t *testing.T) {
 		t.Logf("relación %.0f → pivote %.2f: %.1f %%", kr, bp, 100*float64(best)/float64(len(recs)))
 	}
 	// Rejilla: con la antigüedad y el tiempo dados, la relación que mejor reproduce el corte de antes.
-	for _, ka := range []float64{0.02, 0.04, 0.06, 0.08, 0.1} {
+	for _, ka := range []float64{0.06, 0.09, 0.12, 0.15, 0.2, 0.25} {
 		for _, kt := range []float64{0.1, 0.15, 0.2, 0.25} {
 			best, bk, bp := 0, 0.0, 0.0
 			for kr := 4.0; kr <= 30; kr += 1 {
 				for piv := 0.38; piv <= 0.9; piv += 0.01 {
 					ok := 0
 					for _, r := range recs {
-						v := ka*float64(max(r.ago-r.young, 0)) + kt*math.Log1p(r.hours) + kr*(piv-r.sim)
+						v := ka*math.Log1p(float64(max(r.ago-r.young, 0)))/math.Log(phi) + kt*math.Log1p(r.hours) + kr*(piv-r.sim)
 						if (v >= vigCut) == r.old {
 							ok++
 						}
