@@ -117,6 +117,49 @@ func textoDe(c json.RawMessage) string {
 
 // imagenesDe: las imágenes (base64) del resultado de una herramienta, también dentro de bloques anidados
 // (los resultados de herramientas MCP llevan su contenido como lista de bloques).
+// imagenDataURL: una imagen en una data: URL (base64), como las adjunta OpenCode.
+func imagenDataURL(mime, url string) (Imagen, bool) {
+	cab, datos, ok := strings.Cut(url, ",")
+	if !ok || !strings.HasPrefix(cab, "data:image/") || !strings.HasSuffix(cab, ";base64") {
+		return Imagen{}, false
+	}
+	d, err := base64.StdEncoding.DecodeString(datos)
+	if err != nil || len(d) == 0 {
+		return Imagen{}, false
+	}
+	if mime == "" || !strings.HasPrefix(mime, "image/") {
+		mime = strings.TrimSuffix(strings.TrimPrefix(cab, "data:"), ";base64")
+	}
+	return Imagen{Tipo: mime, Datos: d}, true
+}
+
+// tiposImagen: las extensiones de las imágenes que se muestran en el chat cuando el agente las lee.
+var tiposImagen = map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+
+// imagenDeFichero: la imagen que ha leído el agente, por la ruta de la entrada de su herramienta (si es una imagen
+// de menos de 10 MB).
+func imagenDeFichero(entrada json.RawMessage) []Imagen {
+	var in map[string]any
+	if json.Unmarshal(entrada, &in) != nil {
+		return nil
+	}
+	for _, k := range []string{"Path", "path", "AbsolutePath", "filePath", "file_path", "TargetFile"} {
+		ruta, _ := in[k].(string)
+		tipo := tiposImagen[strings.ToLower(filepath.Ext(ruta))]
+		if ruta == "" || tipo == "" {
+			continue
+		}
+		if st, err := os.Stat(ruta); err != nil || !st.Mode().IsRegular() || st.Size() > 10<<20 {
+			return nil
+		}
+		if d, err := os.ReadFile(ruta); err == nil && len(d) > 0 {
+			return []Imagen{{Tipo: tipo, Datos: d}}
+		}
+		return nil
+	}
+	return nil
+}
+
 func imagenesDe(c json.RawMessage) []Imagen {
 	var bloques []struct {
 		Type   string `json:"type"`
@@ -407,7 +450,8 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 		}
 	}()
 	vistas := map[int]bool{}
-	llamadasAgy := map[int]bool{} // pasos con consumo propio: cada uno, una llamada al modelo
+	llamadasAgy := map[int]bool{}           // pasos con consumo propio: cada uno, una llamada al modelo
+	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
 	for sc.Scan() {
 		var ev struct {
 			Event          string `json:"event"`
@@ -471,6 +515,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				if !vistas[p.Indice] {
 					vistas[p.Indice] = true
 					empezadas[p.Indice] = p.Has
+					parametros[p.Indice] = p.Info.Parametros
 					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Resumen: resumen(p.Info.Parametros),
 						Entrada: recorta(string(p.Info.Parametros), maxEntrada), Estado: "curso", Skill: skillDe(p.Has, p.Info.Parametros)}})
 				}
@@ -486,7 +531,12 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 							salida = p.Info.Error
 						}
 					}
-					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Salida: recorta(salida, maxSalida), Estado: estado}})
+					// Antigravity no devuelve la imagen que lee, solo su ruta: se toma del disco.
+					var imgs []Imagen
+					if estado == "ok" && strings.Contains(strings.ToLower(p.Has), "file") {
+						imgs = imagenDeFichero(parametros[p.Indice])
+					}
+					emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: p.Has, Salida: recorta(salida, maxSalida), Estado: estado, Imagenes: imgs}})
 				}
 			}
 		case "result":
@@ -528,6 +578,11 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 					Title  string          `json:"title"`
 					Error  string          `json:"error"`
 					Meta   json.RawMessage `json:"metadata"`
+					// Adjuntos del resultado: las imágenes que lee (data: URL en base64).
+					Adjuntos []struct {
+						Mime string `json:"mime"`
+						URL  string `json:"url"`
+					} `json:"attachments"`
 				} `json:"state"`
 				Cost   float64 `json:"cost"`
 				Tokens struct {
@@ -577,9 +632,15 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			if res == "" {
 				res = primeraLinea(ev.Part.State.Title)
 			}
+			var imgs []Imagen
+			for _, a := range ev.Part.State.Adjuntos {
+				if i, ok := imagenDataURL(a.Mime, a.URL); ok {
+					imgs = append(imgs, i)
+				}
+			}
 			emite(Evento{Herramienta: &Herramienta{ID: id, Nombre: ev.Part.Tool, Resumen: res,
 				Entrada: recorta(string(ev.Part.State.Input), maxEntrada), Salida: recorta(salida, maxSalida), Estado: estado,
-				Skill: skillDe(ev.Part.Tool, ev.Part.State.Input)}})
+				Skill: skillDe(ev.Part.Tool, ev.Part.State.Input), Imagenes: imgs}})
 			if t := tareaOpenCode(id, ev.Part.Tool, ev.Part.State.Input, ev.Part.State.Output, ev.Part.State.Meta, estado); t != nil {
 				emite(Evento{Tarea: t})
 			}
@@ -593,6 +654,12 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			m := ev.Error.Data.Message
 			if m == "" {
 				m = ev.Error.Name
+			}
+			// Al llegar al límite de pasos, OpenCode añade al final un mensaje del modelo («responde sin
+			// herramientas») y Gemini rechaza las peticiones que acaban así (OpenCode 1.19): se explica.
+			if strings.Contains(m, "ending with a model turn") {
+				m = fmt.Sprintf("OpenCode ha llegado al límite de %d pasos por petición y, con Gemini, lo corta con un error en vez de "+
+					"resumir. El trabajo hecho hasta aquí se conserva: escribe «sigue» para continuar", PasosOpenCode)
 			}
 			errores = append(errores, m)
 		}

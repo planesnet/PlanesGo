@@ -3,9 +3,12 @@ package llm
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -435,5 +438,50 @@ func TestMensajesConSubagenteEnSegundoPlano(t *testing.T) {
 	}
 	if g := texto.String(); g != "KIWI|cerrada|" {
 		t.Errorf("texto %q", g)
+	}
+}
+
+// Las imágenes que leen los agentes salen en el chat: OpenCode las adjunta (data: URL); Antigravity solo da la
+// ruta y se toman del disco.
+func TestImagenesLeidas(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\nfalso")
+	b64 := base64.StdEncoding.EncodeToString(png)
+	oc := `{"type":"tool_use","sessionID":"s","part":{"tool":"read","callID":"c1","state":{"status":"completed","input":{"filePath":"/x/a.png"},"output":"Image read successfully","attachments":[{"type":"file","mime":"image/png","url":"data:image/png;base64,` + b64 + `"}]}}}`
+	var imgs []Imagen
+	leeOpenCode(strings.NewReader(oc), func(e Evento) {
+		if e.Herramienta != nil {
+			imgs = append(imgs, e.Herramienta.Imagenes...)
+		}
+	})
+	if len(imgs) != 1 || imgs[0].Tipo != "image/png" || string(imgs[0].Datos) != string(png) {
+		t.Fatalf("OpenCode: %+v", imgs)
+	}
+
+	f := filepath.Join(t.TempDir(), "captura.png")
+	os.WriteFile(f, png, 0o644)
+	ruta, _ := json.Marshal(f)
+	agy := `{"event":"step_update","step_update":{"step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"read_file","tool_info":{"parameters":{"Path":` + string(ruta) + `}}}}
+{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"output":"ok"}}}
+{"event":"result","result":{"status":"SUCCESS"}}`
+	imgs = nil
+	leeAntigravity(strings.NewReader(agy), func(e Evento) {
+		if e.Herramienta != nil {
+			imgs = append(imgs, e.Herramienta.Imagenes...)
+		}
+	})
+	if len(imgs) != 1 || string(imgs[0].Datos) != string(png) {
+		t.Fatalf("Antigravity: %+v", imgs)
+	}
+	if imagenDeFichero(json.RawMessage(`{"Path":"/etc/hostname"}`)) != nil {
+		t.Error("un fichero que no es una imagen no se muestra")
+	}
+}
+
+// El error de Gemini al llegar OpenCode al límite de pasos se explica (y cómo seguir).
+func TestLimitePasosOpenCode(t *testing.T) {
+	in := `{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"Requests ending with a model turn are not supported."}}}`
+	err := leeOpenCode(strings.NewReader(in), func(Evento) {})
+	if err == nil || !strings.Contains(err.Error(), "límite de 40 pasos") || !strings.Contains(err.Error(), "sigue") {
+		t.Errorf("%v", err)
 	}
 }
