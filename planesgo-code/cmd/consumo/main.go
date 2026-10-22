@@ -610,7 +610,8 @@ func comprueba(t Turno, texto, carpeta string) string {
 		}
 	}
 	for _, r := range t.SinCambios {
-		if out, _ := exec.Command("git", "-C", carpeta, "status", "--porcelain", "--", r).Output(); len(bytes.TrimSpace(out)) > 0 {
+		// Sin contar la caché de Python (__pycache__): la crea ejecutar las pruebas sin PYTHONDONTWRITEBYTECODE (CI).
+		if out, _ := exec.Command("git", "-C", carpeta, "status", "--porcelain", "--", r, ":(exclude,glob)**/__pycache__/**").Output(); len(bytes.TrimSpace(out)) > 0 {
 			return fmt.Sprintf("ha cambiado %s (no se podía tocar)", r)
 		}
 	}
