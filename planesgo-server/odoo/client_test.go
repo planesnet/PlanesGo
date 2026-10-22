@@ -556,3 +556,55 @@ func TestUpdateTimesheetWithTicketFieldName(t *testing.T) {
 		})
 	}
 }
+
+// En Odoo Community (sin timer.mixin) no se llama a action_timer_* en los partes: dejaría un AttributeError en el
+// log de Odoo. Con el cronómetro de Enterprise sí.
+func TestLineTimerOnlyWithTimerMixin(t *testing.T) {
+	for _, enterprise := range []bool{false, true} {
+		var calls []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req jsonRPCRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			params, _ := req.Params.(map[string]interface{})
+			args, _ := params["args"].([]interface{})
+			var result interface{} = true
+			switch {
+			case params["method"] == "authenticate":
+				result = 42
+			case len(args) > 4 && args[4] == "fields_get":
+				fields := map[string]interface{}{}
+				if enterprise {
+					fields["is_timer_running"] = map[string]interface{}{"type": "boolean"}
+				}
+				result = fields
+			case len(args) > 4:
+				calls = append(calls, args[3].(string)+"."+args[4].(string))
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		}))
+		client := &Client{
+			config:       config.OdooConfig{URL: server.URL, DB: "testdb", Username: "u", Password: "p"},
+			httpClient:   server.Client(),
+			userUIDCache: make(map[string]int),
+		}
+		ctx := context.Background()
+		client.PauseTimer(ctx, 7, 0, 1.5)
+		client.ResumeTimer(ctx, 7, 0)
+		client.StopTimer(ctx, 7, 0, 2, "fin")
+		server.Close()
+
+		timerCalls := 0
+		for _, c := range calls {
+			if c == "account.analytic.line.action_timer_pause" || c == "account.analytic.line.action_timer_start" ||
+				c == "account.analytic.line.action_timer_stop" {
+				timerCalls++
+			}
+		}
+		if enterprise && timerCalls != 3 {
+			t.Fatalf("con timer.mixin: esperadas 3 llamadas action_timer_*, hay %d: %v", timerCalls, calls)
+		}
+		if !enterprise && timerCalls != 0 {
+			t.Fatalf("sin timer.mixin: no debe llamar a action_timer_*: %v", calls)
+		}
+	}
+}

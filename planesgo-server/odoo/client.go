@@ -294,6 +294,12 @@ func (c *Client) HasField(ctx context.Context, model, field string) bool {
 	return has
 }
 
+// hasLineTimer: si account.analytic.line tiene el cronómetro de Odoo Enterprise (timer.mixin). En Community no
+// existen los action_timer_* y llamarlos deja una excepción AttributeError en el log de Odoo.
+func (c *Client) hasLineTimer(ctx context.Context) bool {
+	return c.HasField(ctx, "account.analytic.line", "is_timer_running")
+}
+
 // Authenticate autentica contra el endpoint común de Odoo y devuelve el UID.
 // Si el cliente ya tiene un UID autenticado previamente, lo devuelve de inmediato sin llamadas de red.
 func (c *Client) Authenticate(ctx context.Context) (int, error) {
@@ -2437,7 +2443,7 @@ func (c *Client) StartTimerExtended(ctx context.Context, projectID int, projectN
 	}
 
 	// 2. Invocar acción nativa de Odoo action_timer_start en account.analytic.line si está disponible
-	if actualTimesheetID > 0 {
+	if actualTimesheetID > 0 && c.hasLineTimer(ctx) {
 		startArgs := []interface{}{
 			c.config.DB,
 			uid,
@@ -2610,7 +2616,9 @@ func (c *Client) PauseTimer(ctx context.Context, timesheetID int, taskID int, un
 			"action_timer_pause",
 			[]interface{}{[]int{timesheetID}},
 		}
-		_, _ = c.call(ctx, "object", "execute_kw", pauseArgs, nil)
+		if c.hasLineTimer(ctx) {
+			_, _ = c.call(ctx, "object", "execute_kw", pauseArgs, nil)
+		}
 
 		if unitAmount > 0 {
 			writeArgs := []interface{}{
@@ -2659,7 +2667,7 @@ func (c *Client) ResumeTimer(ctx context.Context, timesheetID int, taskID int) e
 		return err
 	}
 
-	if timesheetID > 0 {
+	if timesheetID > 0 && c.hasLineTimer(ctx) {
 		// Método nativo y estándar de Odoo timer.mixin: action_timer_start
 		startArgs := []interface{}{
 			c.config.DB,
@@ -2736,7 +2744,9 @@ func (c *Client) StopTimerWithAI(ctx context.Context, timesheetID int, taskID in
 			"action_timer_stop",
 			[]interface{}{[]int{timesheetID}},
 		}
-		_, _ = c.call(ctx, "object", "execute_kw", stopArgs, nil)
+		if c.hasLineTimer(ctx) {
+			_, _ = c.call(ctx, "object", "execute_kw", stopArgs, nil)
+		}
 
 		vals := map[string]interface{}{}
 		if unitAmount > 0 {
