@@ -186,8 +186,8 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 	// OpenCode: se apunta su sesión (también la nueva) para repararla si el turno se corta.
 	sesionOC := p.SesionAgente
 	emiteOC := emite
+	pasos := 0
 	if a.Clave == "opencode" {
-		pasos := 0
 		emiteOC = func(e Evento) {
 			if e.SesionAgente != "" {
 				sesionOC = e.SesionAgente
@@ -215,6 +215,27 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			}
 		}
 		return err
+	}
+	// OpenCode: al llegar al límite de pasos de la petición, el trabajo no ha acabado (solo la petición): se sigue
+	// con otra petición en la misma sesión, que empieza con la poda del historial (lo ya hecho y no vigente se va),
+	// en vez de quedarse en un resumen esperando «sigue». Como mucho ContinuacionesOpenCode veces por turno.
+	if a.Clave == "opencode" {
+		antes := 0
+		for n := 0; n < ContinuacionesOpenCode && ctx.Err() == nil && idSesionOC.MatchString(sesionOC) &&
+			(errors.As(err, new(*errLimitePasos)) || (err == nil && pasos-antes >= PasosOpenCode)); n++ {
+			depuracion.Log(a.Clave, "la sesión %s llegó al límite de %d pasos: sigue con otra petición (%d)", sesionOC, PasosOpenCode, n+1)
+			reparaOpenCode(ctx, a, p, sesionOC) // por si quedó una respuesta vacía (Gemini)
+			emiteOC(Evento{Texto: fmt.Sprintf("\n\n_(Límite de %d pasos de la petición: sigo con una nueva.)_\n\n", PasosOpenCode)})
+			q := p
+			q.SesionAgente, q.Adjuntos, q.Idioma = sesionOC, nil, ""
+			// La poda mide lo vigente frente a lo que pidió el usuario, no frente al «sigue».
+			if rep := pruneOpenCode(ctx, a, q); rep != nil {
+				emite(Evento{Prune: rep})
+			}
+			q.Mensajes = []Mensaje{{Rol: "user", Texto: textoContinuacion}}
+			antes = pasos
+			err = a.chat(ctx, q, emiteOC)
+		}
 	}
 	if a.Clave == "opencode" && sesionOC != "" {
 		switch {

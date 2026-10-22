@@ -71,6 +71,12 @@ func entornoOpenCode(p Peticion) []string {
 //     sin él (limite 0, la gestión del contexto desactivada), el del catálogo de OpenCode.
 const PasosOpenCode = 40
 
+// ContinuacionesOpenCode: cuántas peticiones nuevas encadena un turno de OpenCode al llegar al límite de pasos
+// (Chat); textoContinuacion, lo que se le dice en cada una (corto: va en su historial).
+const ContinuacionesOpenCode = 5
+
+const textoContinuacion = "Sigue con la tarea donde lo dejaste."
+
 func configOpenCode(modelo string, limite int) map[string]any {
 	cfg := map[string]any{
 		"compaction": map[string]any{"auto": true, "prune": true},
