@@ -14,6 +14,7 @@ import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, TiraFotos, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
+import { withUnanswered } from '../unanswered';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as AY from '../ayuda';
@@ -527,7 +528,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     let punto = ''; // el último mensaje del agente en su sesión (para continuar desde esta respuesta más tarde)
     // Skill de la petición por embeddings: «elegir» espera (como mucho 1,5 s) y se la indica al agente;
     // «sugerir» va en paralelo y solo se muestra.
-    let aEnviar = t;
+    // Lo que no llegó al agente (turnos cortados antes de que respondiera) va con este mensaje: si no, lo vería el
+    // usuario en el chat pero el agente no (p. ej. si el corte fue antes de crear su sesión, este empieza otra).
+    const pendiente = prov.tipo === 'agente' && !orden && !opc.crudo ? withUnanswered(previos, t) : { text: t, attachments: [] as Adjunto[] };
+    const tAgente = pendiente.text;
+    let aEnviar = tAgente;
     const marcaSkill = (k: SkillPgo) => {
       actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k } : m);
       pon(actual, true);
@@ -542,7 +547,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         const r = await Promise.race([pide.catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 1500))]);
         if (r?.elegida) {
           const n = r.elegida.nombre;
-          aEnviar = ses.agente === 'claude-code' ? `/${n} ${t}` : `Usa la skill «${n}».\n\n${t}`;
+          aEnviar = ses.agente === 'claude-code' ? `/${n} ${tAgente}` : `Usa la skill «${n}».\n\n${tAgente}`;
           marcaSkill({ nombre: n, puntuacion: r.elegida.puntuacion, modo: 'elegida' });
         }
       } else {
@@ -590,7 +595,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // «Continuar desde aquí» manda sobre el relevo: el agente sigue desde el punto elegido (o con su traspaso).
         permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: corte?.punto ? corte.sesion : relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
         ...(corte ? { corte: corte.punto || '', traspaso: corte.traspaso } : {}),
-        sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
+        sesion: ses.id, titulo: ses.nombre, adjuntos: [...pendiente.attachments, ...listos].map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language, compactar: compactAtTokens(ses.compactAtK), contexto_previo: lastContext(previos),
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
