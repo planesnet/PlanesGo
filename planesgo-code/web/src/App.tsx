@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { escuchaAvisos, get, listaCopias, post, quitaCopia, type Proveedor, type Proyecto, type Usuario } from './api';
 import * as S from './sesiones';
 import * as C from './copias';
+import { duplicateSession as duplicateSessionOf } from './duplicate';
 import type { PedidoWeb } from './componentes/Navegador';
 import { leeAjustes, AJUSTES_DEFECTO, type AjustesProyecto } from './ajustes';
 import Acceso from './componentes/Acceso';
@@ -268,6 +269,15 @@ export default function App() {
     pedida.current = s.id;
     elige(p);
   }, [proyecto, elige]);
+
+  // «Duplicar sin historial»: la copia se guarda y se abre (si es de otro proyecto, al abrir ese proyecto).
+  const duplicateSession = useCallback((p: Proyecto, s: S.Sesion) => {
+    if (!usuario) return;
+    const c = duplicateSessionOf(s, S.lista(usuario.login, s.proyecto));
+    const l = S.guarda(usuario.login, c);
+    if (proyecto?.id === p.id) setSesiones(l);
+    eligeSesionDe(p, c);
+  }, [usuario, proyecto?.id, eligeSesionDe]);
   const nuevaEn = useCallback((p: Proyecto) => {
     if (proyecto?.id === p.id) { nuevaSesion(); return; }
     pedida.current = 'nueva';
@@ -287,6 +297,7 @@ export default function App() {
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
+        onDuplicateSession={duplicateSession}
         alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
       <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
