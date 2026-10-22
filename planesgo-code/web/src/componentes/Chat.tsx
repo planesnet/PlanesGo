@@ -10,6 +10,7 @@ import { compactAtTokens, lastContext } from '../compaction';
 import * as AP from '../aparte';
 import * as W from '../workingMemory';
 import * as TP from '../topics';
+import * as PR from '../prune';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, TiraFotos, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
@@ -591,10 +592,17 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         permisos: modoPlan ? 'lectura' : opc.permisos || modoDe(ses), sesion_agente: corte?.punto ? corte.sesion : relevo ? undefined : sesionPrevia, esfuerzo: ses.esfuerzo || '',
         ...(corte ? { corte: corte.punto || '', traspaso: corte.traspaso } : {}),
         sesion: ses.id, titulo: ses.nombre, adjuntos: listos.map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
-        idioma: navigator.language, compactar: compactAtTokens(ses.compactAtK), contexto_previo: lastContext(previos),
+        idioma: navigator.language, compactar: compactAtTokens(ses.compactAtK), contexto_previo: lastContext(previos), podar: PR.autoPruneOn(ses),
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
+        // Poda del historial del agente al empezar el turno: lo que queda fuera, en los intercambios anteriores; lo
+        // retirado, en este turno.
+        if (e.poda) {
+          const r = e.poda;
+          actual = PR.applyPruneReport(actual, r);
+          ultimo(m => (r.retirados > 0 || r.repuestos ? { ...m, pruned: { tokens: r.retirados, ...(r.repuestos ? { repuestos: r.repuestos } : {}) } } : m));
+        }
         if (e.texto) parte({ tipo: 'texto', texto: e.texto });
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
         // Los tokens de cada acción, como los de la conversación hasta ella (los de antes del turno y los de este).
@@ -827,8 +835,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   {m.fuera ? 'Fuera del contexto del agente: lo de aquí abajo ya no lo ve' : 'Fuera del contexto del agente al enviar el siguiente mensaje'}
                 </div>
               )}
-              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (sesion.corte === i ? ' cut-point' : '')}
-                title={fuera ? 'Fuera del contexto del agente (no lo verá)' : undefined}>
+              {m.prune && m.rol === 'user' && !fuera && (
+                <div className={'prune-label' + (m.prune.nivel === 'L3' ? ' out' : '')} role="note">{m.prune.motivo}</div>
+              )}
+              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (fuera ? '' : PR.pruneClass(m)) + (sesion.corte === i ? ' cut-point' : '')}
+                title={fuera ? 'Fuera del contexto del agente (no lo verá)' : m.prune ? m.prune.motivo : undefined}>
+                {m.pruned && PR.prunedLine(m.pruned) && <div className="pruned-line" role="note">{PR.prunedLine(m.pruned)}</div>}
                 {m.texto && !(enCurso && i === mensajes.length - 1) && (
                   <button className="icono copiar-mensaje" onClick={() => copiaTexto(m.texto, i)} title={copiado === i ? 'Copiado' : 'Copiar el mensaje'} aria-label="Copiar el mensaje">
                     <Icono n={copiado === i ? 'hecho' : 'copiar'} t={13} />

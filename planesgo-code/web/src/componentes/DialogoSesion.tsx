@@ -273,6 +273,11 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
               </span>
             </label>
             <span className="suave pequeno">El agente reenvía todo su historial en cada paso: al llegar a este tamaño lo resume y sigue con el resumen. Más bajo gasta menos tokens por paso; más alto conserva más detalle. Vacío: {COMPACT_AT_DEFAULT_K}k (de {COMPACT_AT_MIN_K}k a {COMPACT_AT_MAX_K}k).</span>
+            <label className="casilla">
+              <input type="checkbox" checked={s.autoPrune !== false} onChange={e => cambia({ autoPrune: e.target.checked ? undefined : false })} />
+              Podar el historial automáticamente
+            </label>
+            <span className="suave pequeno">Al empezar cada turno, pgocode quita del historial del agente lo que ya no importa: lecturas superadas, imágenes ya vistas, salidas repetidas o largas, el razonamiento antiguo y lo que no tiene relación con lo último (por embeddings locales). Si vuelve a ser relevante, se repone. Solo cuando lo que sale compensa perder la caché. De momento, con OpenCode.</span>
           </fieldset>
         </>}
 

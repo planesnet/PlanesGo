@@ -173,6 +173,8 @@ type conversation struct {
 	History     []exchange
 	// CompactAt y LastContext: los de llm.Peticion en el modo pgocode (ver internal/llm/compaction.go).
 	CompactAt, LastContext int
+	// Prune: la poda del historial (llm.Peticion.Prune; «» en las demás estrategias).
+	Prune string
 	Note                   string // lo que ha hecho la estrategia en este turno
 	// Run: un turno con el agente, fuera de las pruebas (su consumo cuenta en el turno que empieza).
 	Run   func(ctx context.Context, msg, session string) resultadoTurno
@@ -334,10 +336,23 @@ var strategies = map[string]func(n int) strategy{
 	"relevo": func(n int) strategy {
 		return relayStrategy{threshold: cmp.Or(n, 20) * 1000, script: filepath.Join(moduleDir, "cmd", "consumo", "relay.mts")}
 	},
+	"poda":        func(int) strategy { return pruneStrategy{mode: llm.PruneAuto} },
+	"poda-reglas": func(int) strategy { return pruneStrategy{mode: llm.PruneRules} },
 }
 
 // pgocodeOnly: las estrategias que usan lo que hace pgocode (no tienen sentido sin él).
-var pgocodeOnly = map[string]bool{"compactar": true, "relevo": true}
+var pgocodeOnly = map[string]bool{"compactar": true, "relevo": true, "poda": true, "poda-reglas": true}
+
+// pruneStrategy («poda», «poda-reglas»): la poda automática del historial de pgocode (internal/llm/prune.go) al
+// empezar cada turno, con embeddings y reglas o solo con reglas. Sin la compactación de pgocode (como «ninguna»),
+// para medir solo la poda.
+type pruneStrategy struct{ mode string }
+
+func (s pruneStrategy) before(_ context.Context, c *conversation) error {
+	c.CompactAt = llm.CompactAtMax
+	c.Prune = s.mode
+	return nil
+}
 
 // parseStrategy: «nombre[:N]» (N en miles de tokens).
 func parseStrategy(s string) (name string, n int, err error) {
@@ -374,6 +389,7 @@ type resultadoTurno struct {
 	bruto  llm.Uso // lo que da el agente, sin restar el acumulado anterior
 	parts  []uiPart
 	tasks  []llm.Tarea
+	prune  string // lo que ha podado pgocode al empezar el turno
 }
 
 // recoge: junta los eventos de un turno. Si el agente da el consumo acumulado de su conversación (ver
@@ -408,6 +424,12 @@ func (c *recoge) evento(e llm.Evento) {
 	}
 	if e.SesionAgente != "" {
 		c.r.sesion = e.SesionAgente
+	}
+	if p := e.Prune; p != nil && (p.Removed > 0 || p.Restored > 0) {
+		c.r.prune = fmt.Sprintf("poda %s", miles(p.Removed))
+		if p.Restored > 0 {
+			c.r.prune += fmt.Sprintf(" (%d repuestas)", p.Restored)
+		}
 	}
 	if u := e.Uso; u != nil {
 		c.acumula.Entrada += u.Entrada
@@ -565,12 +587,12 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 
 // conPgocode: un turno con el proveedor de pgocode (internal/llm), con la petición que arma su servidor para la
 // interfaz: idioma del navegador y mensajes a mitad de turno (Claude Code: la entrada por stdin).
-func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string, previo *llm.Uso, compactAt, lastContext int) resultadoTurno {
+func conPgocode(ctx context.Context, prov llm.Proveedor, agente string, conf ConfAgente, carpeta, permisos, msg, sesion string, previo *llm.Uso, compactAt, lastContext int, prune string) resultadoTurno {
 	c := &recoge{inicio: time.Now(), previo: previo, agente: agente}
 	var mu sync.Mutex
 	err := prov.Chat(ctx, llm.Peticion{Modelo: conf.Modelo, Esfuerzo: conf.Esfuerzo, Carpeta: carpeta, Permisos: permisos,
 		SesionAgente: sesion, Mensajes: []llm.Mensaje{{Rol: "user", Texto: msg}}, Idioma: llm.NombreIdioma("es-ES"),
-		CompactAt: compactAt, LastContext: lastContext,
+		CompactAt: compactAt, LastContext: lastContext, Prune: prune,
 		AlInyectar: func(func(string) error) {}, Traza: "banco de consumo"}, func(e llm.Evento) {
 		mu.Lock()
 		c.evento(e)
@@ -641,7 +663,7 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 		if modo == "directo" {
 			r = directo(cx, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, datosOC)
 		} else {
-			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, c.CompactAt, c.LastContext)
+			r = conPgocode(cx, prov, agente, conf, carpeta, pr.Permisos, msg, sesion, previo, c.CompactAt, c.LastContext, c.Prune)
 		}
 		if acumula {
 			b := r.bruto
@@ -673,6 +695,9 @@ func ejecuta(ctx context.Context, modo, agente string, conf ConfAgente, pr Prueb
 		}
 		c.History = append(c.History, exchange{Message: t.Mensaje, Reply: r.texto, Usage: m, Parts: r.parts, Tasks: r.tasks})
 		nota := c.Note
+		if r.prune != "" {
+			nota = strings.TrimPrefix(nota+"; "+r.prune, "; ")
+		}
 		if x := compactionNote.FindString(r.texto); x != "" {
 			nota = strings.TrimPrefix(strings.TrimSpace(nota+"; "+strings.Replace(x, "ha compactado su historial", "compacta", 1)), "; ")
 		}

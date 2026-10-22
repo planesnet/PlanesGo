@@ -898,6 +898,12 @@ button.miga-item:hover { background: var(--hover); }
 .mensaje:hover > .continue-from-here, .continue-from-here:focus-visible { opacity: .85; }
 .mensaje.outside-context { opacity: .45; }
 .mensaje.outside-context:hover { opacity: .7; }
+.mensaje.pruned-out { opacity: .5; }
+.mensaje.pruned-out:hover { opacity: .75; }
+.mensaje.pruned-rules { opacity: .8; }
+.prune-label { font-size: 11px; color: var(--suave); margin: 6px 0 2px; }
+.prune-label.out::before { content: '⤓ '; }
+.pruned-line { font-size: 11.5px; color: var(--suave); margin-bottom: 6px; }
 .mensaje.cut-point { box-shadow: inset 3px 0 0 var(--aviso, #b26b00); }
 .outside-context-label { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--suave); margin: 4px 0; }
 .outside-context-label::before, .outside-context-label::after { content: ''; flex: 1; border-top: 1px dashed var(--linea); }

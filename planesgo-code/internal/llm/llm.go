@@ -60,6 +60,9 @@ type Peticion struct {
 	// LastContext: tokens de contexto de la última llamada del turno anterior (para los agentes a los que pgocode
 	// les pide la compactación él mismo: Antigravity).
 	LastContext int
+	// Prune: poda automática del historial del agente al empezar el turno (PruneAuto, PruneRules o PruneOff; ver
+	// prune.go). De momento, solo OpenCode.
+	Prune string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
@@ -81,6 +84,8 @@ type Evento struct {
 	// Adoptados: programas que el agente dejó en marcha (en segundo plano) y que pgocode se queda al acabar
 	// su respuesta, para no esperarlos ni gastar otro turno (siguen en Programas y en la barra de ejecución).
 	Adoptados []Adoptado `json:"adoptados,omitempty"`
+	// Prune: lo que pgocode ha retirado del historial del agente al empezar el turno (va antes que la respuesta).
+	Prune *PruneReport `json:"poda,omitempty"`
 	// Vivos: al acabar el turno, los grupos de procesos de este agente que siguen en marcha (solo los suyos).
 	Vivos *int `json:"-"`
 }

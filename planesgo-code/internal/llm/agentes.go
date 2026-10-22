@@ -177,16 +177,32 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			previo(e)
 		}
 	}
+	// OpenCode: poda del historial al empezar el turno (prune.go), con lo que su recolector ya ha marcado.
+	if a.Clave == "opencode" {
+		if rep := pruneOpenCode(ctx, a, p); rep != nil {
+			emite(Evento{Prune: rep})
+		}
+	}
 	// OpenCode: se apunta su sesión (también la nueva) para repararla si el turno se corta.
 	sesionOC := p.SesionAgente
 	emiteOC := emite
 	if a.Clave == "opencode" {
+		pasos := 0
 		emiteOC = func(e Evento) {
 			if e.SesionAgente != "" {
 				sesionOC = e.SesionAgente
 			}
+			// Marcado continuo: cada salida grande de una herramienta se embebe en cuanto llega.
+			if h := e.Herramienta; h != nil && h.Estado == "ok" && p.Prune == PruneAuto && !p.Aparte && idSesionOC.MatchString(sesionOC) {
+				collectorFor(sesionOC).notePiece(h.ID, h.Nombre, h.Resumen, h.Salida)
+			}
+			if e.Uso != nil {
+				pasos++
+				midTurnPrune(a, p, sesionOC, pasos)
+			}
 			emite(e)
 		}
+		defer func() { markOpenCode(a, p, sesionOC) }()
 	}
 	err := a.chat(ctx, p, emiteOC)
 	// Pregunta aparte en OpenCode: su copia de la sesión (o la nueva) se borra; nada de reparar ni reintentar.
@@ -823,6 +839,7 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 	if !idSesionOC.MatchString(sesion) {
 		return errors.New("sesión no válida")
 	}
+	defer forgetSnapshot(sesion)
 	rotas := `SELECT m.id FROM message m WHERE m.session_id='` + sesion + `' AND json_extract(m.data,'$.role')='assistant' AND NOT EXISTS (` +
 		`SELECT 1 FROM part x WHERE x.message_id=m.id AND ((json_extract(x.data,'$.type') IN ('text','reasoning') AND ` +
 		`length(coalesce(json_extract(x.data,'$.text'),''))>0) OR json_extract(x.data,'$.type')='tool'))`
@@ -866,6 +883,7 @@ func cortaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion, punto str
 	if !idSesionOC.MatchString(sesion) || !idMensajeOC.MatchString(punto) {
 		return errors.New("sesión o mensaje de OpenCode no válidos")
 	}
+	defer forgetSnapshot(sesion)
 	for _, q := range consultasCorteOpenCode(sesion, punto) {
 		cmd := exec.CommandContext(ctx, "opencode", "db", q)
 		cmd.Dir = p.Carpeta
