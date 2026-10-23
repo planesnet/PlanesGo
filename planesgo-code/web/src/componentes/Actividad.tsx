@@ -5,6 +5,8 @@ import * as RP from '../reparto';
 import * as C from '../copias';
 import { ARCHIVE_SESSIONS, conversacion, titulo, type Sesion } from '../sesiones';
 import * as LA from '../liveActivity';
+import * as TS from '../todoSync';
+import TodoSyncList, { todoCount } from './TodoSyncList';
 import * as R from '../router';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, PLANS_CHANGED, type Plan } from './Planes';
@@ -24,7 +26,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   // aunque el panel se abra ahora) y, si no, las tareas guardadas en su conversación. Se actualiza con cada aviso.
   const [snap, setSnap] = useState<LA.LiveSnapshot | undefined>(undefined);
   useEffect(() => {
-    setSnap(sesion ? LA.lastSnapshot(sesion.id) || { sesion: sesion.id, tareas: conversacion(sesion.id).flatMap(m => m.tareas || []), trabajando: false } : undefined);
+    setSnap(sesion ? LA.lastSnapshot(sesion.id) || (c => ({ sesion: sesion.id, tareas: c.flatMap(m => m.tareas || []), trabajando: false, todo: TS.sessionTodo(c, false) }))(conversacion(sesion.id)) : undefined);
     const aviso = (e: Event) => {
       const d = (e as CustomEvent<LA.LiveSnapshot>).detail;
       if (d.sesion === sesion?.id) setSnap(d);
@@ -52,7 +54,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
     return () => window.removeEventListener('pgo:ruta', aviso);
   }, [sesion?.id]);
 
-  const todo = LA.todoView(snap?.tareas || []);
+  const todo = snap?.todo;
   const listas = LA.liveLists(snap, ahora);
   // Subtareas en paralelo: las sesiones hijas de esta (reparto de pgocode), con el estado real de cada una y de su unión.
   const repartos = RP.lee();
@@ -126,24 +128,20 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   );
 }
 
-// TodoBoard: la lista de tareas del agente, arriba del todo: la que está haciendo AHORA, destacada; las hechas,
-// tachadas; el progreso. Acabada y con el agente libre, plegada en una línea.
-function TodoBoard({ v, trabajando }: { v: LA.TodoView; trabajando: boolean }) {
+// TodoBoard: la lista de tareas del agente, arriba del todo: la que está haciendo AHORA, destacada (▷ si es la que
+// hace según sus acciones y aún no la ha marcado); debajo lo que falta y, plegadas, las hechas; el progreso. Acabada y
+// con el agente libre, plegada en una línea.
+function TodoBoard({ v, trabajando }: { v: TS.SyncView; trabajando: boolean }) {
   const viva = trabajando || !v.finished;
-  const pct = Math.round((v.done / v.total) * 100);
+  const pct = v.total ? Math.round(((v.done + v.probables) / v.total) * 100) : 100;
   return (
     <details className={'act-todo' + (viva ? ' viva' : '')} open={viva || undefined} title="La lista de tareas que el agente lleva para organizarse (TodoWrite, TaskCreate…)">
       <summary>
         <b>Tareas del agente</b>
         <span className="act-todo-barra" aria-hidden><span style={{ width: pct + '%' }} /></span>
-        <span className="act-todo-cuenta">{v.done}/{v.total}</span>
+        <span className="act-todo-cuenta" title={v.probables ? `${v.done} marcadas por el agente y ${v.probables} probablemente hechas según lo que ha hecho` : undefined}>{todoCount(v)}</span>
       </summary>
-      {v.current ? <div className="act-todo-ahora">▶ Ahora: {v.current.texto}</div>
-        : trabajando && v.next ? <div className="act-todo-ahora siguiente">Siguiente: {v.next.texto}</div>
-        : v.finished ? <div className="act-todo-ahora hecha">✓ Todas hechas</div> : null}
-      <ol>
-        {v.items.map((e, i) => <li key={i} className={e.estado}><span aria-hidden>{e.estado === 'hecho' ? '✓' : e.estado === 'curso' ? '▶' : '○'}</span> {e.texto}</li>)}
-      </ol>
+      <TodoSyncList v={v} trabajando={trabajando} />
     </details>
   );
 }

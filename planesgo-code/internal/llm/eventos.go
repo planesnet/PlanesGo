@@ -247,6 +247,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	// run_in_background): ya se ven como herramienta; no son «En segundo plano».
 	primerPlano := map[string]bool{}
 	lista := &listaClaude{}
+	listasSub := map[string]*listaClaude{} // las listas de los subagentes, por su herramienta (parent_tool_use_id)
 	contexto := 0
 	ctxCache, ctxEscrita := 0, 0 // de la última llamada: lo leído de caché y lo escrito en ella
 	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
@@ -342,16 +343,27 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 			lista.sesion = ev.SessionID
 			sesion = ev.SessionID
 		}
-		// La lista de tareas (TodoWrite, TaskCreate, TaskUpdate), también si la toca un subagente.
+		// La lista de tareas (TodoWrite, TaskCreate, TaskUpdate). La de un subagente va aparte (su propia Tarea
+		// «lista», con Padre): no pisa la del agente principal.
+		l := lista
+		if ev.Padre != "" {
+			if listasSub[ev.Padre] == nil {
+				listasSub[ev.Padre] = &listaClaude{cargada: true}
+			}
+			l = listasSub[ev.Padre]
+		}
 		for _, c := range ev.Message.Content {
 			var t *Tarea
 			switch {
 			case ev.Type == "assistant" && c.Type == "tool_use":
-				t = lista.usa(c.ID, c.Name, c.Input)
+				t = l.usa(c.ID, c.Name, c.Input)
 			case ev.Type == "user" && c.Type == "tool_result":
-				t = lista.resultado(c.ToolUseID, c.IsError, textoDe(c.Content), ev.ResultadoHerr)
+				t = l.resultado(c.ToolUseID, c.IsError, textoDe(c.Content), ev.ResultadoHerr)
 			}
 			if t != nil {
+				if ev.Padre != "" {
+					t.ID, t.Padre, t.Titulo = "lista:"+ev.Padre, ev.Padre, "Lista de tareas del subagente"
+				}
 				emite(Evento{Tarea: t})
 			}
 		}
@@ -1018,7 +1030,7 @@ func tareaOpenCode(id, herr string, entrada json.RawMessage, salida string, meta
 }
 
 // tareaLista: la lista de tareas del agente (pares texto, estado: pending | in_progress | completed | cancelled)
-// como la Tarea «lista»; nil si está vacía.
+// como la Tarea «lista» (pendiente | curso | hecho | cancelada); nil si está vacía.
 func tareaLista(l [][2]string) *Tarea {
 	if len(l) == 0 {
 		return nil
@@ -1029,8 +1041,10 @@ func tareaLista(l [][2]string) *Tarea {
 		switch x[1] {
 		case "in_progress":
 			e, t.Estado = "curso", "curso"
-		case "completed", "cancelled":
+		case "completed":
 			e = "hecho"
+		case "cancelled":
+			e = "cancelada"
 		}
 		t.Elementos = append(t.Elementos, Elemento{Texto: x[0], Estado: e})
 	}

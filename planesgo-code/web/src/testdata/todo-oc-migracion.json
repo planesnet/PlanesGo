@@ -1,0 +1,757 @@
+{
+ "nota": "OpenCode (Gemini), turno real con 8 tareas bien llevadas: la inferencia no debe cambiar nada.",
+ "fuente": "opencode",
+ "peticion": "\"puedes revisar el plan y ver si lo has acabado.\"",
+ "eventos": [
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/internal/config/config.go",
+    "entrada": "{\"content\": \"package config\\n\\nimport (\\n\\t\\\"encoding/json\\\"\\n\\t\\\"os\\\"\\n\\t\\\"path/filepath\\\"\\n\\t\\\"strings\\\"\\n\\t\\\"sync\\\"\\n)\\n\\n// OdooConfig almacena los parámetros de conexión a Odoo.\\ntype OdooConfig struct {\\n\\tURL      string `json:\\\"url\\\"`\\n\\tDB       string `json:\\\"db\\\"`\\n\\tUsername string `json:\\\"username\\\"`\\n\\tPassword string `json:\\\"password\\\"`\\n}\", \"filePath\": \"/proyecto/internal/config/config.go\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "curso"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/internal/odoo/cliente.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/cliente.go\", \"content\": \"package odoo\\n\\nimport (\\n\\t\\\"bytes\\\"\\n\\t\\\"crypto/tls\\\"\\n\\t\\\"encoding/json\\\"\\n\\t\\\"errors\\\"\\n\\t\\\"fmt\\\"\\n\\t\\\"io\\\"\\n\\t\\\"math/rand\\\"\\n\\t\\\"net\\\"\\n\\t\\\"net/http\\\"\\n\\t\\\"strings\\\"\\n\\t\\\"sync\\\"\\n\\t\\\"time\\\"\\n\\n\\t\\\"intradema/internal/config\\\"\\n)\\n\\nconst authTTL = 30 * time.Minute\\n\\n// Client gestiona las llamadas JSON-RPC a Odoo y la caché de sesión/etapas.\\ntype Client\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/internal/odoo/etapas.go",
+    "entrada": "{\"content\": \"package odoo\\n\\nimport (\\n\\t\\\"strings\\\"\\n\\t\\\"time\\\"\\n)\\n\\n// PaletteTone representa los tonos hexadecimales para una etapa de Odoo.\\ntype PaletteTone struct {\\n\\tHex      string\\n\\tLightHex string\\n\\tDarkHex  string\\n}\\n\\nvar odooPalette = map[int]PaletteTone{\\n\\t0:  {Hex: \\\"#e2e8f0\\\", LightHex: \\\"#f8fafc\\\", DarkHex: \\\"#475569\\\"}\", \"filePath\": \"/proyecto/internal/odoo/etapas.go\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/internal/odoo/proyectos.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/proyectos.go\", \"content\": \"package odoo\\n\\nimport (\\n\\t\\\"fmt\\\"\\n\\t\\\"regexp\\\"\\n\\t\\\"strconv\\\"\\n\\t\\\"strings\\\"\\n\\t\\\"time\\\"\\n)\\n\\nvar (\\n\\thtmlTagRegex    = regexp.MustCompile(`<[^>]*>?`)\\n\\tbracketRefRegex = regexp.MustCompile(`^\\\\[(.*?)\\\\]\\\\s*(.*)$`)\\n\\ttrailingDigits  = regexp.MustCompile(`(\\\\d+)$`)\\n)\\n\\n// SaleOrderLineDTO representa una línea de pedido de venta \"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "curso"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/internal/servidor/servidor.go",
+    "entrada": "{\"content\": \"package servidor\\n\\nimport (\\n\\t\\\"encoding/json\\\"\\n\\t\\\"fmt\\\"\\n\\t\\\"io\\\"\\n\\t\\\"io/fs\\\"\\n\\t\\\"net/http\\\"\\n\\t\\\"path\\\"\\n\\t\\\"strings\\\"\\n\\n\\t\\\"intradema/internal/config\\\"\\n\\t\\\"intradema/internal/odoo\\\"\\n)\\n\\n// Server encapsula las rutas REST de Odoo y el servidor SPA embebido.\\ntype Server struct {\\n\\tcfgMgr     *config.Manager\\n\\todooClient *odoo.Clien\", \"filePath\": \"/proyecto/internal/servidor/servidor.go\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "curso"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/cmd/intradema/main.go",
+    "entrada": "{\"filePath\": \"/proyecto/cmd/intradema/main.go\", \"content\": \"package main\\n\\nimport (\\n\\t\\\"context\\\"\\n\\t\\\"errors\\\"\\n\\t\\\"flag\\\"\\n\\t\\\"fmt\\\"\\n\\t\\\"log\\\"\\n\\t\\\"net\\\"\\n\\t\\\"net/http\\\"\\n\\t\\\"os\\\"\\n\\t\\\"os/signal\\\"\\n\\t\\\"path/filepath\\\"\\n\\t\\\"strings\\\"\\n\\t\\\"syscall\\\"\\n\\t\\\"time\\\"\\n\\n\\t\\\"intradema\\\"\\n\\t\\\"intradema/internal/config\\\"\\n\\t\\\"intradema/internal/odoo\\\"\\n\\t\\\"intradema/internal/servidor\\\"\\n)\\n\\nfunc main() {\\n\\tdefaultAddr := resolveDefaultA\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/cmd/intradema/servicio_otros.go",
+    "entrada": "{\"filePath\": \"/proyecto/cmd/intradema/servicio_otros.go\", \"content\": \"//go:build !windows\\n\\npackage main\\n\\nimport (\\n\\t\\\"fmt\\\"\\n\\t\\\"net/http\\\"\\n)\\n\\nfunc isWindowsService() bool {\\n\\treturn false\\n}\\n\\nfunc handleServiceCommand(action, addr, configPath string) error {\\n\\treturn fmt.Errorf(\\\"el comando 'service %s' es exclusivo para el Servicio Nativo de Windows (.exe). En Linux puedes eje\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/cmd/intradema/servicio_windows.go",
+    "entrada": "{\"filePath\": \"/proyecto/cmd/intradema/servicio_windows.go\", \"content\": \"//go:build windows\\n\\npackage main\\n\\nimport (\\n\\t\\\"context\\\"\\n\\t\\\"errors\\\"\\n\\t\\\"fmt\\\"\\n\\t\\\"log\\\"\\n\\t\\\"net/http\\\"\\n\\t\\\"os\\\"\\n\\t\\\"time\\\"\\n\\n\\t\\\"golang.org/x/sys/windows/svc\\\"\\n\\t\\\"golang.org/x/sys/windows/svc/eventlog\\\"\\n\\t\\\"golang.org/x/sys/windows/svc/mgr\\\"\\n)\\n\\nconst (\\n\\tserviceName        = \\\"IntrademaOdoo\\\"\\n\\tserviceDisplayName = \\\"Intradema - Ge\"}"
+   }
+  },
+  {
+   "texto": "Ejecutaré `go mod tidy` para descargar `golang.org/x/sys` y generar `go.sum`."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "go mod tidy",
+    "entrada": "{\"command\": \"go mod tidy\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "curso"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/App.tsx\", \"limit\": 700, \"offset\": 121}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooControlPanel.tsx",
+    "entrada": "{\"offset\": 121, \"filePath\": \"/proyecto/src/components/OdooControlPanel.tsx\", \"limit\": 100}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/NotesPanel.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/NotesPanel.tsx\", \"limit\": 260, \"offset\": 101}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"offset\": 121, \"filePath\": \"/proyecto/src/components/ProjectTable.tsx\", \"limit\": 600}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"limit\": 250, \"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"offset\": 101}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"offset\": 1, \"limit\": 200}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"offset\": 1, \"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"limit\": 200}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ReportsModal.tsx",
+    "entrada": "{\"limit\": 300, \"offset\": 101, \"filePath\": \"/proyecto/src/components/ReportsModal.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"offset\": 201, \"limit\": 750, \"filePath\": \"/proyecto/src/components/ProjectModal.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"offset\": 201, \"limit\": 100}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/index.html",
+    "entrada": "{\"filePath\": \"/proyecto/index.html\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/index.html",
+    "entrada": "{\"content\": \"<!doctype html>\\n<html lang=\\\"es\\\">\\n  <head>\\n    <meta charset=\\\"UTF-8\\\" />\\n    <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\" />\\n    <title>INTRADEMA · Gestión Industrial Odoo</title>\\n    <meta name=\\\"description\\\" content=\\\"Sistema de gestión de proyectos y piezas industriales sincr\", \"filePath\": \"/proyecto/index.html\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/src/index.css",
+    "entrada": "{\"filePath\": \"/proyecto/src/index.css\", \"content\": \"@import \\\"tailwindcss\\\";\\n\\n@layer base {\\n  :root {\\n    --bg-canvas: #f7f6f2;\\n    --bg-surface: #ffffff;\\n    --bg-subtle: #f1efe9;\\n    --border-subtle: #e4e2dd;\\n    --border-strong: #d1cfc7;\\n    --accent-claude: #d97757;\\n    --accent-claude-hover: #c46445;\\n    --header-dark: #141413;\\n  }\\n\\n  body {\\n    f\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"newString\": \"  return (\\n    <div className=\\\"min-h-screen bg-[#F7F6F2] flex flex-col text-zinc-900 font-sans antialiased overflow-hidden h-screen\\\">\\n      {/* 1. Header estilo pgocode / Claude Code Desktop */}\\n      <OdooNavbar\\n        activeView={activeView}\\n        onChangeView={setActiveView}\\n        onOpenRepo\", \"filePath\": \"/proyecto/src/App.tsx\", \"oldString\": \"  return (\\n    <div className=\\\"min-h-screen bg-slate-100 flex flex-col text-slate-800 font-sans antialiased overflow-hidden h-screen\\\">\\n      {/* 1. Header Odoo con Menú Principal (Tablero / Proyectos), Estado de Odoo & "
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\", \"content\": \"import { useState, useEffect, useRef } from 'react';\\nimport {\\n  Terminal,\\n  ChevronDown,\\n  Database,\\n  RefreshCw,\\n  PanelRight,\\n  X,\\n  CheckCircle2,\\n  AlertCircle,\\n  FileSpreadsheet,\\n  LayoutDashboard,\\n  List,\\n  Info,\\n} from 'lucide-react';\\nimport { updateOdooConfig } from '../services/odooApi';\\nimp\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/src/components/OdooControlPanel.tsx",
+    "entrada": "{\"content\": \"import { Search, Filter, Layers, FileSpreadsheet, RefreshCw } from 'lucide-react';\\nimport { TaskStage, TASK_STAGES } from '../types';\\n\\ninterface OdooControlPanelProps {\\n  searchTerm: string;\\n  onSearchChange: (val: string) => void;\\n  filterBlocked: boolean;\\n  onToggleFilterBlocked: () => void;\\n  fil\", \"filePath\": \"/proyecto/src/components/OdooControlPanel.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/src/components/NotesPanel.tsx",
+    "entrada": "{\"content\": \"import { useState, useEffect } from 'react';\\nimport { Project, Task, ProblemStatus } from '../types';\\nimport {\\n  FileText,\\n  Save,\\n  Check,\\n  Star,\\n  Layers,\\n  Clock,\\n  X,\\n  Terminal,\\n} from 'lucide-react';\\nimport { saveOdooNote } from '../services/odooApi';\\n\\ninterface NotesPanelProps {\\n  selectedPr\", \"filePath\": \"/proyecto/src/components/NotesPanel.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectTable.tsx\", \"oldString\": \"  return (\\n    <div className=\\\"bg-white rounded-md border border-slate-200 shadow-xs overflow-hidden\\\">\\n      <div className=\\\"overflow-x-auto\\\">\\n        <table className=\\\"w-full border-collapse text-left text-xs font-normal\\\">\\n          {/* Table Header */}\\n          <thead>\\n            <tr className=\\\"\", \"newString\": \"  return (\\n    <div className=\\\"bg-white rounded-lg border border-[#E4E2DD] shadow-2xs overflow-hidden\\\">\\n      <div className=\\\"overflow-x-auto\\\">\\n        <table className=\\\"w-full border-collap"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"newString\": \"      {/* 1. LÍNEA PRINCIPAL DEL PROYECTO */}\\n      <tr\\n        id={`project-row-${project.id}`}\\n        onClick={onSelectProject}\\n        className={`group transition-colors border-t border-[#D1CFC7] font-medium cursor-pointer ${\\n          isSelected\\n            ? 'bg-[#D97757]/10 ring-1 ring-inset\", \"oldString\": \"      {/* 1. LÍNEA PRINCIPAL DEL PROYECTO */}\\n      <tr\\n        id={`project-row-${project.id}`}\\n        onClick={onSelectProject}\\n        className={`group transition-colors border-t-2 border-slate-300 font-medium cursor-pointer ${\\n          isSelected\\n  "
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectTable.tsx\", \"newString\": \"              className={`py-1 px-1 border-l border-slate-200 text-center align-middle w-14 min-w-[54px] max-w-[64px] h-9 cursor-pointer transition-all hover:brightness-95 hover:ring-2 hover:ring-inset hover:ring-[#D97757]/40 select-none ${\\n                isSelected ? 'bg-[#D97757]/10' : isExpanded\", \"oldString\": \"              className={`py-1 px-1 border-l border-slate-200 text-center align-middle w-14 min-w-[54px] max-w-[64px] h-9 cursor-pointer transition-all hover:brightness-95 hover:ring-2 hover:ring-inset hover:ri"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectTable.tsx\", \"oldString\": \"              <FileText className=\\\"w-3 h-3 text-[#714B67]\\\" />\", \"newString\": \"              <FileText className=\\\"w-3 h-3 text-[#D97757]\\\" />\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"oldString\": \"      {/* Barra superior con buscador de proyectos */}\\n      <div className=\\\"bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 shadow-2xs space-y-2\\\">\\n        <div className=\\\"flex items-center justify-between gap-3 flex-wrap\\\">\\n          <div className=\\\"flex items-center gap-2\\\">\\n            <h2 c\", \"newString\": \"      {/* Barra superior con buscador de proyectos */}\\n      <div className=\\\"bg-[#FAF9F6] border-b border-[#E4E2DD] px-4 sm:px-5 py-2.5 space-y-2\\\">\\n        <div className=\\\"flex items-center justify-between gap-3 flex-wrap\\\">\\n          <div className=\\\""
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"newString\": \"                          className={`transition-colors cursor-pointer ${\\n                            isSelected\\n                              ? 'bg-[#D97757]/10 ring-1 ring-inset ring-[#D97757]/50'\\n                              : 'bg-white hover:bg-[#FAF9F6]'\\n                          }`}\", \"oldString\": \"                          className={`transition-colors cursor-pointer ${\\n                            isSelected\\n                              ? 'bg-purple-50/80 ring-2 ring-inset ring-[#714B67]/40'\\n                              : 'bg-white hover:bg-slate-50'\\n          "
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"oldString\": \"                                className=\\\"px-2.5 py-1 text-xs font-semibold text-[#714B67] bg-purple-50 hover:bg-[#714B67] hover:text-white rounded border border-purple-200 hover:border-[#714B67] shadow-2xs transition-colors inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap\\\"\\n       \", \"newString\": \"                                className=\\\"px-2.5 py-1 text-xs font-semibold text-zinc-800 bg-white hover:bg-[#141413] hover:text-white rounded border border-[#D1CFC7] hover:border-[#141413] shadow-2xs transition-colors inline-flex items-center gap-1.5 cursor-poin"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"replaceAll\": true, \"oldString\": \"#714B67\", \"newString\": \"#141413\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"newString\": \"#141413\", \"replaceAll\": true, \"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"oldString\": \"#714B67\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ReportsModal.tsx",
+    "entrada": "{\"newString\": \"#141413\", \"replaceAll\": true, \"oldString\": \"#714B67\", \"filePath\": \"/proyecto/src/components/ReportsModal.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"newString\": \"#27272a\", \"oldString\": \"#5e3d55\", \"replaceAll\": true}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"oldString\": \"#5f3e56\", \"replaceAll\": true, \"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"newString\": \"#27272a\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"replaceAll\": true, \"newString\": \"#27272a\", \"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"oldString\": \"#5f3e56\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ReportsModal.tsx",
+    "entrada": "{\"oldString\": \"#5e3d55\", \"filePath\": \"/proyecto/src/components/ReportsModal.tsx\", \"replaceAll\": true, \"newString\": \"#27272a\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "curso"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/.gitignore",
+    "entrada": "{\"filePath\": \"/proyecto/.gitignore\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/Makefile",
+    "entrada": "{\"filePath\": \"/proyecto/Makefile\", \"content\": \"APP_NAME := intradema\\nVERSION  := $(shell tr -d '[:space:]' < VERSION)\\nLDFLAGS  := -s -w\\n\\n.PHONY: all web build linux windows dist run clean\\n\\nall: dist\\n\\n## Compila el frontend React + Tailwind v4 con Vite en dist/\\nweb:\\n\\tnpm run build\\n\\n## Compila el binario para Linux (x86_64) con la web embebida\\nlin\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/package.json",
+    "entrada": "{\"filePath\": \"/proyecto/package.json\", \"content\": \"{\\n  \\\"name\\\": \\\"intradema\\\",\\n  \\\"private\\\": true,\\n  \\\"version\\\": \\\"1.2.0\\\",\\n  \\\"type\\\": \\\"module\\\",\\n  \\\"scripts\\\": {\\n    \\\"dev\\\": \\\"vite\\\",\\n    \\\"build\\\": \\\"vite build\\\",\\n    \\\"preview\\\": \\\"vite preview\\\",\\n    \\\"clean\\\": \\\"rm -rf dist release\\\",\\n    \\\"lint\\\": \\\"tsc --noEmit\\\"\\n  },\\n  \\\"dependencies\\\": {\\n    \\\"@tailwindcss/vite\\\": \\\"^4.1.14\\\"\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/vite.config.ts",
+    "entrada": "{\"content\": \"import tailwindcss from '@tailwindcss/vite';\\nimport react from '@vitejs/plugin-react';\\nimport path from 'path';\\nimport {defineConfig} from 'vite';\\n\\nexport default defineConfig(() => {\\n  return {\\n    plugins: [react(), tailwindcss()],\\n    resolve: {\\n      alias: {\\n        '@': path.resolve(__dirname,\", \"filePath\": \"/proyecto/vite.config.ts\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/Dockerfile",
+    "entrada": "{\"content\": \"# syntax=docker/dockerfile:1.4\\n\\n# ==========================================\\n# STAGE 1: Frontend Builder (Node + Vite)\\n# ==========================================\\nFROM node:22-alpine AS web-builder\\n\\nWORKDIR /app\\nCOPY package*.json ./\\nRUN npm ci --no-audit --prefer-offline || npm install --no-audit\\n\", \"filePath\": \"/proyecto/Dockerfile\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "write",
+    "resumen": "/proyecto/.gitignore",
+    "entrada": "{\"content\": \"node_modules/\\nbuild/\\ndist/\\nrelease/\\ncoverage/\\n.DS_Store\\n*.log\\n.env*\\n!.env.example\\nwordpress/*.sql\\nwordpress/*.gz\\nwordpress/db_init/01_wp_hd39b.sql\\nwordpress/wp-content/*\\n!wordpress/wp-content/uploads/\\nwordpress/wp-content/uploads/*\\n!wordpress/wp-content/uploads/subvenciones/\\n\", \"filePath\": \"/proyecto/.gitignore\"}"
+   }
+  },
+  {
+   "texto": "Eliminaré el antiguo servidor Node (`server.ts` y los artefactos `dist/server.cjs*`) ya sustituidos por el backend en Go."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "rm -f server.ts dist/server.cjs dist/server.cjs.map",
+    "entrada": "{\"command\": \"rm -f server.ts dist/server.cjs dist/server.cjs.map\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "curso"
+    }
+   ]
+  },
+  {
+   "texto": "Ejecutaré `npm run lint` y `make dist` para verificar los tipos de TypeScript, compilar el frontend con Vite y generar los binarios estáticos de Linux y Windows."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "npm run lint && make dist",
+    "entrada": "{\"command\": \"npm run lint && make dist\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/tsconfig.json",
+    "entrada": "{\"filePath\": \"/proyecto/tsconfig.json\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/tsconfig.json",
+    "entrada": "{\"newString\": \"    \\\"allowImportingTsExtensions\\\": true,\\n    \\\"noEmit\\\": true\\n  },\\n  \\\"include\\\": [\\n    \\\"src\\\",\\n    \\\"vite.config.ts\\\"\\n  ],\\n  \\\"exclude\\\": [\\n    \\\"node_modules\\\",\\n    \\\"dist\\\",\\n    \\\"release\\\",\\n    \\\"wordpress\\\"\\n  ]\\n}\", \"oldString\": \"    \\\"allowImportingTsExtensions\\\": true,\\n    \\\"noEmit\\\": true\\n  }\\n}\", \"filePath\": \"/proyecto/tsconfig.json\"}"
+   }
+  },
+  {
+   "texto": "Ejecutaré `npm run lint && make dist` para comprobar que TypeScript valida sin errores y generar los binarios de Linux y Windows."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "npm run lint && make dist",
+    "entrada": "{\"command\": \"npm run lint && make dist\"}"
+   }
+  },
+  {
+   "texto": "Probaré el binario de Linux (`./release/intradema-linux-amd64`) arrancándolo temporalmente en el puerto `3005` y verificando la respuesta de la web embebida y los endpoints de Odoo (`/api/odoo/status` y `/api/odoo/projects`)."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "./release/intradema-linux-amd64 -version && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status; echo ",
+    "entrada": "{\"command\": \"./release/intradema-linux-amd64 -version && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status; echo \\\"\\\"; curl -s -I http://127.0.0.1:3005/ | head -n 5; kill -INT $PID; wait $PID 2>/dev/null || true)\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/internal/odoo/etapas.go",
+    "entrada": "{\"newString\": \"\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.task.type\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{[]any{}},\\n\\t\\tmap[string]any{\\n\\t\\t\\t\\\"fields\\\": []string{\\\"id\\\", \\\"name\\\", \\\"sequence\\\", \\\"fold\\\"},\\n\\t\\t},\\n\\t}, &stages)\\n\\tif err != nil {\\n\\t\\t// Fallback por si algún campo opcional difiere \", \"oldString\": \"\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.task.type\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{[]any{}},\\n\\t\\tmap[string]any{\\n\\t\\t\\t\\\"fields\\\": []strin"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/internal/odoo/etapas.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/etapas.go\", \"newString\": \"\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.task.type\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{[]any{}},\\n\\t\\tmap[string]any{\\n\\t\\t\\t\\\"fields\\\": []string{\\\"id\\\", \\\"name\\\", \\\"color\\\", \\\"sequence\\\", \\\"fold\\\"},\\n\\t\\t},\\n\\t}, &stages)\\n\\tif err != nil {\\n\\t\\t// En Odoo 18 estándar project.task.typ\", \"oldString\": \"\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.task.type\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{[]any{"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/internal/odoo/proyectos.go",
+    "entrada": "{\"oldString\": \"\\tvar rawProjects []map[string]any\\n\\terr = c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.project\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{\\n\\t\\t\\t[]any{\\n\\t\\t\\t\\t[]any{\\\"active\\\", \\\"=\\\", true},\\n\\t\\t\\t},\\n\\t\\t},\\n\\t\\tmap[string]any{\\n\\t\\t\\t\\\"fields\\\": []string{\\\"id\\\", \\\"name\\\", \\\"partner_id\\\", \\\"date_start\\\", \\\"da\", \"newString\": \"\\tvar rawProjects []map[string]any\\n\\terr = c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"project.project\\\",\\n\\t\\t\\\"search_read\\\",\\n\\t\\t[]any{\\n\\t\\t\\t[]a"
+   }
+  },
+  {
+   "texto": "Recompilaré los binarios con `make dist` y verificaré las respuestas de `/api/odoo/status` y `/api/odoo/projects` contra Odoo."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "make dist && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status; echo \"\"; curl -s http://127.0.0.1:30",
+    "entrada": "{\"command\": \"make dist && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status; echo \\\"\\\"; curl -s http://127.0.0.1:3005/api/odoo/projects | head -c 500; echo \\\"\\\"; kill -INT $PID; wait $PID 2>/dev/null || true)\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/internal/odoo/etapas.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/etapas.go\", \"oldString\": \"// FetchAndVerifyStages consulta project.task.type en Odoo y actualiza el mapa de etapas.\\nfunc (c *Client) FetchAndVerifyStages(uid int) StageVerificationResult {\\n\\tcfg := c.cfgMgr.Get()\\n\\tvar stages []StageRecord\\n\\n\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\tcfg.DB,\\n\\t\\tuid,\\n\\t\\tcfg.Password,\\n\\t\\t\\\"pr\", \"newString\": \"// FetchAndVerifyStages consulta project.task.type en Odoo y actualiza el mapa de etapas.\\nfunc (c *Client) FetchAndVerifyStages(uid int) StageVerificationResult {\\n\\tcfg := c.cfgMgr.Get()\\n\\tva"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/internal/odoo/proyectos.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/proyectos.go\", \"newString\": \"\\tif odooProjectID <= 0 {\\n\\t\\tvar createdID any\\n\\t\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\t\\tcfg.DB,\\n\\t\\t\\tuid,\\n\\t\\t\\tcfg.Password,\\n\\t\\t\\t\\\"project.project\\\",\\n\\t\\t\\t\\\"create\\\",\\n\\t\\t\\t[]any{\\n\\t\\t\\t\\tmap[string]any{\\n\\t\\t\\t\\t\\t\\\"name\\\":               projectName,\\n\\t\\t\\t\\t\\t\\\"privacy_visibility\\\": \\\"employees\\\",\\n\\t\\t\\t\\t\\t\\\"description\\\":     \", \"oldString\": \"\\tif odooProjectID <= 0 {\\n\\t\\tvar createdID int\\n\\t\\terr := c.CallRPC(\\\"object\\\", \\\"execute_kw\\\", []any{\\n\\t\\t\\tcfg.DB,\\n\\t\\t\\tuid,\\n\\t\\t\\tcfg.Pa"
+   }
+  },
+  {
+   "texto": "Compilaré los binarios actualizados con `make dist` y verificaré `/api/odoo/status` y `/api/odoo/sale-orders`."
+  },
+  {
+   "h": {
+    "nombre": "bash",
+    "resumen": "make dist && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status | head -c 450; echo \"\"; curl -s http:",
+    "entrada": "{\"command\": \"make dist && (./release/intradema-linux-amd64 -addr :3005 & PID=$!; sleep 1; curl -s http://127.0.0.1:3005/api/odoo/status | head -c 450; echo \\\"\\\"; curl -s http://127.0.0.1:3005/api/odoo/sale-orders | head -c 350; echo \\\"\\\"; kill -INT $PID; wait $PID 2>/dev/null || true)\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Inicializar módulo Go (VERSION, go.mod, embed.go) y estructura de directorios",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar gestión de configuración persistente (internal/config/config.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Migrar cliente JSON-RPC de Odoo, etapas y lógica de proyectos (internal/odoo/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar servidor HTTP REST y SPA embebida (internal/servidor/servidor.go)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Implementar arranque CLI/LAN en Linux y Servicio Nativo en Windows (cmd/intradema/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar interfaz con estética pgocode / Claude Code Desktop (src/)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear Makefile multiplataforma, limpiar package.json y eliminar server.ts",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Compilar, ejecutar pruebas de verificación en Linux y validar binarios Linux/Windows",
+     "estado": "hecho"
+    }
+   ]
+  },
+  {
+   "texto": "El plan se ha completado y verificado al 100%:\n\n1. **Backend en Go + Web Embebida (`cmd/intradema`, `internal/`, `embed.go`):**\n   - Migrados todos los endpoints JSON-RPC de Odoo (`/api/odoo/status`, `/api/odoo/config`, `/api/odoo/sale-orders`, `/api/odoo/projects`, `/api/odoo/sync-project`, `/api/odoo/save-note`, `/api/odoo/update-task-stage`, `/api/odoo/batch-update-task-stages`) y eliminado `se"
+  }
+ ],
+ "verdad": [
+  -1,
+  2,
+  2,
+  2,
+  3,
+  4,
+  4,
+  4,
+  4,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  5,
+  6,
+  6,
+  6,
+  6,
+  6,
+  6,
+  6,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7,
+  7
+ ]
+}

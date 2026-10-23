@@ -1,12 +1,13 @@
 // Tareas de los agentes (subagentes, órdenes en segundo plano, lista de tareas): el mismo concepto para todos.
 // Funciones puras para poder probarlas: node --test src/tareas.test.ts
 
-export interface Elemento { texto: string; estado: 'pendiente' | 'curso' | 'hecho' }
+export interface Elemento { texto: string; estado: 'pendiente' | 'curso' | 'hecho' | 'cancelada' }
 export interface Tarea {
   id: string; tipo?: 'subagente' | 'segundo_plano' | 'lista'; herramienta?: string; padre?: string;
   titulo?: string; subtipo?: string; estado?: 'curso' | 'ok' | 'error' | 'parada'; segundo_plano?: boolean;
   progreso?: string; salida?: string; detalle?: string; sesion_hija?: string; elementos?: Elemento[];
   inicio?: number; fin?: number; // cuándo la vio empezar y acabar pgocode (ms; para el tiempo en Actividad)
+  tras?: number; // lista: cuántas herramientas del agente principal llevaba el turno en su última actualización (todoSync.ts)
 }
 
 // fusiona: una actualización de una tarea (por id) sobre la lista; lo que llega vacío conserva lo anterior.

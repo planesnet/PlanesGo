@@ -5,6 +5,8 @@ import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Ses
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
+import * as TS from '../todoSync';
+import TodoSyncList, { todoCount } from './TodoSyncList';
 import * as CO from '../costes';
 import { autoContextOn, contextPolicy, lastContext, relayAsBackup } from '../contextPolicy';
 import * as CL from '../cleaner';
@@ -257,7 +259,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const silencio = Date.now() - (ultimoEvento.current[sesion.id] || Date.now());
     const g = vivo?.vivo || vivo?.uso;
     LA.publishSnapshot({
-      sesion: sesion.id, tareas: mensajes.flatMap(m => m.tareas || []), trabajando: Boolean(enCurso),
+      sesion: sesion.id, tareas: mensajes.flatMap(m => m.tareas || []), trabajando: Boolean(enCurso), todo: TS.sessionTodo(mensajes, Boolean(enCurso)),
       accion: vivo ? currentAction(vivo, silencio) : undefined, inicio: enCurso ? inicioTurno.current[sesion.id] : undefined,
       ultimoEvento: ultimoEvento.current[sesion.id], tokensTurno: g ? g.entrada + g.salida : undefined,
       contexto: serie[serie.length - 1]?.tokens, umbral, enCola: cola.length, colaParada: Boolean(colaSesion.parada),
@@ -894,7 +896,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // Los tokens de cada acción, como los de la conversación hasta ella (los de antes del turno y los de este).
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta.tokens ? { ...e.herramienta, tokens: gAntes.entrada + gAntes.salida + e.herramienta.tokens } : e.herramienta });
         if (e.vivo) ultimo(m => ({ ...m, vivo: e.vivo }));
-        if (e.tarea) ultimo(m => ({ ...m, tareas: T.fusiona(m.tareas, T.conTiempos(m.tareas, e.tarea!, Date.now())) }));
+        // La lista del agente recuerda por dónde iba el turno al actualizarla (lo de después lo sincroniza todoSync.ts).
+        if (e.tarea) ultimo(m => {
+          const t = e.tarea!.tipo === 'lista' && !e.tarea!.padre ? { ...e.tarea!, tras: TS.actionsOf(m).length } : e.tarea!;
+          return { ...m, tareas: T.fusiona(m.tareas, T.conTiempos(m.tareas, t, Date.now())) };
+        });
         // Puede haber varios consumos en un turno (OpenCode da uno por paso; Claude con tareas en segundo plano, más
         // de un «result»): se suman, salvo el contexto, que es el de la última llamada.
         if (e.uso) {
@@ -1457,7 +1463,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   </button>
                 )}
                 {m.partes?.length
-                  ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} inicio={i > 0 ? acumulados[i - 1] : 0} /></VigFade.Provider>
+                  ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} inicio={i > 0 ? acumulados[i - 1] : 0} vivo={Boolean(enCurso) && i === mensajes.length - 1} error={m.error} /></VigFade.Provider>
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
@@ -1730,12 +1736,12 @@ const usoTexto = (u: { entrada: number; salida: number; coste?: number; segundos
 // Lo que costó cada acción del turno (por id de herramienta), para la fila de cada una.
 const ConsumoAccion = createContext<Map<string, number>>(new Map());
 
-const Partes = memo(function Partes({ partes, tareas, detalle, inicio = 0 }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle; inicio?: number }) {
+const Partes = memo(function Partes({ partes, tareas, detalle, inicio = 0, vivo = false, error }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle; inicio?: number; vivo?: boolean; error?: boolean }) {
   const consumo = useMemo(() => consumoPorAccion(partes, inicio), [partes, inicio]);
-  return <ConsumoAccion.Provider value={consumo}><PartesDentro partes={partes} tareas={tareas} detalle={detalle} /></ConsumoAccion.Provider>;
+  return <ConsumoAccion.Provider value={consumo}><PartesDentro partes={partes} tareas={tareas} detalle={detalle} vivo={vivo} error={error} /></ConsumoAccion.Provider>;
 });
 
-const PartesDentro = memo(function PartesDentro({ partes, tareas, detalle }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle }) {
+const PartesDentro = memo(function PartesDentro({ partes, tareas, detalle, vivo, error }: { partes: Parte[]; tareas?: T.Tarea[]; detalle: Detalle; vivo: boolean; error?: boolean }) {
   // Las herramientas de un subagente van dentro de su tarea; la herramienta que crea una tarea se pinta como tarea.
   const dentro = (id: string) => partes.filter(p => p.tipo === 'herramienta' && p.h.padre === id);
   const sueltas = partes.filter(p => p.tipo !== 'herramienta' || !p.h.padre);
@@ -1744,14 +1750,16 @@ const PartesDentro = memo(function PartesDentro({ partes, tareas, detalle }: { p
     return t ? <BloqueTarea key={j} t={t} h={p.tipo === 'herramienta' ? p.h : undefined} internas={dentro(t.herramienta!)} abierta={abierta} />
       : <ParteMensaje key={j} p={p} abierta={abierta} />;
   };
-  const lista = tareas?.find(t => t.tipo === 'lista');
+  // La lista de tareas del agente principal, sincronizada con lo que hace en el turno (todoSync.ts).
+  const todo = useMemo(() => TS.turnTodo({ rol: 'assistant', texto: '', partes, tareas, error }, vivo), [partes, tareas, error, vivo]);
+  const lista = todo && <ListaTareas v={todo} vivo={vivo} />;
   // Tareas sin herramienta en la conversación (p. ej. lanzadas por un subagente): al final.
   const huerfanas = (tareas || []).filter(t => t.tipo !== 'lista' && !partes.some(p => p.tipo === 'herramienta' && p.h.id === t.herramienta));
   const extra = <>
-    {lista && <ListaTareas t={lista} />}
+    {lista}
     {huerfanas.map(t => <BloqueTarea key={t.id} t={t} internas={t.herramienta ? dentro(t.herramienta) : []} abierta={false} />)}
   </>;
-  if (detalle !== 'conciso') return <>{lista && <ListaTareas t={lista} />}{sueltas.map((p, j) => pinta(p, j, detalle === 'detallado'))}{huerfanas.map(t => <BloqueTarea key={t.id} t={t} internas={t.herramienta ? dentro(t.herramienta) : []} abierta={false} />)}</>;
+  if (detalle !== 'conciso') return <>{lista}{sueltas.map((p, j) => pinta(p, j, detalle === 'detallado'))}{huerfanas.map(t => <BloqueTarea key={t.id} t={t} internas={t.herramienta ? dentro(t.herramienta) : []} abierta={false} />)}</>;
   const acciones = sueltas.filter(p => p.tipo === 'herramienta' && !p.h.skill && !T.deHerramienta(tareas, p.h.id));
   const conTarea = sueltas.filter(p => p.tipo === 'herramienta' && T.deHerramienta(tareas, p.h.id));
   const skills = sueltas.filter(p => p.tipo === 'herramienta' && p.h.skill);
@@ -1791,15 +1799,12 @@ const BloqueTarea = memo(function BloqueTarea({ t, h, internas, abierta }: { t: 
   );
 });
 
-// La lista de tareas del agente, con casillas.
-const ListaTareas = memo(function ListaTareas({ t }: { t: T.Tarea }) {
-  const hechas = (t.elementos || []).filter(e => e.estado === 'hecho').length;
+// La lista de tareas del agente en el turno: lo que hace ahora, lo que falta y, plegado, lo hecho (TodoSyncList).
+const ListaTareas = memo(function ListaTareas({ v, vivo }: { v: TS.SyncView; vivo: boolean }) {
   return (
     <details className="lista-tareas-agente" open>
-      <summary>Lista de tareas · {hechas}/{t.elementos?.length || 0}</summary>
-      <ul>{(t.elementos || []).map((e, i) => (
-        <li key={i} className={e.estado}><span className="casilla" aria-hidden>{e.estado === 'hecho' ? '☑' : e.estado === 'curso' ? '◐' : '☐'}</span> {e.texto}</li>
-      ))}</ul>
+      <summary title={v.inferred ? 'Con ▷ y ≈, lo que pgocode deduce de lo que hace el agente (no lo ha marcado él)' : undefined}>Lista de tareas · {todoCount(v)}</summary>
+      <TodoSyncList v={v} trabajando={vivo} />
     </details>
   );
 });

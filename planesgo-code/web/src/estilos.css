@@ -740,8 +740,25 @@ button.miga-item:hover { background: var(--hover); }
 .lista-tareas-agente summary { cursor: pointer; color: var(--suave); }
 .lista-tareas-agente ul { list-style: none; margin: 4px 0; padding: 0 0 0 4px; display: grid; gap: 2px; }
 .lista-tareas-agente li { display: flex; align-items: baseline; gap: 6px; }
-.lista-tareas-agente li.hecho { color: var(--suave); text-decoration: line-through; }
-.lista-tareas-agente li.curso { font-weight: 600; }
+/* Lista de tareas sincronizada (TodoSyncList: chat y Actividad): ahora, pendientes y, plegadas, hechas y canceladas. */
+.todo-sync ul { list-style: none; margin: 2px 0; padding: 0 0 0 2px; display: grid; gap: 1px; }
+.todo-item { display: flex; gap: 6px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.todo-marca { flex: none; width: 1em; text-align: center; color: var(--suave); }
+.todo-item.hecha, .todo-item.probable { color: var(--tenue); }
+.todo-item.hecha .todo-texto { text-decoration: line-through; }
+.todo-item.probable .todo-marca { color: #2e8b57; }
+.todo-item.sin-hacer .todo-marca, .todo-item.sin-hacer .todo-nota { color: #c0392b; }
+.todo-item.cancelada { color: var(--tenue); font-size: 12px; }
+.todo-item.cancelada .todo-texto { text-decoration: line-through; }
+.todo-nota { color: var(--suave); font-size: 12px; font-style: italic; }
+.todo-grupo { margin: 6px 0 2px; font-size: 12px; color: var(--suave); }
+.todo-plegadas { margin-top: 4px; }
+.todo-plegadas > summary { cursor: pointer; font-size: 12px; color: var(--suave); }
+.todo-canceladas > summary { color: var(--tenue); }
+.todo-ahora { margin: 6px 0 4px; padding: 5px 8px; border-radius: 6px; font-weight: 600; background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--texto); border-left: 3px solid var(--acento); overflow-wrap: anywhere; }
+.todo-ahora.inferida { border-left-style: dashed; background: color-mix(in srgb, var(--acento) 7%, transparent); }
+.todo-ahora.siguiente { font-weight: 500; }
+.todo-ahora.hecha { background: color-mix(in srgb, #2e8b57 12%, transparent); border-left-color: #2e8b57; font-weight: 500; }
 .en-marcha { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; font-size: 12px; color: var(--suave); border: 1px dashed var(--linea); border-radius: 8px; overflow: hidden; }
 .en-marcha-tarea { min-width: 0; padding: 1px 8px; border-radius: 999px; background: var(--hover); }
 
@@ -1056,15 +1073,6 @@ button.miga-item:hover { background: var(--hover); }
 .act-todo-barra { flex: 1; height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; min-width: 30px; }
 .act-todo-barra > span { display: block; height: 100%; background: var(--acento); transition: width .3s; }
 .act-todo-cuenta { font: 600 12px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-.act-todo-ahora { margin: 8px 0 4px; padding: 6px 8px; border-radius: 6px; font-weight: 600; background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--texto); border-left: 3px solid var(--acento); overflow-wrap: anywhere; }
-.act-todo-ahora.siguiente { font-weight: 500; }
-.act-todo-ahora.hecha { background: color-mix(in srgb, #2e8b57 12%, transparent); border-left-color: #2e8b57; font-weight: 500; }
-.act-todo ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; }
-.act-todo li { display: flex; gap: 6px; align-items: baseline; padding: 1px 2px; min-width: 0; overflow-wrap: anywhere; }
-.act-todo li > span { flex: none; width: 1em; text-align: center; color: var(--suave); }
-.act-todo li.hecho { color: var(--tenue); text-decoration: line-through; }
-.act-todo li.curso { font-weight: 600; color: var(--acento); }
-.act-todo li.curso > span { color: var(--acento); }
 /* Panel estrecho: el tipo y los tokens se quitan (siguen en el title). */
 @container (max-width: 340px) { .act-tipo, .act-fila .act-num.suave { display: none; } .act-fila { grid-template-columns: 8px minmax(0, 1fr) auto; } }
 .actividad { container-type: inline-size; }

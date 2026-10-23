@@ -108,9 +108,9 @@ export function resumenEstado(m: Mensaje | undefined, o: { trabajando: boolean; 
   const cab = o.trabajando ? `**Trabajando** desde hace ${duracion(o.segundos || 0)}` : '**Último turno** (ya terminado)';
   const u = m.uso ? ` · ${tokens(m.uso.entrada + m.uso.salida)} tokens${m.uso.coste ? ' · $' + m.uso.coste.toFixed(2) : ''}` : '';
   l.push(cab + u + (o.enCola ? ` · ${o.enCola} en cola` : '') + '.');
-  const lista = m.tareas?.find(t => t.tipo === 'lista');
+  const lista = m.tareas?.find(t => t.tipo === 'lista' && !t.padre);
   if (lista?.elementos?.length) {
-    const el = lista.elementos;
+    const el = lista.elementos.filter(e => e.estado !== 'cancelada');
     const hechas = el.filter(e => e.estado === 'hecho').length;
     const curso = el.filter(e => e.estado === 'curso');
     const pend = el.filter(e => e.estado === 'pendiente');
@@ -250,7 +250,7 @@ export function handoff(ms: Mensaje[], hasta: number, max = MAX_HANDOFF): string
   });
   const ficheros = [...new Set(previos.filter(m => m.rol === 'assistant').flatMap(changedFiles))];
   const ultima = [...previos].reverse().find(m => m.rol === 'assistant');
-  const lista = ultima?.tareas?.find(t => t.tipo === 'lista');
+  const lista = ultima?.tareas?.find(t => t.tipo === 'lista' && !t.padre);
   const estado: string[] = [];
   if (ficheros.length) estado.push(`Ficheros tocados en la conversación (${ficheros.length}): ${ficheros.slice(-25).join(', ')}${ficheros.length > 25 ? '…' : ''}`);
   if (lista?.elementos?.length) {
