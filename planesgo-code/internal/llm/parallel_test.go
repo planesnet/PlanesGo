@@ -29,6 +29,9 @@ func TestParallelHintRules(t *testing.T) {
 		{"cambia el color del botón de guardar a azul en el componente de cabecera de la página", ""},
 		{"- arregla el descuento\n- cambia el logo\n- actualiza el README", "partes"},
 		{"Pasos:\n1. crea la tabla de etiquetas\n2. crea el modelo de etiquetas\n3. crea la tabla de usos con ese modelo", ""},
+		// Ficheros distintos: independientes aunque se parezcan (aquí, todas al mismo vector); el mismo fichero: no.
+		{"Haz esto:\n1. en precios.py añade el IVA\n2. en textos.py añade capitaliza\n3. en fechas.py añade bisiesto", "partes"},
+		{"Haz esto:\n1. en precios.py añade el IVA\n2. en precios.py añade descuentos\n3. en fechas.py añade bisiesto", ""},
 	} {
 		a := ParallelHintFor(ctx, c.text, embedFalso)
 		got := ""

@@ -134,6 +134,8 @@ const dinero = (x: number) => (x < 0.01 && x > 0 ? '<0,01' : x.toFixed(2).replac
 
 // La unión de una hija, en una frase.
 export function fraseUnion(h: Hija): string {
+  // Sin rama: la copia no se llegó a crear (no hay nada que unir ni que conservar).
+  if (!h.rama && !h.carpeta && h.union === 'sin') return h.estado === 'error' ? `no empezó: ${h.motivo || 'no se pudo crear su copia del repositorio'}` : 'sin copia: nada que unir';
   switch (h.union) {
     case 'unida': return 'unida' + (h.quitada ? ' (copia quitada)' : h.aviso ? ` (${h.aviso})` : '');
     case 'sin_cambios': return 'sin cambios que unir' + (h.quitada ? ' (copia quitada)' : '');

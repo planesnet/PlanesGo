@@ -127,3 +127,9 @@ test('frases de unión pendiente y con error', () => {
   assert.match(R.fraseUnion(h({ union: 'error', motivo: 'boom', rama: 'pgo/x-1' })), /NO unida: boom/);
   assert.equal(R.fraseUnion(h({ union: 'sin_cambios', quitada: true })), 'sin cambios que unir (copia quitada)');
 });
+
+test('una parte cuya copia no se llegó a crear no habla de ramas', () => {
+  const h = { n: 1, idx: 1, parte: 'x', sesion: 's', estado: 'error', union: 'sin', motivo: 'la carpeta tiene que estar dentro de /home/luis' } as unknown as R.Hija;
+  assert.equal(R.fraseUnion(h), 'no empezó: la carpeta tiene que estar dentro de /home/luis');
+  assert.doesNotMatch(R.resumen({ id: 'r', madre: 'm', hijas: [h] } as unknown as R.Reparto, {}), /undefined/);
+});

@@ -136,6 +136,27 @@ func ParallelHint(ctx context.Context, text string) *ParallelAdvice {
 	return ParallelHintFor(ctx, text, pruneEmbed)
 }
 
+var fileRef = regexp.MustCompile(`[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z][A-Za-z0-9]{0,5}\b`)
+
+// independentByFiles: si cada parte nombra ficheros, si son independientes por ellos (ok: se ha podido decidir).
+func independentByFiles(items []string) (independent, ok bool) {
+	seen := map[string]int{}
+	for i, it := range items {
+		fs := fileRef.FindAllString(it, -1)
+		if len(fs) == 0 {
+			return false, false
+		}
+		for _, f := range fs {
+			f = strings.ToLower(f)
+			if j, dup := seen[f]; dup && j != i {
+				return false, true
+			}
+			seen[f] = i
+		}
+	}
+	return true, true
+}
+
 // listItems: los elementos de una lista con viñetas o números.
 func listItems(t string) []string {
 	var out []string
@@ -150,6 +171,11 @@ func listItems(t string) []string {
 // independent: las partes no se parecen entre sí (parecido medio bajo). Sin embeddings no se puede saber: se
 // toman por independientes solo si hay cinco o más (una lista tan larga rara vez es una secuencia).
 func independent(ctx context.Context, items []string, embed func(context.Context, string, string) ([]float32, error)) bool {
+	// Los ficheros que nombra cada parte mandan: todas con los suyos y sin compartir ninguno, independientes (aunque
+	// se redacten igual: «en X añade…»); si dos comparten fichero, no.
+	if v, ok := independentByFiles(items); ok {
+		return v
+	}
 	if embed == nil {
 		return len(items) >= 5
 	}

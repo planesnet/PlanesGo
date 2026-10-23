@@ -181,6 +181,7 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 	mu.Lock()
 	defer mu.Unlock()
 	var c repo.CopiaCreada
+	nueva := false
 	ramaMadre := repo.RamaActual(r.Context(), p.Carpeta)
 	if e, err := repo.EstadoCopia(r.Context(), dest); err == nil && e.Worktree && e.Rama == rama { // ya estaba
 		if reg, ok := s.RegistroCopias.Busca(dest); !ok || reg.Sesion != p.Hija {
@@ -191,13 +192,21 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 	} else if c, ramaMadre, err = repo.CopiaHija(r.Context(), p.Carpeta, rama, dest); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
+	} else {
+		nueva = true
 	}
-	c.Sesion, c.Proyecto = p.Hija, p.Proyecto
-	s.apuntaCopia(c)
 	if err := s.Indice.Registra(p.Proyecto, c.Carpeta); err != nil {
+		// La copia recién creada no se puede usar: se quita (está vacía y su rama, en el commit de la madre).
+		if nueva {
+			if _, _, e := repo.QuitaUnida(context.WithoutCancel(r.Context()), c.Carpeta, p.Carpeta); e != nil {
+				log.Printf("reparto: no se pudo quitar la copia sin usar %s: %v", c.Carpeta, e)
+			}
+		}
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	c.Sesion, c.Proyecto = p.Hija, p.Proyecto
+	s.apuntaCopia(c)
 	log.Printf("reparto: copia de la parte %d de %s en %s (rama %s, desde %s)", p.N, p.Sesion, c.Carpeta, c.Rama, ramaMadre)
 	jsonOK(w, map[string]any{"carpeta": c.Carpeta, "rama": c.Rama, "rama_madre": ramaMadre})
 }
