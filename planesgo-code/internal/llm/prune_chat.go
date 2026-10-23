@@ -183,7 +183,7 @@ func ChatVigencia(ctx context.Context, key, folder string, xs []ChatExchange, ms
 		c.state.Vig = vigSnapshot(plan, func(*pruneExchange) bool { return false }, func(*pieceVig) bool { return false })
 		c.state.Vig.addCompacted(chatWindow(antes))
 		c.save()
-		rep = &PruneReport{Pending: chatPending(plan)}
+		rep = &PruneReport{Pending: chatPending(plan), Calibration: calibrationInfo(folder)}
 		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 		c.publish(rep)
 	})

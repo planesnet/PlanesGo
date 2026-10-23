@@ -26,7 +26,7 @@ func TestVigenciaFormula(t *testing.T) {
 	}
 	// Tiempo: suave (logarítmico en horas).
 	h1, h3, d1 := vigencia(base, vigT0.Add(time.Hour)), vigencia(base, vigT0.Add(3*time.Hour)), vigencia(base, vigT0.Add(24*time.Hour))
-	if !(a < h1 && h1 < h3 && h3 < d1) || d1-a > 0.6 || (h3-h1)/2 >= h1-a || (d1-h3)/21 >= (h3-h1)/2 {
+	if !(a < h1 && h1 < h3 && h3 < d1) || d1-a > 1.0 || (h3-h1)/2 >= h1-a || (d1-h3)/21 >= (h3-h1)/2 {
 		t.Fatalf("tiempo: %v %v %v %v", a, h1, h3, d1)
 	}
 	// Relación: mucha la baja (sin bajar de 0); poca la sube por encima del corte.
@@ -179,7 +179,7 @@ func TestVigenciaReportBackground(t *testing.T) {
 		if tarea == "RETRIEVAL_QUERY" {
 			return []float32{1, 0}, nil
 		}
-		return []float32{1, 2}, nil // relación 0,45
+		return []float32{1, 3}, nil // relación 0,32
 	}
 	ahora := vigT0
 	pruneNow = func() time.Time { return ahora }

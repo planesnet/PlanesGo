@@ -13,6 +13,7 @@ func TestMain(m *testing.M) {
 	if err == nil {
 		os.Setenv("XDG_CACHE_HOME", d)
 	}
+	calibEnabled = false // la calibración en segundo plano, solo en sus pruebas
 	c := m.Run()
 	if d != "" {
 		os.RemoveAll(d)

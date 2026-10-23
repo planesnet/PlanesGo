@@ -233,7 +233,8 @@ type pruneState struct {
 
 // reportNow: lo que ve la interfaz del estado (sin lo retirado en este momento).
 func (c *pruneCollector) reportNow(now time.Time) *PruneReport {
-	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending, ForcePending: c.state.ForcePending}
+	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending, ForcePending: c.state.ForcePending,
+		Calibration: calibrationInfo(c.state.Folder)}
 	if c.state.Pending > 0 && now.UnixMilli() < c.state.CacheUntil {
 		r.CacheWarm, r.CacheSuffix = true, c.state.CacheSuffix
 	}
@@ -696,7 +697,7 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	c.save()
 	depuracion.Log(a.Clave, "poda %s: %d tokens fuera (%d partes cambiadas, %d repuestas, %d quitadas)", c.key, d.Saved,
 		len(d.Update), len(d.Restore), len(d.Delete))
-	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore)}
+	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Calibration: calibrationInfo(c.state.Folder)}
 	rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 	return rep, nil
 }
@@ -783,6 +784,7 @@ func markOpenCode(a *Agente, p Peticion, ses string) {
 		ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancela()
 		c.mark(ctx, a, p, p.Prune == PruneAuto)
+		noteTurn(c.state.Folder)
 	})
 }
 

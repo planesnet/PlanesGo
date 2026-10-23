@@ -825,7 +825,7 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	c.state.Pending, c.state.CacheSuffix, c.state.ForcePending = 0, 0, false
 	c.save()
 	depuracion.Log("claude-code", "poda %s: %d tokens fuera (%d vaciados, %d repuestos; %s)", c.key, d.Saved, len(clear), len(d.Restore), porque)
-	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Podable: true}
+	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Podable: true, Calibration: calibrationInfo(c.state.Folder)}
 	rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 	return rep, bak, nil
 }
@@ -886,5 +886,6 @@ func markClaude(p Peticion, ses string) {
 		defer cancela()
 		c.setFolder(p.Carpeta)
 		c.markClaudeNow(ctx, p.Prune == PruneAuto)
+		noteTurn(c.state.Folder)
 	})
 }

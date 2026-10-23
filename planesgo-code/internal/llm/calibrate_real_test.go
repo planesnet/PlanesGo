@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,13 @@ func TestPruneSimulationReal(t *testing.T) {
 		t.Logf("%s: %d mensajes, %d pasos, %d piezas, %d puntos de barrido (%s)", ses, len(msgs), h.Steps, len(h.Pieces), len(h.Points), time.Since(t0).Round(time.Millisecond))
 		r := h.simulate(defaultVig, CompactAtDefault)
 		logResult(t, "generales", r)
+		if kj := os.Getenv("PGO_PRUEBA_SIM_K"); kj != "" {
+			var k vigParams
+			if err := json.Unmarshal([]byte(kj), &k); err != nil {
+				t.Fatal(err)
+			}
+			logResult(t, "calibrados", h.simulate(k, CompactAtDefault))
+		}
 		if os.Getenv("PGO_PRUEBA_SIM_DETALLE") != "" {
 			parts := map[string]*ocPart{}
 			for _, m := range msgs {
@@ -114,4 +122,49 @@ func itoa(n int) string {
 		b = append([]byte{byte('0' + n%10)}, b...)
 	}
 	return string(b)
+}
+
+// TestCalibrationReal: la calibración de los pesos con sesiones reales (por proyecto y todas juntas).
+// PGO_PRUEBA_CAL=<a.json,b.json;c.json> (cada grupo separado por «;» es un proyecto) PGO_PRUEBA_SIM_CACHE=<carpeta>
+func TestCalibrationReal(t *testing.T) {
+	grupos := os.Getenv("PGO_PRUEBA_CAL")
+	if grupos == "" {
+		t.Skip()
+	}
+	var todas []*calibHistory
+	for _, g := range strings.Split(grupos, ";") {
+		var hs []*calibHistory
+		for _, path := range strings.Split(g, ",") {
+			ses := strings.TrimSuffix(filepath.Base(path), ".json")
+			vec, fin := dumpVec(t, ses)
+			var msgs []*ocMessage
+			if strings.HasPrefix(path, "claude:") { // una sesión de Claude Code (solo se lee)
+				ses = strings.TrimPrefix(path, "claude:")
+				fin()
+				vec, fin = dumpVec(t, ses)
+				var err error
+				if msgs, err = loadClaudeHistory(ses); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				msgs = loadDump(t, path)
+			}
+			hs = append(hs, buildHistory(msgs, vec))
+			fin()
+		}
+		todas = append(todas, hs...)
+		base := simulateAll(hs, defaultVig)
+		k, r := searchParams(hs, defaultVig)
+		t.Logf("proyecto %s", g)
+		logTotal(t, "  generales", defaultVig, base)
+		logTotal(t, "  calibrados", k, r)
+	}
+	k, r := searchParams(todas, defaultVig)
+	logTotal(t, "todos juntos: generales", defaultVig, simulateAll(todas, defaultVig))
+	logTotal(t, "todos juntos: calibrados", k, r)
+}
+
+func logTotal(t *testing.T, nombre string, k vigParams, r calibTotal) {
+	t.Logf("%s %+v: %d retiradas, %d tokens, %d k tokens·paso, usadas después %d, podadas de más %d (%.1f %%), piezas %d",
+		nombre, k, r.Cleared, r.Tokens, r.TokenSteps/1000, r.Used, r.Over, pctOf(r.Over, r.Cleared), r.Labeled)
 }

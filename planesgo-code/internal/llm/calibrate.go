@@ -2,6 +2,7 @@ package llm
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -416,6 +417,13 @@ func (cp *calibPiece) usedAfter(t int) bool {
 // pruneMinTokens; entre pasos, además, el contexto por encima de la mitad del umbral). threshold: el contexto al
 // que compacta el agente (para el tramo: en qué paso habría llegado).
 func (h *calibHistory) simulate(k vigParams, threshold int) calibResult {
+	r := h.sweepSim(k, threshold)
+	h.segments(&r, threshold)
+	return r
+}
+
+// sweepSim: lo que sale en cada punto de barrido con los pesos k (sin el detalle por tramo).
+func (h *calibHistory) sweepSim(k vigParams, threshold int) calibResult {
 	r := calibResult{At: map[*calibPiece]int{}, Labeled: len(h.Pieces)}
 	for _, cp := range h.Pieces {
 		if len(cp.Uses) > 0 {
@@ -456,7 +464,11 @@ func (h *calibHistory) simulate(k vigParams, threshold int) calibResult {
 			}
 		}
 	}
-	// Por tramo: el contexto real y el que habría quedado.
+	return r
+}
+
+// segments: por tramo, el contexto real y el que habría quedado.
+func (h *calibHistory) segments(r *calibResult, threshold int) {
 	tok := map[*calibPiece]int{}
 	for _, pt := range h.Points {
 		for _, c := range pt.Cands {
@@ -494,5 +506,111 @@ func (h *calibHistory) simulate(k vigParams, threshold int) calibResult {
 	for cp, at := range r.At {
 		r.Segs[h.SegOf[max(at, 1)]].Removed += tok[cp]
 	}
-	return r
+}
+
+// ---- búsqueda de los pesos ----
+
+// calibMaxOver: lo que se tolera de podadas de más: el 2 % de las piezas retiradas. Releer cuesta un paso y la
+// pieza entera otra vez (sin caché), y el agente puede equivocarse mientras tanto; retirar de menos solo cuesta
+// reenviarla a precio de caché. Por eso es una restricción, no un término que se compense con lo ahorrado.
+const calibMaxOver = 0.02
+
+// calibGrid: los valores que se prueban de cada peso (búsqueda por coordenadas: uno cada vez, con los demás fijos,
+// hasta que ninguno mejora).
+var calibGrid = [][]float64{
+	{0, 0.06, 0.12, 0.2, 0.3, 0.5},               // antigüedad (intercambios)
+	{0, 0.2, 0.4, 0.6, 0.8, 1, 1.3, 1.6, 2, 2.5}, // pasos
+	{0, 0.075, 0.15, 0.3, 0.5},                   // tiempo
+	{5, 10, 15, 20, 25, 30, 40},                  // relación
+	{0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65},      // pivote
+}
+
+func (k *vigParams) coord(i int) *float64 {
+	return [...]*float64{&k.AgeK, &k.StepK, &k.TimeK, &k.RelK, &k.RelPivot}[i]
+}
+
+// calibTotal: los resultados de varios historiales juntos.
+type calibTotal struct {
+	Cleared, Tokens, Over, Used, Labeled int
+	TokenSteps                           int64
+}
+
+func simulateAll(hs []*calibHistory, k vigParams) calibTotal {
+	var t calibTotal
+	for _, h := range hs {
+		r := h.sweepSim(k, CompactAtDefault)
+		t.Cleared += r.Cleared
+		t.Tokens += r.Tokens
+		t.Over += r.Over
+		t.Used += r.Used
+		t.Labeled += r.Labeled
+		t.TokenSteps += r.TokenSteps
+	}
+	return t
+}
+
+// excess: las podadas de más por encima de lo tolerado (0 si cumple).
+func (t calibTotal) excess() float64 {
+	return max(float64(t.Over)-calibMaxOver*float64(t.Cleared), 0)
+}
+
+// better: si a es mejor que b: primero cumplir (o pasarse menos), después más tokens·paso fuera.
+func (a calibTotal) better(b calibTotal) bool {
+	if ea, eb := a.excess(), b.excess(); ea != eb {
+		return ea < eb
+	}
+	return a.TokenSteps > b.TokenSteps
+}
+
+// searchParams: los pesos que más retiran (tokens·paso fuera del contexto) con las podadas de más por debajo del
+// 2 %, empezando por base.
+func searchParams(hs []*calibHistory, base vigParams) (vigParams, calibTotal) {
+	// Primero, la rejilla entera de los tres que más pesan (pasos, relación y pivote), con los demás como en base:
+	// desde unos pesos que se pasan de podadas de más, cambiar uno solo no suele bastar.
+	type sem struct {
+		k vigParams
+		t calibTotal
+	}
+	sems := []sem{{base, simulateAll(hs, base)}}
+	for _, st := range calibGrid[1] {
+		for _, rk := range calibGrid[3] {
+			for _, pv := range calibGrid[4] {
+				k := base
+				k.StepK, k.RelK, k.RelPivot = st, rk, pv
+				sems = append(sems, sem{k, simulateAll(hs, k)})
+			}
+		}
+	}
+	sort.SliceStable(sems, func(i, j int) bool { return sems[i].t.better(sems[j].t) })
+	best, bestT := sems[0].k, sems[0].t
+	// Después, por coordenadas desde las tres mejores.
+	for _, s := range sems[:min(3, len(sems))] {
+		if k, t := descend(hs, s.k, s.t); t.better(bestT) {
+			best, bestT = k, t
+		}
+	}
+	return best, bestT
+}
+
+// descend: búsqueda por coordenadas desde k.
+func descend(hs []*calibHistory, best vigParams, bestT calibTotal) (vigParams, calibTotal) {
+	for pasada := 0; pasada < 4; pasada++ {
+		mejora := false
+		for i := range calibGrid {
+			for _, v := range calibGrid[i] {
+				k := best
+				*k.coord(i) = v
+				if k == best {
+					continue
+				}
+				if t := simulateAll(hs, k); t.better(bestT) {
+					best, bestT, mejora = k, t, true
+				}
+			}
+		}
+		if !mejora {
+			break
+		}
+	}
+	return best, bestT
 }
