@@ -551,11 +551,18 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 }
 
 // permisosOpenCode: la configuración de permisos de OpenCode para cada modo de pgocode.
-func permisosOpenCode(modo string, autorizadas []string) string {
-	// La imputación la hace pgocode: sus skills de imputación, denegadas.
+// carpeta: la de la sesión (decide qué skills no se le muestran: fixed.go).
+func permisosOpenCode(modo string, autorizadas []string, carpeta string) string {
+	// La imputación la hace pgocode: sus skills de imputación, denegadas. Las denegadas no le llegan al modelo:
+	// tampoco las que no puede usar o no son de este proyecto (openCodeHiddenSkills).
 	sk := map[string]string{"*": "allow"}
-	for _, n := range skills.Sustituidas {
+	for _, n := range append(openCodeHiddenSkills(carpeta), skills.Sustituidas...) {
 		sk[n] = "deny"
+	}
+	if sk["odoo-*"] == "deny" {
+		for n := range odooSkillsKept {
+			sk[n] = "allow"
+		}
 	}
 	// Fuera de la carpeta de la sesión, solo las carpetas autorizadas en ella (en todos los modos).
 	fuera := map[string]string{"*": "deny"}
@@ -711,6 +718,9 @@ func Agentes() []Proveedor {
 				// Solo las herramientas propias que usa pgocode: las definiciones de todas van en cada llamada al modelo
 				// (con las 32 de Claude Code 2.1, un «OK» cuesta 20,5k tokens de entrada; con este perfil, 15k).
 				a = append(a, "--tools", strings.Join(herramientasClaude(p.Permisos, p.Aparte), ","))
+				// Lista de skills acotada (skillOverrides, fixed.go): con las de Claude Code 2.1 un «OK» pasa de 14,9k
+				// tokens de entrada a 10,3k.
+				a = append(a, "--settings", claudeSettings())
 				// Solo los servidores MCP que pide la sesión (y «pgo»): el resto ni arranca ni gasta tokens.
 				if f := configMCP(p.Carpeta, p.MCP); f != "" {
 					a = append(a, "--strict-mcp-config", "--mcp-config", f)
@@ -789,7 +799,13 @@ func Agentes() []Proveedor {
 				}
 				// El mensaje va pegado a la opción: así nunca se toma como otra opción. Con el contexto por encima del
 				// umbral de la sesión, tras «/compact» (compaction.go).
-				return append(a, "--print="+antigravityMessage(msg, p))
+				m := antigravityMessage(msg, p)
+				// Sin la lista de órdenes de barra (unos 800 tokens en cada llamada; las skills siguen): salvo si el
+				// mensaje es una de ellas («/compact», o una que escriba el usuario).
+				if !strings.HasPrefix(strings.TrimSpace(m), "/") {
+					a = append(a, "--disable-slash-commands")
+				}
+				return append(a, "--print="+m)
 			}},
 		// OpenCode: «run --format json» (eventos de texto, herramientas, consumo y errores); -s continúa la sesión.
 		&Agente{Clave: "opencode", Nombre: "OpenCode", Programa: "opencode", Lee: leeOpenCode, Modos: true,
