@@ -104,7 +104,7 @@ func loadOpenCodeSession(ctx context.Context, a *Agente, p Peticion, ses string)
 	}
 	q := `SELECT m.id AS mid, json_extract(m.data,'$.role') AS role, CASE WHEN json_type(m.data,'$.summary')='true' THEN 1 ELSE 0 END AS summary, ` +
 		`coalesce(json_extract(m.data,'$.parentID'),'') AS parent, m.time_created AS mt, ` +
-		`coalesce(json_extract(m.data,'$.tokens.input'),0)+coalesce(json_extract(m.data,'$.tokens.cache.read'),0) AS ctx, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
+		`coalesce(json_extract(m.data,'$.tokens.input'),0)+coalesce(json_extract(m.data,'$.tokens.cache.read'),0)+coalesce(json_extract(m.data,'$.tokens.cache.write'),0) AS ctx, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
 		`CASE WHEN o.data IS NULL OR o.data=p.data THEN '' ELSE p.data END AS cur ` +
 		`FROM message m LEFT JOIN part p ON p.message_id=m.id LEFT JOIN ` + pruneTable + ` o ON o.id=p.id ` +
 		`WHERE m.session_id='` + ses + `' ORDER BY m.time_created, m.id, p.id`
@@ -677,8 +677,12 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.setRulesOnly(true)
 	}
 	now := pruneNow()
+	liveCtx := p.LastContext
+	if mid != nil && mid.Context > liveCtx {
+		liveCtx = mid.Context
+	}
 	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Empty: c.emptyNext,
-		Dir: offloadDirOf(p.Carpeta)})
+		Dir: offloadDirOf(p.Carpeta), LiveCtx: liveCtx})
 	plan, d := o.Plan, o.D
 	before := compactedBefore(msgs, win)
 	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
@@ -938,16 +942,17 @@ func estimateRatio(win []*ocMessage, sys, ctx, at int) float64 {
 
 // sweepInput: lo que necesita decideSweep.
 type sweepInput struct {
-	Win    []*ocMessage
-	Sims   *pruneSims
-	Young  int
-	Now    time.Time
-	K      vigParams
-	Msg    string // el último mensaje del usuario (la señal para reponer)
-	Target int    // el objetivo de contexto (0: sin)
-	Claude bool   // solo lo que se aplica en Claude Code
-	Empty  bool   // «Vaciar contexto»: todo el historial fuera de vigencia (ForceEmpty)
-	Dir    string // la carpeta de las salidas completas (offloadDirOf; «»: sin salidas a fichero)
+	Win     []*ocMessage
+	Sims    *pruneSims
+	Young   int
+	Now     time.Time
+	K       vigParams
+	Msg     string // el último mensaje del usuario (la señal para reponer)
+	Target  int    // el objetivo de contexto (0: sin)
+	Claude  bool   // solo lo que se aplica en Claude Code
+	Empty   bool   // «Vaciar contexto»: todo el historial fuera de vigencia (ForceEmpty)
+	Dir     string // la carpeta de las salidas completas (offloadDirOf; «»: sin salidas a fichero)
+	LiveCtx int    // contexto medido en vivo (p. ej. entre pasos o del último turno) si supera al guardado
 }
 
 // sweepOutcome: el plan, el cambio (en tokens reales, con estimateRatio) y lo que cuesta en caché.
@@ -962,11 +967,17 @@ type sweepOutcome struct {
 }
 
 // decideSweep: el plan con su vigencia, lo retirado que se queda fuera (stickyOut), y, si el contexto pasa del
-// objetivo, con el corte más bajo para lo grande y viejo (2,5 y después 2) hasta quedar por debajo.
+// objetivo, con el corte más bajo (2,5; 2; 1,5; 1; 0,5) hasta quedar por debajo y evitar la compactación del agente.
 func decideSweep(in sweepInput) sweepOutcome {
 	o := sweepOutcome{Cut: vigCut}
 	var at int
 	o.Ctx, at = lastContext(in.Win)
+	if in.LiveCtx > o.Ctx {
+		o.Ctx = in.LiveCtx
+		if at < 0 && len(in.Win) > 0 {
+			at = len(in.Win) - 1
+		}
+	}
 	o.System = systemTokens(in.Win)
 	o.Ratio = estimateRatio(in.Win, o.System, o.Ctx, at)
 	recent := recentText(in.Win, in.Msg)
@@ -990,7 +1001,7 @@ func decideSweep(in sweepInput) sweepOutcome {
 		build(vigCut)
 	}
 	if !in.Empty && in.Target > 0 && o.Ctx > in.Target {
-		for _, cut := range []float64{2.5, 2} {
+		for _, cut := range []float64{2.5, 2, 1.5, 1, 0.5} {
 			if o.Ctx-o.D.Saved <= in.Target {
 				break
 			}
@@ -1030,11 +1041,15 @@ func (o sweepOutcome) why(cold, mid bool, threshold, target int) string {
 	if !d.changes() {
 		return "nada que cambiar"
 	}
-	if d.Saved < pruneMinTokens {
+	minSaved := pruneMinTokens
+	if threshold > 0 && o.Ctx >= threshold*2/3 {
+		minSaved = pruneMinTokens / 2
+	}
+	if d.Saved < minSaved {
 		if d.Back > 0 && d.Out == 0 && cold && !mid {
 			return "" // solo reponer, con la caché fría: no cuesta caché
 		}
-		return fmt.Sprintf("menos de %d", pruneMinTokens)
+		return fmt.Sprintf("menos de %d", minSaved)
 	}
 	if threshold > 0 && o.Ctx >= threshold/2 {
 		return ""

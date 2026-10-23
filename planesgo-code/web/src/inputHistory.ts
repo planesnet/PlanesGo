@@ -30,6 +30,68 @@ export function historyItems(sent: readonly string[], queued: readonly string[])
 export const onFirstLine = (value: string, caret: number) => !value.slice(0, caret).includes('\n');
 export const onLastLine = (value: string, caret: number) => !value.slice(caret).includes('\n');
 
+// isCaretOnVisualBoundary: comprueba si el cursor está en la primera línea visual (up) o en la última (down) del
+// textarea, teniendo en cuenta tanto los saltos de línea (\n) como el ajuste automático de línea (soft wrap).
+export function isCaretOnVisualBoundary(el: HTMLTextAreaElement, dir: 'up' | 'down'): boolean {
+  const value = el.value;
+  const caret = el.selectionStart ?? 0;
+  if (dir === 'up') {
+    if (!onFirstLine(value, caret)) return false;
+    if (caret <= 0) return true;
+  } else {
+    if (!onLastLine(value, caret)) return false;
+    if (caret >= value.length) return true;
+  }
+  if (typeof document === 'undefined' || typeof window === 'undefined' || !el.clientWidth) return true;
+  const style = window.getComputedStyle(el);
+  const mirror = document.createElement('div');
+  mirror.style.position = 'fixed';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  mirror.style.top = '-9999px';
+  mirror.style.left = '-9999px';
+  mirror.style.boxSizing = 'border-box';
+  mirror.style.border = '0';
+  mirror.style.width = `${el.clientWidth}px`;
+  mirror.style.padding = style.padding;
+  mirror.style.font = style.font;
+  mirror.style.fontFamily = style.fontFamily;
+  mirror.style.fontSize = style.fontSize;
+  mirror.style.fontWeight = style.fontWeight;
+  mirror.style.lineHeight = style.lineHeight;
+  mirror.style.letterSpacing = style.letterSpacing;
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.overflowWrap = style.overflowWrap || 'anywhere';
+  mirror.style.wordBreak = style.wordBreak;
+
+  const startMarker = document.createElement('span');
+  startMarker.textContent = '\u200b';
+  const caretMarker = document.createElement('span');
+  const ch = value[caret];
+  if (ch && ch !== '\n') {
+    caretMarker.textContent = ch;
+  } else {
+    caretMarker.textContent = '\u200b';
+  }
+  const endMarker = document.createElement('span');
+  endMarker.textContent = '\u200b';
+
+  mirror.append(
+    startMarker,
+    document.createTextNode(value.slice(0, caret)),
+    caretMarker,
+    document.createTextNode(ch && ch !== '\n' ? value.slice(caret + 1) : value.slice(caret)),
+    endMarker,
+  );
+  document.body.appendChild(mirror);
+  const startTop = startMarker.offsetTop;
+  const caretTop = caretMarker.offsetTop;
+  const endTop = endMarker.offsetTop;
+  document.body.removeChild(mirror);
+
+  return dir === 'up' ? caretTop <= startTop + 2 : caretTop >= endTop - 2;
+}
+
 // moveHistory: el paso con ↑ («up») o ↓ («down») desde «state», con «current» en el cuadro. null: no hay a dónde ir
 // (la tecla hace lo de siempre). item: la entrada cargada (sin él, ha vuelto el borrador).
 export function moveHistory(items: readonly HistoryItem[], state: HistoryState, dir: 'up' | 'down', current: string): { state: HistoryState; text: string; item?: HistoryItem } | null {

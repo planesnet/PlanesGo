@@ -152,6 +152,9 @@ func TestBudgetCut(t *testing.T) {
 	if budgetCut(vigCut, 50000, 50, false) != vigCut {
 		t.Fatal("sin objetivo, el normal")
 	}
+	if budgetCut(1.5, 600, 30, false) != 1.5 || budgetCut(1.5, 100, 30, false) != vigCut {
+		t.Fatal("con corte < 2, entran también las piezas medianas")
+	}
 }
 
 // decideSweep baja el corte hasta quedar por debajo del objetivo.
@@ -181,5 +184,33 @@ func TestDecideSweepTarget(t *testing.T) {
 	}
 	if con.Rewrite != max(con.Ctx-con.System-con.D.Saved, 0) || con.System <= 0 {
 		t.Fatalf("lo reenviado sin caché: todo lo de después del sistema (%d, sistema %d)", con.Rewrite, con.System)
+	}
+
+	// Si las piezas son medianas (< 2000 tokens, como lecturas y ediciones habituales) y el contexto en vivo supera el
+	// objetivo, decideSweep baja de 2,0 para evitar llegar a los 150k de compactación.
+	s2 := &sesionPrueba{}
+	s2.user("instrucciones")
+	s2.assistant(text("ok")).Ctx = 15000
+	for i := 0; i < 8; i++ {
+		s2.user(fmt.Sprintf("paso %d", i))
+		s2.assistant(tool("read", map[string]any{"filePath": fmt.Sprintf("/p/a%d.go", i)}, lineas(90)))
+		s2.assistant(tool("edit", map[string]any{
+			"filePath":  fmt.Sprintf("/p/b%d.go", i),
+			"oldString": lineas(40),
+			"newString": lineas(45),
+		}, "Edit applied successfully."))
+		s2.assistant(text("listo"))
+	}
+	med := decideSweep(sweepInput{
+		Win:     s2.msgs,
+		Young:   pruneYoung,
+		Now:     time.Now(),
+		K:       vigParams{},
+		Msg:     "siguiente",
+		Target:  60000,
+		LiveCtx: 115000,
+	})
+	if med.Ctx != 115000 || med.Cut >= 2 || med.D.Saved == 0 {
+		t.Fatalf("con piezas medianas y LiveCtx alto debe recortar con corte < 2: ctx=%d cut=%.1f saved=%d", med.Ctx, med.Cut, med.D.Saved)
 	}
 }

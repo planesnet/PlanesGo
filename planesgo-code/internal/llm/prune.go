@@ -563,14 +563,36 @@ func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k v
 	return planPruneCut(win, sims, young, now, k, vigCut)
 }
 
-// pruneBudgetBig: con el contexto por encima del objetivo de la sesión (contextTarget), el corte de vigencia baja
-// (de 3 a 2,5 y a 2) solo para lo más grande y viejo: piezas de al menos estos tokens, y de los intercambios jóvenes
-// solo las que tienen el doble de pasos protegidos encima.
-const pruneBudgetBig = 2000
+// pruneBudgetBig y pruneBudgetMed: con el contexto por encima del objetivo de la sesión (contextTarget), el corte de
+// vigencia baja primero (2,5 y 2) para lo más grande y viejo, y si aún sigue por encima (1,5; 1; 0,5), también para
+// las piezas medianas (lecturas, búsquedas, ediciones y salidas de órdenes de una sesión larga) para evitar llegar a
+// la compactación del agente.
+const (
+	pruneBudgetBig = 2000
+	pruneBudgetMed = 250
+)
 
-// budgetCut: el corte de una pieza con el corte del presupuesto (cut): el normal salvo para lo grande y viejo.
+func pieceSize(p *ocPart) int {
+	n := estTokens(p.output()) + pruneImageTokens*len(p.v.State.Attachments)
+	if isEditTool(p.v.Tool) {
+		n = max(n, estTokens(string(p.v.State.Input)))
+	}
+	return n
+}
+
+// budgetCut: el corte de una pieza con el corte del presupuesto (cut): el normal salvo para lo grande y viejo, o lo
+// mediano cuando el contexto sigue por encima del objetivo con cut < 2.
 func budgetCut(cut float64, size, steps int, young bool) float64 {
-	if cut >= vigCut || size < pruneBudgetBig || (young && steps < 2*pruneProtectSteps) {
+	if cut >= vigCut {
+		return vigCut
+	}
+	if cut >= 2 {
+		if size < pruneBudgetBig || (young && steps < 2*pruneProtectSteps) {
+			return vigCut
+		}
+		return cut
+	}
+	if size < pruneBudgetMed || (young && steps < pruneProtectSteps+4) {
 		return vigCut
 	}
 	return cut
@@ -656,7 +678,7 @@ func planPruneCut(win []*ocMessage, sims *pruneSims, young int, now time.Time, k
 		// La pieza: su fecha, sus pasos, su relación propia si es grande (si no, la del intercambio) y si está
 		// superada.
 		f := x.Vig
-		f.Steps, f.Size = since, estTokens(p.output())
+		f.Steps, f.Size = since, pieceSize(p)
 		if m.Time > 0 {
 			f.At = m.Time
 		}
@@ -722,7 +744,7 @@ func youngPiece(p *ocPart, n int, x *pruneExchange, m *ocMessage, since, young i
 	if !p.isTool() {
 		return nil
 	}
-	f := vigFactors{Ago: x.Vig.Ago, Young: young, At: m.Time, Steps: since, Size: estTokens(p.output())}
+	f := vigFactors{Ago: x.Vig.Ago, Young: young, At: m.Time, Steps: since, Size: pieceSize(p)}
 	if since < pruneProtectSteps {
 		f = vigFactors{Pinned: true, Steps: since}
 		return &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}

@@ -1346,11 +1346,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const veAlCorte = () => { if (sesion?.corte !== undefined) lista.current?.querySelector(`[data-indice="${sesion.corte}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
 
   const teclas = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // ↑ ↓: el historial de mensajes (solo en la primera o la última línea); Esc: vuelve lo que se escribía.
+    // ↑ ↓: el historial de mensajes (solo en la primera o la última línea visual); Esc: vuelve lo que se escribía.
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       const el = e.currentTarget;
       const arriba = e.key === 'ArrowUp';
-      if (el.selectionStart !== el.selectionEnd || !(arriba ? IH.onFirstLine(el.value, el.selectionStart) : IH.onLastLine(el.value, el.selectionStart))) return;
+      if (el.selectionStart !== el.selectionEnd || !IH.isCaretOnVisualBoundary(el, arriba ? 'up' : 'down')) return;
       const enviados = mensajes.filter(m => m.rol === 'user' && !m.error && !m.nota).map(m => m.texto);
       const r = IH.moveHistory(IH.historyItems(enviados, cola.map(m => m.texto)), historial, arriba ? 'up' : 'down', texto);
       if (!r) return;

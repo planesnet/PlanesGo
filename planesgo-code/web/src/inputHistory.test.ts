@@ -36,6 +36,12 @@ test('las flechas solo actúan en la primera (↑) o la última línea (↓)', (
   assert.ok(H.onLastLine(v, v.length));
   assert.ok(!H.onLastLine(v, 10));
   assert.ok(H.onFirstLine('', 0) && H.onLastLine('', 0));
+  const fakeArea = (value: string, selectionStart: number) =>
+    ({ value, selectionStart, clientWidth: 0 }) as unknown as HTMLTextAreaElement;
+  assert.equal(H.isCaretOnVisualBoundary(fakeArea(v, 3), 'up'), true);
+  assert.equal(H.isCaretOnVisualBoundary(fakeArea(v, 10), 'up'), false);
+  assert.equal(H.isCaretOnVisualBoundary(fakeArea(v, 10), 'down'), false);
+  assert.equal(H.isCaretOnVisualBoundary(fakeArea(v, v.length), 'down'), true);
 });
 
 test('el aviso de la cola', () => {
