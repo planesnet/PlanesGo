@@ -60,3 +60,57 @@ func TestPgoDrive(t *testing.T) {
 		t.Fatal("estado sin sesión")
 	}
 }
+
+// La sección de Propiedades: cargar el fichero del cliente (sin devolverlo), conectar (la URL de Google) y
+// desconectar. Todo con sesión y por usuario.
+func TestGoogleOAuthEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	s := &Servidor{Puerto: "7801", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(),
+		Google: &gworkspace.Manager{Endpoints: gworkspace.Endpoints{Auth: "https://accounts.example/auth"}, Dir: dir}}
+	h := s.Handler()
+	ses, _ := s.Sesiones.Crea(1, "Luis", "luis@planesnet.com", "x")
+	pide := func(metodo, ruta, cuerpo string, conSesion bool) (int, string) {
+		r := httptest.NewRequest(metodo, ruta, strings.NewReader(cuerpo))
+		r.Host = "127.0.0.1:7801"
+		r.Header.Set("X-PGO", "1")
+		if conSesion {
+			r.AddCookie(&http.Cookie{Name: cookie, Value: ses.Token})
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	const fichero = `{"installed":{"client_id":"1-a.apps.googleusercontent.com","client_secret":"GOCSPX-xyz","project_id":"planes-dev"}}`
+	cuerpo, _ := json.Marshal(map[string]string{"contenido": fichero})
+	if c, _ := pide("POST", "/api/google/cliente", string(cuerpo), false); c != http.StatusUnauthorized {
+		t.Fatalf("sin sesión: %d", c)
+	}
+	if c, b := pide("POST", "/api/google/conectar", "{}", true); c != http.StatusConflict || !strings.Contains(b, "falta registrar") {
+		t.Fatalf("sin cliente: %d %s", c, b)
+	}
+	if c, b := pide("POST", "/api/google/cliente", `{"contenido":"{\"web\":{}}"}`, true); c != http.StatusBadRequest || !strings.Contains(b, "escritorio") {
+		t.Fatalf("cliente web: %d %s", c, b)
+	}
+	if c, b := pide("POST", "/api/google/cliente", string(cuerpo), true); c != http.StatusOK || strings.Contains(b, "GOCSPX") || !strings.Contains(b, "planes-dev") {
+		t.Fatalf("%d %s", c, b)
+	}
+	c, b := pide("GET", "/api/google", "", true)
+	if c != http.StatusOK || !strings.Contains(b, `"cliente":true`) || strings.Contains(b, "GOCSPX") || strings.Contains(b, `"conectado":true`) {
+		t.Fatalf("%d %s", c, b)
+	}
+	c, b = pide("POST", "/api/google/conectar", "{}", true)
+	var r struct{ URL string }
+	json.Unmarshal([]byte(b), &r)
+	if c != http.StatusOK || !strings.HasPrefix(r.URL, "https://accounts.example/auth?") || !strings.Contains(r.URL, "login_hint=luis%40planesnet.com") || strings.Contains(r.URL, "GOCSPX") {
+		t.Fatalf("%d %s", c, b)
+	}
+	if c, b := pide("GET", "/api/google", "", true); !strings.Contains(b, `"en_curso":true`) {
+		t.Fatalf("%d %s", c, b)
+	}
+	if c, b := pide("POST", "/api/google/desconectar", "{}", true); c != http.StatusOK || strings.Contains(b, "aviso") {
+		t.Fatalf("%d %s", c, b)
+	}
+	if c, b := pide("GET", "/api/google", "", true); strings.Contains(b, `"en_curso":true`) {
+		t.Fatalf("tras desconectar: %d %s", c, b)
+	}
+}

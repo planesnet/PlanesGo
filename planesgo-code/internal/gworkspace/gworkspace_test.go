@@ -184,8 +184,8 @@ const allScopes = "openid https://www.googleapis.com/auth/userinfo.email " + Sco
 func TestStatusADC(t *testing.T) {
 	g := &fakeGoogle{scopes: map[string]string{"adc": allScopes}}
 	m, _ := newTest(t, g, map[string]string{SourceADC: "adc"})
-	st := m.Status(context.Background(), true)
-	if !st.Connected || st.Email != "luis@planesnet.com" || st.Source != SourceADC || !st.ReadOnly || !st.Gcloud {
+	st := m.Status(context.Background(), "", true)
+	if !st.Connected || st.Email != "luis@planesnet.com" || st.Source != SourceADC || !st.ReadOnly {
 		t.Fatalf("%+v", st)
 	}
 	if b, _ := json.Marshal(st); strings.Contains(string(b), `"adc"`) && strings.Contains(string(b), "token") {
@@ -194,11 +194,12 @@ func TestStatusADC(t *testing.T) {
 }
 
 func TestStatusNoDriveScope(t *testing.T) {
-	// ADC sin Drive (solo cloud-platform) y sin sesión de gcloud con Drive: dice qué ejecutar.
+	// ADC sin Drive (solo cloud-platform) y sin sesión de gcloud con Drive.
 	g := &fakeGoogle{scopes: map[string]string{"adc": "https://www.googleapis.com/auth/cloud-platform openid", "gc": "openid"}}
 	m, _ := newTest(t, g, map[string]string{SourceADC: "adc", SourceGcloud: "gc"})
-	st := m.Status(context.Background(), true)
-	if st.Connected || !strings.Contains(st.Problem, "permiso de lectura de Drive") || st.Command != LoginCommand || st.Email == "" {
+	st := m.Status(context.Background(), "", true)
+	// El respaldo de gcloud es silencioso: sin acceso, sin problema que enseñar (lo que toca es conectar la cuenta).
+	if st.Connected || st.Problem != "" || st.Email != "" || st.Client {
 		t.Fatalf("%+v", st)
 	}
 	if _, err := m.Search(context.Background(), SearchParams{Text: "x"}); !errors.Is(err, ErrNoAccess) {
@@ -209,7 +210,7 @@ func TestStatusNoDriveScope(t *testing.T) {
 func TestFallbackGcloudSession(t *testing.T) {
 	g := &fakeGoogle{scopes: map[string]string{"adc": "openid", "gc": "openid " + ScopeDrive}}
 	m, _ := newTest(t, g, map[string]string{SourceADC: "adc", SourceGcloud: "gc"})
-	st := m.Status(context.Background(), true)
+	st := m.Status(context.Background(), "", true)
 	if !st.Connected || st.Source != SourceGcloud || st.ReadOnly {
 		t.Fatalf("%+v", st)
 	}
@@ -219,8 +220,8 @@ func TestNoGcloud(t *testing.T) {
 	g := &fakeGoogle{}
 	m, _ := newTest(t, g, nil)
 	m.Fetch = func(context.Context, string) (string, error) { return "", ErrNoGcloud }
-	st := m.Status(context.Background(), true)
-	if st.Gcloud || st.Connected || !strings.Contains(st.Problem, "gcloud") {
+	st := m.Status(context.Background(), "", true)
+	if st.Connected || st.Problem != "" {
 		t.Fatalf("%+v", st)
 	}
 }
@@ -265,7 +266,7 @@ func TestQuotaProjectRetry(t *testing.T) {
 	// Sin proyecto de cuota: el error dice qué habilitar.
 	m2, _ := newTest(t, &fakeGoogle{scopes: map[string]string{"adc": allScopes}, needQuota: true}, map[string]string{SourceADC: "adc"})
 	m2.QuotaProject = ""
-	if _, err := m2.List(context.Background(), "", 0); err == nil || !strings.Contains(err.Error(), "gcloud services enable") {
+	if _, err := m2.List(context.Background(), "", 0); err == nil || !strings.Contains(err.Error(), "habilitar las APIs") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -391,15 +392,41 @@ func TestParseRef(t *testing.T) {
 	}
 }
 
-// Prueba real (opcional): PGO_PRUEBA_GOOGLE=1 go test ./internal/gworkspace -run Real -v
-// Usa la gcloud del equipo; PGO_PRUEBA_GOOGLE_REF: un documento que leer.
+// Prueba real (opcional), contra Google de verdad y con la aplicación «PlanesGo» registrada:
+//
+//	PGO_PRUEBA_GOOGLE=1 PGO_PRUEBA_GOOGLE_DATOS=<carpeta con google-oauth-client.json> \
+//	  [PGO_PRUEBA_GOOGLE_USUARIO=luis@planesnet.com] [PGO_PRUEBA_GOOGLE_REF=<id o url>] [PGO_PRUEBA_GOOGLE_DESCONECTAR=1] \
+//	  go test ./internal/gworkspace -run Real -v -timeout 10m
+//
+// Si el usuario no está conectado, escribe la URL de Google (ábrela en el navegador y acepta) y espera 5 minutos.
 func TestReal(t *testing.T) {
 	if os.Getenv("PGO_PRUEBA_GOOGLE") != "1" {
 		t.Skip("prueba contra Google de verdad: PGO_PRUEBA_GOOGLE=1")
 	}
-	m := New("planes-dev")
-	ctx := context.Background()
-	st := m.Status(ctx, true)
+	dir := os.Getenv("PGO_PRUEBA_GOOGLE_DATOS")
+	if dir == "" {
+		t.Fatal("falta PGO_PRUEBA_GOOGLE_DATOS (una carpeta de pruebas, no la de datos de pgocode)")
+	}
+	login := os.Getenv("PGO_PRUEBA_GOOGLE_USUARIO")
+	if login == "" {
+		login = "prueba"
+	}
+	m := New(dir, "")
+	m.Fetch = nil // sin el respaldo de gcloud: se prueba la conexión propia
+	ctx := WithUser(context.Background(), login)
+	st := m.Status(ctx, login, true)
+	if !st.Connected {
+		u, err := m.StartAuth(ctx, login)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("abre en el navegador y acepta:\n%s", u)
+		for end := time.Now().Add(5 * time.Minute); time.Now().Before(end); time.Sleep(2 * time.Second) {
+			if st = m.Status(ctx, login, false); !st.Pending {
+				break
+			}
+		}
+	}
 	t.Logf("estado: %+v", st)
 	if !st.Connected {
 		t.Fatal(st.Problem)
@@ -415,5 +442,11 @@ func TestReal(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Log("\n" + FormatContent(c))
+	}
+	if os.Getenv("PGO_PRUEBA_GOOGLE_DESCONECTAR") == "1" {
+		if err := m.Disconnect(ctx, login); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("desconectado y revocado")
 	}
 }

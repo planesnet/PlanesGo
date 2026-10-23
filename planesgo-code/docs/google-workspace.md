@@ -1,64 +1,62 @@
 # Google Workspace en pgocode (Drive, Docs y Sheets, solo lectura)
 
 pgocode y sus agentes pueden **buscar, listar y leer** en Google Drive, Docs y Sheets con la cuenta de Google del
-usuario. Nada de escritura: pgocode solo hace peticiones `GET` a las APIs de Google.
+usuario. Nada de escritura: pgocode solo pide permiso de lectura (`drive.readonly`) y solo hace peticiones `GET` a
+las APIs de Google.
 
-No hay cliente OAuth propio ni proyecto nuevo en Google Cloud: pgocode usa la autorización que el usuario da a la
-herramienta oficial `gcloud` con su cuenta.
+Funciona como Claude u otras aplicaciones de escritorio: la empresa registra **una vez** una aplicación OAuth en
+Google Cloud y cada usuario pulsa **«Conectar con Google»**, ve la pantalla de Google y acepta. No hace falta `gcloud`.
 
-## Lo que tiene que hacer Luis (una vez)
+## 1. Registrar la aplicación (una vez, quien administra Google Cloud)
 
-1. En un terminal, dar a las credenciales por defecto de gcloud (ADC) el permiso de leer Drive (abre la página de
-   Google para aceptar):
+En la [consola de Google Cloud](https://console.cloud.google.com/), proyecto `planes-dev`:
 
-   ```sh
-   gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/cloud-platform
-   ```
+1. **APIs y servicios → Biblioteca**: habilitar **Google Drive API** y **Google Sheets API** (las cuotas de las
+   peticiones van a este proyecto). Docs se lee exportando por Drive.
+2. **Google Auth Platform → Marca / Pantalla de consentimiento**: tipo **Interna** (solo cuentas de planesnet.com:
+   sin verificación de Google ni pantalla de «aplicación no verificada»). Nombre: «PlanesGo».
+3. **Acceso a los datos**: ámbitos `openid`, `…/auth/userinfo.email` y `…/auth/drive.readonly`.
+4. **Clientes → Crear cliente**: tipo **Aplicación de escritorio**, nombre «PlanesGo». No lleva URI de redirección:
+   Google admite para estos clientes la vuelta a `http://127.0.0.1:<cualquier puerto>`.
+5. **Descargar JSON** del cliente (`client_secret_….apps.googleusercontent.com.json`, con
+   `{"installed":{"client_id":…,"client_secret":…}}`) y pasárselo a cada usuario por un canal interno.
 
-   Lleva también `cloud-platform`: estas credenciales son las mismas que usa pgocode para Vertex AI (OpenCode y los
-   modelos de Google), que siguen funcionando.
+El secreto de un cliente de escritorio no es confidencial para Google (va en cada instalación y lo protege PKCE),
+pero pgocode no lo enseña en la interfaz ni lo escribe en los registros.
 
-2. En pgocode: menú del logo → **Propiedades → Google Workspace → Comprobar**. Tiene que decir «Conectado como
-   luis@planesnet.com · solo lectura de Drive». La misma sección enseña la orden, con un botón para copiarla.
+Más adelante, el servidor de PlanesGo podrá servir el cliente a todo el equipo (endpoint de solo lectura,
+autenticado): el gestor ya tiene el gancho (`Manager.ClientSource`); el fichero local manda si existe.
 
-3. Solo si al leer Google dice que la API no está habilitada (lo dice el error y la sección de Propiedades), habilitar
-   las APIs en el proyecto de cuota (`planes-dev`, el de `gcloud`):
+## 2. Conectar la cuenta (cada usuario)
 
-   ```sh
-   gcloud services enable drive.googleapis.com sheets.googleapis.com docs.googleapis.com --project=planes-dev
-   ```
+1. Menú del logo → **Propiedades → Google Workspace**.
+2. Si dice «Falta registrar la aplicación de Google», **Cargar el fichero del cliente…** (o arrastrar el JSON a la
+   sección). Se guarda en `~/.local/share/pgocode/google-oauth-client.json` (0600; solo `client_id`,
+   `client_secret` y `project_id`). Se hace una vez por equipo.
+3. **Conectar con Google**: se abre la página de Google en el **navegador del sistema** (Google bloquea el inicio de
+   sesión en navegadores integrados como el de Electron: «Este navegador o aplicación pueden no ser seguros»). Elegir
+   la cuenta de planesnet.com y aceptar. La pestaña dice «pgocode ya puede leer tu Google Drive» y la sección pasa a
+   «Conectado como luis@planesnet.com · solo lectura de Drive».
+4. **Desconectar** revoca el permiso en Google y borra la conexión del equipo. También se puede quitar en
+   https://myaccount.google.com/permissions (pgocode lo nota en la siguiente renovación y borra la conexión).
 
-   pgocode manda el proyecto de cuota (cabecera `x-goog-user-project`) solo si Google lo pide; es `planes-dev`
-   (`GOOGLE_CLOUD_PROJECT` si está puesta, o `PGOCODE_GOOGLE_QUOTA_PROJECT` para otro).
+## Cómo funciona
 
-### Si Google responde «Esta aplicación está bloqueada»
-
-La documentación de Google avisa de que pedir ámbitos de fuera de Google Cloud (como Drive) al iniciar sesión de
-ADC con la configuración por defecto puede dar ese error, y recomienda un cliente OAuth propio
-([Troubleshoot your ADC setup](https://docs.cloud.google.com/docs/authentication/troubleshoot-adc)). Sin cliente
-propio, la alternativa es la sesión de la propia gcloud con acceso a Drive (opción oficial `--enable-gdrive-access`
-de [`gcloud auth login`](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login)):
-
-```sh
-gcloud auth login --enable-gdrive-access
-```
-
-Esa da el ámbito de Drive completo, no el de solo lectura; pgocode sigue haciendo solo lecturas, y la sección de
-Propiedades lo dice («Drive completo (pgocode solo lee)»). pgocode prueba primero ADC y, si su token no puede leer
-Drive, el de la sesión de gcloud.
-
-No se ha podido comprobar contra Google cuál de las dos funciona con la cuenta de planesnet.com (en el desarrollo no
-había credenciales reales); la prueba real está más abajo.
-
-## Cómo obtiene pgocode el token
-
-- Cuando lo necesita, ejecuta `gcloud auth application-default print-access-token` (y, si ese token no lleva Drive,
-  `gcloud auth print-access-token`). pgocode no lee los ficheros de credenciales ni guarda el token en disco: vive
-  en memoria hasta que caduca (como mucho 30 minutos) o Google lo rechaza (entonces lo vuelve a pedir una vez).
-- Con `tokeninfo` de Google (el token va en el cuerpo, no en la URL) sabe la cuenta y los ámbitos: lo que enseña
-  Propiedades. El token nunca sale del backend.
-- Para desconectar: `gcloud auth application-default revoke` (quita también Vertex) o quitar el acceso en
-  https://myaccount.google.com/permissions. pgocode no tiene botón de desconectar: las credenciales son de gcloud.
+- OAuth 2.0 de aplicación nativa ([RFC 8252](https://www.rfc-editor.org/rfc/rfc8252)) con PKCE S256: el backend abre
+  un puerto efímero en `127.0.0.1`, la URL de consentimiento lleva `state`, el reto PKCE, `access_type=offline` y
+  `prompt=consent`; Google vuelve a `http://127.0.0.1:<puerto>/?code=…&state=…`, el backend cambia el código por los
+  tokens (con el verificador) y cierra el puerto. Se espera como mucho 10 minutos; un nuevo «Conectar» sustituye al
+  anterior.
+- Si en la pantalla de Google se desmarca el permiso de Drive, no se guarda nada y se revoca lo concedido.
+- El **token de renovación** se guarda solo en el equipo, uno por usuario de pgocode:
+  `~/.local/share/pgocode/google/<usuario>.json` (carpeta 0700, fichero 0600), con la cuenta y los ámbitos. El
+  **token de acceso** vive en memoria y se renueva solo al caducar o si Google lo rechaza.
+- Los endpoints de Google son fijos en el código (no se toman del JSON del cliente).
+- Usuario de cada petición: la interfaz usa la conexión de quien ha entrado en pgocode; los agentes (`pgo drive`), la
+  del último usuario que ha usado la interfaz o, si en el equipo solo hay una conexión, esa.
+- **Respaldo silencioso**: si el usuario no ha conectado su cuenta y en el equipo hay una `gcloud` ya autorizada con
+  Drive, se usa su token (en memoria). La interfaz lo dice («Con las credenciales de Google de este equipo») pero no
+  enseña órdenes de gcloud; conectar la cuenta propia tiene preferencia.
 
 ## Uso
 
@@ -78,22 +76,24 @@ pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
   carpetas como listado; PDF, imágenes y demás, solo metadatos y enlace (Drive no da su texto).
 - Recorte: 40 000 caracteres por defecto (`--max` hasta 200 000), con un aviso al final de cómo pedir menos.
 
-API del backend: `GET /api/google[?probar=1]` (estado, con sesión) y `GET /api/google/{buscar|listar|leer}` (con
-sesión); los agentes, `GET /api/pgo/drive-{buscar|listar|leer}` con el token de su proyecto (`PGO_TOKEN`).
+API del backend (con sesión): `GET /api/google[?probar=1]` (estado), `POST /api/google/conectar` (devuelve la URL de
+Google), `POST /api/google/desconectar`, `POST /api/google/cliente {contenido}` (el JSON del cliente) y
+`GET /api/google/{buscar|listar|leer}`; los agentes, `GET /api/pgo/drive-{buscar|listar|leer}` con el token de su
+proyecto (`PGO_TOKEN`).
 
 ## Código y pruebas
 
-- `internal/gworkspace` (token por gcloud, tokeninfo, Drive y Sheets, formato compacto), `internal/servidor/google.go`,
+- `internal/gworkspace/oauth.go` (cliente, conexión, PKCE, renovación, revocación), `auth.go` (token y estado;
+  respaldo de gcloud), `drive.go` (Drive y Sheets, formato compacto), `internal/servidor/google.go`,
   `cmd/pgocode/pgo.go` (`pgo drive`), `internal/llm/pgohint.go` (aviso), `web/src/componentes/GoogleSettings.tsx`.
-- Pruebas con un Google simulado: `go test ./internal/gworkspace ./internal/servidor -run 'Drive|Google|Status|Read'`.
-- Prueba real (opcional, con la gcloud del equipo ya autorizada):
+- Pruebas con un Google simulado (autorización, intercambio con PKCE, renovación, revocación, errores, estado):
+  `go test -race ./internal/gworkspace ./internal/servidor -run 'OAuth|Client|Drive|Google|Status|Read'`.
+- Prueba real (opcional; en una carpeta de pruebas con el `google-oauth-client.json`, no la de datos de pgocode):
 
   ```sh
-  PGO_PRUEBA_GOOGLE=1 PGO_PRUEBA_GOOGLE_REF=<id o url de un documento> go test ./internal/gworkspace -run Real -v
+  PGO_PRUEBA_GOOGLE=1 PGO_PRUEBA_GOOGLE_DATOS=<carpeta> PGO_PRUEBA_GOOGLE_USUARIO=luis@planesnet.com \
+    [PGO_PRUEBA_GOOGLE_REF=<id o url de un documento>] [PGO_PRUEBA_GOOGLE_DESCONECTAR=1] \
+    go test ./internal/gworkspace -run Real -v -timeout 10m
   ```
 
-## Opción avanzada (no necesaria)
-
-Si ninguna de las dos órdenes funcionara con la cuenta, la vía que documenta Google es un cliente OAuth propio de
-tipo «Aplicación de escritorio» y `gcloud auth application-default login --client-id-file=<fichero> --scopes=…`.
-pgocode no cambia: sigue pidiendo el token a gcloud.
+  Si no hay conexión, escribe la URL de Google: abrirla en el navegador y aceptar (espera 5 minutos).

@@ -78,7 +78,7 @@ const fileFields = "id,name,mimeType,modifiedTime,size,webViewLink,owners(emailA
 // ---- peticiones ----
 
 // get hace un GET autenticado y devuelve como mucho limit bytes (truncated: había más). Si Google rechaza el token,
-// pide otro a gcloud una vez; si pide un proyecto de cuota, lo manda desde entonces.
+// pide otro una vez; si pide un proyecto de cuota, lo manda desde entonces.
 func (m *Manager) get(ctx context.Context, u string, limit int64) (body []byte, truncated bool, err error) {
 	retried, quotaTried := false, false
 	for {
@@ -113,7 +113,7 @@ func (m *Manager) get(ctx context.Context, u string, limit int64) (body []byte, 
 		switch {
 		case res.StatusCode == http.StatusUnauthorized && !retried:
 			retried = true
-			m.forget()
+			m.forget(ctx)
 			continue
 		case res.StatusCode == http.StatusForbidden && needsQuota(e) && !quota && !quotaTried && m.QuotaProject != "":
 			quotaTried = true
@@ -124,14 +124,10 @@ func (m *Manager) get(ctx context.Context, u string, limit int64) (body []byte, 
 		case res.StatusCode == http.StatusNotFound:
 			return nil, false, ErrNotFound
 		case res.StatusCode == http.StatusForbidden && (e.Reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT" || e.Reason == "insufficientPermissions"):
-			m.forget()
+			m.forget(ctx)
 			return nil, false, ErrNoAccess
 		case res.StatusCode == http.StatusForbidden && needsQuota(e):
-			p := m.QuotaProject
-			if p == "" {
-				p = "<proyecto>"
-			}
-			e.Hint = "Habilita las APIs en el proyecto de cuota: «" + EnableServicesCommand(p) + "»"
+			e.Hint = "Hay que habilitar las APIs de Google Drive y Google Sheets en el proyecto de Google Cloud de la aplicación (consola de Google Cloud → APIs y servicios)"
 		}
 		return nil, false, e
 	}

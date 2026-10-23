@@ -337,8 +337,9 @@ func main() {
 			log.Printf("adjuntos: %d carpetas de más de 30 días borradas", n)
 		}
 	}()
-	// Google Workspace en solo lectura, con las credenciales de gcloud del usuario (proyecto de cuota: el de Vertex).
-	s.Google = gworkspace.New(google.Proyecto())
+	// Google Workspace en solo lectura: la cuenta que conecta cada usuario (cliente OAuth y conexiones en la carpeta
+	// de datos); respaldo silencioso, la gcloud del equipo (proyecto de cuota: el de Vertex).
+	s.Google = gworkspace.New(filepath.Dir(*dirGrab), google.Proyecto())
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

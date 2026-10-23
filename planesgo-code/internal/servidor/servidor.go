@@ -112,7 +112,7 @@ type Servidor struct {
 	Imputacion *imputacion.Gestor
 	// GitHub: issues y pull requests del repositorio (con la sesión de «gh» del usuario).
 	GitHub github.Lector
-	// Google: Drive, Docs y Sheets en solo lectura con las credenciales de gcloud (nil: no disponible).
+	// Google: Drive, Docs y Sheets en solo lectura con la cuenta de Google de cada usuario (nil: no disponible).
 	Google *gworkspace.Manager
 	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
 	TokenAgente string
@@ -206,6 +206,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))
 	mux.HandleFunc("GET /api/google", s.conSesion(s.googleEstado))
 	mux.HandleFunc("GET /api/google/{orden}", s.conSesion(s.googleDrive))
+	mux.HandleFunc("POST /api/google/conectar", s.conSesion(s.googleConecta))
+	mux.HandleFunc("POST /api/google/desconectar", s.conSesion(s.googleDesconecta))
+	mux.HandleFunc("POST /api/google/cliente", s.conSesion(s.googleCliente))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
@@ -364,6 +367,9 @@ func (s *Servidor) conSesion(f manejador) http.HandlerFunc {
 		if !ok {
 			jsonError(w, http.StatusUnauthorized, "la sesión ha caducado: vuelve a entrar")
 			return
+		}
+		if s.Google != nil {
+			s.Google.SetActive(ses.Login) // los agentes leen Drive con la cuenta de quien usa la interfaz
 		}
 		if antigua {
 			s.poneCookieSesion(w, r, ses.Token, int(sesiones.Duracion.Seconds()))

@@ -1,11 +1,14 @@
 // Package gworkspace: acceso de SOLO LECTURA a Google Workspace (Drive, Docs y Sheets) para pgocode y sus agentes.
 //
-// Sin cliente OAuth propio: pgocode usa la autorización que el usuario ya ha dado a la herramienta gcloud de Google
-// con su cuenta. El token de acceso se pide a gcloud cuando hace falta (primero el de las credenciales por defecto,
-// ADC; si no lleva el ámbito de Drive, el de la sesión de gcloud) y solo vive en memoria, hasta que caduca o Google
-// lo rechaza; nunca se copia a disco. Con sus ámbitos se sabe la cuenta y si puede leer Drive (tokeninfo).
+// Camino principal (oauth.go): la aplicación OAuth «PlanesGo» (cliente de escritorio registrado una vez por la
+// empresa) y, por cada usuario de pgocode, «Conectar con Google»: el navegador del sistema enseña la pantalla de
+// consentimiento de Google y vuelve a un puerto efímero de 127.0.0.1 (RFC 8252, con PKCE). El token de renovación
+// se guarda solo en el equipo (un fichero 0600 por usuario); el de acceso vive en memoria y se renueva solo.
 //
-// pgocode solo hace peticiones de lectura (GET), aunque el token tenga un ámbito más amplio.
+// Respaldo silencioso: si el usuario no ha conectado su cuenta y en el equipo hay una gcloud ya autorizada con
+// Drive, se usa su token (en memoria, nunca a disco). La interfaz no enseña órdenes de gcloud.
+//
+// pgocode solo hace peticiones de lectura (GET) a las APIs, aunque el token tenga un ámbito más amplio.
 package gworkspace
 
 import (
@@ -14,10 +17,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,21 +36,14 @@ const (
 	ScopeDrive         = "https://www.googleapis.com/auth/drive"
 )
 
-// LoginCommand: lo que ejecuta el usuario (una vez) para dar acceso de lectura a Drive a sus credenciales por defecto
-// (ADC). Lleva también cloud-platform: las mismas credenciales sirven a Vertex AI y a las demás herramientas.
-const LoginCommand = "gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/userinfo.email," +
-	ScopeDriveReadonly + ",https://www.googleapis.com/auth/cloud-platform"
-
-// AltLoginCommand: la alternativa si Google bloquea la anterior («Esta aplicación está bloqueada»): la sesión de la
-// propia gcloud con acceso a Drive (ámbito de Drive completo; pgocode solo lee).
-const AltLoginCommand = "gcloud auth login --enable-gdrive-access"
-
 // EnvQuotaProject: el proyecto de cuota (cabecera x-goog-user-project) si no vale el de por defecto.
 const EnvQuotaProject = "PGOCODE_GOOGLE_QUOTA_PROJECT"
 
-// Endpoints de Google (en las pruebas, los de un servidor simulado).
+// Endpoints de Google (en las pruebas, los de un servidor simulado). Los de OAuth son fijos (no los del fichero del
+// cliente): así un fichero manipulado no puede mandar el secreto ni los tokens a otro sitio.
 type Endpoints struct {
 	TokenInfo, Drive, Sheets string
+	Auth, Token, Revoke      string
 }
 
 // GoogleEndpoints: los de verdad.
@@ -53,18 +51,22 @@ var GoogleEndpoints = Endpoints{
 	TokenInfo: "https://oauth2.googleapis.com/tokeninfo",
 	Drive:     "https://www.googleapis.com/drive/v3",
 	Sheets:    "https://sheets.googleapis.com/v4",
+	Auth:      "https://accounts.google.com/o/oauth2/v2/auth",
+	Token:     "https://oauth2.googleapis.com/token",
+	Revoke:    "https://oauth2.googleapis.com/revoke",
 }
 
 // Fuentes del token.
 const (
-	SourceADC    = "adc"    // gcloud auth application-default print-access-token
-	SourceGcloud = "gcloud" // gcloud auth print-access-token
+	SourceOAuth  = "oauth"  // la conexión propia del usuario («Conectar con Google»)
+	SourceADC    = "adc"    // respaldo: gcloud auth application-default print-access-token
+	SourceGcloud = "gcloud" // respaldo: gcloud auth print-access-token
 )
 
 // Errores que ve el usuario (o el agente) tal cual.
 var (
-	ErrNoGcloud = errors.New("no está la herramienta gcloud de Google en este equipo (https://cloud.google.com/sdk/docs/install)")
-	ErrNoAccess = errors.New("tu cuenta de Google no ha dado acceso de lectura a Drive: ejecuta en un terminal «" + LoginCommand + "» (Propiedades de pgocode → Google Workspace)")
+	ErrNoGcloud = errors.New("no está la herramienta gcloud de Google en este equipo")
+	ErrNoAccess = errors.New("no hay acceso de lectura a Google Drive: conecta tu cuenta de Google en pgocode (Propiedades → Google Workspace → Conectar con Google)")
 )
 
 // TokenInfo: lo que dice Google de un token (sin el token).
@@ -79,27 +81,42 @@ type cachedToken struct {
 	info          TokenInfo
 }
 
-// Manager: el acceso a Google con las credenciales de gcloud del usuario del equipo.
+// Manager: el acceso a Google de los usuarios de pgocode.
 type Manager struct {
 	Endpoints Endpoints
 	HTTP      *http.Client
-	// Fetch pide un token a gcloud (source: adc | gcloud). En las pruebas, uno simulado.
+	// Dir: la carpeta de datos de pgocode (google-oauth-client.json y google/<usuario>.json). Vacía: sin conexión
+	// propia (solo el respaldo de gcloud).
+	Dir string
+	// ClientSource: otra fuente del cliente OAuth si no está el fichero (más adelante, el servidor de PlanesGo para
+	// todo el equipo). nil: ninguna.
+	ClientSource func(ctx context.Context) (*OAuthClient, error)
+	// Listen abre el puerto de vuelta de Google (por defecto, uno efímero de 127.0.0.1). En las pruebas, otro.
+	Listen func() (net.Listener, error)
+	// AuthTimeout: cuánto se espera a que el usuario acepte en Google (por defecto, 10 minutos).
+	AuthTimeout time.Duration
+	// Fetch pide un token a gcloud (source: adc | gcloud) para el respaldo; nil: sin respaldo.
 	Fetch func(ctx context.Context, source string) (string, error)
 	// QuotaProject: el proyecto de cuota que se manda (x-goog-user-project) si Google lo pide.
 	QuotaProject string
 	Now          func() time.Time
 
-	mu       sync.Mutex
-	cached   *cachedToken
-	useQuota bool // Google pidió un proyecto de cuota: se manda desde entonces
+	mu        sync.Mutex
+	cached    *cachedToken // el de gcloud
+	useQuota  bool         // Google pidió un proyecto de cuota: se manda desde entonces
+	active    string       // el último usuario de pgocode que ha usado la interfaz (para los agentes)
+	access    map[string]*cachedToken
+	pending   map[string]*authFlow
+	refreshMu sync.Mutex // una renovación a la vez
 }
 
-// New: un gestor con los endpoints de Google, gcloud y el proyecto de cuota dado (vacío: sin él).
-func New(quotaProject string) *Manager {
+// New: un gestor con los endpoints de Google, la carpeta de datos de pgocode, el respaldo de gcloud y el proyecto
+// de cuota dado (vacío: sin él).
+func New(dir, quotaProject string) *Manager {
 	if q := strings.TrimSpace(os.Getenv(EnvQuotaProject)); q != "" {
 		quotaProject = q
 	}
-	return &Manager{Endpoints: GoogleEndpoints, HTTP: &http.Client{Timeout: 60 * time.Second}, Fetch: GcloudToken, QuotaProject: quotaProject}
+	return &Manager{Endpoints: GoogleEndpoints, HTTP: &http.Client{Timeout: 60 * time.Second}, Dir: dir, Fetch: GcloudToken, QuotaProject: quotaProject}
 }
 
 func (m *Manager) now() time.Time {
@@ -114,6 +131,47 @@ func (m *Manager) client() *http.Client {
 		return m.HTTP
 	}
 	return http.DefaultClient
+}
+
+type userKey struct{}
+
+// WithUser: las peticiones con este contexto usan la conexión de ese usuario de pgocode (la interfaz). Sin él (los
+// agentes), la del último usuario que ha usado la interfaz o, si solo hay una conexión en el equipo, esa.
+func WithUser(ctx context.Context, login string) context.Context {
+	return context.WithValue(ctx, userKey{}, login)
+}
+
+// SetActive: el usuario de pgocode que está usando la interfaz (sus agentes leen Drive con su cuenta).
+func (m *Manager) SetActive(login string) {
+	m.mu.Lock()
+	m.active = login
+	m.mu.Unlock()
+}
+
+// userFor: el usuario cuya conexión vale para esta petición ("" si ninguno tiene conexión propia).
+func (m *Manager) userFor(ctx context.Context) string {
+	if u, ok := ctx.Value(userKey{}).(string); ok {
+		if m.hasConnection(u) {
+			return u
+		}
+		return ""
+	}
+	m.mu.Lock()
+	a := m.active
+	m.mu.Unlock()
+	if a != "" && m.hasConnection(a) {
+		return a
+	}
+	if m.Dir == "" {
+		return ""
+	}
+	l, _ := filepath.Glob(filepath.Join(m.Dir, connDir, "*.json"))
+	if len(l) == 1 {
+		if c, err := m.readConnection(l[0]); err == nil {
+			return c.Login
+		}
+	}
+	return ""
 }
 
 // GcloudToken pide un token de acceso a gcloud (no lee ningún fichero de credenciales: lo hace gcloud).
@@ -146,8 +204,15 @@ func hasDrive(scopes []string) bool {
 	return contains(scopes, ScopeDriveReadonly) || contains(scopes, ScopeDrive)
 }
 
-// token devuelve un token con acceso a Drive (de la memoria o pedido a gcloud).
+// token devuelve un token con acceso a Drive: el de la conexión propia del usuario o, si no tiene, el de gcloud.
 func (m *Manager) token(ctx context.Context) (string, error) {
+	if u := m.userFor(ctx); u != "" {
+		c, err := m.oauthToken(ctx, u)
+		if err != nil {
+			return "", err
+		}
+		return c.token, nil
+	}
 	m.mu.Lock()
 	if c := m.cached; c != nil && m.now().Before(c.info.Expiry) {
 		m.mu.Unlock()
@@ -161,59 +226,54 @@ func (m *Manager) token(ctx context.Context) (string, error) {
 	return c.token, nil
 }
 
-// resolve pide el token a gcloud: el de ADC y, si no lleva Drive, el de la sesión de gcloud. Devuelve también lo
-// que se sabe de la cuenta aunque no tenga acceso (para la interfaz).
+// resolve pide el token a gcloud (respaldo): el de ADC y, si no lleva Drive, el de la sesión de gcloud. Sin gcloud
+// o sin Drive: ErrNoAccess (lo que hay que hacer es conectar la cuenta, no tocar gcloud).
 func (m *Manager) resolve(ctx context.Context) (*cachedToken, TokenInfo, error) {
-	var first TokenInfo
-	var firstErr error
+	if m.Fetch == nil {
+		return nil, TokenInfo{}, ErrNoAccess
+	}
+	var netErr error // sin conexión con Google: eso es lo que hay que decir
 	for _, src := range []string{SourceADC, SourceGcloud} {
 		tok, err := m.Fetch(ctx, src)
 		if errors.Is(err, ErrNoGcloud) {
-			return nil, first, err
+			return nil, TokenInfo{}, ErrNoAccess
 		}
 		if err != nil || tok == "" {
-			if firstErr == nil {
-				firstErr = err
-			}
 			continue
 		}
 		info, err := m.tokenInfo(ctx, tok)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		if err != nil && strings.HasPrefix(err.Error(), "no se pudo hablar") && netErr == nil {
+			netErr = err
+		}
+		if err != nil || !hasDrive(info.Scopes) {
 			continue
 		}
-		if first.Email == "" && len(first.Scopes) == 0 {
-			first = info
+		c := &cachedToken{token: tok, source: src, info: info}
+		// Con un minuto de margen y como mucho media hora: se vuelve a preguntar a gcloud de vez en cuando.
+		exp := info.Expiry.Add(-time.Minute)
+		if lim := m.now().Add(30 * time.Minute); exp.After(lim) {
+			exp = lim
 		}
-		if hasDrive(info.Scopes) {
-			c := &cachedToken{token: tok, source: src, info: info}
-			// Con un minuto de margen y como mucho media hora: se vuelve a preguntar a gcloud de vez en cuando.
-			exp := info.Expiry.Add(-time.Minute)
-			if lim := m.now().Add(30 * time.Minute); exp.After(lim) {
-				exp = lim
-			}
-			c.info.Expiry = exp
-			m.mu.Lock()
-			m.cached = c
-			m.mu.Unlock()
-			return c, info, nil
-		}
+		c.info.Expiry = exp
+		m.mu.Lock()
+		m.cached = c
+		m.mu.Unlock()
+		return c, info, nil
 	}
-	if first.Email != "" || len(first.Scopes) > 0 {
-		return nil, first, ErrNoAccess
+	if netErr != nil {
+		return nil, TokenInfo{}, netErr
 	}
-	if firstErr != nil {
-		return nil, first, fmt.Errorf("%w (%v)", ErrNoAccess, firstErr)
-	}
-	return nil, first, ErrNoAccess
+	return nil, TokenInfo{}, ErrNoAccess
 }
 
-// forget olvida el token en memoria (Google lo ha rechazado).
-func (m *Manager) forget() {
+// forget olvida los tokens de acceso en memoria de esta petición (Google los ha rechazado).
+func (m *Manager) forget(ctx context.Context) {
+	u := m.userFor(ctx)
 	m.mu.Lock()
 	m.cached = nil
+	if u != "" {
+		delete(m.access, u)
+	}
 	m.mu.Unlock()
 }
 
@@ -249,67 +309,83 @@ func (m *Manager) tokenInfo(ctx context.Context, tok string) (TokenInfo, error) 
 	return info, nil
 }
 
-// Status: lo que ve la interfaz (nunca el token).
+// Status: lo que ve la interfaz (nunca un token ni el secreto del cliente).
 type Status struct {
-	Connected   bool     `json:"conectado"`              // hay un token que puede leer Drive
-	Email       string   `json:"email,omitempty"`        // la cuenta de Google
-	Scopes      []string `json:"ambitos,omitempty"`      // los del token
-	Source      string   `json:"fuente,omitempty"`       // adc | gcloud
-	ReadOnly    bool     `json:"solo_lectura,omitempty"` // el ámbito es drive.readonly (no el de Drive completo)
-	Gcloud      bool     `json:"gcloud"`                 // gcloud está instalado
-	Problem     string   `json:"problema,omitempty"`     // por qué no hay acceso
-	Command     string   `json:"orden"`                  // lo que hay que ejecutar para dar acceso
-	AltCommand  string   `json:"orden_alternativa"`      // si Google bloquea la anterior
-	QuotaProj   string   `json:"proyecto_cuota,omitempty"`
-	QuotaInUse  bool     `json:"cuota_en_uso,omitempty"`    // se manda x-goog-user-project
-	EnableQuota string   `json:"orden_servicios,omitempty"` // para habilitar las APIs en el proyecto de cuota
+	Connected     bool     `json:"conectado"`                  // hay un token que puede leer Drive
+	Email         string   `json:"email,omitempty"`            // la cuenta de Google
+	Scopes        []string `json:"ambitos,omitempty"`          // los del token
+	Source        string   `json:"fuente,omitempty"`           // oauth | adc | gcloud
+	ReadOnly      bool     `json:"solo_lectura,omitempty"`     // el ámbito es drive.readonly (no el de Drive completo)
+	Since         string   `json:"desde,omitempty"`            // cuándo se conectó (RFC 3339)
+	Client        bool     `json:"cliente"`                    // la aplicación de Google está registrada en este equipo
+	ClientOrigin  string   `json:"cliente_origen,omitempty"`   // fichero | servidor
+	ClientProject string   `json:"cliente_proyecto,omitempty"` // el proyecto de Google Cloud del cliente
+	Pending       bool     `json:"en_curso,omitempty"`         // esperando a que el usuario acepte en Google
+	Problem       string   `json:"problema,omitempty"`         // por qué no hay acceso (o por qué falló la conexión)
 }
 
-// Status comprueba el acceso (pregunta a gcloud y a Google; fresh: sin usar el token en memoria).
-func (m *Manager) Status(ctx context.Context, fresh bool) Status {
-	st := Status{Command: LoginCommand, AltCommand: AltLoginCommand, QuotaProj: m.QuotaProject}
-	if m.QuotaProject != "" {
-		st.EnableQuota = EnableServicesCommand(m.QuotaProject)
+// Status: el acceso a Google del usuario de pgocode login (fresh: comprueba con Google, sin el token en memoria).
+func (m *Manager) Status(ctx context.Context, login string, fresh bool) Status {
+	var st Status
+	if c, err := m.oauthClient(ctx); err == nil {
+		st.Client, st.ClientOrigin, st.ClientProject = true, c.Origin, c.ProjectID
+	} else if !errors.Is(err, ErrNoClient) {
+		st.Problem = err.Error()
 	}
+	m.mu.Lock()
+	if f := m.pending[login]; f != nil {
+		st.Pending = !f.done
+		if f.err != "" {
+			st.Problem = f.err
+		}
+		if f.done { // el resultado se dice una vez
+			delete(m.pending, login)
+		}
+	}
+	m.mu.Unlock()
+	if conn, err := m.loadConnection(login); err == nil {
+		st.Email, st.Scopes, st.Source, st.Since = conn.Email, conn.Scopes, SourceOAuth, conn.Created.Format(time.RFC3339)
+		if fresh {
+			m.mu.Lock()
+			delete(m.access, login)
+			m.mu.Unlock()
+		}
+		c, err := m.oauthToken(ctx, login)
+		if err != nil {
+			st.Problem = err.Error()
+			if errors.Is(err, ErrRevoked) {
+				st.Email, st.Scopes, st.Source, st.Since = "", nil, "", ""
+			}
+			return st
+		}
+		st.Connected, st.Problem = true, ""
+		if len(c.info.Scopes) > 0 {
+			st.Scopes = c.info.Scopes
+		}
+		st.ReadOnly = contains(st.Scopes, ScopeDriveReadonly) && !contains(st.Scopes, ScopeDrive)
+		return st
+	}
+	// Sin conexión propia: el respaldo de gcloud, en silencio (sin enseñar sus errores).
 	if fresh {
-		m.forget()
+		m.mu.Lock()
+		m.cached = nil
+		m.mu.Unlock()
 	}
 	m.mu.Lock()
 	c := m.cached
-	st.QuotaInUse = m.useQuota
 	m.mu.Unlock()
 	var info TokenInfo
-	var err error
 	if c == nil || !m.now().Before(c.info.Expiry) {
-		c, info, err = m.resolve(ctx)
+		var err error
+		if c, info, err = m.resolve(ctx); err != nil {
+			return st
+		}
 	} else {
 		info = c.info
 	}
-	st.Gcloud = !errors.Is(err, ErrNoGcloud)
-	st.Email, st.Scopes = info.Email, info.Scopes
-	if err != nil {
-		st.Problem = err.Error()
-		if errors.Is(err, ErrNoAccess) { // la orden ya la enseña la interfaz: solo el porqué
-			st.Problem = "Las credenciales de gcloud no tienen permiso de lectura de Drive" + strings.TrimPrefix(err.Error(), ErrNoAccess.Error())
-		}
-		return st
-	}
-	st.Connected, st.Source = true, c.source
+	st.Connected, st.Source, st.Email, st.Scopes = true, c.source, info.Email, info.Scopes
 	st.ReadOnly = contains(info.Scopes, ScopeDriveReadonly) && !contains(info.Scopes, ScopeDrive)
 	return st
-}
-
-// Connected: hay acceso a Drive ahora (sin preguntar a gcloud: lo que hay en memoria). Para decidir si el aviso
-// de «pgo drive» va al agente.
-func (m *Manager) Connected() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.cached != nil
-}
-
-// EnableServicesCommand: la orden para habilitar las APIs en el proyecto de cuota.
-func EnableServicesCommand(project string) string {
-	return "gcloud services enable drive.googleapis.com sheets.googleapis.com docs.googleapis.com --project=" + project
 }
 
 func firstLine(s string) string {
