@@ -152,9 +152,9 @@ test('contexto contra el umbral de compactación, paso en curso y gráfica con e
 
 test('Barrer ahora: qué da y qué cuesta, confirmación, pendiente visible y resultado que caduca', () => {
   const r = { retirados: 0, intercambios: [], pendiente: 40_000, cache_caliente: true, cache_resto: 65_000, no_compensa: true };
-  assert.equal(C.sweepCost('opencode', 'gemini-4-argon', r), 'retira 40 k · ahorra ~0,008 $/paso · cuesta ~0,12 $ ahora');
-  assert.equal(C.sweepCost('opencode', 'x', { ...r, cache_caliente: false }), 'retira 40 k · ahorra ~0,008 $/paso · caché fría: no cuesta caché');
-  assert.equal(C.sweepCost('antigravity', 'x', r), 'retira 40 k');
+  assert.equal(C.sweepCost('opencode', 'gemini-4-argon', r), 'retira 40 k: cada paso reenvía 40 k menos · ahora reenvía ~65 k sin caché una vez');
+  assert.equal(C.sweepCost('opencode', 'x', { ...r, cache_caliente: false }), 'retira 40 k: cada paso reenvía 40 k menos · caché fría: no se pierde caché');
+  assert.match(C.sweepCost('antigravity', 'x', r), /^retira 40 k: cada paso reenvía 40 k menos/);
   assert.equal(C.sweepCost('opencode', 'x', { retirados: 0, intercambios: [] }), '');
   assert.match(C.sweepAdvice(r), /no compensa/);
   assert.equal(C.sweepAdvice({ ...r, no_compensa: false }), '');

@@ -170,21 +170,17 @@ export function inputPrice(agent: string, model?: string): number {
   return 2; // Gemini pro (OpenCode)
 }
 
-const usd = (x: number) => (x > 0 && x < 0.001 ? '<0,001' : x.toFixed(x < 0.01 ? 3 : 2).replace('.', ',')) + ' $';
 
 // sweepCost: lo que da y lo que cuesta «Barrer ahora»: «retira 40 k · ahorra ~0,01 $/paso · cuesta ~0,12 $ ahora»
 // (cada paso siguiente manda lo retirado de menos a precio de caché, 0,1; ahora, con la caché caliente, se reenvía
 // lo de después del sistema: Gemini, a precio de entrada; Claude Code, de escritura a 1 h, 2). «» sin nada que
 // retirar.
-export function sweepCost(agent: string, model: string | undefined, r?: PruneReport | null): string {
+export function sweepCost(_agent: string, _model: string | undefined, r?: PruneReport | null): string {
   const n = r?.pendiente || 0;
   if (n <= 0) return '';
-  const pr = inputPrice(agent, model);
-  let t = `retira ${k(n)}`;
-  if (!pr) return t;
-  t += ` · ahorra ~${usd((n * pr * 0.1) / 1e6)}/paso`;
-  const now = r?.cache_caliente && r.cache_resto ? (r.cache_resto * pr * (agent === 'claude-code' ? 1.9 : 0.9)) / 1e6 : 0;
-  return t + (now > 0 ? ` · cuesta ~${usd(now)} ahora` : ' · caché fría: no cuesta caché');
+  // Solo tokens: en la ventana del hilo de limpieza no se habla de dinero.
+  const t = `retira ${k(n)}: cada paso reenvía ${k(n)} menos`;
+  return t + (r?.cache_caliente && r.cache_resto ? ` · ahora reenvía ~${k(r.cache_resto)} sin caché una vez` : ' · caché fría: no se pierde caché');
 }
 
 // sweepAdvice: si conviene confirmar «Barrer ahora» (con la caché caliente no compensa: «» si compensa).

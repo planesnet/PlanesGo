@@ -165,24 +165,23 @@ function fmt(n: number): string {
   return n >= 1_000_000 ? (n / 1_000_000).toFixed(1).replace('.', ',') + ' M' : n >= 1000 ? Math.round(n / 1000) + ' k' : String(n);
 }
 
-// ContextCostBar: el contexto de la última llamada partido en lo que cuesta poco (leído de caché), lo escrito en
-// caché y lo que fue a precio de entrada (en rojo), con lo que cuesta cada paso si se sabe el precio.
-function ContextCostBar({ c, agent }: { c: CL.ContextCost; agent: string }) {
+// ContextCostBar: el contexto de la última llamada partido en lo leído de caché, lo escrito en ella y lo que fue sin
+// caché (en rojo). Solo tokens: en esta ventana no se habla de dinero.
+function ContextCostBar({ c }: { c: CL.ContextCost; agent: string }) {
   const pct = (n: number) => `${(n / c.total) * 100}%`;
-  const $ = (x: number) => (x > 0 && x < 0.001 ? '<0,001' : x.toFixed(x < 0.01 ? 3 : 2).replace('.', ',')) + ' $';
   return (
-    <div className="ctx-cost" aria-label="Coste del contexto de la última llamada">
+    <div className="ctx-cost" aria-label="El contexto de la última llamada: leído de caché, escrito en caché y sin caché">
       <div className="ctx-cost-bar" role="img" aria-hidden>
         {c.cached > 0 && <span className="ctx-cached" style={{ width: pct(c.cached) }} />}
         {c.written > 0 && <span className="ctx-written" style={{ width: pct(c.written) }} />}
         {c.fresh > 0 && <span className="ctx-fresh" style={{ width: pct(c.fresh) }} />}
       </div>
       <div className="ctx-cost-legend pequeno">
-        {c.cached > 0 && <span><i className="ctx-cached" /> {fmt(c.cached)} en caché{c.cost ? ` · ${$(c.cost.cached)}` : ''}</span>}
-        {c.written > 0 && <span><i className="ctx-written" /> {fmt(c.written)} escritos en caché{c.cost ? ` · ${$(c.cost.written)}` : ''}</span>}
-        {c.fresh > 0 && <span className="ctx-fresh-txt"><i className="ctx-fresh" /> {fmt(c.fresh)} sin caché{c.cost ? ` · ${$(c.cost.fresh)}` : ''}</span>}
+        {c.cached > 0 && <span><i className="ctx-cached" /> {fmt(c.cached)} en caché</span>}
+        {c.written > 0 && <span><i className="ctx-written" /> {fmt(c.written)} escritos en caché</span>}
+        {c.fresh > 0 && <span className="ctx-fresh-txt"><i className="ctx-fresh" /> {fmt(c.fresh)} sin caché</span>}
       </div>
-      {c.cost && <div className="suave pequeno">Cada paso cuesta ahora ~{$(c.cost.step)} de entrada; con la caché caducada (unos minutos parado) costaría ~{$(c.cost.cold)}.{agent === 'claude-code' ? '' : ' (precios aproximados)'}</div>}
+      <div className="suave pequeno">Con la caché caducada (unos minutos parado), los {fmt(c.total)} irían sin caché.</div>
     </div>
   );
 }
