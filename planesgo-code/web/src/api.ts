@@ -1,4 +1,5 @@
 import type { Tarea } from './tareas';
+import type { DirectNote } from './direct';
 import type { Copia } from './copias';
 import type { Propuesta } from './reparto';
 import type { PruneReport, Vigencia } from './prune';
@@ -18,7 +19,7 @@ export interface Uso { entrada: number; salida: number; coste?: number; segundos
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; reparto?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; vig?: Vigencia; pruned?: { tokens: number; repuestos?: number } } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; vig: la vigencia del intercambio en el contexto del agente (prune.ts); pruned: lo que retiró al empezar este turno
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; reparto?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; vig?: Vigencia; pruned?: { tokens: number; repuestos?: number }; directo?: DirectNote } // directo: nota de una orden que ha hecho pgocode sin el agente (direct.ts); fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; vig: la vigencia del intercambio en el contexto del agente (prune.ts); pruned: lo que retiró al empezar este turno
 // Relevo: el mensaje fue a una sesión nueva del agente con la memoria de trabajo (de: tokens de contexto que tenía la
 // sesión anterior; a: los de la memoria, estimados, y al acabar el turno los del contexto real de la sesión nueva);
 // anterior: la sesión del agente de antes (para deshacerlo).
@@ -53,11 +54,11 @@ async function respuesta<T>(r: Response): Promise<T> {
 
 export const get = <T,>(ruta: string) => fetch(ruta, { credentials: 'same-origin' }).then(r => respuesta<T>(r));
 
-export const post = <T,>(ruta: string, cuerpo: unknown) =>
+export const post = <T,>(ruta: string, cuerpo: unknown, signal?: AbortSignal) =>
   fetch(ruta, {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-PGO': '1' },
-    body: JSON.stringify(cuerpo),
+    body: JSON.stringify(cuerpo), signal,
   }).then(r => respuesta<T>(r));
 
 export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; tarea?: Tarea; uso?: Uso; vivo?: Uso; sesion_agente?: string; punto?: string; error?: string; fin?: boolean; poda?: PruneReport }

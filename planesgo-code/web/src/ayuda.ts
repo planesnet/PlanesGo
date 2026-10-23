@@ -32,6 +32,16 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'ejecuta el plan N', que: 'Ejecutarlo (también: descarta, reactiva o borra el plan N)' },
       { clave: '/<skill> …', que: 'Usar una skill (Claude Code)' },
     ] },
+    { titulo: 'Sin el agente (0 tokens)', entradas: [
+      { clave: 'compila · pasa los tests', que: 'Si el mensaje es solo eso, pgocode ejecuta la orden del proyecto (programa guardado, Makefile, package.json, go.mod…) en la carpeta de la sesión y deja una nota con el resultado. Si falla: «Pásaselo al agente», con solo los errores' },
+      { clave: 'comprueba los tipos · lint', que: 'Igual, si el proyecto lo tiene (si no se sabe la orden con seguridad, va al agente)' },
+      { clave: 'haz commit', que: 'git add -A y commit con un mensaje redactado por la IA local (sin ella, por reglas). Nunca push: «sube», «push», «publica» van al agente' },
+      { clave: '¿qué cambios hay? · diff', que: 'Estado de git y diff, sin el agente' },
+      { clave: '¿qué ficheros has tocado?', que: 'Los que ha editado el agente en la conversación y los que tienen cambios según git' },
+      { clave: '¿cuánto llevamos gastado?', que: 'Tokens y coste de la sesión' },
+      { clave: '¿en qué rama estamos? · ¿qué has hecho?', que: 'Rama y carpeta; las acciones del agente en su último turno' },
+      { clave: 'Para que lo haga el agente', que: 'Dilo con más palabras («compila tú y revisa los avisos»), pon «>» delante o pulsa la etiqueta antes de enviar. Se desactiva en los ajustes de la sesión' },
+    ] },
     { titulo: 'En la interfaz', entradas: [
       { clave: 'Etiqueta de destino', que: 'Clic para cambiar adónde va el mensaje antes de enviarlo' },
       { clave: 'Siempre al turno', que: 'Lo escrito con el agente trabajando le llega ya, en vez de esperar en la cola' },

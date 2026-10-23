@@ -20,3 +20,10 @@ test('la ayuda refleja las teclas de envío según el agente y la opción', () =
   assert.ok(claves({ alTurno: true, inyecta: true }).some(e => e.clave.startsWith('/help')));
   assert.match(claves({ alTurno: false, inyecta: false }).find(e => e.clave === '↑ ↓')!.que, /cola/);
 });
+
+test('la ayuda explica las órdenes que hace pgocode sin el agente', () => {
+  const e = A.secciones({ alTurno: true, inyecta: true }).find(s => s.titulo.startsWith('Sin el agente'))!.entradas;
+  assert.ok(e.some(x => x.clave.includes('compila')) && e.some(x => x.clave.includes('haz commit')));
+  assert.match(e.find(x => x.clave.includes('haz commit'))!.que, /Nunca push/);
+  assert.match(e.find(x => x.clave.startsWith('Para que'))!.que, /«>»/);
+});

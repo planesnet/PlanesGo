@@ -49,7 +49,8 @@ export interface WorkingMemory {
 // collectWorkingMemory: los datos de la memoria (sin formato).
 // Lo que quedó fuera del contexto del agente con «Continuar desde aquí» no cuenta: el agente lo ha olvidado.
 export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
-  const ms = todos.filter(m => !m.fuera).map(vigentParts);
+  // Tampoco las órdenes que hizo pgocode sin el agente (direct.ts): ni la orden ni su nota.
+  const ms = todos.filter((m, i) => !m.fuera && !m.directo && !(m.rol === 'user' && todos[i + 1]?.directo)).map(vigentParts);
   const us = requests(ms);
   const goal = us[0]?.texto.trim();
   const files: string[] = [];
