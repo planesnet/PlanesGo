@@ -359,7 +359,15 @@ func (s *Sim) compara(esperadas []LineaEsperada) []string {
 func (s *Sim) nuevoGestor() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	s.g = &Gestor{Odoo: s.odoo, Ahora: s.ahora, FicheroEstado: filepath.Join(s.dir, "estado.json"), Diario: filepath.Join(s.dir, "diario.log")}
+	s.g = &Gestor{Odoo: s.odoo, Ahora: s.ahora, FicheroEstado: filepath.Join(s.dir, "estado.json"), Diario: filepath.Join(s.dir, "diario.log"),
+		// La sesión de Odoo no está en el fichero: la da la sesión de pgocode del usuario (que tras una actualización
+		// se recupera de sesiones-reinicio.json).
+		SesionOdoo: func(uid int) string {
+			if uid == s.b.UID {
+				return s.sesionActual()
+			}
+			return ""
+		}}
 	s.g.arrancaSinReloj(ctx)
 }
 

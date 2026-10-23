@@ -236,7 +236,7 @@ func TestOpenCodePermiso(t *testing.T) {
 	}
 	a := Agentes()[2].(*Agente)
 	e := a.EntornoPara(Peticion{Permisos: "auto", Modelo: "google-vertex/gemini-4-argon"})
-	if len(e) != 3 || !strings.Contains(e[0], `"bash":"allow"`) || !strings.HasPrefix(e[1], "XDG_DATA_HOME=") {
+	if len(e) != 3 || !strings.Contains(e[0], `"bash":{"*":"allow"`) || !strings.HasPrefix(e[1], "XDG_DATA_HOME=") {
 		t.Errorf("auto: %v", e)
 	}
 	// Ahorro de tokens: lecturas de registros y dependencias denegadas, bucles cortados, compactación, límite de

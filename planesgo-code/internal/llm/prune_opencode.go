@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/depuracion"
+	"planesgo-code/internal/proceso"
 	"planesgo-code/internal/selector"
 )
 
@@ -60,7 +61,7 @@ func ocDBRun(ctx context.Context, a *Agente, p Peticion, q string, asJSON bool) 
 	}
 	cmd := exec.CommandContext(ctx, "opencode", args...)
 	cmd.Dir = p.Carpeta
-	cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+	cmd.Env = append(append(proceso.CleanEnviron(), a.EntornoDefecto...), "PWD="+p.Carpeta)
 	if a.EntornoPara != nil {
 		cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
 	}

@@ -442,9 +442,8 @@ func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error
 	}
 	depuracion.Log(id, "lanza %s %q en %s [%s] (entorno añadido: %s; del agente: %s)", a.Programa, args, p.Carpeta, p.Traza,
 		clavesEntorno(p.Entorno)+" "+strings.Join(a.EntornoDefecto, ","), clavesEntorno(propio))
-	if len(entorno) > 0 {
-		cmd.Env = append(os.Environ(), entorno...)
-	}
+	// Siempre sin las credenciales de Odoo y PlanesGo (proceso.CleanEnviron: docs/odoo-blindaje.md).
+	cmd.Env = append(proceso.CleanEnviron(), entorno...)
 	// El agente va en su propio grupo y con una marca en el entorno que heredan todos sus descendientes: al
 	// cancelar se le pide que termine (cierra sus tareas) y, tras unos segundos, se mata todo lo marcado, también
 	// lo que lanzó en otro grupo (Bash en segundo plano). WaitDelay evita esperar a un nieto con la salida abierta.
@@ -602,14 +601,25 @@ func permisosOpenCode(modo string, autorizadas []string, carpeta string) string 
 	// los patrones van relativos a la carpeta; «*» abarca subcarpetas).
 	leer := map[string]string{"*": "allow", "*.log": "deny", "*.log.*": "deny", "node_modules/*": "deny", "*/node_modules/*": "deny"}
 	// doom_loop denegado en todos los modos: la misma llamada repetida una y otra vez se corta (gasta tokens).
-	p := map[string]any{"webfetch": "allow", "external_directory": fuera, "skill": sk, "read": leer, "doom_loop": "deny"}
+	// Blindaje de Odoo (odooguard.go): ni su host ni el de PlanesGo por webfetch u órdenes, ni los ficheros de
+	// sesión, ni los clientes de imputación.
+	g := currentGuard()
+	web := map[string]string{"*": "allow"}
+	for k, v := range openCodeWebfetchDeny(g) {
+		web[k] = v
+	}
+	p := map[string]any{"webfetch": web, "external_directory": fuera, "skill": sk, "read": leer, "doom_loop": "deny"}
 	switch modo {
 	case "ninguna": // sin herramientas: solo responde (el cierre tras el límite de pasos)
 		for _, h := range []string{"edit", "bash", "read", "glob", "grep", "list", "webfetch", "websearch", "task", "todowrite", "skill", "patch", "codesearch"} {
 			p[h] = "deny"
 		}
 	case "auto":
-		p["edit"], p["bash"] = "allow", "allow"
+		bash := map[string]string{"*": "allow"}
+		for k, v := range openCodeBashDeny(g) {
+			bash[k] = v
+		}
+		p["edit"], p["bash"] = "allow", bash
 	case "editar":
 		p["edit"], p["bash"] = "allow", "deny"
 	default:
@@ -966,7 +976,7 @@ func sesionOpenCodeEn(ctx context.Context, a *Agente, p Peticion) bool {
 	defer cancela()
 	cmd := exec.CommandContext(ctx, "opencode", "session", "list", "--format", "json", "-n", "1000")
 	cmd.Dir = p.Carpeta
-	cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+	cmd.Env = append(append(proceso.CleanEnviron(), a.EntornoDefecto...), "PWD="+p.Carpeta)
 	if a.EntornoPara != nil {
 		cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
 	}
@@ -1032,7 +1042,7 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 	} {
 		cmd := exec.CommandContext(ctx, "opencode", "db", q)
 		cmd.Dir = p.Carpeta
-		cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+		cmd.Env = append(append(proceso.CleanEnviron(), a.EntornoDefecto...), "PWD="+p.Carpeta)
 		if a.EntornoPara != nil {
 			cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
 		}
@@ -1083,7 +1093,7 @@ func cortaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion, punto str
 	for _, q := range consultasCorteOpenCode(sesion, punto) {
 		cmd := exec.CommandContext(ctx, "opencode", "db", q)
 		cmd.Dir = p.Carpeta
-		cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+		cmd.Env = append(append(proceso.CleanEnviron(), a.EntornoDefecto...), "PWD="+p.Carpeta)
 		if a.EntornoPara != nil {
 			cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
 		}
@@ -1119,7 +1129,7 @@ func borraOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) er
 	}
 	cmd := exec.CommandContext(ctx, "opencode", "session", "delete", sesion)
 	cmd.Dir = p.Carpeta
-	cmd.Env = append(append(os.Environ(), a.EntornoDefecto...), "PWD="+p.Carpeta)
+	cmd.Env = append(append(proceso.CleanEnviron(), a.EntornoDefecto...), "PWD="+p.Carpeta)
 	if a.EntornoPara != nil {
 		cmd.Env = append(cmd.Env, a.EntornoPara(p)...)
 	}
@@ -1245,12 +1255,14 @@ func ServidoresMCP(carpeta string) map[string]json.RawMessage {
 	return m
 }
 
-// configMCP: un fichero de configuración MCP con «pgo» y los servidores pedidos (para --strict-mcp-config).
+// configMCP: un fichero de configuración MCP con los servidores pedidos (para --strict-mcp-config).
 func configMCP(carpeta string, pedidos []string) string {
 	todos := ServidoresMCP(carpeta)
 	sel := map[string]json.RawMessage{}
-	for _, n := range append([]string{"pgo"}, pedidos...) {
-		if v, ok := todos[n]; ok {
+	// Sin el MCP de imputación de PlanesGo («pgo»): la imputación la hace pgocode y ningún agente escribe en Odoo
+	// (odooguard.go).
+	for _, n := range pedidos {
+		if v, ok := todos[n]; ok && !isImputationMCP(n, v) {
 			sel[n] = v
 		}
 	}

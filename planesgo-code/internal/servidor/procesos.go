@@ -1,10 +1,6 @@
 package servidor
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -327,9 +323,13 @@ func (s *Servidor) procesosSalida(w http.ResponseWriter, r *http.Request, ses *s
 
 // ---- desde el agente (orden pgo) ----
 
-// entornoAgente: lo que reciben los agentes para usar «pgo»: su token vale solo para su proyecto.
-func (s *Servidor) entornoAgente(proyecto int) []string {
-	return append(s.entornoPrograma(proyecto), "PGO_TOKEN="+s.tokenProyecto(proyecto))
+// entornoAgente: lo que reciben los agentes para usar «pgo»: el token de su sesión y turno (agenttoken.go).
+func (s *Servidor) entornoAgente(proyecto int, token string) []string {
+	e := s.entornoPrograma(proyecto)
+	if token != "" {
+		e = append(e, "PGO_TOKEN="+token)
+	}
+	return e
 }
 
 // entornoPrograma: lo que reciben los programas que se lanzan (sin token: un programa o sus dependencias no
@@ -341,19 +341,6 @@ func (s *Servidor) entornoPrograma(proyecto int) []string {
 		e = append(e, "PATH="+s.DirBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	return e
-}
-
-// tokenProyecto: el token de los agentes de un proyecto (derivado del secreto de esta ejecución).
-func (s *Servidor) tokenProyecto(proyecto int) string {
-	m := hmac.New(sha256.New, []byte(s.TokenAgente))
-	fmt.Fprintf(m, "pgo-proyecto:%d", proyecto)
-	return hex.EncodeToString(m.Sum(nil))
-}
-
-// esAgente: el token es el del proyecto que dice la orden.
-func (s *Servidor) esAgente(r *http.Request, proyecto int) bool {
-	t := r.Header.Get("X-PGO-Agente")
-	return s.TokenAgente != "" && t != "" && proyecto > 0 && subtle.ConstantTimeCompare([]byte(t), []byte(s.tokenProyecto(proyecto))) == 1
 }
 
 // dentroDelProyecto: la carpeta está en una de las del proyecto (o en una copia de rama de pgocode), también
@@ -409,9 +396,20 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		p.Proyecto, _ = strconv.Atoi(q.Get("proyecto"))
 		p.N, _ = strconv.Atoi(q.Get("n"))
 	}
-	// El token es el del proyecto: el agente solo actúa en su proyecto, sus carpetas y sus programas.
-	if !s.esAgente(r, p.Proyecto) {
+	// El token es el del turno del agente: solo actúa en su proyecto, sus carpetas y sus programas, y solo con las
+	// órdenes de la lista blanca (ninguna toca Odoo).
+	g, ok := s.agentToken(r)
+	if !ok || p.Proyecto <= 0 || g.project != p.Proyecto {
 		jsonError(w, http.StatusForbidden, "token de agente no válido para este proyecto")
+		return
+	}
+	// Lista blanca (agenttoken.go): lo que no está, no existe para el agente; con otro método, prohibido.
+	if _, ok := agentEndpoints[r.PathValue("orden")]; !ok {
+		jsonError(w, http.StatusNotFound, "orden desconocida")
+		return
+	}
+	if !agentEndpointAllowed(r.PathValue("orden"), r.Method) {
+		jsonError(w, http.StatusForbidden, "orden no permitida a los agentes")
 		return
 	}
 	// Google Drive (solo lectura): pgo drive buscar|listar|leer.

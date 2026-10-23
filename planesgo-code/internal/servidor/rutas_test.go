@@ -92,7 +92,9 @@ func TestRutasPOSTSinCabecera(t *testing.T) {
 		n++
 		r := httptest.NewRequest(x.metodo, "http://127.0.0.1:7801"+concreta(x.patron), strings.NewReader("{}"))
 		r.AddCookie(&http.Cookie{Name: cookie, Value: ses.Token})
-		r.Header.Set("X-PGO-Agente", "agente")
+		if esRutaAgente(x.patron) { // fuera de /api/pgo, la cabecera del agente ya se rechaza por sí sola
+			r.Header.Set("X-PGO-Agente", "agente")
+		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "X-PGO") {

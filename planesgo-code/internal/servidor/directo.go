@@ -140,7 +140,7 @@ func (s *Servidor) directo(w http.ResponseWriter, r *http.Request, ses *sesiones
 		res.Orden, res.Origen = c.Orden, c.Origen
 		mu := directLock(dir)
 		mu.Lock()
-		out, code, dur, err := runDirect(r.Context(), dir, c.Orden, append(os.Environ(), append(s.entornoPrograma(p.Proyecto), "CI=true")...), directTimeouts[p.Accion])
+		out, code, dur, err := runDirect(r.Context(), dir, c.Orden, append(proceso.CleanEnviron(), append(s.entornoPrograma(p.Proyecto), "CI=true")...), directTimeouts[p.Accion])
 		mu.Unlock()
 		res.Segundos, res.Codigo = dur.Seconds(), code
 		res.OK = err == nil && code == 0
@@ -497,7 +497,7 @@ func gitDirect(ctx context.Context, dir string, args ...string) (string, error) 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C")
+	cmd.Env = append(proceso.CleanEnviron(), "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C")
 	out, err := cmd.CombinedOutput()
 	return strings.TrimRight(string(out), "\n"), err
 }

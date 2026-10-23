@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -478,5 +479,63 @@ func TestCamposIAReintento(t *testing.T) {
 	g.CamposIA(ctx, "s")
 	if o.nCampos != 2 {
 		t.Errorf("con campos, una sola vez: %d consultas", o.nCampos)
+	}
+}
+
+// La sesión de Odoo no se guarda en el fichero de estado (la leería un agente: docs/odoo-blindaje.md). Tras
+// reiniciar sin sesión, lo pendiente espera sin marcarse como error; al entrar el usuario, se escribe.
+func TestSesionOdooNoSeGuarda(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "estado.json")
+	o := nuevoOdoo()
+	r := &reloj{t: t0}
+	g := &Gestor{Odoo: o, Ahora: r.ahora, FicheroEstado: f}
+	tt := tr("s1")
+	tt.OdooSesion = "sesion-odoo-secreta"
+	fin := g.Empieza(tt)
+	espera(t, func() bool { return o.n() == 1 })
+	o.mu.Lock()
+	o.falla = true // lo que sigue queda pendiente de escribir
+	o.mu.Unlock()
+	r.pasa(30 * time.Minute)
+	fin()
+	g.Suspende()
+	g.Espera() // que no quede ninguna escritura en vuelo antes de que Odoo vuelva
+	o.mu.Lock()
+	o.falla = false
+	o.mu.Unlock()
+	b, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "sesion-odoo-secreta") || strings.Contains(string(b), "odoo_sesion") {
+		t.Fatalf("la sesión de Odoo está en el fichero de estado: %s", b)
+	}
+	// Reinicio sin sesión de pgocode (cierre inesperado): nada se escribe, nada queda en error.
+	sinSesion := 0
+	g2 := &Gestor{Odoo: o, Ahora: r.ahora, FicheroEstado: f, SesionOdoo: func(int) string { sinSesion++; return "" }}
+	ctx, cancela := context.WithCancel(context.Background())
+	defer cancela()
+	g2.arrancaSinReloj(ctx)
+	r.pasa(10 * time.Minute)
+	g2.revisa()
+	g2.Espera()
+	if sinSesion == 0 {
+		t.Error("no se ha pedido la sesión de Odoo del usuario al arrancar")
+	}
+	antes := o.con("pgocode-m-claude-code")
+	if len(antes) != 1 || antes[0]["unit_amount"].(float64) >= 0.5 {
+		t.Fatalf("sin sesión no se debería haber escrito: %v", antes)
+	}
+	// El usuario entra: se escribe con su sesión nueva.
+	g2.ActualizaSesionOdoo(tt.UID, "sesion-nueva")
+	g2.revisa()
+	espera(t, func() bool {
+		m := o.con("pgocode-m-claude-code")
+		return len(m) == 1 && m[0]["unit_amount"].(float64) >= 0.5
+	})
+	b, _ = os.ReadFile(f)
+	if strings.Contains(string(b), "sesion-nueva") {
+		t.Fatal("la sesión nueva ha acabado en el fichero de estado")
 	}
 }

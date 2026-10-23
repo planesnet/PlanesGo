@@ -117,6 +117,28 @@ func (a *Almacen) Busca(token string) (*Sesion, bool) {
 	return s, true
 }
 
+// OdooSesionDe: la sesión de Odoo de la sesión viva más reciente del usuario uid ("" si no tiene ninguna). La usa
+// la imputación, que no guarda la sesión de Odoo en disco (docs/odoo-blindaje.md).
+func (a *Almacen) OdooSesionDe(uid int) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ahora := a.ahora()
+	var mejor *Sesion
+	var uso time.Time
+	for _, s := range a.sesiones {
+		s.mu.Lock()
+		u := s.ultimoUso
+		s.mu.Unlock()
+		if s.UID == uid && s.OdooSesion != "" && ahora.Sub(u) <= Duracion && (mejor == nil || u.After(uso)) {
+			mejor, uso = s, u
+		}
+	}
+	if mejor == nil {
+		return ""
+	}
+	return mejor.OdooSesion
+}
+
 // Borra cierra la sesión.
 func (a *Almacen) Borra(token string) {
 	a.mu.Lock()

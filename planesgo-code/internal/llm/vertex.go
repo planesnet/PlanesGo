@@ -59,6 +59,10 @@ func entornoOpenCode(p Peticion) []string {
 			cfg["provider"].(map[string]any)[proveedorDeepSeekVertex] = prov
 		}
 	}
+	// Sin el MCP de imputación de PlanesGo (odooguard.go): se mezcla con la configuración del usuario, desactivado.
+	if m := openCodeDisabledMCP(); len(m) > 0 {
+		cfg["mcp"] = m
+	}
 	b, _ := json.Marshal(cfg)
 	return append(e, "OPENCODE_CONFIG_CONTENT="+string(b))
 }

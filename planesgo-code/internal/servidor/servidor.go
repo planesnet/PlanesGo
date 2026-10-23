@@ -115,9 +115,13 @@ type Servidor struct {
 	GitHub github.Lector
 	// Google: Drive, Docs y Sheets en solo lectura con la cuenta de Google de cada usuario (nil: no disponible).
 	Google *gworkspace.Manager
-	// TokenAgente: secreto que reciben los agentes (PGO_TOKEN) para usar la orden «pgo»; DirBin: carpeta con «pgo».
+	// TokenAgente: no vacío, los agentes reciben la orden «pgo» con un token propio de su sesión y turno (PGO_TOKEN,
+	// agenttoken.go); DirBin: carpeta con «pgo».
 	TokenAgente string
-	DirBin      string
+	agentes     agentTokens
+	// esProcesoAgente sustituye en las pruebas la comprobación del proceso que se conecta (peer.go).
+	esProcesoAgente func(*http.Request) bool
+	DirBin          string
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
 	EstudioOcupado func() bool
 	activos        atomic.Int64 // chats y agentes en curso
@@ -275,8 +279,14 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 			jsonError(w, http.StatusMisdirectedRequest, "host no permitido")
 			return
 		}
-		// Las órdenes del agente llevan su token (que /api/pgo comprueba contra el proyecto de la orden).
+		// Las órdenes del agente llevan su token (que /api/pgo comprueba contra el proyecto de la orden). Con el token
+		// de agente o desde un proceso de agente, nada fuera de /api/pgo: ni la interfaz ni las rutas que hablan con
+		// Odoo (docs/odoo-blindaje.md).
 		agente := esRutaAgente(r.URL.Path) && r.Header.Get("X-PGO-Agente") != ""
+		if !esRutaAgente(r.URL.Path) && r.URL.Path != "/healthz" && (r.Header.Get("X-PGO-Agente") != "" || s.fromAgentProcess(r)) {
+			jsonError(w, http.StatusForbidden, "los agentes solo pueden usar la orden «pgo»")
+			return
+		}
 		if r.URL.Path != "/healthz" && !agente && !s.desdeEscritorio(r) {
 			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -668,7 +678,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		SesionAgente string        `json:"sesion_agente"`
 		Rama         string        `json:"rama"`
 		Autorizadas  []string      `json:"autorizadas"` // carpetas de fuera del proyecto autorizadas en la sesión
-		MCP          []string      `json:"mcp"`         // servidores MCP de Claude que la sesión quiere además de «pgo»
+		MCP          []string      `json:"mcp"`         // servidores MCP de Claude que pide la sesión (nunca el de imputación «pgo»)
 		Permisos     string        `json:"permisos"`
 		Esfuerzo     string        `json:"esfuerzo"`
 		Sesion       string        `json:"sesion"` // id de la sesión de pgocode (para imputar su tiempo)
@@ -829,9 +839,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	// Id del turno: enlaza en el registro de tiempos la petición, sus herramientas, sus tareas y su fin.
 	turno := idTurno()
+	// El token de la orden «pgo» vale para esta sesión y este turno: se revoca al acabar (agenttoken.go).
+	tokenAgente, revocaToken := s.issueAgentToken(p.Proyecto, sesionImp)
+	defer revocaToken()
 	if p.Aparte != "" {
 		s.aparte(turno, r, p.Aparte, p.Contexto, p.AparteMotor, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
-			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
+			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto, tokenAgente),
 			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, CacheTTL: p.CacheTTL, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
 		return
 	}
@@ -842,7 +855,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
 	pet := llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
-		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
+		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto, tokenAgente), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
 		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0",
 		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar), CacheTTL: p.CacheTTL,
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,

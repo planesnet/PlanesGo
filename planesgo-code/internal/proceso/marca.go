@@ -1,7 +1,6 @@
 package proceso
 
 import (
-	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -26,7 +25,7 @@ var (
 func Agente(cmd *exec.Cmd, marca string) {
 	GrupoPropio(cmd)
 	if cmd.Env == nil {
-		cmd.Env = os.Environ()
+		cmd.Env = CleanEnviron()
 	}
 	cmd.Env = append(cmd.Env, VarMarca+"="+marca)
 	muMarcas.Lock()

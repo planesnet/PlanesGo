@@ -31,9 +31,9 @@ type Skill struct {
 	Sustituida  bool     `json:"sustituida,omitempty"` // la hace pgocode: no se sugiere ni la usan sus agentes
 }
 
-// Sustituidas: skills cuyo trabajo hace pgocode por su cuenta (la imputación de horas en Odoo). Siguen
+// Sustituidas: skills (y la orden /pgo) cuyo trabajo hace pgocode por su cuenta (la imputación de horas en Odoo). Siguen
 // instaladas para las sesiones de los agentes fuera de pgocode.
-var Sustituidas = []string{"pgo-imputacion"}
+var Sustituidas = []string{"pgo-imputacion", "pgo"}
 
 // tokens: estimación habitual (unos 4 caracteres por token).
 func tokens(s string) int { return (utf8.RuneCountInString(s) + 3) / 4 }

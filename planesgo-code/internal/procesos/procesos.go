@@ -96,7 +96,7 @@ func (g *Gestor) Lanza(nombre string, proyecto int, carpeta, orden, lanzado stri
 	cmd := exec.CommandContext(ctx, "bash", "-c", orden)
 	cmd.Dir = carpeta
 	marca := fmt.Sprintf("prog-%d-%s-%d", os.Getpid(), nombre, time.Now().UnixNano()%1e9)
-	cmd.Env = append(append(os.Environ(), entorno...), proceso.VarMarca+"="+marca)
+	cmd.Env = append(append(proceso.CleanEnviron(), entorno...), proceso.VarMarca+"="+marca)
 	proceso.GrupoPropio(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	pr, pw := io.Pipe()

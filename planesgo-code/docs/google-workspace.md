@@ -119,7 +119,7 @@ API del backend (con sesión): `GET /api/google[?probar=1]` (estado), `POST /api
 Google), `POST /api/google/desconectar`, `POST /api/google/cliente {contenido}` (el JSON del cliente) y
 `GET /api/google/{buscar|listar|leer}` (Drive) y `GET /api/google/gmail/{buscar|listar|leer}` (Gmail: `q`, `max`,
 `ref`, `mensaje=1`); los agentes, `GET /api/pgo/drive-{buscar|listar|leer}` y `GET /api/pgo/gmail-{buscar|listar|leer}`
-con el token de su proyecto (`PGO_TOKEN`). El estado (`/api/google`) lleva `drive` y `gmail` (autorizado o no).
+con el token de su sesión y turno (`PGO_TOKEN`, ver [odoo-blindaje.md](odoo-blindaje.md)). El estado (`/api/google`) lleva `drive` y `gmail` (autorizado o no).
 
 ## Código y pruebas
 

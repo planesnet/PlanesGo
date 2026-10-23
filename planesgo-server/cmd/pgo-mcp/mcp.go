@@ -147,7 +147,7 @@ func ficheroGestor() string {
 }
 
 func gestorPgocode() bool {
-	if os.Getenv("PLANESGO_GESTOR") == "pgocode" { // agente lanzado por pgocode: siempre
+	if dentroDePgocode() { // agente lanzado por pgocode (o descendiente): siempre, aunque cambie su entorno
 		return true
 	}
 	b, err := os.ReadFile(ficheroGestor())

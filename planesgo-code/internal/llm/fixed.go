@@ -56,6 +56,10 @@ func claudeSettings() string {
 			}
 		}
 	}
+	// Blindaje de Odoo (odooguard.go): red, ficheros y órdenes que ningún agente de pgocode puede usar.
+	if d := claudeDenyRules(currentGuard()); len(d) > 0 {
+		cfg["permissions"] = map[string]any{"deny": d}
+	}
 	b, _ := json.Marshal(cfg)
 	return string(b)
 }

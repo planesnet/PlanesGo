@@ -201,6 +201,8 @@ func main() {
 	addr := flag.String("addr", entorno("PGO_ADDR", "127.0.0.1:7801"), "dirección de escucha (solo local por defecto)")
 	odooURL := flag.String("odoo", entorno("ODOO_URL", "https://planesnet.autopyme.com"), "URL de Odoo")
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")
+	// PlanesGo también escribe en Odoo (su API de imputación): sus hosts, como el de Odoo, se deniegan a los agentes.
+	planesgoURL := flag.String("planesgo", entorno("PLANESGO_URL", "https://planesgo.autopyme.com"), "servidor de PlanesGo (escribe en Odoo: denegado a los agentes)")
 	raices := flag.String("raices", entorno("PGO_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.planesgo.json), separadas por comas")
 	studioAddr := flag.String("studio", entorno("PGO_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
 	urlAct := flag.String("actualizaciones", entorno("PGO_ACTUALIZACIONES", "https://planesgo.autopyme.com/install/pgocode"), "dónde se publican las actualizaciones (vacío: sin autoactualización)")
@@ -305,6 +307,7 @@ func main() {
 	s.Puerto = puerto
 	// La app de escritorio pasa su secreto por entorno (no por argumento: se vería en la lista de procesos).
 	s.TokenEscritorio = os.Getenv("PGO_TOKEN_ESCRITORIO")
+	os.Unsetenv("PGO_TOKEN_ESCRITORIO") // y no pasa a nada de lo que se lance (además, proceso.CleanEnviron)
 	s.PermitirNavegador = *navegador
 
 	// Registro de depuración (~/.local/share/pgocode/depuracion.log): agentes, órdenes, salidas y errores.
@@ -323,12 +326,24 @@ func main() {
 	selector.SetLocalAIFile(filepath.Join(filepath.Dir(*dirGrab), "ia-local.json"))
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
+	// Blindaje del Odoo de PlanesNet (docs/odoo-blindaje.md): los agentes no pueden llegar a Odoo ni a PlanesGo, ni
+	// leer los ficheros de datos de pgocode, ni lanzar los clientes de imputación de PlanesGo.
+	llm.SetAgentGuard(llm.DefaultAgentGuard(*odooURL, *planesgoURL, filepath.Dir(*dirGrab)))
 	// Imputación directa en Odoo. PlanesGo se duerme solo en los agentes que lanza pgocode (PLANESGO_GESTOR);
 	// las sesiones de los agentes fuera de pgocode siguen imputando por su cuenta en el mismo equipo.
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
 		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log"),
 		// Registro detallado de tiempos (un JSONL por día) para validar la imputación: Imputación → Validar.
 		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos"), Version: version}}
+	// La sesión de Odoo no se guarda con los partes (la leería un agente): la da la sesión de pgocode del usuario,
+	// que solo está en memoria (o, durante una actualización, en sesiones-reinicio.json, que se borra al leerlo).
+	ficheroSesiones := filepath.Join(filepath.Dir(*dirGrab), "sesiones-reinicio.json")
+	if n, err := s.Sesiones.Carga(ficheroSesiones, 5*time.Minute); err != nil {
+		log.Printf("sesiones tras la actualización: %v", err)
+	} else if n > 0 {
+		log.Printf("sesiones recuperadas tras la actualización: %d", n)
+	}
+	s.Imputacion.SesionOdoo = s.Sesiones.OdooSesionDe
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
 	go s.Imputacion.Arranca(context.Background())
 	// Adjuntos viejos (de sesiones ya terminadas): fuera, cuando el índice de carpetas esté listo.
@@ -359,12 +374,6 @@ func main() {
 	// Autoactualización: la app instalada (paquete) vive junto al ejecutable; las versiones nuevas se preparan en
 	// ~/.local/share/pgocode/actualizacion y se aplican cuando no hay nada en curso.
 	datos := filepath.Dir(*dirGrab) // ~/.local/share/pgocode
-	ficheroSesiones := filepath.Join(datos, "sesiones-reinicio.json")
-	if n, err := s.Sesiones.Carga(ficheroSesiones, 5*time.Minute); err != nil {
-		log.Printf("sesiones tras la actualización: %v", err)
-	} else if n > 0 {
-		log.Printf("sesiones recuperadas tras la actualización: %d", n)
-	}
 	exe, _ := os.Executable()
 	if v := s.Version; v == "dev" || v == "" {
 		if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "VERSION")); err == nil {
@@ -405,7 +414,7 @@ func main() {
 	// ficheros con el arnés ya cerrado.
 	base, cancelaBase := context.WithCancel(context.Background())
 	srv := &http.Server{Addr: *addr, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second,
-		BaseContext: func(net.Listener) context.Context { return base }}
+		BaseContext: func(net.Listener) context.Context { return base }, ConnContext: s.ConnContext}
 	apagado := make(chan struct{})
 	go func() {
 		defer close(apagado)

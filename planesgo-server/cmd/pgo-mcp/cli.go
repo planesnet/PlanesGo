@@ -92,6 +92,12 @@ func ejecutaCLI(argv []string, salida, errSalida io.Writer) (codigo int, servido
 		return 0, false
 	}
 
+	// Dentro de pgocode, ninguna orden que hable con PlanesGo (y con él, con Odoo): ni imputar, ni vincular, ni buscar.
+	if dentroDePgocode() {
+		fmt.Fprintln(errSalida, textoBloqueadoPgocode)
+		return 3, false
+	}
+
 	// Al menos una vez cada selfUpdateCheckInterval, de forma no bloqueante
 	autoactualizar()
 

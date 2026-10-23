@@ -1,11 +1,14 @@
 // odoo-prueba: un Odoo simulado para probar pgocode de punta a punta sin un Odoo real (ciclos de prueba con la
 // interfaz y los agentes de verdad). Acepta cualquier usuario y contraseña, ofrece un proyecto de prueba y guarda
-// en memoria las tareas y las líneas de horas que imputa pgocode (se ven en /lineas).
+// en memoria las tareas y las líneas de horas que imputa pgocode (se ven en /lineas). Como el de verdad, call_kw
+// exige la cookie de una sesión abierta (aleatoria en cada entrada): sin ella, «sesión caducada».
 //
 //	go run ./cmd/odoo-prueba -addr 127.0.0.1:8611 -proyecto 999
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +25,8 @@ var (
 	lineas  = map[int]map[string]any{}
 	proyID  int
 	proyNom string
+	// sesiones abiertas con /web/session/authenticate
+	sesiones = map[string]bool{}
 )
 
 func main() {
@@ -36,7 +41,13 @@ func main() {
 			} `json:"params"`
 		}
 		json.NewDecoder(r.Body).Decode(&p)
-		http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "sesion-de-prueba", Path: "/"})
+		b := make([]byte, 16)
+		rand.Read(b)
+		ses := hex.EncodeToString(b)
+		mu.Lock()
+		sesiones[ses] = true
+		mu.Unlock()
+		http.SetCookie(w, &http.Cookie{Name: "session_id", Value: ses, Path: "/"})
 		responde(w, map[string]any{"uid": 2, "name": "Usuario de prueba", "username": p.Params.Login})
 	})
 	http.HandleFunc("/web/session/destroy", func(w http.ResponseWriter, r *http.Request) { responde(w, true) })
@@ -72,6 +83,13 @@ func llamada(w http.ResponseWriter, r *http.Request) {
 	m, metodo, args := p.Params.Model, p.Params.Method, p.Params.Args
 	mu.Lock()
 	defer mu.Unlock()
+	if c, err := r.Cookie("session_id"); err != nil || !sesiones[c.Value] {
+		log.Printf("rechazado sin sesión: %s.%s", m, metodo)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": nil, "error": map[string]any{"code": 100,
+			"message": "Odoo Session Expired", "data": map[string]any{"name": "odoo.http.SessionExpiredException", "message": "Session expired"}}})
+		return
+	}
 	switch {
 	case m == "project.project" && metodo == "search_read":
 		// El de prueba y otro más (para probar el cambio de proyecto).

@@ -22,6 +22,7 @@ package imputacion
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -71,7 +72,8 @@ type Trabajo struct {
 	TareaID    int    `json:"tarea_id"`
 	Tarea      string `json:"tarea"`
 	UID        int    `json:"uid"`
-	OdooSesion string `json:"odoo_sesion"`
+	// OdooSesion: solo en memoria (json "-"): en el fichero de estado la leería un agente (docs/odoo-blindaje.md).
+	OdooSesion string `json:"-"`
 	Modelo     string `json:"modelo"`
 	Desc       string `json:"desc"`
 }
@@ -114,7 +116,7 @@ type Dia struct {
 	Coste      float64   `json:"coste"`
 	Sesiones   []string  `json:"sesiones"`
 	UID        int       `json:"uid"`
-	OdooSesion string    `json:"odoo_sesion"`
+	OdooSesion string    `json:"-"`       // solo en memoria (ver Trabajo.OdooSesion)
 	Escrito    float64   `json:"escrito"` // horas escritas en Odoo la última vez
 	Sucio      bool      `json:"sucio"`   // hay que escribirla
 	version    int       // cambia cada vez que se ensucia: una escritura que empezó antes no la da por escrita
@@ -155,7 +157,11 @@ type Gestor struct {
 	Odoo                  Odoo
 	Aviso                 func()
 	FicheroEstado, Diario string
-	Ahora                 func() time.Time
+	// SesionOdoo: la sesión de Odoo viva del usuario (la de su sesión de pgocode, en memoria). La sesión de Odoo no
+	// se guarda en FicheroEstado: al arrancar, los partes recuperados la toman de aquí o, si no hay, esperan a que
+	// el usuario entre (ActualizaSesionOdoo).
+	SesionOdoo func(uid int) string
+	Ahora      func() time.Time
 	// Tiempos: registro detallado de todo lo que interviene en la imputación (registro.go), para validarla.
 	Tiempos *Registro
 
@@ -365,6 +371,7 @@ func (g *Gestor) arrancaCon(ctx context.Context, reloj bool) {
 			}
 		}
 	}
+	g.rellenaSesiones()
 	n := len(g.periodos)
 	g.mu.Unlock()
 	if g.Tiempos != nil {
@@ -387,6 +394,39 @@ func (g *Gestor) arrancaCon(ctx context.Context, reloj bool) {
 		}
 	}()
 }
+
+// rellenaSesiones (con el cerrojo): la sesión de Odoo de lo recuperado del fichero (que no la guarda).
+func (g *Gestor) rellenaSesiones() {
+	if g.SesionOdoo == nil {
+		return
+	}
+	de := map[int]string{}
+	sesion := func(uid int) string {
+		if v, ok := de[uid]; ok {
+			return v
+		}
+		de[uid] = g.SesionOdoo(uid)
+		return de[uid]
+	}
+	for _, p := range g.periodos {
+		if p.T.OdooSesion == "" && p.T.UID > 0 {
+			p.T.OdooSesion = sesion(p.T.UID)
+		}
+	}
+	for _, p := range g.sinTarea {
+		if p.T.OdooSesion == "" && p.T.UID > 0 {
+			p.T.OdooSesion = sesion(p.T.UID)
+		}
+	}
+	for _, d := range g.dias {
+		if d.OdooSesion == "" && d.UID > 0 {
+			d.OdooSesion = sesion(d.UID)
+		}
+	}
+}
+
+// errSinSesion: lo recuperado de una ejecución anterior aún no tiene sesión de Odoo (se escribe al entrar).
+var errSinSesion = errors.New("sin sesión de Odoo: se escribirá cuando vuelvas a entrar en pgocode")
 
 // Empieza: empieza un turno del agente (devuelve la función de fin de turno).
 func (g *Gestor) Empieza(t Trabajo) (fin func()) {
@@ -538,6 +578,9 @@ func (g *Gestor) preparaYEscribe(p *Periodo) {
 	g.mu.Lock()
 	t, tarea := p.T, p.TareaID
 	g.mu.Unlock()
+	if tarea == 0 && t.OdooSesion == "" {
+		return // sin sesión de Odoo todavía: se resuelve al entrar (ActualizaSesionOdoo)
+	}
 	if tarea == 0 {
 		ctx, cancela := context.WithTimeout(context.Background(), 30*time.Second)
 		id, err := g.tarea(ctx, t)
@@ -1079,6 +1122,9 @@ func definitivo(err error) bool {
 
 // tarea busca la tarea por nombre en el proyecto y, si no existe, la crea (asignada al usuario).
 func (g *Gestor) tarea(ctx context.Context, t Trabajo) (int, error) {
+	if t.OdooSesion == "" {
+		return 0, errSinSesion
+	}
 	var l []struct {
 		ID int `json:"id"`
 	}
