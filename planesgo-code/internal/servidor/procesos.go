@@ -201,6 +201,48 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 	jsonOK(w, x)
 }
 
+// quitaConfiguracion: borra un programa guardado (si no estaba, nada).
+func quitaConfiguracion(carpeta, nombre string) error {
+	l := leeConfiguraciones(carpeta)
+	n := l[:0]
+	for _, c := range l {
+		if c.Nombre != nombre {
+			n = append(n, c)
+		}
+	}
+	if len(n) == len(leeConfiguraciones(carpeta)) {
+		return nil
+	}
+	b, _ := json.MarshalIndent(n, "", "  ")
+	return os.WriteFile(filepath.Join(carpeta, ".psf", "ejecutar.json"), append(b, '\n'), 0o644)
+}
+
+// procesosBorraConfig: quita un programa de los guardados del proyecto (.psf/ejecutar.json); si está en marcha, sigue.
+func (s *Servidor) procesosBorraConfig(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Carpeta  string `json:"carpeta"`
+		Nombre   string `json:"nombre"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
+		return
+	}
+	if !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
+		jsonError(w, http.StatusForbidden, "esa carpeta no pertenece al proyecto")
+		return
+	}
+	if err := quitaConfiguracion(p.Carpeta, p.Nombre); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.AvisaProcesos()
+	jsonOK(w, map[string]bool{"ok": true})
+}
+
 // procesosGuarda: guarda un programa en el proyecto (.psf/ejecutar.json) sin lanzarlo, p. ej. uno que el agente
 // dejó en marcha y pgocode adoptó: la próxima vez lo arranca pgocode, sin el agente ni tokens.
 func (s *Servidor) procesosGuarda(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listaCopias, quitaCopia, type Proyecto } from '../api';
 import * as C from '../copias';
-import { conversacion, type Sesion } from '../sesiones';
+import { conversacion, titulo, type Sesion } from '../sesiones';
 import * as T from '../tareas';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, type Plan } from './Planes';
@@ -12,8 +12,8 @@ import { askConfirm } from './Modal';
 // sus subagentes, tareas en segundo plano y lista de tareas; los programas del proyecto (fuera del agente, también
 // los que adoptó pgocode), los planes guardados y las copias de trabajo (git worktree) de los repositorios.
 
-export default function Actividad({ proyecto, carpeta, sesion, directorio, versionProcesos, alAbrir }: {
-  proyecto: Proyecto; carpeta: string; sesion?: Sesion | null; directorio?: string; versionProcesos: number; alAbrir: (url: string) => void;
+export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], directorio, versionProcesos, alAbrir }: {
+  proyecto: Proyecto; carpeta: string; sesion?: Sesion | null; sesiones?: Sesion[]; directorio?: string; versionProcesos: number; alAbrir: (url: string) => void;
 }) {
   // Tareas de la sesión: las guardadas en su conversación y, en vivo, las que avisa el chat.
   const [tareas, setTareas] = useState<T.Tarea[]>([]);
@@ -33,6 +33,9 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
 
   const vivas = T.vivas(tareas);
   const hechas = tareas.filter(t => t.tipo !== 'lista' && t.estado !== 'curso').reverse().slice(0, 15);
+  const deTipo = (l: T.Tarea[], sub: boolean) => l.filter(t => (t.tipo === 'subagente') === sub);
+  // Subtareas en paralelo: las sesiones hijas de esta (reparto de pgocode).
+  const hijas = sesion ? sesiones.filter(s => s.madre === sesion.id).sort((a, b) => (a.parte || 0) - (b.parte || 0)) : [];
   const lista = [...tareas].reverse().find(t => t.tipo === 'lista');
 
   // Planes del proyecto.
@@ -51,27 +54,64 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
         )}
       </section>
 
+      <ConceptGuide />
+
       <section>
-        <h4>Subagentes y tareas <span className="gh-cuenta">{vivas.length}</span></h4>
-        {vivas.length === 0 && hechas.length === 0 && !lista && <p className="suave pequeno">Nada en esta sesión todavía.</p>}
-        {vivas.map(t => <FilaTarea key={t.id} t={t} />)}
-        {lista && (
-          <details className="lista-tareas-agente" open>
-            <summary>Lista de tareas · {(lista.elementos || []).filter(e => e.estado === 'hecho').length}/{lista.elementos?.length || 0}</summary>
-            <ul>{(lista.elementos || []).map((e, i) => <li key={i} className={e.estado}><span aria-hidden>{e.estado === 'hecho' ? '☑' : e.estado === 'curso' ? '◐' : '☐'}</span> {e.texto}</li>)}</ul>
-          </details>
-        )}
-        {hechas.length > 0 && (
+        <h4>Subagentes <span className="gh-cuenta">{deTipo(vivas, true).length}</span></h4>
+        <p className="suave pequeno">Los lanza el agente dentro de su turno. Cada uno con su propio contexto: lo que lee no entra en tu conversación, solo su resumen. Trabajan en la misma carpeta y rama de la sesión.</p>
+        {deTipo(vivas, true).length === 0 && deTipo(hechas, true).length === 0 && <p className="suave pequeno">Ninguno en esta sesión todavía.</p>}
+        {deTipo(vivas, true).map(t => <FilaTarea key={t.id} t={t} />)}
+        {deTipo(hechas, true).length > 0 && (
           <details className="act-hechas">
-            <summary className="suave pequeno">Terminadas ({hechas.length})</summary>
-            {hechas.map(t => <FilaTarea key={t.id} t={t} />)}
+            <summary className="suave pequeno">Terminados ({deTipo(hechas, true).length})</summary>
+            {deTipo(hechas, true).map(t => <FilaTarea key={t.id} t={t} />)}
           </details>
         )}
       </section>
 
       <section>
+        <h4>Subtareas en paralelo <span className="gh-cuenta">{hijas.length}</span></h4>
+        <p className="suave pequeno">Las lanza pgocode al repartir una petición con partes independientes: cada una es una sesión aparte, con su conversación, en su propia copia del repositorio y su rama <code>pgo/…</code>. Al acabar, pgocode une su rama a la tuya (en local: no se sube nada a GitHub).</p>
+        {hijas.length === 0 && <p className="suave pequeno">Ninguna: esta sesión no ha repartido nada.</p>}
+        {hijas.map(h => (
+          <div key={h.id} className="act-tarea">
+            <span className="tarea-tipo">Parte {h.parte}</span>
+            <span className="act-tarea-texto">
+              <span className="recorta">{titulo(h)}</span>
+              <span className="suave pequeno recorta" title={h.carpeta}>{h.rama === sesion?.rama
+                ? <>unida: sus cambios ya están en <code>{sesion?.rama}</code></>
+                : <><code>{h.rama || 'sin rama'}</code> → se unirá a <code>{sesion?.rama || 'tu rama'}</code></>}</span>
+            </span>
+          </div>
+        ))}
+      </section>
+
+      <section>
+        <h4>En segundo plano <span className="gh-cuenta">{deTipo(vivas, false).length}</span></h4>
+        <p className="suave pequeno">Órdenes que el agente dejó en marcha (un servidor, una compilación larga). No ocupan contexto mientras corren; su salida solo entra si el agente la lee.</p>
+        {deTipo(vivas, false).length === 0 && deTipo(hechas, false).length === 0 && <p className="suave pequeno">Nada en marcha.</p>}
+        {deTipo(vivas, false).map(t => <FilaTarea key={t.id} t={t} />)}
+        {deTipo(hechas, false).length > 0 && (
+          <details className="act-hechas">
+            <summary className="suave pequeno">Terminadas ({deTipo(hechas, false).length})</summary>
+            {deTipo(hechas, false).map(t => <FilaTarea key={t.id} t={t} />)}
+          </details>
+        )}
+      </section>
+
+      {lista && (
+      <section>
+        <h4>Lista de tareas del agente</h4>
+          <details className="lista-tareas-agente" open>
+            <summary>Lista de tareas · {(lista.elementos || []).filter(e => e.estado === 'hecho').length}/{lista.elementos?.length || 0}</summary>
+            <ul>{(lista.elementos || []).map((e, i) => <li key={i} className={e.estado}><span aria-hidden>{e.estado === 'hecho' ? '☑' : e.estado === 'curso' ? '◐' : '☐'}</span> {e.texto}</li>)}</ul>
+          </details>
+      </section>
+      )}
+
+      <section>
         <h4>Programas del proyecto</h4>
-        <p className="suave pequeno">Fuera del agente y sin tokens: los guardados, los lanzados aquí y los que el agente dejó en marcha.</p>
+        <p className="suave pequeno">Fuera del agente y sin tokens: los guardados, los lanzados aquí y los que el agente dejó en marcha. Se definen en las propiedades de la sesión.</p>
         <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />
       </section>
 
@@ -95,6 +135,25 @@ export default function Actividad({ proyecto, carpeta, sesion, directorio, versi
         alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()} alBorrar={() => cargaPlanes()}
         alEjecutar={p => { window.dispatchEvent(new CustomEvent('pgo:ejecutar-plan', { detail: p })); setPlan(null); cargaPlanes(); }} />}
     </div>
+  );
+}
+
+// ConceptGuide: qué es cada cosa que corre a la vez y cómo se relaciona con el contexto y con git/GitHub.
+function ConceptGuide() {
+  return (
+    <details className="act-conceptos">
+      <summary className="suave pequeno">¿Subagente, subtarea, segundo plano…? Qué es cada cosa</summary>
+      <table>
+        <thead><tr><th /><th>Quién la lanza</th><th>Contexto</th><th>Carpeta y rama</th><th>Git y GitHub</th></tr></thead>
+        <tbody>
+          <tr><th>Subagente</th><td>El agente, dentro de su turno (pgocode puede sugerírselo)</td><td>Propio: lo que lee no llena tu conversación; solo vuelve su resumen</td><td>Las de la sesión</td><td>No crea ramas ni commits: sus cambios son los de la sesión</td></tr>
+          <tr><th>Subtarea en paralelo</th><td>pgocode, al repartir una petición con partes independientes</td><td>Una sesión aparte, con su conversación</td><td>Su propia copia (git worktree) y rama <code>pgo/…</code></td><td>Al acabar se une a tu rama (merge local). Nada se sube a GitHub</td></tr>
+          <tr><th>En segundo plano</th><td>El agente (una orden que sigue en marcha)</td><td>No ocupa contexto; su salida entra si la lee</td><td>Las de la sesión</td><td>—</td></tr>
+          <tr><th>Lista de tareas</th><td>El agente, para organizarse</td><td>Va en su contexto (es corta)</td><td>—</td><td>—</td></tr>
+          <tr><th>Programa</th><td>Tú o el agente (<code>pgo ejecutar</code>)</td><td>Fuera del agente: no gasta tokens</td><td>La de la sesión</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </details>
   );
 }
 

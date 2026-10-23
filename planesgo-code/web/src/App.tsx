@@ -10,7 +10,8 @@ import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
 import Barra from './componentes/Barra';
-import DialogoSesion from './componentes/DialogoSesion';
+import DialogoSesion, { type SessionSection } from './componentes/DialogoSesion';
+import { OPEN_PROGRAM_SETTINGS } from './componentes/ProgramSettings';
 import { askConfirm, Dialogs, showMessage } from './componentes/Modal';
 
 // El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
@@ -202,7 +203,7 @@ export default function App() {
 
   // Ventana de la sesión: crear una (no existe hasta confirmar) o ajustar una existente. «envio»: mensaje que se
   // manda solo al agente en cuanto se cree (p. ej. «Resuelve la issue…»).
-  const [dialogo, setDialogo] = useState<{ sesion: S.Sesion; nueva: boolean; envio?: string } | null>(null);
+  const [dialogo, setDialogo] = useState<{ sesion: S.Sesion; nueva: boolean; envio?: string; seccion?: SessionSection } | null>(null);
   const [envioPendiente, setEnvioPendiente] = useState<{ sesion: string; texto: string } | null>(null);
 
   // Nueva sesión: se abre su ventana. Con rama (cambiar de rama en la cabecera) va ya elegida; si es la misma
@@ -261,6 +262,12 @@ export default function App() {
 
   // El chat solo trabaja con una sesión del proyecto activo: su carpeta es la que manda (repositorio, rama, git).
   const sesionDelProyecto = sesion && proyecto && sesion.proyecto === proyecto.id ? sesion : null;
+  // «Definir programas» (Actividad, Programas): abre las propiedades de la sesión en su sección Programas.
+  useEffect(() => {
+    const abre = () => { if (sesionDelProyecto) setDialogo({ sesion: sesionDelProyecto, nueva: false, seccion: 'programs' }); };
+    window.addEventListener(OPEN_PROGRAM_SETTINGS, abre);
+    return () => window.removeEventListener(OPEN_PROGRAM_SETTINGS, abre);
+  }, [sesionDelProyecto]);
   const elige = useCallback((p: Proyecto) => { setProyecto(p); recuerdaProyecto(usuario?.login || '', p.id); }, [usuario]);
 
   // Desde la lista lateral: una sesión de cualquier proyecto reciente, o una nueva en él.
@@ -325,7 +332,7 @@ export default function App() {
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
       {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
-    {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login}
+    {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login} inicial={dialogo.seccion}
       proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} />}
     <Dialogs />
     </div>

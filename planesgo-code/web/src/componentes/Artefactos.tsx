@@ -78,7 +78,7 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
               ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
               : vista === 'capturas' ? <Galeria key={proyecto.id} proyecto={proyecto.id} />
                 : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
-            {pestana === 'actividad' && <Actividad key={proyecto.id} proyecto={proyecto} carpeta={carpeta} sesion={sesion} directorio={directorio} versionProcesos={versionProcesos} alAbrir={alAbrir} />}
+            {pestana === 'actividad' && <Actividad sesiones={sesiones} key={proyecto.id} proyecto={proyecto} carpeta={carpeta} sesion={sesion} directorio={directorio} versionProcesos={versionProcesos} alAbrir={alAbrir} />}
             {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} alResolver={alResolver} />}
             {pestana === 'skills' && <Skills key={proyecto.id} proyecto={proyecto} carpeta={carpeta} agente={agente} sesiones={sesiones} />}
             {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}

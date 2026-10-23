@@ -8,6 +8,7 @@ import { Agente, Hosting } from './Marca';
 import * as CO from '../costes';
 import { autoContextOn } from '../contextPolicy';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
+import ProgramSettings from './ProgramSettings';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
 // Lo primero, la rama del repositorio; después el nombre, el alojamiento
@@ -18,14 +19,14 @@ interface Ramas { repo: string; repositorio?: string; ramas: string[]; actual?: 
 
 const NUEVA = '\u0000nueva';
 // Sections of the window, grouped by topic.
-type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'spending' | 'ids';
+export type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'spending' | 'programs' | 'ids';
 const SESSION_SECTIONS: readonly PropertiesSection<SessionSection>[] = [{ id: 'general', name: 'General', icon: 'rama' }, { id: 'agent', name: 'Agente', icon: 'terminal' },
   { id: 'access', name: 'Acceso a carpetas', icon: 'carpeta' }, { id: 'conversation', name: 'Conversación', icon: 'comentario' },
-  { id: 'spending', name: 'Gasto e imputación', icon: 'reloj' }, { id: 'ids', name: 'Identificador', icon: 'info' }];
+  { id: 'spending', name: 'Gasto e imputación', icon: 'reloj' }, { id: 'programs', name: 'Programas', icon: 'ejecutar' }, { id: 'ids', name: 'Identificador', icon: 'info' }];
 const unir = (dir: string, rama: string) => dir.replace(/\/+$/, '') + '/' + rama.replace(/\//g, '_');
 
-export default function DialogoSesion({ sesion, nueva, login, proveedores, alCerrar, alGuardar }: {
-  sesion: Sesion; nueva: boolean; login: string; proveedores: Proveedor[];
+export default function DialogoSesion({ sesion, nueva, login, proveedores, inicial, alCerrar, alGuardar }: {
+  sesion: Sesion; nueva: boolean; login: string; proveedores: Proveedor[]; inicial?: SessionSection;
   alCerrar: () => void; alGuardar: (s: Sesion, repo: Repo | null) => void;
 }) {
   const [s, setS] = useState<Sesion>(sesion);
@@ -114,7 +115,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
   return (
     <PropertiesModal title={nueva ? 'Nueva sesión' : <><span className="suave">Propiedades ·</span> {titulo(sesion)}</>}
       label={nueva ? 'Nueva sesión' : 'Propiedades de la sesión'} className="ajustes-sesion" onClose={alCerrar}
-      sections={SESSION_SECTIONS.map(x => ({ ...x, incomplete: incomplete[x.id] }))}
+      sections={SESSION_SECTIONS.filter(x => !nueva || x.id !== 'programs').map(x => ({ ...x, incomplete: incomplete[x.id] }))} initial={inicial}
       footer={<>
         {error && <p className="error footer-error">{error}</p>}
         {!nueva && <span className="suave pequeno">Cambiar la rama, la carpeta o el agente empieza una conversación nueva con el agente.</span>}
@@ -292,6 +293,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, alCer
           </label>
         </>}
 
+        {section === 'programs' && <ProgramSettings proyecto={s.proyecto} carpeta={sesion.carpeta} />}
         {section === 'ids' && <>
           <h3>Identificador</h3>
           <span className="suave pequeno">Para localizar la sesión en los registros de pgocode (tiempos y depuracion.log) y su conversación en el agente. Pásaselo a quien vaya a investigarla.</span>

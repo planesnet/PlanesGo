@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { get, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
 import Icono from './Icono';
 import { askConfirm } from './Modal';
+import { OPEN_PROGRAM_SETTINGS } from './ProgramSettings';
 
 // Programas del proyecto en local (un Odoo, un servicio, lo que se está desarrollando): los guardados en
 // .psf/ejecutar.json de la carpeta de la sesión, los que están en marcha (lanzados aquí o por el agente con «pgo»)
@@ -12,7 +13,6 @@ export default function Programas({ proyecto, carpeta, version, alAbrir }: {
   const [procs, setProcs] = useState<Proceso[]>([]);
   const [cfg, setCfg] = useState<ConfigPrograma[]>([]);
   const [error, setError] = useState('');
-  const [nuevo, setNuevo] = useState(false);
   const [verSalida, setVerSalida] = useState<string | null>(null);
 
   const carga = () => get<{ procesos: Proceso[]; configuraciones: ConfigPrograma[] }>(
@@ -58,12 +58,11 @@ export default function Programas({ proyecto, carpeta, version, alAbrir }: {
           {p && verSalida === c.nombre && <Salida nombre={c.nombre} enCurso={p.estado === 'curso'} />}
         </div>
       ))}
-      {cfg.length === 0 && procs.length === 0 && carpeta && !nuevo && (
-        <p className="suave pequeno">Aún no hay programas. Añade cómo se arranca (por ejemplo, un Odoo) o pide al agente que lo ejecute con <code>pgo ejecutar</code>.</p>
+      {cfg.length === 0 && procs.length === 0 && carpeta && (
+        <p className="suave pequeno">Aún no hay programas. Defínelos en las propiedades de la sesión o pide al agente que lo ejecute con <code>pgo ejecutar</code>.</p>
       )}
-      {nuevo
-        ? <NuevoPrograma alCancelar={() => setNuevo(false)} alLanzar={(c, g) => { setNuevo(false); lanza(c, g); }} />
-        : carpeta && <button className="enlace" onClick={() => setNuevo(true)}><Icono n="nuevo" t={13} /> Añadir programa</button>}
+      {carpeta && <button className="enlace" onClick={() => window.dispatchEvent(new Event(OPEN_PROGRAM_SETTINGS))}
+        title="Propiedades de la sesión → Programas"><Icono n="ajustes" t={13} /> Definir programas…</button>}
       <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} />
     </div>
   );
@@ -123,22 +122,6 @@ function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version:
   );
 }
 
-function NuevoPrograma({ alLanzar, alCancelar }: { alLanzar: (c: ConfigPrograma, guardar: boolean) => void; alCancelar: () => void }) {
-  const [nombre, setNombre] = useState('');
-  const [orden, setOrden] = useState('');
-  const [url, setUrl] = useState('');
-  const [guardar, setGuardar] = useState(true);
-  const envia = (e: FormEvent) => { e.preventDefault(); if (nombre.trim() && orden.trim()) alLanzar({ nombre: nombre.trim(), orden: orden.trim(), url: url.trim() || undefined }, guardar); };
-  return (
-    <form className="nuevo-programa" onSubmit={envia}>
-      <input placeholder="Nombre (p. ej. odoo)" value={nombre} onChange={e => setNombre(e.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" required autoFocus />
-      <input placeholder="Orden (p. ej. ./odoo-bin -c odoo.conf)" value={orden} onChange={e => setOrden(e.target.value)} required />
-      <input placeholder="URL (opcional, si no la dice al arrancar)" value={url} onChange={e => setUrl(e.target.value)} />
-      <label className="casilla"><input type="checkbox" checked={guardar} onChange={e => setGuardar(e.target.checked)} /> Guardar en .psf/ejecutar.json</label>
-      <div className="fila-config"><span className="hueco" /><button type="button" className="enlace" onClick={alCancelar}>Cancelar</button><button className="primario">Ejecutar</button></div>
-    </form>
-  );
-}
 
 // Salida del programa: se va actualizando mientras está en marcha.
 function Salida({ nombre, enCurso }: { nombre: string; enCurso: boolean }) {

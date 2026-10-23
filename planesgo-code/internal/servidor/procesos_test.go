@@ -88,3 +88,21 @@ func TestOcupadoPorUso(t *testing.T) {
 		t.Fatal("tras el plazo ya no")
 	}
 }
+
+// Quitar un programa guardado deja los demás tal cual; quitar uno que no está no cambia nada.
+func TestQuitaConfiguracion(t *testing.T) {
+	d := t.TempDir()
+	for _, n := range []string{"odoo", "web", "worker"} {
+		if err := guardaConfiguracion(d, Configuracion{Nombre: n, Orden: "./" + n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := quitaConfiguracion(d, "web"); err != nil {
+		t.Fatal(err)
+	}
+	quitaConfiguracion(d, "no-esta")
+	l := leeConfiguraciones(d)
+	if len(l) != 2 || l[0].Nombre != "odoo" || l[1].Nombre != "worker" {
+		t.Fatalf("%+v", l)
+	}
+}

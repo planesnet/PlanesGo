@@ -952,3 +952,15 @@ button.miga-item:hover { background: var(--hover); }
 .reparto-estado.aviso { background: color-mix(in srgb, #d4a017 18%, transparent); color: #9a7200; }
 .reparto-estado.error { background: color-mix(in srgb, #d1242f 16%, transparent); color: #d1242f; }
 @media (prefers-color-scheme: dark) { .reparto-estado.curso { color: #79c0ff; } .reparto-estado.ok { color: #56d364; } .reparto-estado.aviso { color: #e3b341; } .reparto-estado.error { color: #ff7b72; } }
+
+/* Actividad: qué es cada cosa (subagente, subtarea, segundo plano…) y su relación con el contexto y git. */
+.act-conceptos { margin: 0 0 10px; }
+.act-conceptos summary { cursor: pointer; }
+.act-conceptos table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; table-layout: fixed; }
+.act-conceptos th, .act-conceptos td { border-top: 1px solid var(--linea); padding: 4px 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.act-conceptos thead th { color: var(--suave); font-weight: 500; border-top: 0; }
+.act-conceptos tbody th { font-weight: 600; width: 18%; }
+
+/* Propiedades de la sesión → Programas: cada programa guardado. */
+.programa-def { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--linea); }
+.programa-def .programa-texto { display: grid; flex: 1; min-width: 0; }
