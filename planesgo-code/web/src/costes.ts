@@ -84,8 +84,8 @@ export function avisoContexto(contexto: number | undefined, minutosParada: numbe
   const precio = ENTRADA_SIN_CACHE[agente];
   if (minutosParada >= CACHE_MIN) {
     const coste = precio ? ` (~${dinero(contexto * precio / 1e6)})` : '';
-    return `Este mensaje reenviará ${tokens(contexto)} tokens de historial sin caché${coste}: la conversación lleva ${Math.round(minutosParada)} min parada. Para algo nuevo o mecánico, mejor una sesión nueva.`;
+    return `Este mensaje reenviará ${tokens(contexto)} tokens de historial sin caché${coste}: la conversación lleva ${Math.round(minutosParada)} min parada. Puedes vaciar el contexto: el agente sigue en esta conversación y vuelve a leer lo que necesite.`;
   }
-  if (contexto >= 150_000) return `Conversación grande: cada paso del agente reenvía ${tokens(contexto)} tokens. Para algo nuevo, mejor una sesión nueva.`;
+  if (contexto >= 150_000) return `Conversación grande: cada paso del agente reenvía ${tokens(contexto)} tokens. Puedes vaciar el contexto: el agente vuelve a leer lo que necesite.`;
   return null;
 }

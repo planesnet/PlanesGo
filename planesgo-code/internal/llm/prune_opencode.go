@@ -272,6 +272,8 @@ type pruneCollector struct {
 	key   string // la sesión del agente
 	jobs  chan func()
 	state pruneState
+	// emptyNext: el barrido en curso es «Vaciar contexto» (ForceEmpty); solo en el hilo del recolector.
+	emptyNext bool
 	// snapshot: la sesión leída al acabar el último turno (el barrido la usa si sigue valiendo).
 	snapshot []*ocMessage
 	// Lo que ve la interfaz sin esperar al hilo (el indicador del recolector): en qué está y el último informe.
@@ -671,7 +673,7 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.setRulesOnly(true)
 	}
 	now := pruneNow()
-	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target})
+	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Empty: c.emptyNext})
 	plan, d := o.Plan, o.D
 	before := compactedBefore(msgs, win)
 	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
@@ -936,6 +938,7 @@ type sweepInput struct {
 	Msg    string // el último mensaje del usuario (la señal para reponer)
 	Target int    // el objetivo de contexto (0: sin)
 	Claude bool   // solo lo que se aplica en Claude Code
+	Empty  bool   // «Vaciar contexto»: todo el historial fuera de vigencia (ForceEmpty)
 }
 
 // sweepOutcome: el plan, el cambio (en tokens reales, con estimateRatio) y lo que cuesta en caché.
@@ -968,8 +971,15 @@ func decideSweep(in sweepInput) sweepOutcome {
 		d.scale(o.Ratio)
 		o.Plan, o.D, o.Cut = plan, d, cut
 	}
-	build(vigCut)
-	if in.Target > 0 && o.Ctx > in.Target {
+	if in.Empty {
+		// Todo fuera: corte 0 y ningún intercambio joven. Solo salen las salidas de herramientas e imágenes; los
+		// textos de la conversación (lo que se pidió y respondió) quedan, y el agente relee lo que necesite.
+		in.Young = 0
+		build(-1)
+	} else {
+		build(vigCut)
+	}
+	if !in.Empty && in.Target > 0 && o.Ctx > in.Target {
 		for _, cut := range []float64{2.5, 2} {
 			if o.Ctx-o.D.Saved <= in.Target {
 				break

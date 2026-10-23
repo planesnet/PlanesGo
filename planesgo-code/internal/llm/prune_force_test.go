@@ -71,3 +71,23 @@ func TestForceSweepClaude(t *testing.T) {
 		t.Fatalf("pendiente al empezar el turno: %+v", rep2)
 	}
 }
+
+// «Vaciar contexto»: todo el historial fuera de una vez (más que «Barrer ahora», que solo saca lo de vigencia 3+),
+// también lo reciente; los textos de la conversación quedan.
+func TestForceEmptyOpenCode(t *testing.T) {
+	s := conversacion(20)
+	win := pruneWindow(s.msgs)
+	normal := decideSweep(sweepInput{Win: win, Young: pruneYoung, Now: time.Now(), K: defaultVig, Msg: "sigue"})
+	vacio := decideSweep(sweepInput{Win: win, Young: pruneYoung, Now: time.Now(), K: defaultVig, Msg: "sigue", Empty: true})
+	if vacio.D.Saved <= normal.D.Saved {
+		t.Fatalf("vaciar debe retirar más que barrer: %d frente a %d", vacio.D.Saved, normal.D.Saved)
+	}
+	for id, e := range vacio.Plan.Edits {
+		if p := partByID(win, id); p != nil && p.v.Type == "text" && e.Delete {
+			t.Fatalf("un texto de la conversación no se borra: %s", id)
+		}
+	}
+	if _, err := ForceEmpty(context.Background(), "antigravity", "x", t.TempDir(), ""); err == nil {
+		t.Fatal("Antigravity no se vacía en el servidor (relevo en la interfaz)")
+	}
+}

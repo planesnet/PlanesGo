@@ -676,7 +676,8 @@ func planPruneCut(win []*ocMessage, sims *pruneSims, young int, now time.Time, k
 		switch {
 		case superada != "":
 			pv.Out = e.Clear || e.TrimInput
-		case x.Tier == TierL3 || (propia && k.of(f, now) >= pc) || (!f.Pinned && f.Steps > pruneProtectSteps && k.of(f, now) >= pc):
+		case cut < 0 || x.Tier == TierL3 || (propia && k.of(f, now) >= pc) || (!f.Pinned && f.Steps > pruneProtectSteps && k.of(f, now) >= pc):
+			// (cut < 0: «Vaciar contexto»: todo fuera, sin proteger lo reciente ni el primer intercambio.)
 			// Fuera: la salida, a la marca nativa; las ediciones, sin su texto; lo pequeño se queda (la línea que lo
 			// sustituye ocuparía lo mismo).
 			e = outEdit(p)

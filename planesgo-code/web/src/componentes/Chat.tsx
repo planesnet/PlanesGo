@@ -316,7 +316,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const relevoForzado = useRef<Record<string, boolean>>({});
   const [relevoPedido, setRelevoPedido] = useState<Record<string, boolean>>({});
   const barridoPend = useRef<Record<string, number>>({});
-  async function barreAhora() {
+  // vaciar: «Vaciar contexto» (el aviso de una conversación grande y parada): todo el historial fuera, no solo lo de
+  // vigencia 3+; en Antigravity, el relevo en el próximo envío (no deja tocar su historial).
+  async function barreAhora(vaciar = false) {
     if (!sesion || !proyecto) return;
     const s = sesion;
     if (contextPolicy(s.agente, s).vig === 'chat') {
@@ -330,7 +332,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setBarriendo(x => ({ ...x, [s.id]: true }));
     setBarridoTxt(x => ({ ...x, [s.id]: '' }));
     try {
-      const r = await post<PR.PruneReport>('/api/chat/vigencia?barrer=1', { proyecto: proyecto.id, agente: s.agente, sesion_agente: s.sesionAgente,
+      const r = await post<PR.PruneReport>('/api/chat/vigencia?barrer=1' + (vaciar ? '&vaciar=1' : ''), { proyecto: proyecto.id, agente: s.agente, sesion_agente: s.sesionAgente,
         carpeta: s.carpeta, mensaje: ultimoUsuario, en_curso: enMarcha });
       ponLimpieza(s.id, { r });
       const quitados = r.retirados || 0;
@@ -507,9 +509,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Antes de enviar: si la conversación es grande (y sin caché por llevar un rato parada), cuánto se reenviará.
   const avisoContexto = useMemo(() => {
     if (enCurso || !sesion) return null;
-    const u = [...mensajes].reverse().find(m => m.rol === 'assistant' && m.uso);
-    return u ? CO.avisoContexto(u.uso?.contexto, u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente) : null;
-  }, [mensajes, enCurso, sesion?.agente, Boolean(texto.trim())]); // eslint-disable-line react-hooks/exhaustive-deps
+    let i = mensajes.length - 1;
+    while (i >= 0 && !(mensajes[i].rol === 'assistant' && mensajes[i].uso)) i--;
+    if (i < 0) return null;
+    const u = mensajes[i];
+    // Lo retirado después (Barrer ahora / Vaciar contexto) ya no se reenvía.
+    const retirado = mensajes.slice(i + 1).reduce((n, m) => n + (m.nota && m.pruned ? m.pruned.tokens : 0), 0);
+    if (relevoPedido[sesion.id]) return null;
+    return CO.avisoContexto(Math.max((u.uso?.contexto || 0) - retirado, 0), u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente);
+  }, [mensajes, enCurso, sesion?.agente, Boolean(texto.trim()), relevoPedido]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Intro: el ENRUTADOR (router.ts) decide quién hace qué con el mensaje y aquí solo se despacha.
   // forzar: el destino que manda (Alt+Intro → turno en curso); si no, el elegido en la etiqueta o el automático.
@@ -1585,7 +1593,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {rutaViva && avisoContexto && (
               <div className="aviso-contexto" role="note">
                 <span>⚠ {avisoContexto}</span>
-                <button className="enlace" onClick={() => alNuevaSesion(sesion.rama)}>Nueva sesión</button>
+                <button className="enlace" onClick={() => barreAhora(true)} disabled={Boolean(barriendo[sesion.id])}
+                  title="Saca del contexto del agente todo el historial (lecturas, salidas de órdenes, imágenes); la conversación sigue y el agente vuelve a leer lo que necesite">{barriendo[sesion.id] ? 'Vaciando…' : 'Vaciar contexto'}</button>
               </div>
             )}
             {editaCola && <div className="history-notice suave pequeno" role="status">{IH.queueNotice(editaCola.index)}</div>}
@@ -1674,7 +1683,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <span className="hueco" />
               {vigOn && prov?.tipo === 'agente' && contextPolicy(sesion.agente, sesion).vig !== 'none' && (
                 <CleanerIndicator agent={sesion.agente} model={sesion.modelo || prov.por_defecto} report={limpieza[sesion.id]?.r}
-                  busy={limpieza[sesion.id]?.busy} messages={mensajes} onSweep={barreAhora} sweeping={barriendo[sesion.id]}
+                  busy={limpieza[sesion.id]?.busy} messages={mensajes} onSweep={() => barreAhora()} sweeping={barriendo[sesion.id]}
                   sweepResult={barridoTxt[sesion.id]} relayForced={relevoPedido[sesion.id]} />
               )}
               {gastoSesion.turnos > 0 && (

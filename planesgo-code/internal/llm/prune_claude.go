@@ -745,7 +745,7 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		}
 	}
 	now := pruneNow()
-	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true})
+	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true, Empty: c.emptyNext})
 	plan, d := o.Plan, o.D
 	vale, porque := claudeCacheWorth(s, d, claudeCleared(win, o), o.System, now)
 	if force {

@@ -20,6 +20,18 @@ import (
 // ForceSweep barre la sesión del agente ahora. folder: la carpeta de la sesión; msg: el último mensaje del usuario
 // (la relación se mide frente a él); running: hay un turno en marcha.
 func ForceSweep(ctx context.Context, agent, ses, folder, msg string, running bool) (*PruneReport, error) {
+	return forceSweep(ctx, agent, ses, folder, msg, running, false)
+}
+
+// ForceEmpty: «Vaciar contexto» (el aviso de una conversación grande y parada, con la caché ya caducada): todo el
+// historial de la sesión del agente fuera de vigencia de golpe —las salidas de herramientas e imágenes; los textos
+// quedan—, para que el siguiente mensaje no reenvíe decenas de miles de tokens. El agente sigue en su conversación y
+// vuelve a leer lo que necesite. Solo entre turnos.
+func ForceEmpty(ctx context.Context, agent, ses, folder, msg string) (*PruneReport, error) {
+	return forceSweep(ctx, agent, ses, folder, msg, false, true)
+}
+
+func forceSweep(ctx context.Context, agent, ses, folder, msg string, running, empty bool) (*PruneReport, error) {
 	if !sesionValida.MatchString(ses) {
 		return nil, errors.New("sesión no válida")
 	}
@@ -53,6 +65,8 @@ func ForceSweep(ctx context.Context, agent, ses, folder, msg string, running boo
 		e := c.do(ce, func() {
 			defer c.setPhase("", 0)
 			c.setPhase("barriendo", 0)
+			c.emptyNext = empty
+			defer func() { c.emptyNext = false }()
 			if rep, err = c.sweep(ce, a, p, msg, young, nil, true); err == nil {
 				c.publish(rep)
 			}
@@ -64,6 +78,8 @@ func ForceSweep(ctx context.Context, agent, ses, folder, msg string, running boo
 		e := c.do(ce, func() {
 			defer c.setPhase("", 0)
 			c.setPhase("barriendo", 0)
+			c.emptyNext = empty
+			defer func() { c.emptyNext = false }()
 			if rep, _, err = c.sweepClaude(ce, p, msg, true); err == nil {
 				c.publish(rep)
 			}

@@ -955,7 +955,17 @@ func (s *Servidor) barrer(w http.ResponseWriter, r *http.Request, ses *sesiones.
 	}
 	ctx, cancela := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancela()
-	rep, err := barrido(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje, p.EnCurso)
+	var rep *llm.PruneReport
+	var err error
+	if r.URL.Query().Get("vaciar") == "1" {
+		if p.EnCurso {
+			jsonError(w, http.StatusConflict, "no se puede vaciar el contexto con el agente trabajando")
+			return
+		}
+		rep, err = vaciado(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje)
+	} else {
+		rep, err = barrido(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje, p.EnCurso)
+	}
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -965,6 +975,9 @@ func (s *Servidor) barrer(w http.ResponseWriter, r *http.Request, ses *sesiones.
 
 // barrido: el barrido forzado (en las pruebas, se sustituye).
 var barrido = llm.ForceSweep
+
+// vaciado: «Vaciar contexto» (en las pruebas, se sustituye).
+var vaciado = llm.ForceEmpty
 
 // modoPoda: la poda de la sesión (activada salvo que la sesión la desactive).
 func modoPoda(podar *bool) string {
