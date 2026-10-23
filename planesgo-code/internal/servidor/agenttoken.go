@@ -91,13 +91,9 @@ var agentEndpoints = map[string]string{
 	"procesos": http.MethodGet,
 	"salida":   http.MethodGet,
 	"abrir":    http.MethodPost,
-	// Google en solo lectura, a través del navegador integrado (internal/gbrowser).
-	"drive-buscar": http.MethodGet,
-	"drive-listar": http.MethodGet,
-	"drive-leer":   http.MethodGet,
-	"gmail-buscar": http.MethodGet,
-	"gmail-listar": http.MethodGet,
-	"gmail-leer":   http.MethodGet,
+	// Google en solo lectura y por enlace: descargas a través del navegador integrado (internal/gbrowser).
+	"drive-leer": http.MethodGet,
+	"gmail-leer": http.MethodGet,
 }
 
 // agentEndpointAllowed: la orden está en la lista blanca con ese método.

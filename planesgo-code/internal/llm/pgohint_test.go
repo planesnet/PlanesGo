@@ -44,7 +44,7 @@ func TestPgoHint(t *testing.T) {
 	if h := pgoHintFor("arranca con pgo ejecutar web npm run dev y lee el documento de Google"); !strings.Contains(h, "pgo ejecutar") || !strings.Contains(h, "pgo drive leer") {
 		t.Errorf("los dos avisos: %q", h)
 	}
-	if h := pgoHintFor("mira mi correo y el documento de Google"); !strings.Contains(h, "pgo gmail buscar") || !strings.Contains(h, "pgo drive leer") {
+	if h := pgoHintFor("mira mi correo y el documento de Google"); !strings.Contains(h, "pgo gmail leer") || !strings.Contains(h, "pgo drive leer") {
 		t.Errorf("drive y gmail: %q", h)
 	}
 	if h := pgoHintFor("busca en Drive el informe"); strings.Contains(h, "gmail") {

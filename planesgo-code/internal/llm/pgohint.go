@@ -13,19 +13,17 @@ const pgoHint = "(pgocode: «pgo» es una orden de terminal (ejecútala con tu h
 	"`pgo ejecutar <nombre> <orden…>` arranca un programa del proyecto en la carpeta actual y sigue al acabar el turno; " +
 	"`pgo parar <nombre>`; `pgo procesos`; `pgo salida <nombre> [n]` (últimas n líneas); `pgo abrir <url>` (navegador de pgocode).)"
 
-// driveHint: el uso de «pgo drive» (Google Drive, Docs y Sheets en solo lectura).
-const driveHint = "(pgocode: para Google Drive/Docs/Sheets usa la orden de terminal «pgo» (solo lectura, con la sesión de Google del navegador de pgocode): " +
-	"`pgo drive buscar <texto> [--tipo doc|hoja|pdf|carpeta] [--carpeta <id|url>]`; `pgo drive listar [<carpeta>]`; " +
-	"`pgo drive leer <id|url> [--hoja <nombre>] [--rango A1:D20] [--max N]` (Docs en Markdown, Sheets en CSV, recorta a 40000 caracteres).)"
+// driveHint: el uso de «pgo drive» (Google Drive, Docs y Sheets en solo lectura y por enlace).
+const driveHint = "(pgocode: para Google Drive/Docs/Sheets/Slides usa la orden de terminal «pgo» (solo lectura, por enlace: descarga el fichero con la sesión de Google del navegador de pgocode; no busca ni lista): " +
+	"`pgo drive leer <enlace o id> [--hoja <nombre>] [--rango A1:D20] [--max N]` (Docs en Markdown, Sheets en CSV; PDF y demás, a .pgocode/salidas; recorta a 40000 caracteres).)"
 
 // driveWords: el mensaje habla de Google Drive, Docs o Sheets (o lleva una URL suya). «docs» o «sheet» sueltos no
 // cuentan (la carpeta docs/, las hojas de estilo).
 var driveWords = regexp.MustCompile(`(?i)\bdrive\b|\bgoogle\s+(?:docs?|sheets?|slides)\b|\b(?:docs|drive|sheets)\.google\.com\b|\b(?:documentos?|docs?|hojas?|hojas?\s+de\s+c[aá]lculo)\s+de\s+google\b`)
 
-// gmailHint: el uso de «pgo gmail» (Gmail en solo lectura).
-const gmailHint = "(pgocode: para el correo de Gmail usa la orden de terminal «pgo» (solo lectura, con la sesión de Google del navegador de pgocode; no envía ni borra nada): " +
-	"`pgo gmail buscar <consulta con la sintaxis de Gmail, p. ej. from:ana newer_than:7d>` [--max N]; `pgo gmail listar` (lo reciente de la bandeja); " +
-	"`pgo gmail leer <id de hilo> [--max N]` (el hilo sin lo citado; recorta a 20000 caracteres).)"
+// gmailHint: el uso de «pgo gmail» (Gmail en solo lectura y por enlace).
+const gmailHint = "(pgocode: para leer un correo de Gmail usa la orden de terminal «pgo» (solo lectura, con la sesión de Google del navegador de pgocode; no busca, envía ni borra nada): " +
+	"`pgo gmail leer <enlace del correo> [--max N]` (el texto sin lo citado y los adjuntos; recorta a 20000 caracteres). Sin enlace, pídeselo al usuario.)"
 
 // gmailWords: el mensaje habla del correo del usuario (Gmail, correos, email, la bandeja…).
 var gmailWords = regexp.MustCompile(`(?i)\bgmail\b|\bcorreos?\b|\be-?mails?\b|\bbandeja\b|\binbox\b|\bbuz[oó]n\b|\bmail\.google\.com\b`)

@@ -7,16 +7,20 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"planesgo-code/internal/gbrowser"
+	"planesgo-code/internal/procesos"
 )
 
-// Google (Drive, Docs, Sheets, Slides y Gmail), solo lectura, a través del navegador integrado de pgocode: el agente
-// pide con «pgo drive …» y «pgo gmail …»; el backend le pasa cada página a la app de escritorio (Electron), que la
-// carga con la sesión de Google que el usuario haya abierto en el panel Web y devuelve su texto (internal/gbrowser).
+// Google (Drive, Docs, Sheets, Slides y Gmail), solo lectura y solo por enlace, a través del navegador integrado de
+// pgocode: el agente pide con «pgo drive leer» y «pgo gmail leer»; el backend le pasa a la app de escritorio
+// (Electron) el enlace de DESCARGA del fichero (la exportación de Docs/Sheets/Slides, la descarga de Drive, el
+// mensaje original de Gmail), que lo descarga con la sesión de Google que el usuario haya abierto en el panel Web; el
+// fichero se lee aquí (internal/gbrowser). Nunca se lee una página de Google.
 
 // esElectron: la petición viene del proceso principal de la app de escritorio (con su secreto). Con -navegador
 // tampoco vale otra cosa: el canal de Google es solo para Electron.
@@ -25,7 +29,7 @@ func (s *Servidor) esElectron(r *http.Request) bool {
 	return s.TokenEscritorio != "" && err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.TokenEscritorio)) == 1
 }
 
-// GET /api/escritorio/google/trabajo: Electron recoge la siguiente página que cargar (espera hasta 25 s; 204 si no hay).
+// GET /api/escritorio/google/trabajo: Electron recoge la siguiente descarga (espera hasta 25 s; 204 si no hay).
 func (s *Servidor) googleTrabajo(w http.ResponseWriter, r *http.Request) {
 	if !s.esElectron(r) || s.Google == nil {
 		jsonError(w, http.StatusForbidden, "solo para la app de escritorio")
@@ -41,10 +45,10 @@ func (s *Servidor) googleTrabajo(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, j)
 }
 
-// maxResultadoGoogle: lo que puede ocupar un resultado (el texto ya viene recortado).
-const maxResultadoGoogle = 16 << 20
+// maxResultadoGoogle: lo que puede ocupar un resultado (el fichero descargado, en base64, y poco más).
+const maxResultadoGoogle = gbrowser.MaxDownload*4/3 + 1<<20
 
-// POST /api/escritorio/google/resultado: Electron entrega lo leído.
+// POST /api/escritorio/google/resultado: Electron entrega lo descargado.
 func (s *Servidor) googleResultado(w http.ResponseWriter, r *http.Request) {
 	if !s.esElectron(r) || s.Google == nil {
 		jsonError(w, http.StatusForbidden, "solo para la app de escritorio")
@@ -58,79 +62,59 @@ func (s *Servidor) googleResultado(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]bool{"esperado": s.Google.Bridge.Deliver(res)})
 }
 
-// driveOrden: buscar | listar | leer (pgo drive), con los parámetros de la URL. Responde el texto compacto (el que
-// ve el agente) y, en búsquedas y listados, los ficheros.
+// driveOrden: leer (pgo drive leer <enlace o id>), con los parámetros de la URL. Responde el texto compacto (el que
+// ve el agente). Lo que no es texto (un PDF, una imagen…) se guarda en .pgocode/salidas de la carpeta del agente
+// (si es del proyecto) y se le da la ruta.
 func (s *Servidor) driveOrden(w http.ResponseWriter, r *http.Request, orden string) {
 	if s.Google == nil {
 		jsonError(w, http.StatusServiceUnavailable, gbrowser.ErrNoDesktop.Error())
 		return
 	}
-	q := r.URL.Query()
-	proyecto, _ := strconv.Atoi(q.Get("proyecto"))
-	max, _ := strconv.Atoi(q.Get("max"))
-	var fs []gbrowser.File
-	var err error
-	switch orden {
-	case "buscar":
-		fs, err = s.Google.Search(r.Context(), proyecto, gbrowser.SearchParams{Text: q.Get("q"), Folder: q.Get("carpeta"), Type: q.Get("tipo"), Max: max})
-	case "listar":
-		fs, err = s.Google.List(r.Context(), proyecto, q.Get("carpeta"), max)
-	case "leer":
-		var c gbrowser.Content
-		c, err = s.Google.Read(r.Context(), proyecto, gbrowser.ReadParams{Ref: q.Get("ref"), Sheet: q.Get("hoja"), Range: q.Get("rango"), Max: max})
-		if err == nil {
-			jsonOK(w, map[string]any{"texto": gbrowser.FormatContent(c), "recortado": c.Truncated})
-			return
-		}
-	default:
+	if orden != "leer" {
 		jsonError(w, http.StatusNotFound, "orden desconocida")
 		return
 	}
+	q := r.URL.Query()
+	proyecto, _ := strconv.Atoi(q.Get("proyecto"))
+	max, _ := strconv.Atoi(q.Get("max"))
+	p := gbrowser.ReadParams{Ref: q.Get("ref"), Sheet: q.Get("hoja"), Range: q.Get("rango"), Max: max}
+	if dir := q.Get("carpeta"); filepath.IsAbs(dir) && s.dentroDelProyecto(proyecto, dir) {
+		p.SaveDir = procesos.DirRegistros(dir)
+	}
+	c, err := s.Google.Read(r.Context(), proyecto, p)
 	if err != nil {
 		s.googleFalla(w, proyecto, err)
 		return
 	}
-	jsonOK(w, map[string]any{"texto": gbrowser.FormatFiles(fs), "ficheros": fs})
+	if c.Path != "" {
+		excluyeDeGit(q.Get("carpeta"))
+	}
+	jsonOK(w, map[string]any{"texto": gbrowser.FormatContent(c), "recortado": c.Truncated})
 }
 
-// gmailOrden: buscar (q) | listar (lo reciente de la bandeja de entrada) | leer (ref: un hilo), solo lectura. En el
-// registro, solo la orden, cuántos correos y cuánto ha tardado: nunca la consulta, los identificadores ni el contenido.
+// gmailOrden: leer (ref: el enlace de un correo), solo lectura. En el registro, solo la orden y cuánto ha tardado:
+// nunca el enlace ni el contenido.
 func (s *Servidor) gmailOrden(w http.ResponseWriter, r *http.Request, orden string) {
 	if s.Google == nil {
 		jsonError(w, http.StatusServiceUnavailable, gbrowser.ErrNoDesktop.Error())
+		return
+	}
+	if orden != "leer" {
+		jsonError(w, http.StatusNotFound, "orden desconocida")
 		return
 	}
 	q := r.URL.Query()
 	proyecto, _ := strconv.Atoi(q.Get("proyecto"))
 	max, _ := strconv.Atoi(q.Get("max"))
 	t0 := time.Now()
-	var res map[string]any
-	var n int
-	var err error
-	switch orden {
-	case "buscar", "listar":
-		var l gbrowser.MailList
-		if orden == "buscar" {
-			l, err = s.Google.SearchMail(r.Context(), proyecto, q.Get("q"), max)
-		} else {
-			l, err = s.Google.RecentMail(r.Context(), proyecto, max)
-		}
-		n, res = len(l.Mails), map[string]any{"texto": gbrowser.FormatMails(l), "correos": l.Mails, "hay_mas": l.More}
-	case "leer":
-		var c gbrowser.MailContent
-		c, err = s.Google.ReadMail(r.Context(), proyecto, q.Get("ref"), max)
-		n, res = len(c.Messages), map[string]any{"texto": gbrowser.FormatMailContent(c), "recortado": c.Truncated}
-	default:
-		jsonError(w, http.StatusNotFound, "orden desconocida")
-		return
-	}
+	c, err := s.Google.ReadMail(r.Context(), proyecto, q.Get("ref"), max)
 	if err != nil {
-		log.Printf("gmail: %s falla tras %s", orden, time.Since(t0).Round(time.Millisecond))
+		log.Printf("gmail: leer falla tras %s", time.Since(t0).Round(time.Millisecond))
 		s.googleFalla(w, proyecto, err)
 		return
 	}
-	log.Printf("gmail: %s · %d correos · %s", orden, n, time.Since(t0).Round(time.Millisecond))
-	jsonOK(w, res)
+	log.Printf("gmail: leer · %s", time.Since(t0).Round(time.Millisecond))
+	jsonOK(w, map[string]any{"texto": gbrowser.FormatMailContent(c), "recortado": c.Truncated})
 }
 
 // googleFalla responde el error; si falta la sesión de Google, abre accounts.google.com en el panel Web del
@@ -165,10 +149,8 @@ func googleStatus(err error) int {
 	switch {
 	case errors.Is(err, gbrowser.ErrNoDesktop), errors.Is(err, gbrowser.ErrLogin):
 		return http.StatusServiceUnavailable
-	case errors.Is(err, gbrowser.ErrNoAccess):
-		return http.StatusForbidden
-	case errors.Is(err, gbrowser.ErrNotFound), errors.Is(err, gbrowser.ErrMailNotFound):
-		return http.StatusNotFound
+	case errors.Is(err, gbrowser.ErrNoDownload):
+		return http.StatusBadGateway
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout
 	}

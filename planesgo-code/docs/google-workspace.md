@@ -1,87 +1,88 @@
-# Google en pgocode (Drive, Docs, Sheets, Slides y Gmail, solo lectura)
+# Google en pgocode (Drive, Docs, Sheets, Slides y Gmail, solo lectura y solo por enlace)
 
-pgocode y sus agentes pueden **buscar, listar y leer** en Google Drive, Docs, Sheets, Slides y **Gmail** con la
-sesión de Google que el usuario tenga abierta **en el navegador integrado de pgocode** (el panel Web). No hay nada que
-configurar: ni Propiedades, ni cliente OAuth, ni `gcloud`. Basta con iniciar sesión en Google una vez en el panel Web,
-como en cualquier navegador.
+pgocode y sus agentes pueden **leer por su enlace** ficheros de Google Drive, Docs, Sheets y Slides y **correos de
+Gmail**, con la sesión de Google que el usuario tenga abierta **en el navegador integrado de pgocode** (el panel Web).
+Leer es **descargar el fichero por su enlace de descarga**, como «Archivo → Descargar»: **nunca se carga ni se lee
+una página de Google** (ni su texto ni su DOM). Por eso no hay búsquedas ni listados (necesitarían leer páginas):
+el usuario pega el enlace. No hay nada que configurar: ni Propiedades, ni cliente OAuth, ni `gcloud`.
 
 ## Cómo se usa
 
-1. Abrir el panel **Web** de un proyecto, ir a `accounts.google.com` (o a `drive.google.com`) e iniciar sesión.
-   Si un agente pide algo de Google sin sesión, pgocode abre ahí mismo `accounts.google.com` (como mucho cada 2
-   minutos por proyecto) y el agente recibe «inicia sesión en Google en el panel Web de pgocode».
-2. Pedirle al agente lo que sea («resume el documento https://docs.google.com/document/d/…», «busca en Drive el
-   informe de ventas», «¿qué me ha escrito Ana esta semana?»).
+1. Abrir el panel **Web** de un proyecto, ir a `accounts.google.com` e iniciar sesión (una vez, como en cualquier
+   navegador). Si un agente pide algo de Google sin sesión, pgocode abre ahí mismo `accounts.google.com` (como mucho
+   cada 2 minutos por proyecto) y el agente recibe «inicia sesión en Google en el panel Web de pgocode».
+2. Pegarle al agente el enlace («resume https://docs.google.com/document/d/…», «¿qué dice este correo?
+   https://mail.google.com/mail/u/0/#inbox/FMfcgz…»).
 
 La sesión del navegador es la del panel Web **del proyecto** (cada proyecto tiene la suya: `persist:navegador-<id>`).
 Si en la del proyecto no hay sesión de Google, pgocode prueba las de los demás proyectos (la más reciente primero, 4
 como mucho) y recuerda la primera que funciona; así basta con iniciar sesión en uno.
 
-## Cómo funciona (lo hace el navegador, como lo haría el usuario)
+## Cómo funciona (descargas, como las haría el usuario)
 
-- El agente pide con `pgo drive …` o `pgo gmail …`. El backend (Go, `internal/gbrowser`) decide qué página cargar y
-  se la pide a la app de escritorio por un canal local: Electron (`electron/googleReader.js`) pregunta al backend si
-  hay trabajo (`GET /api/escritorio/google/trabajo`, espera hasta 25 s) y entrega lo leído
-  (`POST /api/escritorio/google/resultado`), los dos con la cookie secreta de la app de escritorio
-  (`pgo_escritorio`); ni el agente ni la interfaz pueden usar ese canal.
-- Electron carga la página en una **ventana oculta** con la misma sesión que el panel Web y devuelve **el texto de la
-  página** (guiones fijos que solo leen el DOM) o, si la página es una exportación que el navegador descarga, el texto
-  de ese fichero (se guarda en una carpeta temporal, se lee y se borra; solo las descargas de esas ventanas: las del
-  panel Web siguen igual).
+- El agente pide con `pgo drive leer` o `pgo gmail leer`. El backend (Go, `internal/gbrowser`) decide qué **enlace
+  de descarga** pedir y se lo pasa a la app de escritorio por un canal local: Electron (`electron/googleReader.js`)
+  pregunta al backend si hay trabajo (`GET /api/escritorio/google/trabajo`, espera hasta 25 s) y entrega el fichero
+  descargado (`POST /api/escritorio/google/resultado`, en base64), los dos con la cookie secreta de la app de
+  escritorio (`pgo_escritorio`); ni el agente ni la interfaz pueden usar ese canal.
+- Electron crea una **ventana oculta** con la misma sesión que el panel Web, **sin cargar ninguna página** (sin
+  JavaScript, sin navegación: `will-navigate` se bloquea) y descarga el enlace con `webContents.downloadURL`. El
+  fichero va a una carpeta temporal, se lee entero y se borra (solo las descargas de esas ventanas: las del panel Web
+  siguen igual). Como mucho 20 MB.
+- **Sin sesión**: se sabe por las URL de la descarga (la cadena de redirecciones lleva a `accounts.google.com`), sin
+  leer nada de la página.
+- **Lo que no es una descarga no se lee**: si Google responde con un error (4xx: sin acceso, no existe, no es de ese
+  tipo; Electron la deja «interrupted») o con una página en vez del fichero (HTML sin `Content-Disposition:
+  attachment`: «solicitar acceso», aviso de virus de los ficheros grandes…), el agente recibe «no se ha podido
+  descargar: ¿tienes acceso a ese fichero? ¿has iniciado sesión en Google en el panel Web de pgocode?».
 - **Límites**: pgocode no lee, copia, exporta ni reutiliza cookies, tokens ni cabeceras de autenticación, y no hace
-  peticiones por su cuenta (nada de `net.request`, `session.fetch` ni `session.cookies`): solo navega. Los guiones no
-  hacen clic ni escriben en ningún formulario. La ventana oculta solo carga páginas de Google por https (`*.google.com`,
-  `*.googleusercontent.com`); si una página lleva a otro sitio, se para. Sin ventanas nuevas, sin sonido.
+  peticiones por su cuenta (nada de `net.request`, `session.fetch` ni `session.cookies`): solo descarga el enlace. Sin
+  clics, sin ventanas nuevas, sin sonido. Solo enlaces de Google por https (`*.google.com`, `*.googleusercontent.com`);
+  si la descarga acaba fuera de Google, se descarta.
 - El navegador se anuncia como Chrome (sin «Electron/…»), porque Google no deja iniciar sesión en navegadores que se
   anuncian como integrados.
 - En modo navegador (`pgocode -navegador`, sin Electron) no está disponible y se dice: «Google se lee a través del
   navegador integrado de la aplicación de escritorio de pgocode…».
 
-Qué página carga cada cosa:
+Qué enlace se descarga en cada caso:
 
-| Orden | Página |
-|---|---|
-| `pgo drive leer` de un Doc | `docs.google.com/document/d/<id>/export?format=md` (si no da un fichero, `format=txt` y, si tampoco, `…/mobilebasic`) |
-| de una hoja de cálculo | las pestañas, de `…/spreadsheets/d/<id>/htmlview`; cada hoja, `…/export?format=csv&gid=<gid>[&range=A1:D20]` |
-| de una presentación | `…/presentation/d/<id>/export/txt` |
-| de una carpeta | `drive.google.com/drive/folders/<id>` (como `listar`) |
-| un ID suelto | antes, `drive.google.com/open?id=<id>`, solo para ver a qué tipo de página lleva |
-| `pgo drive buscar` | `drive.google.com/drive/search?q=<texto> [type:document…]`; con `--carpeta`, el listado de la carpeta filtrado por nombre |
-| `pgo drive listar` | `drive.google.com/drive/my-drive` o la carpeta |
-| `pgo gmail buscar` / `listar` | `mail.google.com/mail/u/0/#search/<consulta>` / `#inbox` (las filas de la lista) |
-| `pgo gmail leer` | la vista de impresión del hilo, `mail.google.com/mail/u/0/?ui=2&view=pt&search=all&th=<id>` |
+| Qué | Enlace de descarga | Se lee como |
+|---|---|---|
+| Un Doc | `docs.google.com/document/d/<id>/export?format=md` (si no se descarga, `format=txt`) | Markdown (o texto) |
+| Una hoja de cálculo | `…/spreadsheets/d/<id>/export?format=xlsx` (el libro entero) | CSV por pestañas (lector XLSX propio en Go) |
+| La hoja de un enlace con `#gid=` (sin `--hoja`) | `…/export?format=csv&gid=<gid>[&range=A1:D20]` | CSV |
+| Una presentación | `…/presentation/d/<id>/export/txt` | texto |
+| Un fichero de Drive (PDF, Word, Excel, texto…) | `drive.google.com/uc?export=download&id=<id>` (Google lo lleva a `drive.usercontent.google.com`) | texto, Word (DOCX) y Excel (XLSX) en texto/CSV, `.eml` como correo; lo demás (PDF, imágenes, ZIP…) se guarda en `.pgocode/salidas/` de la carpeta del agente y se da su ruta, tipo y tamaño |
+| Un ID suelto | se prueban, en orden, Doc (md, txt), hoja (xlsx), presentación (txt) y fichero (uc): el primero que se descarga | según lo descargado |
+| Un correo de Gmail | `mail.google.com/mail/u/<n>/?ui=2&view=att&th=<id>&attid=0&disp=comp&safe=1&zw` (el mensaje original, como «Descargar mensaje») | el MIME en Go: texto (o el HTML pasado a texto) sin lo citado; adjuntos solo como nombre, tipo y tamaño |
 
-Las búsquedas y listados de Drive y de Gmail se leen del DOM de sus páginas (filas con `data-id` en Drive; `tr.zA`,
-`.bog`, `.y2`… en Gmail). Esas páginas no son una API: si Google cambia su maquetación, puede que haya que retocar
-los guiones de `electron/googleReader.js`. Leer por URL o ID (las exportaciones) es lo más estable.
+- **Hojas de cálculo**: el XLSX se lee con `archive/zip` y `encoding/xml` (sin dependencias): nombres de las hojas,
+  textos compartidos y en línea, números, booleanos y fechas/horas (por el formato de número de la celda). Así se
+  saben los nombres de las pestañas sin leer `htmlview`. `--hoja` elige por nombre o número y `--rango` se aplica
+  aquí (A1:D20, B2, A:C, 2:10).
+- **Carpetas**: no se pueden descargar; se dice que se pida el enlace de un fichero.
+- **Gmail**: el enlace es el de la barra de direcciones (`…/mail/u/0/#inbox/FMfcgz…`, o el ID hexadecimal antiguo,
+  o `?th=…`, o `permmsgid=msg-f:…`). Los ID nuevos (`FMfcgz…`) son el texto `f:<número>` en base64, escrito en base
+  40 con consonantes; se decodifican aquí y el número, en hexadecimal, es el ID del mensaje. Se descarga **un
+  mensaje**: el del enlace (en un hilo, el primero). Los de enviados y borradores (`thread-a:…`) no valen. Gmail se
+  descarga con la sesión del navegador; si su URL de descarga necesitara el `ik` de la cuenta (que solo está en la
+  página), no funcionaría: no se ha podido comprobar sin una cuenta.
 
 ## Uso (agentes)
 
-El uso se les añade solo al mensaje que menciona Drive, Docs, Sheets, «documento de Google» o una URL de
+El uso se les añade solo al mensaje que menciona Drive, Docs, Sheets, «documento de Google» o un enlace de
 docs.google.com (y el de Gmail, al que habla del correo, el email, Gmail, la bandeja o el buzón):
 
 ```sh
-pgo drive buscar <texto> [--tipo doc|hoja|presentacion|pdf|carpeta|imagen] [--carpeta <id|url>] [--max N]
-pgo drive listar [<carpeta id|url>]          # sin carpeta: «Mi unidad»
-pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
-pgo gmail buscar <consulta de Gmail> [--max N]   # from:ana newer_than:7d, subject:factura has:attachment, is:unread…
-pgo gmail listar [--max N]                       # lo más reciente de la bandeja de entrada
-pgo gmail leer <id de hilo> [--max N]
+pgo drive leer <enlace o id> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
+pgo gmail leer <enlace del correo> [--max N]
 ```
 
-- Acepta IDs y URLs de Drive, Docs, Sheets y Slides (la hoja del `#gid=` de una URL de Sheets también).
-- Búsquedas y listados: una línea por fichero, `[tipo] nombre · fecha · id` (lo que enseña Drive; 30 por defecto,
-  100 como mucho).
-- Lectura: Docs en Markdown (o texto), Sheets en CSV (todas las hojas, una con `--hoja`, un rango con `--rango`),
-  Slides en texto, carpetas como listado; de los demás ficheros (PDF, imágenes…), solo el enlace.
-- Recorte: 40 000 caracteres por defecto (`--max` hasta 200 000), con un aviso al final de cómo pedir menos.
-- Gmail: dos líneas por correo, `fecha · remitente · asunto · id · no leído` y el fragmento (20 por defecto, 50
-  como mucho); `leer` da el hilo, cada mensaje sin lo citado de los anteriores, recortado a 20 000 caracteres
-  repartidos entre los mensajes. El ID es el del hilo (el que da `buscar`/`listar`, o el hexadecimal de una URL
-  antigua `#inbox/<id>`).
-- **Privacidad del correo**: solo se lee cuando se pide; nada se guarda; el registro del backend dice solo la orden,
-  cuántos correos y cuánto ha tardado (`gmail: buscar · 12 correos · 840ms`). Nada de enviar, borrar, archivar ni
-  etiquetar. Abrir un hilo en la vista web de Gmail puede marcarlo como leído, como cuando lo abre el usuario.
+- Recorte: 40 000 caracteres por defecto en Drive y 20 000 en Gmail (`--max` hasta 200 000), con un aviso al final.
+- Salida compacta: una cabecera `# nombre [tipo · formato · id]` y el texto; en Gmail, `# asunto [correo <id>]`,
+  `De:`, `Para:`, `Cc:`, `Fecha:`, el texto y `Adjuntos: nombre (tipo, tamaño); …`.
+- **Privacidad del correo**: solo se lee cuando se pide y con su enlace; nada se guarda; el registro del backend dice
+  solo la orden y cuánto ha tardado (`gmail: leer · 840ms`). Nada de enviar, borrar, archivar ni etiquetar.
 
 ## Lo de antes (OAuth)
 
@@ -93,11 +94,13 @@ https://myaccount.google.com/permissions («PlanesGo»).
 
 ## Código y pruebas
 
-- `internal/gbrowser` (canal con Electron, qué página cargar, formato compacto, Gmail, borrado de lo de antes),
-  `internal/servidor/google.go` (rutas del canal y de `pgo drive|gmail`), `electron/googleReader.js` (ventana
-  oculta, descargas, guiones de lectura, sesiones), `cmd/pgocode/pgo.go`, `internal/llm/pgohint.go` (aviso).
-- `go test ./internal/gbrowser ./internal/servidor -run 'Google|Bridge|Read|Search|Gmail|OAuth'` (con un Electron
-  simulado) y `node --test electron/*.test.js` (con una ventana simulada).
+- `internal/gbrowser` (canal con Electron, qué enlace descargar, lectura de XLSX/DOCX/EML, formato compacto, borrado
+  de lo de antes), `internal/servidor/google.go` (rutas del canal y de `pgo drive|gmail leer`),
+  `electron/googleReader.js` (ventana oculta, descargas, sesiones), `cmd/pgocode/pgo.go`, `internal/llm/pgohint.go`
+  (aviso).
+- `go test ./internal/gbrowser ./internal/servidor -run 'Google|Bridge|Read|Mail|Parse|HTML|OAuth'` (con un Electron
+  simulado y descargas simuladas: md, txt, csv, xlsx con varias hojas, docx, eml, PDF, páginas de error, sesión) y
+  `node --test electron/*.test.js` (con una ventana simulada que solo descarga).
 - Para probar la app de escritorio sin Google: `PGO_GOOGLE_PRUEBA=http://127.0.0.1:<puerto>` (en el entorno de
-  Electron, que se lo pasa al backend) hace que el backend pida las páginas a ese servidor local en lugar de a Google
-  y que la ventana oculta lo acepte.
+  Electron, que se lo pasa al backend) hace que el backend pida las descargas a ese servidor local en lugar de a
+  Google y que la ventana oculta lo acepte.

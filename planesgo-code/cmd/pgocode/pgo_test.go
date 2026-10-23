@@ -23,51 +23,31 @@ func TestFinishedLine(t *testing.T) {
 	}
 }
 
-func TestDriveQuery(t *testing.T) {
+func TestGoogleQuery(t *testing.T) {
 	for _, c := range []struct {
-		args  []string
-		orden string
-		want  string
+		service string
+		args    []string
+		want    string
 	}{
-		{[]string{"buscar", "informe", "trimestral", "--tipo", "doc"}, "buscar", "q=informe+trimestral&tipo=doc"},
-		{[]string{"buscar", "--tipo=hoja", "ventas"}, "buscar", "q=ventas&tipo=hoja"},
-		{[]string{"listar"}, "listar", ""},
-		{[]string{"listar", "https://drive.google.com/drive/folders/1AbCdEfGhIjK"}, "listar", "carpeta=https%3A%2F%2Fdrive.google.com%2Fdrive%2Ffolders%2F1AbCdEfGhIjK"},
-		{[]string{"leer", "1AbCdEfGhIjK", "--hoja", "Ventas", "--rango", "A1:D20", "--max", "5000"}, "leer", "hoja=Ventas&max=5000&rango=A1%3AD20&ref=1AbCdEfGhIjK"},
+		{"drive", []string{"leer", "1AbCdEfGhIjK", "--hoja", "Ventas", "--rango", "A1:D20", "--max", "5000"}, "hoja=Ventas&max=5000&rango=A1%3AD20&ref=1AbCdEfGhIjK"},
+		{"drive", []string{"leer", "--hoja=2", "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjK/edit"}, "hoja=2&ref=https%3A%2F%2Fdocs.google.com%2Fspreadsheets%2Fd%2F1AbCdEfGhIjK%2Fedit"},
+		{"gmail", []string{"leer", "https://mail.google.com/mail/u/0/#inbox/FMfcgz"}, "ref=https%3A%2F%2Fmail.google.com%2Fmail%2Fu%2F0%2F%23inbox%2FFMfcgz"},
+		{"gmail", []string{"leer", "https://mail.google.com/mail/u/0/#inbox/x", "--max", "3000"}, "max=3000&ref=https%3A%2F%2Fmail.google.com%2Fmail%2Fu%2F0%2F%23inbox%2Fx"},
 	} {
-		o, q, err := driveQuery(c.args)
-		if err != nil || o != c.orden || q.Encode() != c.want {
-			t.Errorf("%v: %s %s %v", c.args, o, q.Encode(), err)
+		q, err := googleQuery(c.service, c.args)
+		if err != nil || q.Encode() != c.want {
+			t.Errorf("%s %v: %s %v", c.service, c.args, q.Encode(), err)
 		}
 	}
-	for _, bad := range [][]string{nil, {"borrar", "x"}, {"buscar"}, {"leer"}, {"leer", "a", "b"}, {"leer", "x", "--hoja"}, {"buscar", "x", "--escribir"}} {
-		if _, _, err := driveQuery(bad); err == nil {
-			t.Errorf("%v debería fallar", bad)
+	for _, bad := range [][]string{nil, {"buscar", "x"}, {"listar"}, {"borrar", "x"}, {"leer"}, {"leer", "a", "b"}, {"leer", "x", "--hoja"},
+		{"leer", "x", "--escribir"}, {"leer", "x", "--max", "mucho"}} {
+		if _, err := googleQuery("drive", bad); err == nil {
+			t.Errorf("drive %v debería fallar", bad)
 		}
 	}
-}
-
-func TestGmailQuery(t *testing.T) {
-	for _, c := range []struct {
-		args  []string
-		orden string
-		want  string
-	}{
-		{[]string{"buscar", "from:ana@x.com", "newer_than:7d"}, "buscar", "q=from%3Aana%40x.com+newer_than%3A7d"},
-		{[]string{"buscar", "subject:factura", "--max=5"}, "buscar", "max=5&q=subject%3Afactura"},
-		{[]string{"listar", "--max", "10"}, "listar", "max=10"},
-		{[]string{"leer", "18f0a1b2c3d4e5f6"}, "leer", "ref=18f0a1b2c3d4e5f6"},
-		{[]string{"leer", "18f0a1b2c3d4e5f6", "--max", "3000"}, "leer", "max=3000&ref=18f0a1b2c3d4e5f6"},
-	} {
-		o, q, err := gmailQuery(c.args)
-		if err != nil || o != c.orden || q.Encode() != c.want {
-			t.Errorf("%v: %s %s %v", c.args, o, q.Encode(), err)
-		}
-	}
-	for _, bad := range [][]string{nil, {"enviar", "x"}, {"borrar", "x"}, {"buscar"}, {"leer"}, {"leer", "a", "b"},
-		{"listar", "x"}, {"buscar", "x", "--max"}, {"buscar", "x", "--max", "mucho"}, {"leer", "18f0a1b2c3d4e5f6", "--mensaje"}, {"buscar", "x", "--marcar"}} {
-		if _, _, err := gmailQuery(bad); err == nil {
-			t.Errorf("%v debería fallar", bad)
+	for _, bad := range [][]string{{"buscar", "from:ana"}, {"listar"}, {"leer", "x", "--hoja", "y"}, {"enviar", "x"}} {
+		if _, err := googleQuery("gmail", bad); err == nil {
+			t.Errorf("gmail %v debería fallar", bad)
 		}
 	}
 }

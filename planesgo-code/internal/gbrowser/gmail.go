@@ -1,129 +1,168 @@
 package gbrowser
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
+	"io"
+	"math/big"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
+	"net/mail"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
-// Gmail, leído de su vista web como lo leería el usuario: la bandeja o una búsqueda (las filas de la lista) y un
-// hilo (su vista de impresión). Nada de clics: no se envía, borra, archiva ni etiqueta nada.
+// Gmail, solo por ENLACE a un correo: se descarga el mensaje original (.eml, como «Descargar mensaje» del menú del
+// correo) y se lee aquí su MIME: el texto (o el HTML pasado a texto) sin lo citado y los adjuntos solo como nombre,
+// tipo y tamaño. No se carga ninguna página de Gmail: ni la bandeja, ni búsquedas, ni el hilo.
 
 // Límites de Gmail (lo leído va al contexto de un agente).
-const (
-	DefaultMaxMails     = 20
-	MaxMails            = 50
-	DefaultMaxMailChars = 20_000 // ~5k tokens por lectura
-	minMailChars        = 600    // lo mínimo de cada mensaje de un hilo largo
-	snippetChars        = 140
-)
+const DefaultMaxMailChars = 20_000 // ~5k tokens por lectura
 
-// ErrMailNotFound: Gmail no encuentra el hilo.
-var ErrMailNotFound = errors.New("no existe ese hilo de Gmail o tu cuenta de Google (la del navegador de pgocode) no lo ve")
-
-// Mail: un correo de la lista (lo que enseña su fila).
-type Mail struct {
-	ID      string `json:"id"` // el del hilo (el que lleva la URL de Gmail)
-	From    string `json:"from"`
-	Subject string `json:"subject"`
-	Date    string `json:"date"`
-	Snippet string `json:"snippet,omitempty"`
-	Unread  bool   `json:"unread,omitempty"`
-}
-
-// MailList: una búsqueda o la bandeja.
-type MailList struct {
-	Mails []Mail
-	More  bool // había más filas que las pedidas
-}
-
-// MailContent: un hilo.
+// MailContent: un correo.
 type MailContent struct {
-	ID        string
-	Subject   string
-	Messages  []string // el texto de cada mensaje (sin lo citado de los anteriores)
-	Truncated bool
+	ID          string
+	Subject     string
+	From        string
+	To          string
+	Cc          string
+	Date        string
+	Text        string
+	Attachments []Attachment
+	Truncated   bool
+	Total       int
 }
 
-func clampMails(n int) int {
-	if n <= 0 {
-		return DefaultMaxMails
-	}
-	return min(n, MaxMails)
-}
-
-// mailBase: la cuenta de Gmail (la primera sesión del navegador).
-func (r *Reader) mailBase() string { return r.Bases.Mail + "/mail/u/0/" }
-
-// SearchMail: los correos de una búsqueda con la sintaxis de Gmail (from:ana newer_than:7d…).
-func (r *Reader) SearchMail(ctx context.Context, project int, query string, max int) (MailList, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return MailList{}, errors.New("di qué buscar (con la sintaxis de Gmail: from:ana newer_than:7d…)")
-	}
-	return r.listMail(ctx, project, r.mailBase()+"#search/"+url.PathEscape(query), max)
-}
-
-// RecentMail: lo más reciente de la bandeja de entrada.
-func (r *Reader) RecentMail(ctx context.Context, project int, max int) (MailList, error) {
-	return r.listMail(ctx, project, r.mailBase()+"#inbox", max)
-}
-
-func (r *Reader) listMail(ctx context.Context, project int, u string, max int) (MailList, error) {
-	max = clampMails(max)
-	res, err := r.load(ctx, project, Job{URL: u, Mode: ModeGmailList, MaxChars: 1000})
-	if err != nil {
-		return MailList{}, err
-	}
-	var l MailList
-	for _, it := range res.Items {
-		if it.ID == "" {
-			continue
-		}
-		if len(l.Mails) == max {
-			l.More = true
-			break
-		}
-		l.Mails = append(l.Mails, Mail{ID: it.ID, From: clean(it.From), Subject: clean(it.Name), Date: clean(it.Date),
-			Snippet: strings.TrimLeft(clean(it.Snippet), "- –"), Unread: it.Unread})
-	}
-	return l, nil
+// Attachment: un adjunto (no se descarga aparte ni se lee).
+type Attachment struct {
+	Name string
+	Type string
+	Size int
 }
 
 var (
-	reMailHexID = regexp.MustCompile(`^[0-9a-fA-F]{12,24}$`)
-	reMailNewID = regexp.MustCompile(`^[A-Za-z]{6,}[A-Za-z0-9]{10,}$`)
+	reMailHexID   = regexp.MustCompile(`^[0-9a-fA-F]{12,24}$`)
+	reMailToken   = regexp.MustCompile(`^[B-DF-HJ-NP-TV-XZb-df-hj-np-tv-xz]{16,}$`)
+	reMailAccount = regexp.MustCompile(`^/mail/u/(\d+)/?`)
+	reMsgF        = regexp.MustCompile(`^(?:thread-|msg-)?f:(\d{1,20})$`)
 )
 
-// ParseMailRef: el ID de un hilo (tal cual, el que da «pgo gmail buscar», o al final de una URL de Gmail con el
-// ID hexadecimal, #inbox/<id>).
-func ParseMailRef(ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if reMailHexID.MatchString(ref) {
-		return strings.ToLower(ref), nil
-	}
-	if u, err := url.Parse(ref); err == nil && u.Hostname() == "mail.google.com" {
-		f := u.Fragment
-		if i := strings.LastIndexByte(f, '/'); i >= 0 {
-			f = f[i+1:]
-		}
-		if reMailHexID.MatchString(f) {
-			return strings.ToLower(f), nil
-		}
-		if reMailNewID.MatchString(f) {
-			return "", errors.New("esa URL de Gmail no lleva el ID que se lee aquí: busca el correo con «pgo gmail buscar» y usa su ID")
-		}
-	}
-	return "", fmt.Errorf("no es el ID de un hilo de Gmail (el que da «pgo gmail buscar»): %q", ref)
+// mailLink: la cuenta (/mail/u/N) y el ID hexadecimal del mensaje de un enlace de Gmail.
+type mailLink struct {
+	Account string
+	ID      string
 }
 
-// ReadMail lee un hilo (su vista de impresión): cada mensaje sin lo citado de los anteriores.
-func (r *Reader) ReadMail(ctx context.Context, project int, ref string, max int) (MailContent, error) {
-	id, err := ParseMailRef(ref)
+// ParseMailLink: el mensaje de un enlace de Gmail: …/mail/u/0/#inbox/<id> (el ID nuevo, FMfcgz…, o el
+// hexadecimal antiguo), …?th=<id> o …?permmsgid=msg-f:<n>.
+func ParseMailLink(link string) (mailLink, error) {
+	link = strings.TrimSpace(link)
+	u, err := url.Parse(link)
+	if err != nil || u.Scheme != "https" || u.Hostname() != "mail.google.com" {
+		return mailLink{}, fmt.Errorf("no es un enlace de Gmail (https://mail.google.com/mail/u/0/#inbox/…): %q", link)
+	}
+	l := mailLink{Account: "0"}
+	if m := reMailAccount.FindStringSubmatch(u.Path); m != nil {
+		l.Account = m[1]
+	}
+	q := u.Query()
+	if th := q.Get("th"); reMailHexID.MatchString(th) {
+		l.ID = strings.ToLower(th)
+		return l, nil
+	}
+	if id, ok := decimalID(q.Get("permmsgid")); ok {
+		l.ID = id
+		return l, nil
+	}
+	f := u.Fragment
+	if i := strings.IndexByte(f, '?'); i >= 0 {
+		f = f[:i]
+	}
+	if i := strings.LastIndexByte(f, '/'); i >= 0 {
+		f = f[i+1:]
+	}
+	switch {
+	case reMailHexID.MatchString(f):
+		l.ID = strings.ToLower(f)
+		return l, nil
+	case reMailToken.MatchString(f):
+		if id, ok := decimalID(decodeMailToken(f)); ok {
+			l.ID = id
+			return l, nil
+		}
+		return mailLink{}, errors.New("ese enlace de Gmail no lleva un ID de mensaje que se pueda descargar (los de enviados y " +
+			"borradores no valen): abre el correo desde la bandeja o una búsqueda y copia ese enlace")
+	}
+	return mailLink{}, errors.New("el enlace no lleva el correo: ábrelo en Gmail y copia el enlace de la barra de direcciones " +
+		"(…/mail/u/0/#inbox/<id>)")
+}
+
+// decimalID: «thread-f:1777…», «msg-f:1777…» o «f:1777…» → el ID hexadecimal.
+func decimalID(s string) (string, bool) {
+	m := reMsgF.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return "", false
+	}
+	n, err := strconv.ParseUint(m[1], 10, 64)
+	if err != nil || n == 0 {
+		return "", false
+	}
+	return strconv.FormatUint(n, 16), true
+}
+
+// Los ID nuevos de las URL de Gmail (FMfcgz…, KtbxL…) son el texto «f:<número>» (o «a:r-…») en base64, escrito
+// como número en base 40 con solo consonantes.
+const (
+	mailTokenChars = "BCDFGHJKLMNPQRSTVWXZbcdfghjklmnpqrstvwxz"
+	base64Chars    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
+
+// convertBase: s, escrito con las cifras de in, escrito con las de out.
+func convertBase(s, in, out string) string {
+	n := new(big.Int)
+	bi, bo := big.NewInt(int64(len(in))), big.NewInt(int64(len(out)))
+	for _, ch := range s {
+		n.Mul(n, bi)
+		n.Add(n, big.NewInt(int64(strings.IndexRune(in, ch))))
+	}
+	var r []byte
+	m := new(big.Int)
+	for n.Sign() > 0 {
+		n.DivMod(n, bo, m)
+		r = append(r, out[m.Int64()])
+	}
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+
+// decodeMailToken: el texto que lleva un ID nuevo de Gmail ("" si no se puede).
+func decodeMailToken(t string) string {
+	b64 := convertBase(t, mailTokenChars, base64Chars)
+	b, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(b64, "="))
+	if err != nil || !utf8.Valid(b) {
+		return ""
+	}
+	return string(b)
+}
+
+// encodeMailToken: lo contrario (para las pruebas).
+func encodeMailToken(s string) string {
+	return convertBase(base64.RawStdEncoding.EncodeToString([]byte(s)), base64Chars, mailTokenChars)
+}
+
+// ReadMail descarga el mensaje original de un enlace de Gmail (.eml) y lo lee.
+func (r *Reader) ReadMail(ctx context.Context, project int, link string, max int) (MailContent, error) {
+	l, err := ParseMailLink(link)
 	if err != nil {
 		return MailContent{}, err
 	}
@@ -131,56 +170,199 @@ func (r *Reader) ReadMail(ctx context.Context, project int, ref string, max int)
 		max = DefaultMaxMailChars
 	}
 	max = min(max, MaxMaxChars)
-	v := url.Values{"ui": {"2"}, "view": {"pt"}, "search": {"all"}, "th": {id}}
-	res, err := r.load(ctx, project, Job{URL: r.mailBase() + "?" + v.Encode(), Mode: ModeGmailPrint, MaxChars: max * 4})
-	if errors.Is(err, ErrNotFound) {
-		return MailContent{}, ErrMailNotFound
-	}
+	v := url.Values{"ui": {"2"}, "view": {"att"}, "th": {l.ID}, "attid": {"0"}, "disp": {"comp"}, "safe": {"1"}}
+	res, err := r.download(ctx, project, r.Bases.Mail+"/mail/u/"+l.Account+"/?"+v.Encode()+"&zw")
 	if err != nil {
 		return MailContent{}, err
 	}
-	c := MailContent{ID: id, Subject: clean(res.Title), Truncated: res.Truncated}
-	var msgs []string
-	for _, it := range res.Items {
-		if t := tidyText(it.Text); t != "" {
-			msgs = append(msgs, t)
-		}
+	m, err := parseEML(res.Data)
+	if err != nil {
+		return MailContent{}, fmt.Errorf("lo descargado de Gmail no es un correo: %v", err)
 	}
-	if len(msgs) == 0 {
-		if t := tidyText(res.Text); t != "" {
-			msgs = []string{t}
-		}
+	m.ID = l.ID
+	if n := utf8.RuneCountInString(m.Text); n > max {
+		m.Text, m.Truncated, m.Total = cutRunes(m.Text, max)+" […]", true, n
 	}
-	if len(msgs) == 0 {
-		return c, ErrMailNotFound
-	}
-	// Lo citado de los anteriores ya está en el hilo (el primero se deja entero).
-	for i := 1; i < len(msgs); i++ {
-		msgs[i], _ = stripQuoted(msgs[i])
-	}
-	// Reparto del máximo: los mensajes cortos enteros; lo que sobra, a partes iguales entre los largos.
-	c.Messages, c.Truncated = share(msgs, max, c.Truncated)
-	return c, nil
+	return m, nil
 }
 
-// share reparte max caracteres entre los mensajes (cada uno, al menos minMailChars si hay que recortar).
-func share(msgs []string, limit int, truncated bool) ([]string, bool) {
-	total := 0
-	for _, m := range msgs {
-		total += utf8.RuneCountInString(m)
+// ---- MIME ----
+
+var wordDecoder = &mime.WordDecoder{CharsetReader: func(cs string, in io.Reader) (io.Reader, error) {
+	b, err := io.ReadAll(in)
+	if err != nil {
+		return nil, err
 	}
-	if total <= limit {
-		return msgs, truncated
+	return strings.NewReader(charsetText(cs, b)), nil
+}}
+
+// charsetText: texto en UTF-8 (lo que no es UTF-8 ni ASCII se toma como Latin-1).
+func charsetText(cs string, b []byte) string {
+	cs = strings.ToLower(strings.TrimSpace(cs))
+	if cs == "" || cs == "utf-8" || cs == "utf8" || cs == "us-ascii" || utf8.Valid(b) && !strings.HasPrefix(cs, "iso-8859") && !strings.HasPrefix(cs, "windows-") {
+		return strings.ToValidUTF8(string(b), "")
 	}
-	each := max(limit/len(msgs), minMailChars)
-	out := make([]string, len(msgs))
-	for i, m := range msgs {
-		if utf8.RuneCountInString(m) > each {
-			m = cutRunes(m, each) + " […]"
+	return latin1(b)
+}
+
+func header(h mail.Header, k string) string {
+	v := h.Get(k)
+	if d, err := wordDecoder.DecodeHeader(v); err == nil {
+		v = d
+	}
+	return clean(v)
+}
+
+// parseEML: un correo .eml: cabeceras, el texto (sin lo citado) y los adjuntos.
+func parseEML(data []byte) (MailContent, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return MailContent{}, err
+	}
+	if msg.Header.Get("From") == "" && msg.Header.Get("Subject") == "" && msg.Header.Get("Date") == "" {
+		return MailContent{}, errors.New("sin cabeceras de correo")
+	}
+	m := MailContent{Subject: header(msg.Header, "Subject"), From: header(msg.Header, "From"), To: header(msg.Header, "To"),
+		Cc: header(msg.Header, "Cc"), Date: header(msg.Header, "Date")}
+	var w mimeWalk
+	w.part(msg.Header, msg.Body, 0)
+	text := tidyText(w.plain.String())
+	if text == "" {
+		text = htmlToText(w.html.String())
+	}
+	if t, ok := stripQuoted(text); ok {
+		text = t
+	}
+	m.Text, m.Attachments = text, w.attachments
+	return m, nil
+}
+
+// mimeWalk recorre las partes de un correo: los textos (sin nombre de fichero) y los adjuntos.
+type mimeWalk struct {
+	plain, html bytes.Buffer
+	attachments []Attachment
+}
+
+func (w *mimeWalk) part(h map[string][]string, body io.Reader, depth int) {
+	get := func(k string) string {
+		if v := h[k]; len(v) > 0 {
+			return v[0]
 		}
-		out[i] = m
+		return ""
 	}
-	return out, true
+	ct, params, err := mime.ParseMediaType(get("Content-Type"))
+	if err != nil || ct == "" {
+		ct, params = "text/plain", map[string]string{}
+	}
+	disp, dparams, _ := mime.ParseMediaType(get("Content-Disposition"))
+	name := firstNonEmpty(dparams["filename"], params["name"])
+	if d, err := wordDecoder.DecodeHeader(name); err == nil {
+		name = d
+	}
+	if strings.HasPrefix(ct, "multipart/") && depth < 10 {
+		mr := multipart.NewReader(body, params["boundary"])
+		for {
+			p, err := mr.NextRawPart()
+			if err != nil {
+				return
+			}
+			w.part(p.Header, p, depth+1)
+		}
+	}
+	data, _ := io.ReadAll(io.LimitReader(decodeTransfer(get("Content-Transfer-Encoding"), body), MaxDownload))
+	if disp == "attachment" || name != "" || ct == "message/rfc822" || !strings.HasPrefix(ct, "text/") {
+		if name == "" && ct == "message/rfc822" {
+			name = "(correo adjunto)"
+		}
+		w.attachments = append(w.attachments, Attachment{Name: firstNonEmpty(name, "(sin nombre)"), Type: ct, Size: len(data)})
+		return
+	}
+	text := charsetText(params["charset"], data)
+	switch ct {
+	case "text/html":
+		w.html.WriteString(text + "\n")
+	default:
+		w.plain.WriteString(text + "\n")
+	}
+}
+
+func decodeTransfer(cte string, r io.Reader) io.Reader {
+	switch strings.ToLower(strings.TrimSpace(cte)) {
+	case "base64":
+		return base64.NewDecoder(base64.StdEncoding, &base64Clean{r: r})
+	case "quoted-printable":
+		return quotedprintable.NewReader(r)
+	}
+	return r
+}
+
+// base64Clean: el base64 de un correo, sin los saltos de línea.
+type base64Clean struct{ r io.Reader }
+
+func (b *base64Clean) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	j := 0
+	for _, c := range p[:n] {
+		if c != '\r' && c != '\n' && c != ' ' && c != '\t' {
+			p[j] = c
+			j++
+		}
+	}
+	return j, err
+}
+
+// ---- HTML → texto ----
+
+var (
+	reTag      = regexp.MustCompile(`(?s)<!--.*?-->|<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>`)
+	reSpaces   = regexp.MustCompile(`[ \t\f\r]+`)
+	blockTags  = map[string]bool{"p": true, "div": true, "br": true, "tr": true, "li": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "table": true, "ul": true, "ol": true, "blockquote": true, "hr": true, "pre": true}
+	skipTags   = map[string]bool{"script": true, "style": true, "head": true, "title": true, "blockquote": true}
+	reQuoteCls = regexp.MustCompile(`(?i)class\s*=\s*["'][^"']*\b(?:gmail_quote|gmail_extra|moz-cite-prefix|yahoo_quoted)\b`)
+)
+
+// htmlToText: el texto de un correo en HTML (sin guiones, estilos ni lo citado: <blockquote>, .gmail_quote).
+func htmlToText(s string) string {
+	var b strings.Builder
+	skip, skipTag := 0, ""
+	last := 0
+	for _, m := range reTag.FindAllStringSubmatchIndex(s, -1) {
+		if skip == 0 {
+			b.WriteString(reSpaces.ReplaceAllString(strings.ReplaceAll(s[last:m[0]], "\n", " "), " "))
+		}
+		last = m[1]
+		if m[4] < 0 { // comentario
+			continue
+		}
+		closing, tag, attrs := s[m[2]:m[3]] == "/", strings.ToLower(s[m[4]:m[5]]), s[m[6]:m[7]]
+		if skip > 0 {
+			if tag == skipTag {
+				if closing {
+					skip--
+				} else if !strings.HasSuffix(attrs, "/") {
+					skip++
+				}
+			}
+			continue
+		}
+		if !closing && (skipTags[tag] || reQuoteCls.MatchString(attrs)) && !strings.HasSuffix(attrs, "/") {
+			skip, skipTag = 1, tag
+			continue
+		}
+		if blockTags[tag] {
+			b.WriteString("\n")
+		} else if tag == "td" || tag == "th" {
+			b.WriteString(" ")
+		}
+	}
+	if skip == 0 && last < len(s) {
+		b.WriteString(reSpaces.ReplaceAllString(strings.ReplaceAll(s[last:], "\n", " "), " "))
+	}
+	lines := strings.Split(html.UnescapeString(b.String()), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(reSpaces.ReplaceAllString(l, " "))
+	}
+	return tidyText(strings.Join(lines, "\n"))
 }
 
 // clean: en una línea y sin espacios de más.
@@ -188,49 +370,31 @@ func clean(s string) string { return strings.Join(strings.Fields(invisible.Repla
 
 // ---- formato compacto (para el contexto de un agente) ----
 
-// FormatMails: dos líneas por correo: «fecha · remitente · asunto · id · no leído» y el fragmento.
-func FormatMails(l MailList) string {
-	if len(l.Mails) == 0 {
-		return "(ningún correo)\n"
-	}
-	var b strings.Builder
-	for _, m := range l.Mails {
-		fmt.Fprintf(&b, "%s · %s · %s · %s", firstNonEmpty(m.Date, "?"), firstNonEmpty(m.From, "?"), firstNonEmpty(m.Subject, "(sin asunto)"), m.ID)
-		if m.Unread {
-			b.WriteString(" · no leído")
-		}
-		b.WriteString("\n")
-		if sn := m.Snippet; sn != "" {
-			if utf8.RuneCountInString(sn) > snippetChars {
-				sn = cutRunes(sn, snippetChars) + "…"
-			}
-			fmt.Fprintf(&b, "  %s\n", sn)
-		}
-	}
-	if l.More {
-		fmt.Fprintf(&b, "[hay más: afina la consulta o pide más con --max N, hasta %d]\n", MaxMails)
-	}
-	return b.String()
-}
-
-// FormatMailContent: el hilo, con una línea por mensaje antes de su texto.
+// FormatMailContent: cabecera del correo (asunto, de, para, fecha), su texto y sus adjuntos.
 func FormatMailContent(c MailContent) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s [hilo %s · %d mensajes]\n", firstNonEmpty(c.Subject, "(sin asunto)"), c.ID, len(c.Messages))
-	for i, m := range c.Messages {
-		fmt.Fprintf(&b, "\n## %d/%d\n%s\n", i+1, len(c.Messages), strings.TrimRight(m, "\n"))
+	fmt.Fprintf(&b, "# %s", firstNonEmpty(c.Subject, "(sin asunto)"))
+	if c.ID != "" {
+		fmt.Fprintf(&b, " [correo %s]", c.ID)
 	}
-	if c.Truncated {
-		fmt.Fprintf(&b, "[recortado; pide más con --max N, hasta %d]\n", MaxMaxChars)
-	}
-	return b.String()
-}
-
-func firstNonEmpty(s ...string) string {
-	for _, x := range s {
-		if strings.TrimSpace(x) != "" {
-			return x
+	b.WriteString("\n")
+	for _, h := range [][2]string{{"De", c.From}, {"Para", c.To}, {"Cc", c.Cc}, {"Fecha", c.Date}} {
+		if h[1] != "" {
+			fmt.Fprintf(&b, "%s: %s\n", h[0], h[1])
 		}
 	}
-	return ""
+	if t := strings.TrimRight(c.Text, "\n"); t != "" {
+		b.WriteString("\n" + t + "\n")
+	}
+	if len(c.Attachments) > 0 {
+		var as []string
+		for _, a := range c.Attachments {
+			as = append(as, fmt.Sprintf("%s (%s, %s)", a.Name, a.Type, humanSize(a.Size)))
+		}
+		fmt.Fprintf(&b, "Adjuntos: %s\n", strings.Join(as, "; "))
+	}
+	if c.Truncated {
+		fmt.Fprintf(&b, "[recortado: %d de %d caracteres; pide más con --max N, hasta %d]\n", utf8.RuneCountInString(c.Text), c.Total, MaxMaxChars)
+	}
+	return b.String()
 }

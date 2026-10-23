@@ -1,6 +1,8 @@
 package gbrowser
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -11,15 +13,15 @@ import (
 	"time"
 )
 
-// fakeDesktop hace de Electron: recoge cada trabajo del canal y responde con h. Devuelve el lector y los trabajos
-// recibidos (las URL que se han cargado).
-func fakeDesktop(t *testing.T, h func(Job) Result) (*Reader, func() []Job) {
+// fakeDesktop hace de Electron: recoge cada descarga del canal y responde con h. Devuelve el lector y los enlaces
+// pedidos.
+func fakeDesktop(t *testing.T, h func(Job) Result) (*Reader, func() []string) {
 	t.Helper()
 	b := NewBridge()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	var mu sync.Mutex
-	var jobs []Job
+	var jobs []string
 	go func() {
 		for {
 			j, ok := b.Next(ctx)
@@ -27,7 +29,7 @@ func fakeDesktop(t *testing.T, h func(Job) Result) (*Reader, func() []Job) {
 				return
 			}
 			mu.Lock()
-			jobs = append(jobs, j)
+			jobs = append(jobs, j.URL)
 			mu.Unlock()
 			r := h(j)
 			r.ID = j.ID
@@ -37,19 +39,50 @@ func fakeDesktop(t *testing.T, h func(Job) Result) (*Reader, func() []Job) {
 	for !b.Available() {
 		time.Sleep(time.Millisecond)
 	}
-	return New(b), func() []Job {
+	return New(b), func() []string {
 		mu.Lock()
 		defer mu.Unlock()
-		return append([]Job(nil), jobs...)
+		return append([]string(nil), jobs...)
 	}
 }
 
-func urls(js []Job) []string {
-	var u []string
-	for _, j := range js {
-		u = append(u, j.Mode+" "+j.URL)
+// file: una descarga completa (como la da Google: Content-Disposition: attachment).
+func file(name, ct string, data []byte) Result {
+	return Result{Download: true, FileName: name, ContentType: ct, Disposition: `attachment; filename="` + name + `"`, Data: data}
+}
+
+// page: Google responde con una página (de error, de «solicitar acceso»…), no con un fichero.
+var page = Result{Download: true, FileName: "export.html", ContentType: "text/html; charset=utf-8", Data: []byte("<html>Solicitar acceso</html>")}
+
+func zipOf(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for n, c := range files {
+		f, _ := w.Create(n)
+		f.Write([]byte(c))
 	}
-	return u
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// testXLSX: un libro con dos hojas (textos compartidos y en línea, números, booleanos y una fecha con estilo).
+func testXLSX(t *testing.T) []byte {
+	return zipOf(t, map[string]string{
+		"xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>` +
+			`<sheet name="Ventas" sheetId="1" r:id="rId1"/><sheet name="Gastos, 2026" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+		"xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+			`<Relationship Id="rId1" Type="x" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="x" Target="/xl/worksheets/hoja2.xml"/></Relationships>`,
+		"xl/sharedStrings.xml": `<sst><si><t>Cliente</t></si><si><t>Importe</t></si><si><r><t>Acme</t></r><r><t xml:space="preserve">, S.A.</t></r></si></sst>`,
+		"xl/styles.xml":        `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>`,
+		"xl/worksheets/sheet1.xml": `<worksheet><sheetData>` +
+			`<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="inlineStr"><is><t>Fecha</t></is></c></row>` +
+			`<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>1234.5</v></c><c r="C2" s="1"><v>46307</v></c></row>` +
+			`<row r="4"><c r="B4" t="b"><v>1</v></c></row></sheetData></worksheet>`,
+		"xl/worksheets/hoja2.xml": `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Luz</t></is></c><c r="B1"><v>80</v></c></row></sheetData></worksheet>`,
+	})
 }
 
 func TestBridge(t *testing.T) {
@@ -60,7 +93,6 @@ func TestBridge(t *testing.T) {
 	if b.Deliver(Result{ID: "nadie"}) {
 		t.Fatal("entrega sin espera")
 	}
-	// Un trabajo que ya nadie espera (se acabó su contexto) no llega a Electron.
 	b.lastPoll = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -75,13 +107,12 @@ func TestBridge(t *testing.T) {
 			t.Errorf("trabajo: %+v %v", j, ok)
 			return
 		}
-		b.Deliver(Result{ID: j.ID, Text: "hola"})
+		b.Deliver(Result{ID: j.ID, Data: []byte("hola")})
 	}()
 	r, err := b.Do(context.Background(), Job{URL: "https://docs.google.com/nuevo"})
-	if err != nil || r.Text != "hola" {
+	if err != nil || string(r.Data) != "hola" {
 		t.Fatalf("%+v %v", r, err)
 	}
-	// Sin consultas de Electron en un rato, la app de escritorio no está.
 	b.now = func() time.Time { return time.Now().Add(2 * presence) }
 	if b.Available() {
 		t.Fatal("presencia caducada")
@@ -113,251 +144,253 @@ func TestParseRef(t *testing.T) {
 
 func TestReadDoc(t *testing.T) {
 	r, jobs := fakeDesktop(t, func(j Job) Result {
-		switch {
-		case strings.Contains(j.URL, "/open?id="):
-			return Result{URL: "https://docs.google.com/document/d/1DocIdXyzw/edit", Status: 200}
-		case strings.HasSuffix(j.URL, "/export?format=md"):
-			return Result{Download: true, FileName: "Informe de ventas.md", Text: "# Ventas\n\nTodo bien.\n"}
-		}
-		return Result{Error: "no esperada"}
+		return file("Informe de ventas.docx.md", "text/x-markdown; charset=utf-8", []byte("\xef\xbb\xbf# Ventas\n\nTodo bien.\n"))
 	})
-	c, err := r.Read(context.Background(), 7, ReadParams{Ref: "1DocIdXyzw"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := FormatContent(c)
-	if got != "# Informe de ventas [doc · markdown · 1DocIdXyzw]\n# Ventas\n\nTodo bien.\n" {
-		t.Fatalf("%q", got)
-	}
-	js := jobs()
-	if strings.Join(urls(js), "\n") != "resolve https://drive.google.com/open?id=1DocIdXyzw\ntext https://docs.google.com/document/d/1DocIdXyzw/export?format=md" {
-		t.Fatalf("%v", urls(js))
-	}
-	if js[0].Project != 7 || js[1].MaxChars != DefaultMaxChars {
-		t.Fatalf("%+v", js[1])
-	}
-}
-
-// Si la exportación no da un fichero (una página HTML), se prueba la siguiente forma; la última, la versión móvil.
-func TestReadDocFallback(t *testing.T) {
-	r, jobs := fakeDesktop(t, func(j Job) Result {
-		if strings.HasSuffix(j.URL, "/mobilebasic") {
-			return Result{Status: 200, Title: "Acta - Documentos de Google", ContentType: "text/html", Text: "Acta\nPunto 1"}
-		}
-		return Result{Status: 200, ContentType: "text/html", Text: "<algo>"}
-	})
-	c, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/document/d/1DocIdXyzw/edit", Max: 8})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs()) != 3 || c.Name != "Acta" || c.Format != "texto" || c.Text != "Acta\nPun" || !c.Truncated || c.Total != 12 {
-		t.Fatalf("%v %+v", urls(jobs()), c)
-	}
-	if f := FormatContent(c); !strings.Contains(f, "[recortado: 8 caracteres de 12;") {
-		t.Fatalf("%q", f)
-	}
-}
-
-func TestReadErrors(t *testing.T) {
-	for _, c := range []struct {
-		res  Result
-		want error
-	}{
-		{Result{Login: true, URL: "https://accounts.google.com/ServiceLogin"}, ErrLogin},
-		{Result{Status: 404}, ErrNotFound},
-		{Result{Status: 403}, ErrNoAccess},
-		{Result{Status: 500}, nil},
-		{Result{Status: 200, Title: "Google Docs", Text: "Necesitas acceso\nSolicitar acceso"}, ErrNoAccess},
-		{Result{Status: 200, Text: "Lo sentimos, el archivo que has solicitado no existe."}, ErrNotFound},
-	} {
-		r, _ := fakeDesktop(t, func(Job) Result { return c.res })
-		_, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/document/d/1DocIdXyzw/edit"})
-		if c.want == nil && (err == nil || !strings.Contains(err.Error(), "(500)")) || c.want != nil && !errors.Is(err, c.want) {
-			t.Errorf("%+v: %v", c.res, err)
-		}
-	}
-	r, _ := fakeDesktop(t, func(Job) Result { return Result{Error: "ERR_NAME_NOT_RESOLVED"} })
-	if _, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/presentation/d/1SlidesIdXy/edit"}); err == nil || !strings.Contains(err.Error(), "ERR_NAME_NOT_RESOLVED") {
-		t.Errorf("%v", err)
-	}
-}
-
-func TestReadSheet(t *testing.T) {
-	tabs := []Item{{ID: "0", Name: "Ventas"}, {ID: "55", Name: "Gastos"}}
-	r, jobs := fakeDesktop(t, func(j Job) Result {
-		switch {
-		case strings.HasSuffix(j.URL, "/htmlview"):
-			return Result{Status: 200, Title: "Cuentas 2026 - Hojas de cálculo de Google", Items: tabs}
-		case strings.Contains(j.URL, "gid=0"):
-			return Result{Download: true, FileName: "Cuentas 2026 - Ventas.csv", Text: "mes,total\nenero,10\n"}
-		case strings.Contains(j.URL, "gid=55"):
-			return Result{Download: true, Text: "mes,total\nenero,4\n"}
-		}
-		return Result{Error: "no esperada"}
-	})
-	c, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "# Cuentas 2026 [hoja · csv · 1SheetIdXyz]\n## Ventas\nmes,total\nenero,10\n\n## Gastos\nmes,total\nenero,4\n[Hojas: Ventas, Gastos. Para una sola: --hoja <nombre> [--rango A1:D20].]\n"
-	if got := FormatContent(c); got != want {
-		t.Fatalf("%q", got)
-	}
-	// Una hoja por nombre, con rango.
-	n := len(jobs())
-	c, err = r.Read(context.Background(), 1, ReadParams{Ref: "1SheetIdXyz", Sheet: "gastos", Range: "A1:B2"})
-	if err == nil {
-		t.Fatalf("un ID suelto se resuelve primero: %+v", c)
-	}
-	c, err = r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit", Sheet: "gastos", Range: "A1:B2"})
-	if err != nil || c.Text != "mes,total\nenero,4\n" || c.Note != "" {
+	c, err := r.Read(context.Background(), 3, ReadParams{Ref: "https://docs.google.com/document/d/1DocIdXyzw/edit"})
+	if err != nil || c.Format != "markdown" || c.Name != "Informe de ventas" || c.Text != "# Ventas\n\nTodo bien.\n" {
 		t.Fatalf("%+v %v", c, err)
 	}
-	last := jobs()[len(jobs())-1]
-	if last.URL != "https://docs.google.com/spreadsheets/d/1SheetIdXyz/export?format=csv&gid=55&range=A1%3AB2" || len(jobs()) <= n {
-		t.Fatalf("%s", last.URL)
+	if got := jobs(); len(got) != 1 || got[0] != "https://docs.google.com/document/d/1DocIdXyzw/export?format=md" {
+		t.Fatalf("%v", got)
 	}
-	// La hoja de la URL (#gid=55): sin pedir las pestañas.
-	n = len(jobs())
-	c, err = r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit#gid=55"})
-	if err != nil || c.Text != "mes,total\nenero,4\n" || len(jobs()) != n+1 {
-		t.Fatalf("%+v %v %v", c, err, urls(jobs()[n:]))
+	if out := FormatContent(c); !strings.HasPrefix(out, "# Informe de ventas [doc · markdown · 1DocIdXyzw]\n# Ventas") {
+		t.Fatalf("%q", out)
 	}
-	if _, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit", Sheet: "Nada"}); err == nil || !strings.Contains(err.Error(), "hay: Ventas, Gastos") {
+}
+
+// Sin Markdown, el texto; si tampoco se descarga (Google da una página), error claro: nunca se lee la página.
+func TestReadDocFallbackAndNoDownload(t *testing.T) {
+	r, jobs := fakeDesktop(t, func(j Job) Result {
+		if strings.HasSuffix(j.URL, "format=txt") {
+			return file("Notas.txt", "text/plain", []byte("hola"))
+		}
+		return Result{Error: "descarga interrupted"}
+	})
+	c, err := r.Read(context.Background(), 0, ReadParams{Ref: "https://docs.google.com/document/d/1DocIdXyzw/edit"})
+	if err != nil || c.Format != "texto" || c.Text != "hola" || len(jobs()) != 2 {
+		t.Fatalf("%+v %v %v", c, err, jobs())
+	}
+	r, jobs = fakeDesktop(t, func(Job) Result { return page })
+	_, err = r.Read(context.Background(), 0, ReadParams{Ref: "https://docs.google.com/document/d/1DocIdXyzw/edit"})
+	if !errors.Is(err, ErrNoDownload) || !strings.Contains(err.Error(), "¿tienes acceso") || !strings.Contains(err.Error(), "panel Web") {
+		t.Fatalf("%v", err)
+	}
+	if got := jobs(); len(got) != 2 || !strings.HasSuffix(got[1], "/export?format=txt") {
+		t.Fatalf("solo descargas: %v", got)
+	}
+}
+
+func TestReadLoginAndFolder(t *testing.T) {
+	r, jobs := fakeDesktop(t, func(Job) Result { return Result{Login: true, URL: "https://accounts.google.com/ServiceLogin"} })
+	if _, err := r.Read(context.Background(), 0, ReadParams{Ref: "1DocIdXyzwAbc"}); !errors.Is(err, ErrLogin) || len(jobs()) != 1 {
+		t.Fatalf("%v %v", err, jobs())
+	}
+	if _, err := r.Read(context.Background(), 0, ReadParams{Ref: "https://drive.google.com/drive/folders/1FolderIdXy"}); !errors.Is(err, ErrFolder) || len(jobs()) != 1 {
+		t.Fatalf("carpeta: %v", err)
+	}
+}
+
+func TestReadSheetXLSX(t *testing.T) {
+	x := testXLSX(t)
+	r, jobs := fakeDesktop(t, func(j Job) Result {
+		if strings.HasSuffix(j.URL, "/export?format=xlsx") {
+			return file("Cuentas.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", x)
+		}
+		return page
+	})
+	ctx := context.Background()
+	c, err := r.Read(ctx, 0, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit"})
+	if err != nil || c.Name != "Cuentas" || c.Text != "## Ventas\nCliente,Importe,Fecha\n\"Acme, S.A.\",1234.5,2026-10-12\n\n,TRUE\n\n## Gastos, 2026\nLuz,80\n" ||
+		c.Note != "Hojas: Ventas, Gastos, 2026. Para una sola: --hoja <nombre> [--rango A1:D20]." {
+		t.Fatalf("%q %q %v", c.Text, c.Note, err)
+	}
+	if got := jobs(); len(got) != 1 || got[0] != "https://docs.google.com/spreadsheets/d/1SheetIdXyz/export?format=xlsx" {
+		t.Fatalf("%v", got)
+	}
+	c, err = r.Read(ctx, 0, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit", Sheet: "gastos, 2026"})
+	if err != nil || c.Text != "Luz,80\n" || c.Note != "" {
+		t.Fatalf("hoja: %q %v", c.Text, err)
+	}
+	// Con --hoja manda la hoja pedida (aunque el enlace lleve otra), y el rango se aplica aquí.
+	c, err = r.Read(ctx, 0, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit#gid=5", Sheet: "1", Range: "B1:C2"})
+	if err != nil || c.Text != "Importe,Fecha\n1234.5,2026-10-12\n" {
+		t.Fatalf("rango: %q %v", c.Text, err)
+	}
+	if _, err := r.Read(ctx, 0, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit", Sheet: "Nada"}); err == nil || !strings.Contains(err.Error(), "hay: Ventas, Gastos, 2026") {
+		t.Fatalf("hoja que no hay: %v", err)
+	}
+}
+
+// Con la hoja del enlace (#gid=), esa hoja en CSV por su enlace de exportación (con el rango, si se pide).
+func TestReadSheetGid(t *testing.T) {
+	r, jobs := fakeDesktop(t, func(j Job) Result { return file("Cuentas - Gastos.csv", "text/csv", []byte("a,b\n1,2\n")) })
+	c, err := r.Read(context.Background(), 0, ReadParams{Ref: "https://docs.google.com/spreadsheets/d/1SheetIdXyz/edit#gid=42", Range: "A1:B2"})
+	if err != nil || c.Text != "a,b\n1,2\n" || c.Format != "csv" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if got := jobs(); got[0] != "https://docs.google.com/spreadsheets/d/1SheetIdXyz/export?format=csv&gid=42&range=A1%3AB2" {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestReadSlidesAndTruncate(t *testing.T) {
+	r, jobs := fakeDesktop(t, func(j Job) Result { return file("Plan.txt", "text/plain", []byte(strings.Repeat("ñ", 50))) })
+	c, err := r.Read(context.Background(), 0, ReadParams{Ref: "https://docs.google.com/presentation/d/1SlidesIdXy/edit", Max: 10})
+	if err != nil || c.Text != strings.Repeat("ñ", 10) || !c.Truncated || c.Total != 50 || jobs()[0] != "https://docs.google.com/presentation/d/1SlidesIdXy/export/txt" {
+		t.Fatalf("%+v %v %v", c, err, jobs())
+	}
+	if out := FormatContent(c); !strings.Contains(out, "[recortado: 10 caracteres de 50;") {
+		t.Fatalf("%q", out)
+	}
+}
+
+// Un ID suelto: se prueban las descargas de cada tipo; un PDF de Drive se guarda en la carpeta de la sesión.
+func TestReadBareIDFile(t *testing.T) {
+	pdf := []byte("%PDF-1.4 binario\x00\x01")
+	r, jobs := fakeDesktop(t, func(j Job) Result {
+		if strings.Contains(j.URL, "/uc?export=download&id=") {
+			return file("Contrato firmado.pdf", "application/pdf", pdf)
+		}
+		return Result{Error: "descarga interrupted"}
+	})
+	dir := filepath.Join(t.TempDir(), ".pgocode", "salidas")
+	c, err := r.Read(context.Background(), 0, ReadParams{Ref: "1FileIdXyzwAbc", SaveDir: dir})
+	if err != nil || c.Kind != KindFile || c.Format != "fichero" || c.MIME != "application/pdf" || c.Size != len(pdf) || c.Name != "Contrato firmado" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	want := []string{
+		"https://docs.google.com/document/d/1FileIdXyzwAbc/export?format=md",
+		"https://docs.google.com/document/d/1FileIdXyzwAbc/export?format=txt",
+		"https://docs.google.com/spreadsheets/d/1FileIdXyzwAbc/export?format=xlsx",
+		"https://docs.google.com/presentation/d/1FileIdXyzwAbc/export/txt",
+		"https://drive.google.com/uc?export=download&id=1FileIdXyzwAbc",
+	}
+	if got := jobs(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("%v", got)
+	}
+	if b, err := os.ReadFile(c.Path); err != nil || !bytes.Equal(b, pdf) || filepath.Dir(c.Path) != dir {
+		t.Fatalf("%s %v", c.Path, err)
+	}
+	if out := FormatContent(c); !strings.Contains(out, "Descargado en "+c.Path+" (application/pdf, 18 B)") {
+		t.Fatalf("%q", out)
+	}
+	// Ninguna descarga: error claro.
+	r, _ = fakeDesktop(t, func(Job) Result { return page })
+	if _, err := r.Read(context.Background(), 0, ReadParams{Ref: "1FileIdXyzwAbc"}); err != ErrNoDownload {
 		t.Fatalf("%v", err)
 	}
 }
 
-func TestReadSlidesFolderFile(t *testing.T) {
-	r, _ := fakeDesktop(t, func(j Job) Result {
-		switch {
-		case strings.HasSuffix(j.URL, "/export/txt"):
-			return Result{Download: true, FileName: "Plan.txt", Text: "Diapositiva 1"}
-		case j.Mode == ModeDrive:
-			return Result{Status: 200, Items: []Item{{ID: "1DocIdXyzw", Lines: []string{"Acta", "12 oct 2026", "yo"}, Href: "https://docs.google.com/document/d/1DocIdXyzw/edit"}}}
-		}
-		return Result{Error: "no esperada"}
-	})
-	c, err := r.Read(context.Background(), 1, ReadParams{Ref: "https://docs.google.com/presentation/d/1SlidesIdXy/edit"})
-	if err != nil || FormatContent(c) != "# Plan [presentación · texto · 1SlidesIdXy]\nDiapositiva 1\n" {
-		t.Fatalf("%q %v", FormatContent(c), err)
+// Ficheros de Drive que son texto, Word o Excel: su texto.
+func TestReadDriveFiles(t *testing.T) {
+	docx := zipOf(t, map[string]string{"word/document.xml": `<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>Hola</w:t></w:r><w:r><w:tab/><w:t xml:space="preserve">mundo</w:t></w:r></w:p>` +
+		`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`})
+	files := map[string]Result{
+		"1TextoIdXyz": file("notas.md", "application/octet-stream", []byte("# Notas")),
+		"1WordIdXyzw": file("Acta.docx", "application/octet-stream", docx),
+		"1ExcelIdXyz": file("Datos.xlsx", "application/octet-stream", testXLSX(t)),
 	}
-	c, err = r.Read(context.Background(), 1, ReadParams{Ref: "https://drive.google.com/drive/folders/1FolderIdXy"})
-	if err != nil || c.Text != "[doc] Acta · 12 oct 2026 · 1DocIdXyzw\n" {
+	r, _ := fakeDesktop(t, func(j Job) Result { return files[j.URL[strings.LastIndex(j.URL, "=")+1:]] })
+	ctx := context.Background()
+	c, err := r.Read(ctx, 0, ReadParams{Ref: "https://drive.google.com/file/d/1TextoIdXyz/view"})
+	if err != nil || c.Text != "# Notas" || c.Format != "texto" {
 		t.Fatalf("%+v %v", c, err)
 	}
-	c, err = r.Read(context.Background(), 1, ReadParams{Ref: "https://drive.google.com/file/d/1FileIdXyzw/view"})
-	if err != nil || c.Format != "enlace" || !strings.Contains(c.Note, "https://drive.google.com/file/d/1FileIdXyzw/view") {
-		t.Fatalf("%+v %v", c, err)
+	c, err = r.Read(ctx, 0, ReadParams{Ref: "https://drive.google.com/file/d/1WordIdXyzw/view"})
+	if err != nil || c.Text != "Hola\tmundo\na | b" {
+		t.Fatalf("%q %v", c.Text, err)
+	}
+	c, err = r.Read(ctx, 0, ReadParams{Ref: "https://drive.google.com/file/d/1ExcelIdXyz/view", Sheet: "2"})
+	if err != nil || c.Text != "Luz,80\n" || c.Format != "csv" {
+		t.Fatalf("%q %v", c.Text, err)
 	}
 }
 
-func TestSearch(t *testing.T) {
-	rows := []Item{
-		{ID: "1FolderIdXy", Lines: []string{"Clientes", "yo", "3 sept 2026"}, Labels: []string{"Carpeta compartida"}},
-		{ID: "1SheetIdXyz", Lines: []string{"Ventas 2026", "yo", "10:32"}, Labels: []string{"Hoja de cálculo de Google"}},
-		{ID: "1DocIdXyzw", Lines: []string{"Ventas: informe", "Oct 12, 2026"}, Href: "https://docs.google.com/document/d/1DocIdXyzw/edit"},
-		{ID: "1SinNombre1", Lines: nil},
+func TestParseRange(t *testing.T) {
+	for in, want := range map[string]cellRange{"": {-1, -1, -1, -1}, "A1:D20": {0, 19, 0, 3}, "B2": {1, 1, 1, 1}, "A:C": {-1, -1, 0, 2},
+		"2:10": {1, 9, -1, -1}, "Hoja!AA1:AB2": {0, 1, 26, 27}} {
+		if got, err := parseRange(in); err != nil || got != want {
+			t.Errorf("%q: %+v %v", in, got, err)
+		}
 	}
-	r, jobs := fakeDesktop(t, func(j Job) Result { return Result{Status: 200, Items: rows} })
-	fs, err := r.Search(context.Background(), 3, SearchParams{Text: "ventas"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "[carpeta] Clientes · 3 sept 2026 · 1FolderIdXy\n[hoja] Ventas 2026 · 10:32 · 1SheetIdXyz\n[doc] Ventas: informe · Oct 12, 2026 · 1DocIdXyzw\n"
-	if got := FormatFiles(fs); got != want {
-		t.Fatalf("%q", got)
-	}
-	if u := jobs()[0].URL; u != "https://drive.google.com/drive/search?q=ventas" {
-		t.Fatal(u)
-	}
-	fs, err = r.Search(context.Background(), 3, SearchParams{Text: "ventas", Type: "hoja", Max: 5})
-	if err != nil || len(fs) != 1 || fs[0].ID != "1SheetIdXyz" || jobs()[1].URL != "https://drive.google.com/drive/search?q=ventas+type%3Aspreadsheet" {
-		t.Fatalf("%v %v %s", fs, err, jobs()[1].URL)
-	}
-	// En una carpeta: su listado, filtrado por nombre.
-	fs, err = r.Search(context.Background(), 3, SearchParams{Text: "informe", Folder: "1FolderIdXy"})
-	if err != nil || len(fs) != 1 || fs[0].ID != "1DocIdXyzw" || jobs()[2].URL != "https://drive.google.com/drive/folders/1FolderIdXy" {
-		t.Fatalf("%v %v", fs, err)
-	}
-	if _, err := r.Search(context.Background(), 3, SearchParams{Type: "vídeo"}); err == nil {
-		t.Fatal("tipo desconocido")
-	}
-	if _, err := r.Search(context.Background(), 3, SearchParams{}); err == nil {
-		t.Fatal("búsqueda vacía")
-	}
-	fs, err = r.List(context.Background(), 3, "", 2)
-	if err != nil || len(fs) != 2 || jobs()[len(jobs())-1].URL != "https://drive.google.com/drive/my-drive" {
-		t.Fatalf("%v %v", fs, err)
-	}
-	if _, err := r.List(context.Background(), 3, "https://docs.google.com/document/d/1DocIdXyzw/edit", 0); err == nil {
-		t.Fatal("un documento no es una carpeta")
+	if _, err := parseRange("¿?"); err == nil {
+		t.Error("rango no válido")
 	}
 }
 
-func TestGmail(t *testing.T) {
-	var rows []Item
-	for i := 0; i < 3; i++ {
-		rows = append(rows, Item{ID: "18f0a1b2c3d4e5f" + string(rune('0'+i)), From: "Ana  Pérez", Name: "Factura octubre", Date: "12 oct", Snippet: " - Te mando la factura de octubre", Unread: i == 0})
+func TestParseMailLink(t *testing.T) {
+	// Un ID nuevo de verdad empieza por FMfcgz… (el texto «f:<número>»).
+	tok := encodeMailToken("f:1777712345678901234")
+	if !strings.HasPrefix(tok, "FMfcgz") || decodeMailToken(tok) != "f:1777712345678901234" {
+		t.Fatalf("%s %q", tok, decodeMailToken(tok))
 	}
-	thread := []Item{
-		{Text: "Ana Pérez <ana@x.com>\t12 oct 2026\nHola, ¿me mandas la factura?"},
-		{Text: "Luis <luis@x.com>\n13 oct 2026\nAquí la tienes.\n\nEl 12 oct 2026, Ana Pérez escribió:\n> Hola, ¿me mandas la factura?"},
-	}
-	r, jobs := fakeDesktop(t, func(j Job) Result {
-		if j.Mode == ModeGmailPrint {
-			return Result{Status: 200, Title: "Factura octubre", Items: thread}
+	const id = "18abb3f5ad046ff2"
+	for in, want := range map[string]mailLink{
+		"https://mail.google.com/mail/u/0/#inbox/" + tok:                                {"0", id},
+		"https://mail.google.com/mail/u/1/#search/factura/" + tok + "?compose=new":      {"1", id},
+		"https://mail.google.com/mail/u/0/#inbox/18ABB3F5AD046FF2":                      {"0", id},
+		"https://mail.google.com/mail/u/2/?ui=2&view=pt&th=" + id:                       {"2", id},
+		"https://mail.google.com/mail/u/0/?view=om&permmsgid=msg-f:1777712345678901234": {"0", id},
+	} {
+		if got, err := ParseMailLink(in); err != nil || got != want {
+			t.Errorf("%s: %+v %v", in, got, err)
 		}
-		return Result{Status: 200, Items: rows}
-	})
-	l, err := r.SearchMail(context.Background(), 2, "from:ana newer_than:7d", 2)
-	if err != nil {
-		t.Fatal(err)
 	}
-	want := "12 oct · Ana Pérez · Factura octubre · 18f0a1b2c3d4e5f0 · no leído\n  Te mando la factura de octubre\n" +
-		"12 oct · Ana Pérez · Factura octubre · 18f0a1b2c3d4e5f1\n  Te mando la factura de octubre\n[hay más: afina la consulta o pide más con --max N, hasta 50]\n"
-	if got := FormatMails(l); got != want {
-		t.Fatalf("%q", got)
-	}
-	if u := jobs()[0].URL; u != "https://mail.google.com/mail/u/0/#search/from:ana%20newer_than:7d" || jobs()[0].Mode != ModeGmailList {
-		t.Fatal(u)
-	}
-	if _, err := r.RecentMail(context.Background(), 2, 0); err != nil || jobs()[1].URL != "https://mail.google.com/mail/u/0/#inbox" {
-		t.Fatal(err, jobs()[1].URL)
-	}
-	c, err := r.ReadMail(context.Background(), 2, "https://mail.google.com/mail/u/0/#inbox/18F0A1B2C3D4E5F0", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want = "# Factura octubre [hilo 18f0a1b2c3d4e5f0 · 2 mensajes]\n\n## 1/2\nAna Pérez <ana@x.com>\t12 oct 2026\nHola, ¿me mandas la factura?\n\n## 2/2\nLuis <luis@x.com>\n13 oct 2026\nAquí la tienes.\n"
-	if got := FormatMailContent(c); got != want {
-		t.Fatalf("%q", got)
-	}
-	if u := jobs()[2].URL; u != "https://mail.google.com/mail/u/0/?search=all&th=18f0a1b2c3d4e5f0&ui=2&view=pt" {
-		t.Fatal(u)
-	}
-	for _, bad := range []string{"", "hola", "https://mail.google.com/mail/u/0/#inbox/FMfcgzQXJWDsKmGgQkLwzrbPbDdcQqKx"} {
-		if _, err := ParseMailRef(bad); err == nil {
+	for _, bad := range []string{id, "https://mail.google.com/mail/u/0/#inbox", "https://evil.com/mail/u/0/#inbox/" + id,
+		"https://mail.google.com/mail/u/0/#sent/" + encodeMailToken("a:r-123456789")} {
+		if _, err := ParseMailLink(bad); err == nil {
 			t.Errorf("%q debería fallar", bad)
 		}
 	}
-	if _, err := r.SearchMail(context.Background(), 2, " ", 0); err == nil {
-		t.Fatal("búsqueda vacía")
+}
+
+const testEML = "From: =?UTF-8?Q?Ana_Mart=C3=ADnez?= <ana@x.com>\r\nTo: luis@x.com\r\nSubject: =?UTF-8?B?RmFjdHVyYSBkZSBvY3R1YnJl?=\r\n" +
+	"Date: Mon, 12 Oct 2026 10:00:00 +0200\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"MIX\"\r\n\r\n" +
+	"--MIX\r\nContent-Type: multipart/alternative; boundary=\"ALT\"\r\n\r\n" +
+	"--ALT\r\nContent-Type: text/html; charset=\"iso-8859-1\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" +
+	"<html><head><style>p{}</style></head><body><p>Hola Luis,</p><p>Te env=EDo la factura &amp; el albar=E1n.</p>" +
+	"<div class=3D\"gmail_quote\"><div>El lun, Ana escribi=F3:</div><blockquote>lo de antes</blockquote></div></body></html>\r\n" +
+	"--ALT--\r\n" +
+	"--MIX\r\nContent-Type: application/pdf; name=\"factura.pdf\"\r\nContent-Disposition: attachment; filename=\"factura.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
+	"JVBERi0xLjQK\r\nAAAA\r\n--MIX--\r\n"
+
+func TestReadMail(t *testing.T) {
+	r, jobs := fakeDesktop(t, func(j Job) Result { return file("Factura de octubre.eml", "message/rfc822", []byte(testEML)) })
+	m, err := r.ReadMail(context.Background(), 0, "https://mail.google.com/mail/u/1/#inbox/18abb3f5ad046ff2", 0)
+	if err != nil || m.Subject != "Factura de octubre" || m.From != "Ana Martínez <ana@x.com>" || m.Text != "Hola Luis,\n\nTe envío la factura & el albarán." ||
+		len(m.Attachments) != 1 || m.Attachments[0] != (Attachment{"factura.pdf", "application/pdf", 12}) {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if got := jobs(); got[0] != "https://mail.google.com/mail/u/1/?attid=0&disp=comp&safe=1&th=18abb3f5ad046ff2&ui=2&view=att&zw" {
+		t.Fatalf("%v", got)
+	}
+	out := FormatMailContent(m)
+	for _, s := range []string{"# Factura de octubre [correo 18abb3f5ad046ff2]\n", "De: Ana Martínez <ana@x.com>\n", "Adjuntos: factura.pdf (application/pdf, 12 B)"} {
+		if !strings.Contains(out, s) {
+			t.Fatalf("%q sin %q", out, s)
+		}
+	}
+	// Recorte y texto sin formato con lo citado.
+	plain := "From: a@x.com\r\nSubject: Re: hola\r\n\r\nVale, de acuerdo.\r\n\r\nOn Mon, Oct 12, 2026 at 10:00 Ana <ana@x.com> wrote:\r\n> antes\r\n"
+	r, _ = fakeDesktop(t, func(j Job) Result { return file("x.eml", "message/rfc822", []byte(plain)) })
+	if m, err = r.ReadMail(context.Background(), 0, "https://mail.google.com/mail/u/0/#inbox/18abb3f5ad046ff2", 4); err != nil || m.Text != "Vale […]" || !m.Truncated {
+		t.Fatalf("%+v %v", m, err)
+	}
+	// Sin sesión o si Gmail no da el mensaje (una página): errores claros.
+	r, _ = fakeDesktop(t, func(j Job) Result { return Result{Login: true} })
+	if _, err := r.ReadMail(context.Background(), 0, "https://mail.google.com/mail/u/0/#inbox/18abb3f5ad046ff2", 0); !errors.Is(err, ErrLogin) {
+		t.Fatal(err)
+	}
+	r, _ = fakeDesktop(t, func(j Job) Result { return page })
+	if _, err := r.ReadMail(context.Background(), 0, "https://mail.google.com/mail/u/0/#inbox/18abb3f5ad046ff2", 0); !errors.Is(err, ErrNoDownload) {
+		t.Fatal(err)
 	}
 }
 
-func TestShare(t *testing.T) {
-	long := strings.Repeat("a", 5000)
-	out, cut := share([]string{"corto", long, long}, 2000, false)
-	if !cut || out[0] != "corto" || len([]rune(out[1])) != 2000/3+len([]rune(" […]")) {
-		t.Fatalf("%v %d", cut, len(out[1]))
-	}
-	// Con muchos mensajes, cada uno al menos minMailChars.
-	if out, _ := share([]string{long, long, long, long, long}, 2000, false); len([]rune(out[0])) != minMailChars+len([]rune(" […]")) {
-		t.Fatal(len([]rune(out[0])))
-	}
-	if out, cut := share([]string{"a", "b"}, 10, false); cut || len(out) != 2 {
-		t.Fatal("sin recorte")
+func TestHTMLToText(t *testing.T) {
+	got := htmlToText(`<div>Uno<br>dos</div><script>x()</script><table><tr><td>a</td><td>b</td></tr></table><!-- nada --><p>&lt;fin&gt;</p>`)
+	if got != "Uno\ndos\n\na b\n\n<fin>" {
+		t.Fatalf("%q", got)
 	}
 }
 
@@ -388,7 +421,6 @@ func TestRemoveOAuthLeftovers(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d, "studio.json")); err != nil {
 		t.Fatal("ha borrado otra cosa")
 	}
-	// Con algo que no es suyo dentro, la carpeta se queda (y lo de dentro también).
 	os.MkdirAll(filepath.Join(d, "google"), 0o700)
 	os.WriteFile(filepath.Join(d, "google", "nota.txt"), []byte("x"), 0o600)
 	if got := RemoveOAuthLeftovers(d); len(got) != 0 {

@@ -229,7 +229,7 @@ app.whenReady().then(async () => {
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
     await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: TOKEN_ESCRITORIO, httpOnly: true, sameSite: 'strict' });
     ventana();
-    // Lecturas de Google que pide el backend (pgo drive, pgo gmail), con la sesión del panel Web.
+    // Descargas de Google que pide el backend (pgo drive leer, pgo gmail leer), con la sesión del panel Web.
     const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),
       testOrigin: process.env.PGO_GOOGLE_PRUEBA || '', log: m => console.error('[pgocode] ' + m) });
     const paraGoogle = googleReader.startPolling({ base: URL_ARNES, token: TOKEN_ESCRITORIO, reader, log: m => console.error('[pgocode] ' + m) });

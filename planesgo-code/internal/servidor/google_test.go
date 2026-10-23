@@ -13,8 +13,8 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
-// El agente lee Google con «pgo drive …» y «pgo gmail …»: el backend pasa cada página a Electron por el canal de la
-// app de escritorio (que solo usa Electron, con su secreto) y responde lo que este ha leído.
+// El agente lee Google con «pgo drive leer» y «pgo gmail leer»: el backend pasa cada enlace de descarga a Electron
+// por el canal de la app de escritorio (que solo usa Electron, con su secreto) y lee lo que este ha descargado.
 func TestGoogleViaDesktop(t *testing.T) {
 	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(),
 		Google: gbrowser.New(gbrowser.NewBridge())}
@@ -34,7 +34,7 @@ func TestGoogleViaDesktop(t *testing.T) {
 	}
 	tok := s.tokenProyecto(7)
 	// Sin app de escritorio (modo -navegador o Electron cerrado): lo dice.
-	if c, b := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", "", tok, ""); c != http.StatusServiceUnavailable || !strings.Contains(b, "aplicación de escritorio") {
+	if c, b := pide("GET", "/api/pgo/drive-leer?ref=1DocIdXyzwAbc&proyecto=7", "", tok, ""); c != http.StatusServiceUnavailable || !strings.Contains(b, "aplicación de escritorio") {
 		t.Fatalf("%d %s", c, b)
 	}
 	// El canal solo es para Electron: ni el agente ni nadie sin el secreto.
@@ -47,7 +47,7 @@ func TestGoogleViaDesktop(t *testing.T) {
 	if c, _ := pide("POST", "/api/escritorio/google/resultado", `{"id":"x"}`, "", "otro"); c != http.StatusForbidden {
 		t.Fatalf("otro secreto: %d", c)
 	}
-	// Electron: recoge cada trabajo y responde (una búsqueda de Drive y, luego, Google pide iniciar sesión).
+	// Electron: recoge cada descarga y responde (un documento exportado y, luego, Google pide iniciar sesión).
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	trabajos := make(chan gbrowser.Job, 4)
@@ -63,8 +63,9 @@ func TestGoogleViaDesktop(t *testing.T) {
 				return
 			}
 			trabajos <- j
-			res := gbrowser.Result{ID: j.ID, Status: 200, Items: []gbrowser.Item{{ID: "1DocIdXyzw", Lines: []string{"Informe", "12 oct 2026"}, Href: "https://docs.google.com/document/d/1DocIdXyzw/edit"}}}
-			if j.Mode == gbrowser.ModeText {
+			res := gbrowser.Result{ID: j.ID, Download: true, FileName: "Informe.md", ContentType: "text/x-markdown",
+				Disposition: "attachment", Data: []byte("# Informe\n")}
+			if strings.Contains(j.URL, "1PrivadoXyz") {
 				res = gbrowser.Result{ID: j.ID, Login: true, URL: "https://accounts.google.com/ServiceLogin"}
 			}
 			cuerpo, _ := json.Marshal(res)
@@ -76,18 +77,18 @@ func TestGoogleViaDesktop(t *testing.T) {
 	for !s.Google.Bridge.Available() {
 		time.Sleep(time.Millisecond)
 	}
-	c, b := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", "", tok, "")
-	if c != http.StatusOK || !strings.Contains(b, `[doc] Informe · 12 oct 2026 · 1DocIdXyzw`) {
+	c, b := pide("GET", "/api/pgo/drive-leer?ref=https://docs.google.com/document/d/1DocIdXyzw/edit&proyecto=7", "", tok, "")
+	if c != http.StatusOK || !strings.Contains(b, `# Informe [doc · markdown · 1DocIdXyzw]\n# Informe`) {
 		t.Fatalf("%d %s", c, b)
 	}
-	if j := <-trabajos; j.Project != 7 || j.Mode != gbrowser.ModeDrive || j.URL != "https://drive.google.com/drive/search?q=informe" {
+	if j := <-trabajos; j.Project != 7 || j.URL != "https://docs.google.com/document/d/1DocIdXyzw/export?format=md" {
 		t.Fatalf("%+v", j)
 	}
 	// Sin sesión de Google: lo dice y abre accounts.google.com en el panel Web del proyecto (una vez).
 	ev := s.Eventos.alta()
 	defer s.Eventos.baja(ev)
 	for i := 0; i < 2; i++ {
-		c, b = pide("GET", "/api/pgo/drive-leer?ref="+"https://docs.google.com/document/d/1DocIdXyzw/edit&proyecto=7", "", tok, "")
+		c, b = pide("GET", "/api/pgo/drive-leer?ref="+"https://docs.google.com/document/d/1PrivadoXyz/edit&proyecto=7", "", tok, "")
 		if c != http.StatusServiceUnavailable || !strings.Contains(b, "inicia sesión en Google") {
 			t.Fatalf("%d %s", c, b)
 		}
@@ -106,10 +107,13 @@ func TestGoogleViaDesktop(t *testing.T) {
 		t.Fatalf("dos veces seguidas: %s", e)
 	default:
 	}
-	if c, _ := pide("GET", "/api/pgo/gmail-borrar?proyecto=7", "", tok, ""); c != http.StatusNotFound {
-		t.Fatalf("orden desconocida: %d", c)
+	// Buscar y listar ya no existen (leerían páginas): solo leer por enlace.
+	for _, o := range []string{"gmail-borrar", "gmail-buscar", "gmail-listar", "drive-buscar", "drive-listar"} {
+		if c, _ := pide("GET", "/api/pgo/"+o+"?q=x&proyecto=7", "", tok, ""); c != http.StatusNotFound {
+			t.Fatalf("%s: %d", o, c)
+		}
 	}
-	if c, _ := pide("GET", "/api/pgo/drive-buscar?q=x&proyecto=7", "", s.tokenProyecto(8), ""); c != http.StatusForbidden {
+	if c, _ := pide("GET", "/api/pgo/drive-leer?ref=1DocIdXyzwAbc&proyecto=7", "", s.tokenProyecto(8), ""); c != http.StatusForbidden {
 		t.Fatalf("token de otro proyecto: %d", c)
 	}
 }

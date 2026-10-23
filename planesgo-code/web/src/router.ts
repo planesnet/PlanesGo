@@ -31,8 +31,8 @@
 //     memory (memoria del proyecto al empezar de cero, servidor);
 //     la poda, la compactación, la continuación de OpenCode y el idioma los aplica siempre el servidor.
 //
-//   HERRAMIENTAS (no son destinos): Google Drive/Docs/Sheets y Gmail en solo lectura los usa el agente con
-//     «pgo drive …» y «pgo gmail …»; un mensaje sobre Drive o el correo va al agente (sin función directa: ver
+//   HERRAMIENTAS (no son destinos): Google Drive/Docs/Sheets y Gmail en solo lectura y por enlace los usa el
+//     agente con «pgo drive leer …» y «pgo gmail leer …»; un mensaje sobre Drive o el correo va al agente (sin función directa: ver
 //     docs/enrutador.md).
 //
 // route() es síncrona y pura (para la etiqueta mientras se escribe y para el envío). Lo que necesita al servidor

@@ -1,5 +1,5 @@
-// Pruebas de googleReader.js sin Electron (node --test electron/): una ventana falsa que imita los eventos de
-// webContents y las descargas de la sesión.
+// Pruebas de googleReader.js sin Electron (node --test electron/): una ventana falsa que imita downloadURL y las
+// descargas de la sesión (sin páginas: la ventana no tiene loadURL ni executeJavaScript).
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
@@ -21,14 +21,12 @@ test('allowedUrl: solo Google por https (y el origen de pruebas)', () => {
   assert.ok(!g.allowedUrl('http://127.0.0.1:8182/x', 'http://127.0.0.1:8181'));
 });
 
-test('isLoginUrl y resolvedUrl', () => {
+test('isLoginUrl', () => {
   assert.ok(g.isLoginUrl('https://accounts.google.com/v3/signin/identifier?continue=x'));
   assert.ok(g.isLoginUrl('https://www.google.com/intl/es/gmail/about/'));
   assert.ok(g.isLoginUrl('https://workspace.google.com/products/drive/'));
   assert.ok(g.isLoginUrl('http://127.0.0.1:8181/ServiceLogin?continue=x'));
-  assert.ok(!g.isLoginUrl('https://docs.google.com/document/d/x/edit'));
-  assert.ok(!g.resolvedUrl('https://drive.google.com/open?id=x'));
-  assert.ok(g.resolvedUrl('https://docs.google.com/document/d/x/edit'));
+  assert.ok(!g.isLoginUrl('https://docs.google.com/document/d/x/export?format=md'));
 });
 
 test('partitionOrder: proyecto, la recordada y las demás por uso', () => {
@@ -47,17 +45,7 @@ test('existingPartitions: solo las del panel Web', () => {
   fs.rmSync(d, { recursive: true });
 });
 
-test('cutText y readHead', () => {
-  assert.deepStrictEqual(g.cutText('ñandú', 3), { text: 'ñan', truncated: true, total: 5 });
-  assert.deepStrictEqual(g.cutText('abc', 5), { text: 'abc', truncated: false });
-  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pgo-head-')), 'x');
-  fs.writeFileSync(f, '﻿año');
-  assert.deepStrictEqual(g.readHead(f, 100), { text: 'año', partial: false });
-  assert.deepStrictEqual(g.readHead(f, 5), { text: 'a', partial: true }); // la ñ cortada no sale
-  fs.rmSync(path.dirname(f), { recursive: true });
-});
-
-// Una ventana falsa: loadURL decide qué pasa según la URL (y la sesión).
+// Una ventana falsa: solo downloadURL (y el aviso de navegación, que se bloquea); behave decide la descarga.
 function fakeElectron(behave) {
   const sessions = new Map();
   const created = [];
@@ -68,11 +56,9 @@ function fakeElectron(behave) {
       if (!sessions.has(partition)) sessions.set(partition, new EventEmitter());
       const wc = new EventEmitter();
       Object.assign(wc, {
-        id: next++, session: sessions.get(partition), url: '', title: '',
+        id: next++, session: sessions.get(partition),
         setAudioMuted() {}, setWindowOpenHandler(h) { wc.openHandler = h; },
-        getURL: () => wc.url, getTitle: () => wc.title,
-        executeJavaScript: async () => wc.page,
-        loadURL: async u => { setImmediate(() => behave(u, wc, partition)); },
+        downloadURL: u => { wc.downloaded = u; setImmediate(() => behave(u, wc, partition)); },
       });
       this.webContents = wc;
       this.destroyed = false;
@@ -83,77 +69,94 @@ function fakeElectron(behave) {
   return { BrowserWindow: FakeWindow, created };
 }
 
-const navigate = (wc, u, code, page, title = '') => {
-  const ev = { preventDefault() { ev.prevented = true; } };
-  wc.emit('will-navigate', ev, u);
-  if (ev.prevented) return;
-  wc.url = u; wc.page = page; wc.title = title;
-  wc.emit('did-navigate', {}, u, code);
-  wc.emit('did-finish-load');
-};
-
 // Una descarga como las de Electron: la sesión avisa (will-download), se guarda donde se diga y acaba.
-const download = (wc, name, content) => {
+const download = (wc, { chain, name = 'f', mime = 'text/plain', disposition = 'attachment', content = '', total, state = 'completed', onlyUpdated }) => {
   const item = new EventEmitter();
-  Object.assign(item, { getTotalBytes: () => content.length, getFilename: () => name, getMimeType: () => 'text/markdown',
-    cancel() {}, setSavePath(p) { item.path = p; } });
+  Object.assign(item, { getTotalBytes: () => total ?? Buffer.byteLength(content), getReceivedBytes: () => Buffer.byteLength(content),
+    getFilename: () => name, getMimeType: () => mime, getContentDisposition: () => disposition, getURLChain: () => chain,
+    getURL: () => chain[0], cancel() { item.cancelled = true; }, setSavePath(p) { item.path = p; } });
   wc.session.emit('will-download', {}, item, wc);
-  wc.emit('did-fail-load', {}, -3, 'ERR_ABORTED', '', true);
-  fs.writeFileSync(item.path, content);
-  item.emit('done', {}, 'completed');
+  if (item.path) fs.writeFileSync(item.path, content);
+  // Las que fallan (4xx) en Electron de verdad: solo «updated» con «interrupted», sin «done».
+  if (onlyUpdated) return item.emit('updated', {}, 'interrupted');
+  item.emit('done', {}, item.cancelled ? 'cancelled' : state);
   return item;
 };
 
-test('run: exportación descargada, sin sesión en el proyecto pero sí en otra', async () => {
+test('run: descarga el enlace (sin páginas), sin sesión en el proyecto pero sí en otra', async () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pgo-ud-'));
   fs.mkdirSync(path.join(userData, 'Partitions', 'navegador-2'), { recursive: true });
   let item;
   const fake = fakeElectron((u, wc, partition) => {
-    if (partition === 'persist:navegador-7') return navigate(wc, 'https://accounts.google.com/ServiceLogin?continue=' + encodeURIComponent(u), 200, {});
-    item = download(wc, 'Informe.md', '# Informe\n\nHola ñandú');
+    if (partition === 'persist:navegador-7') {
+      return download(wc, { chain: [u, 'https://accounts.google.com/ServiceLogin?continue=x'], mime: 'text/html', disposition: '', content: '<html>login</html>' });
+    }
+    item = download(wc, { chain: [u, 'https://doc-0k-docstext.googleusercontent.com/export/x'], name: 'Informe.md', mime: 'text/x-markdown',
+      disposition: 'attachment; filename="Informe.md"', content: '# Informe\n\nHola ñandú' });
   });
   const r = g.createReader({ BrowserWindow: fake.BrowserWindow, userData, tmpDir: userData });
-  const res = await r.run({ id: 'j1', url: 'https://docs.google.com/document/d/x/export?format=md', mode: 'text', project: 7, maxChars: 12 });
+  const url = 'https://docs.google.com/document/d/x/export?format=md';
+  const res = await r.run({ id: 'j1', url, project: 7 });
   assert.strictEqual(res.id, 'j1');
   assert.strictEqual(res.download, true);
   assert.strictEqual(res.fileName, 'Informe.md');
-  assert.strictEqual(res.text, '# Informe\n\nH');
-  assert.strictEqual(res.truncated, true);
+  assert.strictEqual(res.disposition, 'attachment; filename="Informe.md"');
+  assert.strictEqual(Buffer.from(res.data, 'base64').toString('utf8'), '# Informe\n\nHola ñandú');
+  assert.strictEqual(res.text, undefined);
   assert.deepStrictEqual(fake.created.map(c => c.partition), ['persist:navegador-7', 'persist:navegador-2']);
-  assert.ok(fake.created.every(c => c.win.destroyed && c.opts.show === false && c.opts.webPreferences.sandbox));
+  assert.ok(fake.created.every(c => c.win.destroyed && c.opts.show === false && c.opts.webPreferences.sandbox && c.opts.webPreferences.javascript === false));
+  assert.ok(fake.created.every(c => c.win.webContents.downloaded === url), 'solo descarga el enlace');
   assert.ok(!fs.existsSync(item.path), 'el fichero temporal se borra');
+  // Nada de navegar ni de ventanas nuevas.
+  const wc = fake.created[1].win.webContents;
+  const ev = { preventDefault() { ev.prevented = true; } };
+  wc.emit('will-navigate', ev, 'https://docs.google.com/document/d/x/edit');
+  assert.ok(ev.prevented);
+  assert.deepStrictEqual(wc.openHandler(), { action: 'deny' });
   // La sesión que tenía Google se recuerda: la siguiente vez, justo después de la del proyecto.
   fake.created.length = 0;
-  await r.run({ id: 'j2', url: 'https://docs.google.com/document/d/x/export?format=md', mode: 'text', project: 9, maxChars: 100 });
+  await r.run({ id: 'j2', url, project: 9 });
   assert.deepStrictEqual(fake.created.map(c => c.partition), ['persist:navegador-9']);
   r.cleanup();
   assert.deepStrictEqual(fs.readdirSync(userData).filter(n => n.startsWith('pgo-google-')), []);
   fs.rmSync(userData, { recursive: true });
 });
 
-test('run: sin sesión de Google en ninguna, página leída, fuera de Google y resolve', async () => {
+test('run: sin sesión en ninguna, fuera de Google, interrumpida y demasiado grande', async () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pgo-ud-'));
   const fake = fakeElectron((u, wc) => {
-    if (u.includes('/export')) return navigate(wc, 'https://accounts.google.com/v3/signin', 200, {});
-    if (u.includes('/open?id=')) {
-      wc.emit('did-redirect-navigation', {}, 'https://docs.google.com/spreadsheets/d/x/edit', false, true);
-      return;
-    }
-    if (u.includes('/fuera')) return navigate(wc, 'https://example.com/', 200, {});
-    navigate(wc, u, 200, { text: 'Acta\nPunto 1', contentType: 'text/html' }, 'Acta - Documentos de Google');
+    if (u.includes('/login')) return download(wc, { chain: [u, 'https://accounts.google.com/v3/signin'], mime: 'text/html', disposition: '' });
+    if (u.includes('/fuera')) return download(wc, { chain: [u, 'https://example.com/x'], content: 'x' });
+    if (u.includes('/roto')) return download(wc, { chain: [u], state: 'interrupted' });
+    if (u.includes('/400')) return download(wc, { chain: [u], mime: 'text/html', onlyUpdated: true });
+    if (u.includes('/grande')) return download(wc, { chain: [u], total: g.MAX_DOWNLOAD + 1 });
   });
   const r = g.createReader({ BrowserWindow: fake.BrowserWindow, userData, tmpDir: userData });
-  let res = await r.run({ id: 'a', url: 'https://docs.google.com/document/d/x/export?format=md', mode: 'text', project: 4, maxChars: 100 });
+  let res = await r.run({ id: 'a', url: 'https://docs.google.com/login', project: 4 });
   assert.strictEqual(res.login, true);
-  res = await r.run({ id: 'b', url: 'https://docs.google.com/document/d/x/mobilebasic', mode: 'text', project: 4, maxChars: 100 });
-  assert.deepStrictEqual([res.status, res.text, res.title, res.contentType], [200, 'Acta\nPunto 1', 'Acta - Documentos de Google', 'text/html']);
-  res = await r.run({ id: 'c', url: 'https://drive.google.com/open?id=x', mode: 'resolve', project: 4, maxChars: 100 });
-  assert.strictEqual(res.url, 'https://docs.google.com/spreadsheets/d/x/edit');
-  res = await r.run({ id: 'd', url: 'https://docs.google.com/fuera', mode: 'text', project: 4, maxChars: 100 });
+  assert.strictEqual(res.data, undefined);
+  res = await r.run({ id: 'b', url: 'https://docs.google.com/fuera', project: 4 });
   assert.match(res.error, /fuera de Google/);
-  res = await r.run({ id: 'e', url: 'https://example.com/', mode: 'text', project: 4, maxChars: 100 });
-  assert.match(res.error, /solo se leen páginas de Google/);
+  assert.strictEqual(res.data, undefined);
+  res = await r.run({ id: 'c', url: 'https://docs.google.com/roto', project: 4 });
+  assert.match(res.error, /Google no ha dado el fichero/);
+  res = await r.run({ id: 'c2', url: 'https://docs.google.com/400', project: 4, timeoutMs: 2000 });
+  assert.match(res.error, /Google no ha dado el fichero/);
+  res = await r.run({ id: 'd', url: 'https://docs.google.com/grande', project: 4 });
+  assert.match(res.error, /demasiado grande/);
+  res = await r.run({ id: 'e', url: 'https://example.com/', project: 4 });
+  assert.match(res.error, /solo se descargan enlaces de Google/);
+  res = await r.run({ id: 'f', url: 'https://docs.google.com/nada', project: 4, timeoutMs: 50 });
+  assert.match(res.error, /tiempo agotado/);
+  r.cleanup();
   fs.rmSync(userData, { recursive: true });
+});
+
+test('sin guiones de lectura de páginas', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'googleReader.js'), 'utf8').replace(/\/\/.*$/gm, ''); // sin comentarios
+  for (const bad of ['executeJavaScript', '.loadURL(', 'innerText', 'querySelector', 'cookies', 'net.request', 'session.fetch']) {
+    assert.ok(!src.includes(bad), bad);
+  }
 });
 
 test('startPolling: recoge con el secreto, lee y entrega', async () => {
@@ -167,7 +170,7 @@ test('startPolling: recoge con el secreto, lee y entrega', async () => {
       if (sent) { res.statusCode = 204; return setTimeout(() => res.end(), 50); }
       sent = true;
       res.setHeader('Content-Type', 'application/json');
-      return res.end(JSON.stringify({ id: 'j', url: 'https://docs.google.com/x', mode: 'text', maxChars: 10 }));
+      return res.end(JSON.stringify({ id: 'j', url: 'https://docs.google.com/x' }));
     }
     let b = '';
     req.on('data', c => { b += c; });
@@ -175,8 +178,8 @@ test('startPolling: recoge con el secreto, lee y entrega', async () => {
   });
   await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
   const stop = g.startPolling({ base: 'http://127.0.0.1:' + srv.address().port, token: 'secreto',
-    reader: { run: async j => ({ id: j.id, text: 'leído' }) } });
-  assert.deepStrictEqual(await got, { id: 'j', text: 'leído' });
+    reader: { run: async j => ({ id: j.id, download: true, data: 'aG9sYQ==' }) } });
+  assert.deepStrictEqual(await got, { id: 'j', download: true, data: 'aG9sYQ==' });
   stop();
   assert.deepStrictEqual(seen[0], ['GET', '/api/escritorio/google/trabajo', 'pgo_escritorio=secreto', '1']);
   assert.deepStrictEqual(seen[1], ['POST', '/api/escritorio/google/resultado', 'pgo_escritorio=secreto', '1']);

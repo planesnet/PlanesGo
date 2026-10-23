@@ -24,16 +24,13 @@ const ayudaPgo = `pgo: programas del proyecto en local, desde el agente (el proy
                                    la salida completa, en el fichero que indica)
   pgo abrir <url>                  abre la URL en el navegador integrado de pgocode
 
-Google Drive, Docs, Sheets y Slides (solo lectura, con la sesión de Google del navegador de pgocode):
-  pgo drive buscar <texto> [--tipo doc|hoja|presentacion|pdf|carpeta|imagen] [--carpeta <id|url>] [--max N]
-  pgo drive listar [<carpeta id|url>]       sin carpeta: «Mi unidad»
-  pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
-                                   Docs en Markdown, Sheets en CSV; recorta a 40000 caracteres (--max)
-
-Gmail (solo lectura, con la misma sesión: no envía, borra ni archiva nada):
-  pgo gmail buscar <consulta de Gmail> [--max N]   p. ej. from:ana newer_than:7d, subject:factura has:attachment
-  pgo gmail listar [--max N]                       lo más reciente de la bandeja de entrada
-  pgo gmail leer <id de hilo> [--max N]            el hilo (sin lo citado); recorta a 20000 caracteres
+Google (solo lectura y solo por enlace: descarga el fichero, como «Archivo → Descargar», con la sesión de Google
+del navegador de pgocode; nunca lee páginas, no busca ni lista):
+  pgo drive leer <enlace o id> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
+                                   Docs en Markdown, Sheets en CSV, Slides y ficheros de texto/Word/Excel en texto;
+                                   PDF y demás se guardan en .pgocode/salidas (te da la ruta); recorta a 40000 (--max)
+  pgo gmail leer <enlace del correo> [--max N]
+                                   el mensaje original (.eml): texto sin lo citado y adjuntos (nombre, tipo, tamaño)
 `
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
@@ -64,7 +61,7 @@ func pgo(args []string) int {
 		req.Header.Set("X-PGO-Agente", token)
 		req.Header.Set("X-PGO", "1")
 		req.Header.Set("Content-Type", "application/json")
-		// Google se lee cargando páginas en el navegador de pgocode: puede tardar más.
+		// Google se lee descargando en el navegador de pgocode: puede tardar más.
 		espera := 60 * time.Second
 		if strings.HasPrefix(orden, "drive-") || strings.HasPrefix(orden, "gmail-") {
 			espera = 4 * time.Minute
@@ -171,28 +168,18 @@ func pgo(args []string) int {
 			return falla(err)
 		}
 		fmt.Println("abierto en el navegador de pgocode")
-	case "drive":
-		orden, q, err := driveQuery(args[1:])
+	case "drive", "gmail":
+		q, err := googleQuery(args[0], args[1:])
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "pgo drive:", err)
+			fmt.Fprintf(os.Stderr, "pgo %s: %v\n", args[0], err)
 			fmt.Fprint(os.Stderr, ayudaPgo)
 			return 2
 		}
-		raw, err := llama("GET", "drive-"+orden, nil, q)
-		if err != nil {
-			return falla(err)
+		if args[0] == "drive" {
+			dir, _ := os.Getwd() // lo que no es texto se guarda en su .pgocode/salidas
+			q.Set("carpeta", dir)
 		}
-		var r struct{ Texto string }
-		json.Unmarshal(raw, &r)
-		fmt.Print(r.Texto)
-	case "gmail":
-		orden, q, err := gmailQuery(args[1:])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "pgo gmail:", err)
-			fmt.Fprint(os.Stderr, ayudaPgo)
-			return 2
-		}
-		raw, err := llama("GET", "gmail-"+orden, nil, q)
+		raw, err := llama("GET", args[0]+"-leer", nil, q)
 		if err != nil {
 			return falla(err)
 		}
@@ -206,108 +193,51 @@ func pgo(args []string) int {
 	return 0
 }
 
-// gmailQuery: la orden (buscar | listar | leer) y los parámetros de «pgo gmail …». La consulta va tal cual a Gmail
-// (sus operadores: from:, to:, subject:, newer_than:, has:attachment, is:unread…).
-func gmailQuery(args []string) (string, url.Values, error) {
-	if len(args) == 0 {
-		return "", nil, fmt.Errorf("falta la orden (buscar, listar o leer)")
+// googleQuery: los parámetros de «pgo drive leer <enlace o id> [--hoja X] [--rango A1:D20] [--max N]» y de
+// «pgo gmail leer <enlace> [--max N]». Solo hay «leer»: buscar y listar leerían páginas de Google.
+func googleQuery(service string, args []string) (url.Values, error) {
+	if len(args) == 0 || args[0] != "leer" {
+		return nil, fmt.Errorf("solo hay «pgo %s leer <enlace>» (no se busca ni se lista)", service)
 	}
-	orden, rest := args[0], args[1:]
+	opts := map[string]string{"--max": "max"}
+	if service == "drive" {
+		opts["--hoja"], opts["--rango"] = "hoja", "rango"
+	}
 	q := url.Values{}
 	var pos []string
-	for i := 0; i < len(rest); i++ {
-		a := rest[i]
-		name, val, hasVal := strings.Cut(a, "=")
-		switch {
-		case name == "--max":
-			if !hasVal {
-				if i+1 >= len(rest) {
-					return "", nil, fmt.Errorf("falta el valor de --max")
-				}
-				i++
-				val = rest[i]
-			}
-			if n, err := strconv.Atoi(val); err != nil || n <= 0 {
-				return "", nil, fmt.Errorf("--max tiene que ser un número")
-			}
-			q.Set("max", val)
-		case strings.HasPrefix(a, "--"):
-			return "", nil, fmt.Errorf("opción desconocida %s", a)
-		default:
-			pos = append(pos, a)
-		}
-	}
-	switch orden {
-	case "buscar":
-		if len(pos) == 0 {
-			return "", nil, fmt.Errorf("di qué buscar (con la sintaxis de Gmail: from:ana newer_than:7d…)")
-		}
-		q.Set("q", strings.Join(pos, " "))
-	case "listar":
-		if len(pos) > 0 {
-			return "", nil, fmt.Errorf("listar no lleva consulta (para buscar: pgo gmail buscar <consulta>)")
-		}
-	case "leer":
-		if len(pos) != 1 {
-			return "", nil, fmt.Errorf("di qué leer: el ID de un hilo (el que da pgo gmail buscar)")
-		}
-		q.Set("ref", pos[0])
-	default:
-		return "", nil, fmt.Errorf("orden desconocida %q", orden)
-	}
-	return orden, q, nil
-}
-
-// driveQuery: la orden (buscar | listar | leer) y los parámetros de «pgo drive …».
-func driveQuery(args []string) (string, url.Values, error) {
-	if len(args) == 0 {
-		return "", nil, fmt.Errorf("falta la orden (buscar, listar o leer)")
-	}
-	orden, rest := args[0], args[1:]
-	opts := map[string]string{"--tipo": "tipo", "--carpeta": "carpeta", "--max": "max", "--hoja": "hoja", "--rango": "rango"}
-	q := url.Values{}
-	var pos []string
+	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		name, val, hasVal := strings.Cut(a, "=")
 		if k, ok := opts[name]; ok {
 			if !hasVal {
 				if i+1 >= len(rest) {
-					return "", nil, fmt.Errorf("falta el valor de %s", name)
+					return nil, fmt.Errorf("falta el valor de %s", name)
 				}
 				i++
 				val = rest[i]
+			}
+			if k == "max" {
+				if n, err := strconv.Atoi(val); err != nil || n <= 0 {
+					return nil, fmt.Errorf("--max tiene que ser un número")
+				}
 			}
 			q.Set(k, val)
 			continue
 		}
 		if strings.HasPrefix(a, "--") {
-			return "", nil, fmt.Errorf("opción desconocida %s", a)
+			return nil, fmt.Errorf("opción desconocida %s", a)
 		}
 		pos = append(pos, a)
 	}
-	switch orden {
-	case "buscar":
-		if len(pos) == 0 && q.Get("tipo") == "" && q.Get("carpeta") == "" {
-			return "", nil, fmt.Errorf("di qué buscar")
+	if len(pos) != 1 {
+		if service == "gmail" {
+			return nil, fmt.Errorf("di qué leer: el enlace del correo (ábrelo en Gmail y copia la dirección)")
 		}
-		q.Set("q", strings.Join(pos, " "))
-	case "listar":
-		if len(pos) > 1 {
-			return "", nil, fmt.Errorf("una sola carpeta")
-		}
-		if len(pos) == 1 {
-			q.Set("carpeta", pos[0])
-		}
-	case "leer":
-		if len(pos) != 1 {
-			return "", nil, fmt.Errorf("di qué leer: un ID o una URL")
-		}
-		q.Set("ref", pos[0])
-	default:
-		return "", nil, fmt.Errorf("orden desconocida %q", orden)
+		return nil, fmt.Errorf("di qué leer: un enlace o un ID de Google Drive/Docs/Sheets/Slides")
 	}
-	return orden, q, nil
+	q.Set("ref", pos[0])
+	return q, nil
 }
 
 // salidaProceso: la respuesta de /api/pgo/salida.

@@ -208,13 +208,13 @@ con el agente trabajando (con el agente libre no hay nada que interrumpir: en la
 - **Imputación automática**: pgocode imputa en Odoo el tiempo de cada turno (proyecto y tarea de la sesión) sin el
   agente ni PlanesGo (`imputacion.Gestor`, `PLANESGO_GESTOR` por proceso). Las preguntas aparte suman su consumo a
   la sesión pero no cambian la descripción de la línea.
-- **Google Drive, Docs y Sheets** (solo lectura): es una **herramienta**, no un destino. La usa el agente con
-  `pgo drive buscar|listar|leer` (el uso de la orden se le añade solo al mensaje que menciona Drive, Docs, Sheets,
-  «documento de Google» o una URL de docs.google.com: `internal/llm/pgohint.go`); pgocode lo lee a través de su
+- **Google Drive, Docs y Sheets** (solo lectura y solo por enlace: descarga el fichero): es una **herramienta**, no
+  un destino. La usa el agente con `pgo drive leer <enlace o id>` (el uso de la orden se le añade solo al mensaje que menciona Drive, Docs, Sheets,
+  «documento de Google» o una URL de docs.google.com: `internal/llm/pgohint.go`); pgocode lo descarga a través de su
   navegador integrado, con la sesión de Google del usuario (sin ajustes). Un mensaje sobre Drive va al agente como cualquier otro. No hay función directa («busca en drive X»):
   la detección estricta de `direct.ts` reconoce mensajes que son *enteros* una orden fija, y aquí el resultado casi
   siempre lo necesita el agente en su contexto para seguir; leerlo él cuesta lo mismo que pegárselo después.
-  Igual **Gmail** (solo lectura): `pgo gmail buscar|listar|leer`, con su línea de uso solo en el mensaje que habla
+  Igual **Gmail** (solo lectura, por enlace a un correo): `pgo gmail leer <enlace>`, con su línea de uso solo en el mensaje que habla
   del correo, el email, Gmail o la bandeja (no en «el campo email» y parecidos).
   Código: `internal/gbrowser`, `internal/servidor/google.go`, `electron/googleReader.js`, `cmd/pgocode/pgo.go`; ver
   `docs/google-workspace.md`.

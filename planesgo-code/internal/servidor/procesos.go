@@ -374,8 +374,7 @@ func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
 	return ok && p.Proyecto == proyecto
 }
 
-// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-buscar|listar|leer y
-// gmail-buscar|listar|leer.
+// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-leer y gmail-leer.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	var p struct {
 		Proyecto int    `json:"proyecto"`
@@ -412,12 +411,12 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusForbidden, "orden no permitida a los agentes")
 		return
 	}
-	// Google Drive (solo lectura): pgo drive buscar|listar|leer.
+	// Google Drive (solo lectura, por enlace): pgo drive leer.
 	if o, ok := strings.CutPrefix(r.PathValue("orden"), "drive-"); ok && r.Method == http.MethodGet {
 		s.driveOrden(w, r, o)
 		return
 	}
-	// Gmail (solo lectura): pgo gmail buscar|listar|leer.
+	// Gmail (solo lectura, por enlace): pgo gmail leer.
 	if o, ok := strings.CutPrefix(r.PathValue("orden"), "gmail-"); ok && r.Method == http.MethodGet {
 		s.gmailOrden(w, r, o)
 		return
