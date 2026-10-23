@@ -7,6 +7,7 @@ import * as PL from '../plan';
 import * as T from '../tareas';
 import * as TS from '../todoSync';
 import * as PA from '../projectActivity';
+import * as PS from '../parallelSession';
 import TodoSyncList, { todoCount } from './TodoSyncList';
 import * as CO from '../costes';
 import { autoContextOn, contextPolicy, lastContext, relayAsBackup } from '../contextPolicy';
@@ -102,6 +103,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }, [enCurso]);
   const enCursosRef = useRef(enCursos);
   enCursosRef.current = enCursos;
+  const setRunning = (sessionId: string, controller: AbortController | null, expected?: AbortController) => {
+    const next = PS.updateRunningMap(enCursosRef.current, sessionId, controller, expected);
+    enCursosRef.current = next;
+    setEnCursos(next);
+  };
   const inicioTurno = useRef<Record<string, number>>({});
   // Reparto en sesiones paralelas (reparto.ts): la propuesta con su cuenta atrás (por sesión madre), los repartos en
   // marcha o acabados (se guardan), las sesiones madre de cada uno, las hijas que el usuario ha parado y los avisos
@@ -175,9 +181,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const avisos = sesion ? CO.efectivos(sesion.agente, sesion.avisos) : {};
   const nivelGasto = CO.nivel(gastoSesion, avisos);
   // Avisos de la sesión: solo se anotan (sin interrumpir) y se ven en el indicador del pie, junto al modelo.
-  const [alertas, setAlertas] = useState<{ nivel: 'aviso' | 'limite'; texto: string }[]>([]);
-  useEffect(() => setAlertas([]), [sesion?.id]);
-  const avisa = (l: { nivel: 'aviso' | 'limite'; texto: string }[]) => { if (l.length) setAlertas(x => [...x, ...l].slice(-5)); };
+  const [alertsBySession, setAlertsBySession] = useState<Record<string, { nivel: 'aviso' | 'limite'; texto: string }[]>>({});
+  const alertas = (sesion && alertsBySession[sesion.id]) || [];
+  const avisa = (sessionId: string, l: { nivel: 'aviso' | 'limite'; texto: string }[]) => {
+    if (l.length) setAlertsBySession(x => ({ ...x, [sessionId]: [...(x[sessionId] || []), ...l].slice(-5) }));
+  };
 
   // Cola de mensajes (como en Claude Code), una por sesión: ver cola.ts.
   const [colas, setColas] = useState<Record<string, C.Cola<Adjunto>>>({});
@@ -191,12 +199,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   useEffect(() => { setAdjuntos([]); }, [sesion?.id]);
   const adjunta = (fs: File[]) => {
     if (!proyecto || !sesion) return;
+    const sessionId = sesion.id;
+    const projectId = sesion.proyecto;
+    const folder = sesion.carpeta;
     for (const f of fs) {
       const clave = Math.random().toString(36).slice(2);
       setAdjuntos(l => [...l, { nombre: f.name || 'imagen pegada', ruta: clave, tamano: f.size, subiendo: true }]);
-      subeAdjunto(proyecto.id, sesion.carpeta, sesion.id, f)
-        .then(a => setAdjuntos(l => l.map(x => x.ruta === clave ? a : x)))
-        .catch(e => setAdjuntos(l => l.map(x => x.ruta === clave ? { ...x, subiendo: false, error: (e as Error).message } : x)));
+      subeAdjunto(projectId, folder, sessionId, f)
+        .then(a => { if (idActual.current === sessionId) setAdjuntos(l => l.map(x => x.ruta === clave ? a : x)); })
+        .catch(e => { if (idActual.current === sessionId) setAdjuntos(l => l.map(x => x.ruta === clave ? { ...x, subiendo: false, error: (e as Error).message } : x)); });
     }
   };
   const subiendo = adjuntos.some(a => a.subiendo);
@@ -420,12 +431,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // Al acabar un turno sin error, sale la cola (también en sesiones de otros proyectos que siguen en segundo plano).
   useEffect(() => {
-    for (const [id, colaId] of Object.entries(colas)) {
-      const ses = (sesion?.id === id ? sesion : sesionesRef.current[id]) || null;
-      const p = ses ? proveedores.find(x => x.id === ses.agente) : undefined;
-      if (!ses || !p?.disponible) continue;
+    for (const { id, session: ses, queue: colaId } of PS.readyQueueSessions(colas, enCursos, sesion, sesionesRef.current, proveedores)) {
       // Lo que sale solo (órdenes de pgocode y funciones directas) lo decide el enrutador (router.ts).
-      const { enviar, cola: resto, partes, origenes } = C.siguiente(colaId, Boolean(enCursos[id]), t => R.standalone(t, ses.directo !== false));
+      const { enviar, cola: resto, partes, origenes } = C.siguiente(colaId, false, t => R.standalone(t, ses.directo !== false));
       if (!enviar) continue;
       ponCola(id, () => resto);
       // Lo encolado con «>» va al agente aunque parezca una orden directa (y sin repartir); el registro conserva quién
@@ -434,6 +442,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       envia(q.text, enviar.adjuntos, { sesion: ses, desdeCola: true, sinDirecto: q.forced, sinReparto: q.forced, origen: q.origin, generado: q.generated });
     }
   }, [enCursos, sesion, colas, proveedores]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const messagesOfSession = (sessionId: string, preferStored = false): Mensaje[] =>
+    PS.sessionMessages(sessionId, idActual.current, mensajes, vivas.current, conversacion, preferStored);
 
   // Lo último que ha dicho el agente (para decidir si lo que se escribe es su respuesta).
   const ultimoDelAgente = (ms: Mensaje[]) => {
@@ -479,13 +490,16 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   useEffect(() => setDestinoManual(null), [sesion?.id]);
   // ENRUTADOR DE INTENCIONES (router.ts, docs/enrutador.md): lo que necesita saber de la sesión para decidir quién
   // hace qué con un mensaje. La misma decisión sale en la etiqueta encima del cuadro y al enviar.
-  const routeInput = (t: string, ses: Sesion | null | undefined, p = prov): R.RouteInput => ({
-    text: t, isAgent: p?.tipo === 'agente', busy: Boolean(ses && enCursosRef.current[ses.id]), canInject: Boolean(p?.inyecta), alwaysTurn: siempreAlTurno,
-    attachments: adjuntos.filter(a => !a.subiendo && !a.error).length, hasConversation: mensajes.length > 0, lastAgentText: ultimoDelAgente(mensajes),
-    learned: ses ? leeLS(claveAprendidas(ses.proyecto), {}) : (proyecto ? leeLS(claveAprendidas(proyecto.id), {}) : {}), autoAside: ses?.decideAparte !== false, directOn: ses?.directo !== false,
-    permissions: ses ? modoDe(ses) : undefined, child: Boolean(ses?.madre), cutPending: ses?.corte !== undefined && p?.tipo === 'agente',
-    canFork: Boolean(ses?.sesionAgente) && (ses?.agente === 'claude-code' || ses?.agente === 'opencode'),
-  });
+  const routeInput = (t: string, ses: Sesion | null | undefined, p = prov): R.RouteInput => {
+    const ms = ses ? messagesOfSession(ses.id) : mensajes;
+    return {
+      text: t, isAgent: p?.tipo === 'agente', busy: Boolean(ses && enCursosRef.current[ses.id]), canInject: Boolean(p?.inyecta), alwaysTurn: siempreAlTurno,
+      attachments: adjuntos.filter(a => !a.subiendo && !a.error).length, hasConversation: ms.length > 0, lastAgentText: ultimoDelAgente(ms),
+      learned: ses ? leeLS(claveAprendidas(ses.proyecto), {}) : (proyecto ? leeLS(claveAprendidas(proyecto.id), {}) : {}), autoAside: ses?.decideAparte !== false, directOn: ses?.directo !== false,
+      permissions: ses ? modoDe(ses) : undefined, child: Boolean(ses?.madre), cutPending: ses?.corte !== undefined && p?.tipo === 'agente',
+      canFork: Boolean(ses?.sesionAgente) && (ses?.agente === 'claude-code' || ses?.agente === 'opencode'),
+    };
+  };
   // registraRuta: cada decisión, una vez: al registro de tiempos del servidor (suceso «ruta»), al recuento de la
   // sesión (Actividad) y, con t0, cuánto ha tardado en decidirse.
   // ms: lo que tardó en decidirse, si se registra después de hacerlo (la función directa, la pregunta aparte).
@@ -575,7 +589,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       case 'direct':
         // Con el agente trabajando: la pregunta de estado se responde ya, aparte (sin tocar su turno); lo mecánico
         // espera en la cola (nunca al turno en curso) y lo hace pgocode cuando acabe.
-        if (enCurso) {
+        if (enCursosRef.current[ses.id]) {
           if (d.modifiers.includes('queue')) ponCola(ses.id, c => C.encola(c, t, [], R.queueOrigin(d)));
           else directoAparte(ses, t, d, t0);
           return;
@@ -591,7 +605,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // Lo demás (agente, órdenes de planes, función directa, posible reparto): ahora o, con el agente trabajando, a la
     // cola (lo que el usuario mandó al agente a propósito se encola con «>», para que al salir siga yendo al agente).
     if (enCursosRef.current[ses.id]) { ponCola(ses.id, c => C.encola(c, d.forced && d.route === 'agent' ? '> ' + d.text : d.text, listos, R.queueOrigin(d))); return; }
-    envia(d.text, listos, { decision: d, t0 });
+    envia(d.text, listos, { sesion: ses, decision: d, t0 });
   }
 
   // A la conversación: a la cola si el agente está ocupado (la cola sale sola al acabar), si no, se envía.
@@ -624,7 +638,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       base.texto = AP.resumenEstado(ult, { trabajando, segundos: (Date.now() - (inicioTurno.current[ses.id] || Date.now())) / 1000, enCola: (colas[ses.id]?.mensajes.length) || 0 });
     }
     pon(l => o.sustituye ? l.map(a => a.id === o.sustituye ? base : a) : [...l, base]);
-    if (destino === 'estado' || !proyecto) { registra(); return; }
+    if (destino === 'estado') { registra(); return; }
     const p = proveedores.find(x => x.id === ses.agente);
     if (!p) { cambia({ curso: false, error: true, texto: '⚠ Elige un agente' }); return; }
     const ac = new AbortController();
@@ -634,7 +648,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const sinCopia = destino === 'contexto' && (ses.agente === 'antigravity' || !ses.sesionAgente || p.tipo !== 'agente');
     try {
       await chat({
-        proyecto: proyecto.id, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
+        proyecto: ses.proyecto, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '', sesion: ses.id, titulo: ses.nombre, autorizadas: ses.autorizadas || [],
         mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '', mensajes: [{ rol: 'user', texto: q }],
         aparte: destino, aparte_motor: o.motor || '', contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language, compactar: contextPolicy(ses.agente, ses).compactAt,
@@ -694,11 +708,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const t = (forzado ?? texto).trim();
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
     // opc.sesion: el envío es para otra sesión que la abierta (las hijas de un reparto, la cola en segundo plano o la madre tras la cuenta atrás).
-    const ses: Sesion | null = opc.sesion ?? sesion;
-    const prov = opc.sesion ? proveedores.find(p => p.id === opc.sesion!.agente) : provAbierto;
-    if ((!t && !listos.length) || !ses || !ses.hosting || !prov || (opc.sesion ? enCursosRef.current[ses.id] : enCurso) || (forzado === undefined && subiendo)) return;
-    // Sin opc.sesion (envío desde el cuadro de texto), nunca con una sesión de otro proyecto; con opc.sesion (cola o reparto en segundo plano), usa ses.proyecto.
-    if (!opc.sesion && (!proyecto || ses.proyecto !== proyecto.id)) return;
+    const ses = PS.resolveTurnSession(sesion, opc.sesion, proyecto?.id);
+    const prov = ses ? proveedores.find(p => p.id === ses.agente) : undefined;
+    if ((!t && !listos.length) || !ses || !prov || enCursosRef.current[ses.id] || (forzado === undefined && subiendo)) return;
     sesionesRef.current[ses.id] = ses;
     if (!opc.sinReparto && propuestasRef.current[ses.id]) return; // hay un reparto propuesto a la espera: primero eso
     // La decisión del enrutador (router.ts): la de Intro o, si el envío no viene de ahí (la cola, un plan, una hija de
@@ -709,7 +721,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     if (opc.reason) d = { ...d, reason: opc.reason };
     d = R.fromOrigin(d, opc.origen); // lo que salió de la cola: quién decidió encolarlo y por qué
     if (opc.desdeCola && !d.modifiers.includes('queue')) d = { ...d, modifiers: [...d.modifiers, 'queue'] };
-    const limpia = () => { if (forzado === undefined) { setTexto(''); setAdjuntos([]); } };
+    const limpia = () => { if (PS.shouldClearDraft(forzado !== undefined, Boolean(opc.sesion), ses.id, idActual.current)) { setTexto(''); setAdjuntos([]); } };
     // 1. Funciones directas (direct.ts): compilar, pruebas, commit, estado de git, gasto… las hace pgocode (0 tokens).
     if (d.route === 'direct' && d.direct) {
       limpia();
@@ -720,15 +732,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const orden = !opc.crudo && d.route === 'command' && d.plan ? d.plan : null;
     if (orden && orden.tipo !== 'nuevo' && orden.tipo !== 'revisar') {
       limpia();
-      await ordenPlan(orden, t, d, t0);
+      await ordenPlan(orden, t, d, t0, ses);
       return;
     }
     let planRevisado: Plan | undefined;
     if (orden?.tipo === 'revisar') {
-      planRevisado = await planNumero(orden.numero);
+      planRevisado = await planNumero(orden.numero, ses.proyecto);
       if (!planRevisado || planRevisado.estado === 'descartado') {
         limpia();
-        nota(t, !planRevisado ? `No hay ningún plan ${orden.numero} en este proyecto.` : `El plan ${orden.numero} está descartado: «reactiva el plan ${orden.numero}» para seguir con él.`, { ...d, executor: 'pgocode' }, t0);
+        nota(t, !planRevisado ? `No hay ningún plan ${orden.numero} en este proyecto.` : `El plan ${orden.numero} está descartado: «reactiva el plan ${orden.numero}» para seguir con él.`, { ...d, executor: 'pgocode' }, t0, ses);
         return;
       }
     }
@@ -748,7 +760,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (d.route === 'split') d = { ...d, route: 'agent', executor: 'agent', reason: 'ya hay un reparto propuesto en esta sesión' };
     }
     // Gasto antes del turno, para anotar los avisos que salte (sin interrumpir).
-    const gAntes = CO.gasto(forzado !== undefined || opc.sesion ? conversacion(ses.id) : mensajes);
+    const preferStored = forzado !== undefined || Boolean(opc.sesion);
+    const gAntes = CO.gasto(messagesOfSession(ses.id, preferStored));
     const aSes = CO.efectivos(ses.agente, ses.avisos);
     const modoPlan = orden !== null; // crear o revisar un plan
     const id = ses.id;
@@ -761,7 +774,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (final) guardaConversacion(id, m);
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
-    let previos = forzado !== undefined || opc.sesion ? conversacion(id) : mensajes;
+    let previos = messagesOfSession(id, preferStored);
     // «Continuar desde aquí» pendiente: se aplica con este mensaje. Lo de después queda en la vista, fuera del
     // contexto del agente; al agente va el punto (o, si no puede cortar su sesión, el traspaso).
     let corte: AP.CutRequest | undefined;
@@ -802,9 +815,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}), ruta }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
-    if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
+    limpia();
     const ac = new AbortController();
-    setEnCursos(x => ({ ...x, [id]: ac }));
+    setRunning(id, ac);
     PA.mark(ses.proyecto, id, { working: true }); // el proyecto se queda arriba en la lista mientras trabaja
     inicioTurno.current[id] = Date.now();
     if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
@@ -865,7 +878,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         l.push({ nivel: 'aviso', texto: `Este turno lleva ${CO.dinero(turno.coste)} y ${CO.tokens(turno.tokens)} tokens (y sigue).` });
       }
       gPrevio = g;
-      avisa(l);
+      avisa(id, l);
     };
     // Añade un trozo a las partes del mensaje: el texto seguido se junta; la herramienta se actualiza por su id.
     const parte = (p: Parte) => ultimo(m => {
@@ -990,7 +1003,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       pliegaApartes(id);
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
-      setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
+      setRunning(id, null, ac);
       if (idActual.current !== id) publicaDe(id, actual, false);
       // Respuesta que el usuario no está viendo: el proyecto sigue arriba, marcado, hasta que abra la sesión.
       PA.mark(ses.proyecto, id, { working: false, unread: idActual.current !== id && !ac.signal.aborted });
@@ -1030,7 +1043,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const ac = new AbortController();
     const largo = !DR.answeredHere(kind);
     if (largo) {
-      setEnCursos(x => ({ ...x, [id]: ac }));
+      setRunning(id, ac);
+      PA.mark(ses.proyecto, id, { working: true });
       ponCola(id, C.empieza);
       pon([...previos, usuario, { rol: 'assistant', texto: DR.runningText(kind), nota: true, directo: { accion: kind, curso: true } }]);
     }
@@ -1040,8 +1054,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (!r) {
         // No se sabe con seguridad cómo hacerlo en este proyecto: al agente, como siempre.
         pon(previos);
-        setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
-        await envia(t, [], { sinDirecto: true, sesion: idActual.current === id ? undefined : ses, t0, reason: 'pgocode no sabe con seguridad cómo hacerlo en este proyecto: al agente' });
+        setRunning(id, null, ac);
+        await envia(t, [], { sinDirecto: true, sesion: ses, t0, reason: 'pgocode no sabe con seguridad cómo hacerlo en este proyecto: al agente' });
         return;
       }
       if (d) registraRuta(id, R.stamp(d), t0, msDecision);
@@ -1055,7 +1069,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (largo) {
         // Si ha fallado, la cola se detiene (que decida el usuario antes de seguir).
         if (fallo) ponCola(id, C.falla);
-        setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
+        setRunning(id, null, ac);
+        PA.mark(ses.proyecto, id, { working: false, unread: idActual.current !== id && !ac.signal.aborted });
       }
     }
   }
@@ -1246,58 +1261,59 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // Estado del plan en las tarjetas de la conversación (se guarda con ella).
   // Se parte siempre de la conversación guardada (la más reciente): así un cambio no pisa al anterior.
-  function marcaPlan(ruta: string, estado: EstadoPlan | 'borrado', titulo?: string) {
-    if (!sesion) return;
-    const m = conversacion(sesion.id)
+  function marcaPlan(ruta: string, estado: EstadoPlan | 'borrado', titulo?: string, targetSession: Sesion | null = sesion) {
+    if (!targetSession) return;
+    const m = conversacion(targetSession.id)
       .map(x => x.plan?.ruta === ruta ? { ...x, plan: { ...x.plan, estado, titulo: titulo || x.plan.titulo } } : x);
-    if (idActual.current === sesion.id) setMensajes(m);
-    guardaConversacion(sesion.id, m);
+    if (idActual.current === targetSession.id) setMensajes(m);
+    guardaConversacion(targetSession.id, m);
   }
 
   // Una orden y su respuesta de pgocode en el chat (sin agente): «descarta el plan 2» → «Plan #2 descartado».
   // d y t0: la decisión del enrutador (una orden que ha resuelto pgocode): queda en el mensaje y se registra.
-  function nota(orden: string, respuesta: string, d?: R.RouteDecision, t0 = performance.now()) {
-    if (!sesion) return;
-    if (d) registraRuta(sesion.id, R.stamp(d), t0);
-    const m: Mensaje[] = [...conversacion(sesion.id), { rol: 'user', texto: orden, ...(d ? { ruta: R.stamp(d) } : {}) }, { rol: 'assistant', texto: respuesta, nota: true }];
-    if (idActual.current === sesion.id) setMensajes(m);
-    guardaConversacion(sesion.id, m);
+  function nota(orden: string, respuesta: string, d?: R.RouteDecision, t0 = performance.now(), targetSession: Sesion | null = sesion) {
+    if (!targetSession) return;
+    if (d) registraRuta(targetSession.id, R.stamp(d), t0);
+    const m: Mensaje[] = [...conversacion(targetSession.id), { rol: 'user', texto: orden, ...(d ? { ruta: R.stamp(d) } : {}) }, { rol: 'assistant', texto: respuesta, nota: true }];
+    if (idActual.current === targetSession.id) setMensajes(m);
+    guardaConversacion(targetSession.id, m);
   }
 
   // El plan con ese número en el proyecto.
-  async function planNumero(n: number): Promise<Plan | undefined> {
-    if (!proyecto) return undefined;
-    return (await listaPlanes(proyecto.id, directorio).catch(() => [] as Plan[])).find(p => p.numero === n);
+  async function planNumero(n: number, projectId = proyecto?.id): Promise<Plan | undefined> {
+    if (!projectId) return undefined;
+    return (await listaPlanes(projectId, directorio).catch(() => [] as Plan[])).find(p => p.numero === n);
   }
 
   // Órdenes de estado de un plan, en local: descartar, reactivar, borrar; y ejecutar (que sí va al agente).
   // d y t0: la decisión del enrutador. Lo que responde pgocode se registra con la nota; «ejecutar», con el envío al agente.
-  async function ordenPlan(o: PL.OrdenPlan, t: string, d?: R.RouteDecision, t0 = performance.now()) {
-    if (!proyecto || o.tipo === 'nuevo' || o.tipo === 'revisar') return;
-    const n = (r: string): void => nota(t, r, d && { ...d, executor: 'pgocode' }, t0);
-    const p = await planNumero(o.numero);
+  async function ordenPlan(o: PL.OrdenPlan, t: string, d?: R.RouteDecision, t0 = performance.now(), targetSession: Sesion | null = sesion) {
+    if (!targetSession || o.tipo === 'nuevo' || o.tipo === 'revisar') return;
+    const projectId = targetSession.proyecto;
+    const n = (r: string): void => nota(t, r, d && { ...d, executor: 'pgocode' }, t0, targetSession);
+    const p = await planNumero(o.numero, projectId);
     if (!p) { n(`No hay ningún plan ${o.numero} en este proyecto.`); return; }
     const nombre = `Plan #${p.numero} «${p.titulo}»`;
     try {
       switch (o.tipo) {
         case 'descartar':
           if (p.estado === 'descartado') { n(`${nombre} ya estaba descartado.`); return; }
-          await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'descartado' });
-          marcaPlan(p.ruta, 'descartado'); n(`${nombre} descartado. Puedes reactivarlo («reactiva el plan ${p.numero}») o borrarlo («borra el plan ${p.numero}»).`);
+          await guardaPlan(projectId, directorio, { ruta: p.ruta, estado: 'descartado' });
+          marcaPlan(p.ruta, 'descartado', undefined, targetSession); n(`${nombre} descartado. Puedes reactivarlo («reactiva el plan ${p.numero}») o borrarlo («borra el plan ${p.numero}»).`);
           return;
         case 'reactivar':
           if (p.estado === 'borrador') { n(`${nombre} ya está por decidir.`); return; }
-          await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'borrador' });
-          marcaPlan(p.ruta, 'borrador'); n(`${nombre} vuelve a estar por decidir.`);
+          await guardaPlan(projectId, directorio, { ruta: p.ruta, estado: 'borrador' });
+          marcaPlan(p.ruta, 'borrador', undefined, targetSession); n(`${nombre} vuelve a estar por decidir.`);
           return;
         case 'borrar':
           if (p.estado !== 'descartado') { n(`Solo se borran los planes descartados: «descarta el plan ${p.numero}» antes.`); return; }
-          await borraPlan(proyecto.id, directorio, p.ruta);
-          marcaPlan(p.ruta, 'borrado'); n(`${nombre} borrado.`);
+          await borraPlan(projectId, directorio, p.ruta);
+          marcaPlan(p.ruta, 'borrado', undefined, targetSession); n(`${nombre} borrado.`);
           return;
         case 'ejecutar':
           if (p.estado === 'descartado') { n(`${nombre} está descartado: «reactiva el plan ${p.numero}» para ejecutarlo.`); return; }
-          await ejecutaPlan(p, t, d, t0);
+          await ejecutaPlan(p, t, d, t0, targetSession);
           return;
       }
     } catch (e) { n('⚠ ' + (e as Error).message); }
@@ -1305,21 +1321,22 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // Ejecutar: el plan pasa a «ejecutado» y el agente lo recibe con permiso para editar (si la sesión es de solo
   // lectura, solo en este turno).
-  async function ejecutaPlan(p: Plan, orden?: string, d?: R.RouteDecision, t0?: number) {
-    if (!sesion || !proyecto || enCurso) return;
-    const texto = p.texto ?? (await leePlan(proyecto.id, directorio, p.ruta)).texto ?? '';
-    await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'ejecutado' });
-    marcaPlan(p.ruta, 'ejecutado', p.titulo);
-    setPlanAbierto(null);
-    const modo = modoDe(sesion);
-    envia(PL.peticionEjecucion(p.ruta, texto), [], { crudo: true, permisos: modo === 'lectura' ? 'editar' : modo, visible: orden || `Ejecuta el plan #${p.numero ?? ''} «${p.titulo}»`,
+  async function ejecutaPlan(p: Plan, orden?: string, d?: R.RouteDecision, t0?: number, targetSession: Sesion | null = sesion) {
+    if (!targetSession || enCursosRef.current[targetSession.id]) return;
+    const projectId = targetSession.proyecto;
+    const texto = p.texto ?? (await leePlan(projectId, directorio, p.ruta)).texto ?? '';
+    await guardaPlan(projectId, directorio, { ruta: p.ruta, estado: 'ejecutado' });
+    marcaPlan(p.ruta, 'ejecutado', p.titulo, targetSession);
+    if (idActual.current === targetSession.id) setPlanAbierto(null);
+    const modo = modoDe(targetSession);
+    envia(PL.peticionEjecucion(p.ruta, texto), [], { sesion: targetSession, crudo: true, permisos: modo === 'lectura' ? 'editar' : modo, visible: orden || `Ejecuta el plan #${p.numero ?? ''} «${p.titulo}»`,
       decision: d ?? { route: 'command', detail: 'plan:ejecutar', executor: 'agent', engine: 'user', reason: 'botón «Ejecutar» del plan', modifiers: ['plan'], text: orden || '' }, t0 });
   }
 
-  async function descartaPlan(ruta: string) {
-    if (!sesion || !proyecto) return;
-    await guardaPlan(proyecto.id, directorio, { ruta, estado: 'descartado' }).catch(() => {});
-    marcaPlan(ruta, 'descartado');
+  async function descartaPlan(ruta: string, targetSession: Sesion | null = sesion) {
+    if (!targetSession) return;
+    await guardaPlan(targetSession.proyecto, directorio, { ruta, estado: 'descartado' }).catch(() => {});
+    marcaPlan(ruta, 'descartado', undefined, targetSession);
   }
 
   // «Continuar desde aquí»: se marca el punto y se aplica al enviar el siguiente mensaje (hasta entonces, se deshace).

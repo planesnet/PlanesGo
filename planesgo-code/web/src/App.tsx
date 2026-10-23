@@ -150,6 +150,7 @@ export default function App() {
     let vigente = true;
     const sigue = (r: S.Repo | null) => {
       if (!vigente) return;
+      l = S.lista(usuario.login, proyecto.id);
       setRepo(r);
       // Sesiones con un agente que ya no está (p. ej. las antiguas por API): al agente por defecto.
       const disponibles = new Set(proveedores.filter(p => p.disponible).map(p => p.id));
@@ -175,19 +176,22 @@ export default function App() {
   // Si la sesión cambia de carpeta, se carga el repositorio de esa carpeta (y su rama, si la que tenía no está).
   useEffect(() => {
     const c = sesion?.carpeta;
-    if (!proyecto || !c || c === carpetaRepo.current) return;
+    if (!proyecto || !sesion || sesion.proyecto !== proyecto.id || !c || c === carpetaRepo.current) return;
     carpetaRepo.current = c;
+    let vigente = true;
     get<S.Repo>(`/api/proyecto/repo?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(c)}`).then(r => {
+      if (!vigente) return;
       setRepo(r);
       setSesion(x => {
-        if (!x || x.carpeta !== c || !usuario) return x;
+        if (!x || x.proyecto !== proyecto.id || x.carpeta !== c || !usuario) return x;
         const rama = r.ramas.includes(x.rama) ? x.rama : (r.rama || '');
         if (rama === x.rama && x.tipo === r.tipo) return x;
         const n = { ...x, rama, tipo: r.tipo, sesionAgente: rama === x.rama ? x.sesionAgente : undefined };
         setSesiones(S.guarda(usuario.login, n));
         return n;
       });
-    }).catch(() => setRepo(null));
+    }).catch(() => { if (vigente) setRepo(null); });
+    return () => { vigente = false; };
   }, [sesion?.carpeta, proyecto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El icono del hosting se guarda en la sesión para pintarlo en la lista sin consultar el repositorio.
