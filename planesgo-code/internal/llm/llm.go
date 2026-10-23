@@ -184,6 +184,10 @@ type Uso struct {
 	CacheLeida   int `json:"cache_leida,omitempty"`
 	CacheEscrita int `json:"cache_escrita,omitempty"`
 	Llamadas     int `json:"llamadas,omitempty"`
+	// Del Contexto (la última llamada), lo leído de caché y lo escrito en ella (el resto fue a precio de entrada):
+	// lo que muestra la ventana del hilo de limpieza (qué parte del contexto cuesta y cuál no).
+	ContextoCache   int `json:"contexto_cache,omitempty"`
+	ContextoEscrita int `json:"contexto_escrita,omitempty"`
 }
 
 // Info describe un proveedor para el selector del chat.

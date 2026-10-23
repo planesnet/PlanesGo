@@ -20,5 +20,10 @@ export function modelLabel(id: string): string {
   return `${id} · ${win(i.window)}${precio}`;
 }
 
+// modelInputPrice: el precio de entrada ($ por millón) de un modelo de OpenCode, si se conoce.
+export function modelInputPrice(id: string): number | undefined {
+  return MODELS[id]?.input;
+}
+
 // MODEL_LABEL_HELP: la explicación del texto de modelLabel (para el title del selector).
 export const MODEL_LABEL_HELP = 'Ventana de contexto y precio por millón de tokens (entrada/salida)';

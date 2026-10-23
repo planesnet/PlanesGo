@@ -248,6 +248,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	primerPlano := map[string]bool{}
 	lista := &listaClaude{}
 	contexto := 0
+	ctxCache, ctxEscrita := 0, 0 // de la última llamada: lo leído de caché y lo escrito en ella
 	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
 	// «modelUsage» y «total_cost_usd» llevan los subagentes pero son lo acumulado de TODA la sesión (también a través
 	// de --resume). El turno es el acumulado menos el de la vez anterior (guardado por sesión: acumuladoClaude); sin
@@ -262,7 +263,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	llamadas := map[string]llamadaClaude{}
 	cerradas := map[string]bool{}
 	vivo := func() *Uso {
-		u := Uso{Entrada: hecho.Entrada, Salida: hecho.Salida, Contexto: contexto} // contexto: el del paso en curso (hilo de limpieza)
+		u := Uso{Entrada: hecho.Entrada, Salida: hecho.Salida, Contexto: contexto, ContextoCache: ctxCache, ContextoEscrita: ctxEscrita} // contexto: el del paso en curso (hilo de limpieza)
 		for _, l := range llamadas {
 			u.Entrada += l.entrada()
 			u.Salida += l.Salida
@@ -419,6 +420,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 			}
 			if u := ev.Message.Usage; ev.Padre == "" && u.Input+u.CacheRead+u.CacheCreation > 0 {
 				contexto = u.Input + u.CacheRead + u.CacheCreation // la última llamada del agente principal
+				ctxCache, ctxEscrita = u.CacheRead, u.CacheCreation
 			}
 			for _, c := range ev.Message.Content {
 				switch c.Type {
@@ -493,7 +495,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 			}
 			clear(llamadas)
 			emite(Evento{Uso: &Uso{Entrada: turno.Entrada, Salida: turno.Salida, CacheLeida: turno.CacheLeida, CacheEscrita: turno.CacheEscrita,
-				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto}, Vivo: vivo(), Punto: punto})
+				Llamadas: turno.Llamadas, Coste: coste, Segundos: ev.Duracion / 1000, Contexto: contexto, ContextoCache: ctxCache, ContextoEscrita: ctxEscrita}, Vivo: vivo(), Punto: punto})
 			if ev.IsError {
 				return errors.New(ev.Result)
 			}
@@ -534,6 +536,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	vistas := map[int]bool{}
 	llamadasAgy := map[int]bool{}           // pasos con consumo propio: cada uno, una llamada al modelo
 	contexto := 0                           // tokens de entrada de la última llamada
+	ctxCache := 0                           // de ella, lo leído de caché
 	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
 	sinSalida := map[string]string{}        // herramientas acabadas «bien» pero sin salida (id → nombre): quizá denegadas
 	texto := false                          // el agente ha respondido algo
@@ -595,6 +598,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			if p.Uso.Input > 0 {
 				llamadasAgy[p.Indice] = true
 				contexto = p.Uso.Input + p.Uso.CacheRead // el de la última llamada
+				ctxCache = p.Uso.CacheRead
 			}
 			switch {
 			// «checkpoint»: Antigravity ha resumido la conversación (/compact o su compactación automática).
@@ -661,7 +665,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			}
 			// El razonamiento se cobra como salida: va con ella. Llamadas: los pasos con consumo propio.
 			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output + res.Usage.Thinking,
-				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos, Contexto: contexto}})
+				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos, Contexto: contexto, ContextoCache: ctxCache}})
 			if res.Estado != "" && res.Estado != "SUCCESS" {
 				if res.Error != "" {
 					return errors.New(res.Error)
@@ -866,7 +870,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 			avisa(ctxUltimo)
 			retenidos = append(retenidos, Evento{Uso: &Uso{Entrada: t.Input + t.Cache.Read + t.Cache.Write, Salida: t.Output + t.Reasoning,
 				CacheLeida: t.Cache.Read, CacheEscrita: t.Cache.Write, Llamadas: 1,
-				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write}, Punto: ev.Part.MessageID})
+				Coste: ev.Part.Cost, Contexto: t.Input + t.Cache.Read + t.Cache.Write, ContextoCache: t.Cache.Read, ContextoEscrita: t.Cache.Write}, Punto: ev.Part.MessageID})
 		case "error":
 			suelta()
 			m := ev.Error.Data.Message

@@ -179,3 +179,14 @@ test('lo retirado por los relevos y el progreso de la calibración', () => {
   assert.equal(C.calibProgress(c), '71 de 150 piezas y 12 de 30 retiradas para calibrar');
   assert.equal(C.calibProgress({ ...c, generales: false }), '');
 });
+
+test('coste del contexto: caché, escrito y sin caché, con su precio', () => {
+  const c = C.contextCost({ contexto: 100_000, contexto_cache: 80_000, contexto_escrita: 5_000 }, 'claude-code', 'haiku')!;
+  assert.deepEqual([c.cached, c.written, c.fresh], [80_000, 5_000, 15_000]);
+  assert.ok(Math.abs(c.cost!.step - (0.008 + 0.00625 + 0.015)) < 1e-9);
+  assert.equal(C.contextCost({ contexto: 0 }, 'opencode'), null);
+  const g = C.contextCost({ contexto: 125_000, contexto_cache: 100_000 }, 'opencode', 'google-vertex/gemini-4-argon')!;
+  assert.equal(g.fresh, 25_000);
+  assert.ok(Math.abs(g.cost!.step - (0.02 + 0.05)) < 1e-9);
+  assert.equal(C.contextCost({ contexto: 50_000 }, 'antigravity')!.cost, undefined, 'sin precio por token');
+});

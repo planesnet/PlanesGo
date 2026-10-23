@@ -58,6 +58,9 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
   const ticks = CL.turnTicks(series, W, H);
   const line = sweeping ? 'barriendo' : working ? CL.statusLine(st, busy) : agentWorking ? 'el agente trabaja' : CL.statusLine(st, busy);
   const hint = CL.sweepHint(agent, report, relayForced);
+  // Qué parte del contexto de la última llamada cuesta: leído de caché (barato), escrito en ella o sin caché.
+  const lastUse = [...messages].reverse().find(m => m.rol === 'assistant' && (m.vivo?.contexto || m.uso?.contexto));
+  const ctxCost = CL.contextCost(lastUse?.vivo?.contexto ? lastUse.vivo : lastUse?.uso, agent, model);
   const note = CL.pendingNote(agent, report, relayForced);
   const warn = CL.cacheWarning(agent, report);
   const cost = CL.sweepCost(agent, model, report);
@@ -92,6 +95,7 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
             <b>{last ? CL.contextLine(last.tokens, threshold) : '—'}</b>
             <span className="suave"> {CL.nowLabel(last, agentWorking)}</span>
           </div>
+          {ctxCost && <ContextCostBar c={ctxCost} agent={agent} />}
           <div className="suave pequeno">compacta a {fmt(threshold)}{target ? ` · objetivo ${fmt(target)}: por encima, el hilo retira también lo grande y viejo` : ''}</div>
           {series.length > 1 && (
             <figure className="cleaner-spark">
@@ -159,4 +163,26 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
 
 function fmt(n: number): string {
   return n >= 1_000_000 ? (n / 1_000_000).toFixed(1).replace('.', ',') + ' M' : n >= 1000 ? Math.round(n / 1000) + ' k' : String(n);
+}
+
+// ContextCostBar: el contexto de la última llamada partido en lo que cuesta poco (leído de caché), lo escrito en
+// caché y lo que fue a precio de entrada (en rojo), con lo que cuesta cada paso si se sabe el precio.
+function ContextCostBar({ c, agent }: { c: CL.ContextCost; agent: string }) {
+  const pct = (n: number) => `${(n / c.total) * 100}%`;
+  const $ = (x: number) => (x > 0 && x < 0.001 ? '<0,001' : x.toFixed(x < 0.01 ? 3 : 2).replace('.', ',')) + ' $';
+  return (
+    <div className="ctx-cost" aria-label="Coste del contexto de la última llamada">
+      <div className="ctx-cost-bar" role="img" aria-hidden>
+        {c.cached > 0 && <span className="ctx-cached" style={{ width: pct(c.cached) }} />}
+        {c.written > 0 && <span className="ctx-written" style={{ width: pct(c.written) }} />}
+        {c.fresh > 0 && <span className="ctx-fresh" style={{ width: pct(c.fresh) }} />}
+      </div>
+      <div className="ctx-cost-legend pequeno">
+        {c.cached > 0 && <span><i className="ctx-cached" /> {fmt(c.cached)} en caché{c.cost ? ` · ${$(c.cost.cached)}` : ''}</span>}
+        {c.written > 0 && <span><i className="ctx-written" /> {fmt(c.written)} escritos en caché{c.cost ? ` · ${$(c.cost.written)}` : ''}</span>}
+        {c.fresh > 0 && <span className="ctx-fresh-txt"><i className="ctx-fresh" /> {fmt(c.fresh)} sin caché{c.cost ? ` · ${$(c.cost.fresh)}` : ''}</span>}
+      </div>
+      {c.cost && <div className="suave pequeno">Cada paso cuesta ahora ~{$(c.cost.step)} de entrada; con la caché caducada (unos minutos parado) costaría ~{$(c.cost.cold)}.{agent === 'claude-code' ? '' : ' (precios aproximados)'}</div>}
+    </div>
+  );
 }

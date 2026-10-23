@@ -4,6 +4,7 @@
 // costar caché (lo de después del prompt de sistema se reenvía una vez sin ella).
 // Funciones puras: node --test src/cleaner.test.ts
 import type { Mensaje, Parte } from './api';
+import { modelInputPrice } from './modelInfo.ts';
 import type { Calibration, PruneReport, Vigencia } from './prune';
 
 // CollectorStatus: el estado del recolector (llm.CollectorStatus).
@@ -161,6 +162,7 @@ export function cacheWarning(agent: string, r?: PruneReport | null): string {
 export function inputPrice(agent: string, model?: string): number {
   const m = (model || '').toLowerCase();
   if (agent === 'antigravity') return 0;
+  if (agent === 'opencode' && model && modelInputPrice(model) !== undefined) return modelInputPrice(model)!;
   if (m.includes('haiku')) return 1;
   if (m.includes('opus')) return 5;
   if (m.includes('flash')) return 0.3;
@@ -419,4 +421,36 @@ export function applyChatVigencia(ms: Mensaje[], r: PruneReport): Mensaje[] {
 // markRelayedOut: al relevar, lo que quedó fuera de la memoria (fuera de vigencia) pasa a «fuera del contexto».
 export function markRelayedOut(ms: Mensaje[]): Mensaje[] {
   return ms.map(m => (m.vig && m.vig.vigencia >= 3 && !m.vig.fuera ? { ...m, vig: { ...m.vig, fuera: true } } : m));
+}
+
+// ---- Qué parte del contexto cuesta ----
+
+// La caché respecto al precio de entrada: leer, el 10 % (Claude y Gemini); escribir, 1,25 veces en Claude (caché de
+// 5 min) y nada aparte en Gemini.
+const READ_FACTOR = 0.1;
+const writeFactor = (agent: string) => (agent === 'claude-code' ? 1.25 : 1);
+
+// ContextCost: el contexto de la última llamada partido en lo leído de caché (barato), lo escrito en ella y lo que
+// fue a precio de entrada sin caché; con su coste por paso si se sabe el precio.
+export interface ContextCost {
+  total: number; cached: number; written: number; fresh: number;
+  price?: number;                       // $/millón de entrada
+  cost?: { cached: number; written: number; fresh: number; step: number; cold: number }; // cold: el paso con la caché caducada
+}
+
+export function contextCost(u: { contexto?: number; contexto_cache?: number; contexto_escrita?: number } | undefined, agent: string, model?: string): ContextCost | null {
+  const total = u?.contexto || 0;
+  if (!total) return null;
+  const cached = Math.min(u?.contexto_cache || 0, total);
+  const written = Math.min(u?.contexto_escrita || 0, total - cached);
+  const fresh = total - cached - written;
+  const r: ContextCost = { total, cached, written, fresh };
+  const price = inputPrice(agent, model);
+  if (price > 0) {
+    const d = (n: number) => (n * price) / 1e6;
+    const c = { cached: d(cached) * READ_FACTOR, written: d(written) * writeFactor(agent), fresh: d(fresh) };
+    r.price = price;
+    r.cost = { ...c, step: c.cached + c.written + c.fresh, cold: d(total) * writeFactor(agent) };
+  }
+  return r;
 }
