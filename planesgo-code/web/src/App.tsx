@@ -145,7 +145,11 @@ export default function App() {
     const elegida = l.find(s => s.id === quiere) || l[0];
     const carpeta = elegida?.carpeta || proyecto.carpetas[0] || '';
     carpetaRepo.current = carpeta;
+    // Si mientras se lee el repositorio se cambia de proyecto (o de usuario), esta respuesta ya no vale: si no, las
+    // sesiones del proyecto anterior se pintarían (y se podrían abrir) bajo el nuevo.
+    let vigente = true;
     const sigue = (r: S.Repo | null) => {
+      if (!vigente) return;
       setRepo(r);
       // Sesiones con un agente que ya no está (p. ej. las antiguas por API): al agente por defecto.
       const disponibles = new Set(proveedores.filter(p => p.disponible).map(p => p.id));
@@ -160,11 +164,12 @@ export default function App() {
       if (quiere === 'nueva' && proveedores.length) {
         setDialogo({ sesion: conDefectos(S.nueva(proyecto.id, '', '', agentePorDefecto()), l), nueva: true });
       }
-      setSesiones(l);
-      setSesion(s);
+      setSesiones(l.filter(x => x.proyecto === proyecto.id));
+      setSesion(s && s.proyecto === proyecto.id ? s : null);
     };
     if (carpeta) get<S.Repo>(`/api/proyecto/repo?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}`).then(sigue).catch(() => sigue(null));
     else sigue(null);
+    return () => { vigente = false; };
   }, [usuario, proyecto, proveedores.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Si la sesión cambia de carpeta, se carga el repositorio de esa carpeta (y su rama, si la que tenía no está).

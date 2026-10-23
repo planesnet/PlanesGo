@@ -687,6 +687,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const ses: Sesion | null = opc.sesion ?? sesion;
     const prov = opc.sesion ? proveedores.find(p => p.id === opc.sesion!.agente) : provAbierto;
     if ((!t && !listos.length) || !proyecto || !ses || !ses.hosting || !prov || (opc.sesion ? enCursosRef.current[ses.id] : enCurso) || (forzado === undefined && subiendo)) return;
+    // Nunca con una sesión de otro proyecto: sus mensajes irían con este proyecto y la carpeta del otro.
+    if (ses.proyecto !== proyecto.id) return;
     if (!opc.sinReparto && propuestasRef.current[ses.id]) return; // hay un reparto propuesto a la espera: primero eso
     // La decisión del enrutador (router.ts): la de Intro o, si el envío no viene de ahí (la cola, un plan, una hija de
     // un reparto, un reenvío), una nueva con el agente libre y sin preguntas aparte (ya va a la conversación).
