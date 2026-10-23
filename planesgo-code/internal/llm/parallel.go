@@ -52,13 +52,21 @@ var (
 		"find all", "search for", "where is", "where are", "audit ", "across the codebase", "every file", "all usages",
 	}
 	listLine = regexp.MustCompile(`(?m)^\s*(?:\d{1,2}[.)]|[-*•])\s+\S`)
+	// smallTask: la petición empieza por un cambio concreto (añade, cambia, corrige…).
+	smallTask = regexp.MustCompile(`^(?:por favor,?\s+)?(?:añade|añadir|agrega|cambia|corrige|arregla|renombra|quita|elimina|borra|pon|sube|baja|mueve|actualiza|crea|implementa|haz que|add|fix|change|rename|remove|delete|update|create|implement|make)\b`)
+	// wideScope: abarca todo el código (entonces sí puede ser exploración aunque sea un cambio).
+	wideScope = regexp.MustCompile(`\b(?:todo el (?:proyecto|repositorio|código|codigo)|todos los (?:ficheros|archivos|usos|sitios|lugares|módulos|modulos)|todas las (?:referencias|llamadas|apariciones)|en cada|cada uno de los|por todo el|across the codebase|every (?:file|place|usage)|all (?:files|usages|places))\b`)
 )
+
+// planMarker: el principio de las peticiones de plan que manda pgocode (web/src/plan.ts, peticionPlan): el plan es
+// para investigar y escribir, sin subagentes sugeridos.
+const planMarker = "[Modo plan de pgocode]"
 
 // ParallelHintFor decide si la petición lleva una sugerencia de subagentes (nil: no). embed puede ser nil (solo
 // reglas).
 func ParallelHintFor(ctx context.Context, text string, embed func(context.Context, string, string) ([]float32, error)) *ParallelAdvice {
 	t := strings.TrimSpace(text)
-	if t == "" || strings.HasPrefix(t, "/") || len(strings.Fields(t)) < parallelMinWords {
+	if t == "" || strings.HasPrefix(t, "/") || strings.HasPrefix(t, planMarker) || len(strings.Fields(t)) < parallelMinWords {
 		return nil
 	}
 	low := strings.ToLower(t)
@@ -69,6 +77,11 @@ func ParallelHintFor(ctx context.Context, text string, embed func(context.Contex
 				Why: fmt.Sprintf("%d partes independientes", len(items))}
 		}
 		return nil // pasos de un mismo trabajo: en orden, no en paralelo
+	}
+	// Una tarea pequeña y concreta («añade devolucion y merma al tipo de movimiento…») no es exploración aunque diga
+	// «dónde se…»: solo si además abarca todo el código.
+	if smallTask.MatchString(low) && !wideScope.MatchString(low) {
+		return nil
 	}
 	hits := 0
 	for _, r := range exploreRules {

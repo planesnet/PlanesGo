@@ -32,6 +32,10 @@ func TestParallelHintRules(t *testing.T) {
 		// Ficheros distintos: independientes aunque se parezcan (aquí, todas al mismo vector); el mismo fichero: no.
 		{"Haz esto:\n1. en precios.py añade el IVA\n2. en textos.py añade capitaliza\n3. en fechas.py añade bisiesto", "partes"},
 		{"Haz esto:\n1. en precios.py añade el IVA\n2. en precios.py añade descuentos\n3. en fechas.py añade bisiesto", ""},
+		// Las peticiones de plan de pgocode y las tareas pequeñas, sin sugerencia.
+		{"[Modo plan de pgocode] Investiga lo necesario sin modificar ningún fichero, busca en todo el proyecto dónde se usa la función y revisa todo el código", ""},
+		{"añade devolucion y merma al tipo de movimiento y busca dónde se muestra el tipo para traducirlo", ""},
+		{"añade logs en todos los usos de la API de Odoo: busca dónde se llama en todo el proyecto", "exploración"},
 	} {
 		a := ParallelHintFor(ctx, c.text, embedFalso)
 		got := ""

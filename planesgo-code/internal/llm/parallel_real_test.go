@@ -26,6 +26,14 @@ var parallelCases = []struct {
 	{"el puerto del servidor está en config.json: cámbialo al 8081 y reinicia el servicio de pruebas", ""},
 	{"- arregla el cálculo del descuento en pedidos.py\n- añade el campo observaciones al formulario de clientes\n- cambia el logo de la cabecera por el nuevo\n- actualiza el README con los nuevos puertos", "partes"},
 	{"Haz estas tareas:\n1. traduce los mensajes de error del módulo de facturas\n2. optimiza la consulta del listado de clientes\n3. documenta la API de pedidos\n4. añade pruebas del validador de NIF", "partes"},
+	// Tareas pequeñas (aunque digan «dónde se…»): sin subagentes.
+	{"añade los tipos devolucion y merma al enum de movimientos de stock y, donde se muestre el tipo, su texto en español", ""},
+	{"en inventario.py añade la función registra_merma que reste la cantidad del stock y una prueba que la compruebe", ""},
+	{"cambia dónde se calcula el IVA en facturas.py para que redondee a dos decimales y añade su prueba", ""},
+	{"añade devolucion y merma al tipo de movimiento y busca dónde se muestra el tipo para traducirlo al español", ""},
+	{"añade el estado merma a los movimientos y revisa el código de inventario para que lo tenga en cuenta al sumar", ""},
+	{"corrige el descuento de pedidos.py: encuentra dónde se aplica dos veces y deja solo la del total", ""},
+	{"añade logs en todos los sitios donde se llama a la API de Odoo en el proyecto, con el modelo y el método", "exploración"},
 	{"Pasos:\n1. crea la tabla de etiquetas en la base de datos\n2. añade el modelo Etiqueta que use esa tabla\n3. crea el endpoint que lista las etiquetas del modelo\n4. muestra las etiquetas en el Kanban con ese endpoint", ""},
 }
 
