@@ -39,6 +39,8 @@ type Peticion struct {
 	MCP []string
 	// Idioma del usuario (su nombre, p. ej. «español»): el agente responde en él.
 	Idioma string
+	// Paralelo: pgocode puede sugerir subagentes a Claude Code en este turno (parallel.go).
+	Paralelo bool
 	// Traza: la sesión de pgocode y el turno (para encontrar en depuracion.log lo de cada sesión).
 	Traza string
 	// AlInyectar: si el agente admite mensajes a mitad de turno (Claude Code), se llama con la función que se los

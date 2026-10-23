@@ -158,6 +158,17 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 		emite(Evento{Texto: "_(La conversación anterior de OpenCode era de otra carpeta; empiezo una nueva en la de esta sesión.)_\n\n"})
 		p.SesionAgente = ""
 	}
+	// Claude Code: si la petición pide explorar mucho o lista partes independientes, se le sugiere usar subagentes
+	// (su propio contexto: lo que leen no llena la conversación). Solo en ese mensaje, y se avisa en el chat.
+	if a.Clave == "claude-code" && p.Paralelo && !p.Aparte && len(p.Mensajes) > 0 && p.Corte == "" {
+		if adv := ParallelHint(ctx, p.Mensajes[len(p.Mensajes)-1].Texto); adv != nil {
+			ms := append([]Mensaje(nil), p.Mensajes...)
+			ms[len(ms)-1].Texto += "\n\n" + adv.Hint
+			p.Mensajes = ms
+			depuracion.Log(a.Clave, "se sugieren subagentes (%s)", adv.Why)
+			emite(Evento{Texto: "_(pgocode ha sugerido usar subagentes: " + adv.Why + ".)_\n\n"})
+		}
+	}
 	// Antigravity da el consumo acumulado de la conversación (tokens y segundos): se emite solo lo de este turno.
 	if a.Clave == "antigravity" {
 		conv := p.SesionAgente

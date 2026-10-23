@@ -753,6 +753,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
+		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0",
 		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar),
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
 		Corte: p.Corte, Traspaso: p.Traspaso}, func(e llm.Evento) {
