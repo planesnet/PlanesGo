@@ -3,6 +3,7 @@ import { listaCopias, quitaCopia, type Proyecto } from '../api';
 import * as C from '../copias';
 import { conversacion, titulo, type Sesion } from '../sesiones';
 import * as T from '../tareas';
+import * as R from '../router';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, type Plan } from './Planes';
 import Programas from './Programas';
@@ -31,6 +32,15 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
     return () => window.removeEventListener('pgo:actividad', aviso);
   }, [sesion?.id]);
 
+  // Enrutador de intenciones (router.ts): cuántos mensajes de la sesión han ido a cada sitio.
+  const [rutas, setRutas] = useState<R.RouteTally>({});
+  useEffect(() => {
+    setRutas(sesion ? R.readTally(sesion.id) : {});
+    const aviso = (e: Event) => { const d = (e as CustomEvent<{ sesion: string }>).detail; if (sesion && d.sesion === sesion.id) setRutas(R.readTally(sesion.id)); };
+    window.addEventListener('pgo:ruta', aviso);
+    return () => window.removeEventListener('pgo:ruta', aviso);
+  }, [sesion?.id]);
+
   const vivas = T.vivas(tareas);
   const hechas = tareas.filter(t => t.tipo !== 'lista' && t.estado !== 'curso').reverse().slice(0, 15);
   const deTipo = (l: T.Tarea[], sub: boolean) => l.filter(t => (t.tipo === 'subagente') === sub);
@@ -53,6 +63,13 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
             {vivas.length > 0 && <span className="suave"> · {vivas.length} en marcha</span>}</p>
         )}
       </section>
+
+      {sesion && (
+        <section>
+          <h4 title="Quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Ver docs/enrutador.md o /help.">Enrutador</h4>
+          <p className="suave pequeno">{R.summary(rutas)}</p>
+        </section>
+      )}
 
       <ConceptGuide />
 

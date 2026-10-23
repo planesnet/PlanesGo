@@ -16,6 +16,12 @@ import (
 // que una persona olvidaría). Ni cambian la sesión del agente ni su contexto: o las responde un modelo barato sin
 // historial («suelta»), o una copia de la sesión del agente que después se tira («contexto»). Antigravity no
 // permite copiar sus conversaciones: ahí responde el modelo barato con el resumen que manda la interfaz.
+//
+// La IA local como DESTINO (docs/enrutador.md): la pregunta suelta (cultura general, traducciones, qué significa
+// algo) la responde primero el modelo de texto de la IA local del equipo (gemma3:4b: 0 tokens, menos de 1 s en
+// caliente; medido: 9 de 10 respuestas correctas); si no hay modelo de texto, no responde a tiempo o da una
+// respuesta vacía, el modelo barato de pago. La interfaz deja repetirla con el de pago (motor «pago»). Con contexto
+// NO: un modelo de 4B con 12k caracteres de resumen de la conversación responde peor que la copia de la sesión.
 
 const sistemaAparte = "El usuario te hace una pregunta aparte mientras trabaja con un agente de programación. " +
 	"Responde breve y claro. No tienes herramientas: si no lo sabes con lo que tienes, dilo."
@@ -23,13 +29,15 @@ const sistemaAparte = "El usuario te hace una pregunta aparte mientras trabaja c
 // bifurcables: los agentes que pueden copiar su sesión para una pregunta aparte.
 var bifurcables = map[string]bool{"claude-code": true, "opencode": true}
 
-func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto string, prov llm.Proveedor, info llm.Info, pet llm.Peticion, sesionImp, proveedor string, envia func(any)) {
+// motor «pago»: la suelta, con el modelo de pago aunque haya IA local (lo pide el usuario).
+func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto, motor string, prov llm.Proveedor, info llm.Info, pet llm.Peticion, sesionImp, proveedor string, envia func(any)) {
 	inicio := time.Now()
 	pregunta := pet.Mensajes[0].Texto
 	via := "modelo"
 	var err error
 	if tipo == "contexto" && pet.SesionAgente != "" && bifurcables[prov.ID()] {
 		via = "copia"
+		envia(map[string]string{"via": via})
 		err = prov.Chat(r.Context(), pet, func(e llm.Evento) {
 			if e.Uso != nil && s.Imputacion != nil {
 				s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
@@ -39,6 +47,11 @@ func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto string, 
 				envia(llm.Evento{Texto: e.Texto, Pensamiento: e.Pensamiento, Herramienta: e.Herramienta, Uso: e.Uso})
 			}
 		})
+	} else if resp, modelo, ok := s.aparteLocal(r.Context(), tipo, motor, pet.Sistema, pregunta); ok {
+		via = "local/" + modelo
+		envia(map[string]string{"via": via})
+		envia(llm.Evento{Texto: resp})
+		envia(llm.Evento{Uso: &llm.Uso{}})
 	} else {
 		texto := pregunta
 		if tipo == "contexto" && strings.TrimSpace(contexto) != "" {
@@ -46,8 +59,9 @@ func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto string, 
 		}
 		var resp string
 		var u llm.Uso
-		resp, u, err = llm.Gemini(r.Context(), llm.ModeloAparte, sistemaAparte+" "+pet.Sistema, texto, 2048, 512)
+		resp, u, err = aparteGemini(r.Context(), llm.ModeloAparte, sistemaAparte+" "+pet.Sistema, texto, 2048, 512)
 		if err == nil {
+			envia(map[string]string{"via": via})
 			if s.Imputacion != nil {
 				s.Imputacion.SumaUso(sesionImp, u.Entrada, u.Salida, u.Coste)
 			}
@@ -66,6 +80,31 @@ func (s *Servidor) aparte(turno string, r *http.Request, tipo, contexto string, 
 		envia(map[string]string{"error": err.Error()})
 	}
 	envia(map[string]bool{"fin": true})
+}
+
+// aparteGemini y aparteLocalChat: los modelos de las preguntas aparte (en las pruebas se sustituyen).
+var (
+	aparteGemini    = llm.Gemini
+	aparteLocalChat = selector.LocalChat
+)
+
+// aparteLocalMax: lo que se espera a la IA local para una pregunta suelta (la primera vez carga el modelo).
+const aparteLocalMax = 20 * time.Second
+
+// aparteLocal: la pregunta suelta con la IA local del equipo (ok: hay respuesta). No con contexto ni si el usuario
+// pide el modelo de pago.
+func (s *Servidor) aparteLocal(ctx context.Context, tipo, motor, sistema, pregunta string) (string, string, bool) {
+	if tipo != "suelta" || motor == "pago" {
+		return "", "", false
+	}
+	c, cancela := context.WithTimeout(ctx, aparteLocalMax)
+	defer cancela()
+	resp, modelo, err := aparteLocalChat(c, sistemaAparte+" Si no lo sabes con seguridad, di que no lo sabes. "+sistema, pregunta, 600)
+	resp = strings.TrimSpace(resp)
+	if err != nil || resp == "" {
+		return "", "", false
+	}
+	return resp, modelo, true
 }
 
 // clasifica: ¿el mensaje va a la conversación o es una pregunta aparte? Solo para lo que las reglas de la
@@ -93,7 +132,7 @@ func (s *Servidor) clasifica(w http.ResponseWriter, r *http.Request, ses *sesion
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonOK(w, map[string]any{"tipo": tipo, "uso": u})
+	jsonOK(w, map[string]any{"tipo": tipo, "uso": u, "modelo": modelo})
 }
 
 const sistemaClasifica = `Un usuario escribe a un agente de programación que está trabajando. Decide adónde va su mensaje y responde SOLO una palabra:

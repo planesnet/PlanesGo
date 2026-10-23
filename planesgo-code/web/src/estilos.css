@@ -875,6 +875,12 @@ button.miga-item:hover { background: var(--hover); }
 /* Adónde irá el mensaje (encima del cuadro, a la derecha): se puede cambiar con un clic antes de enviar. */
 .destino-mensaje { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 11.5px; margin: 0 4px -2px; }
 .destino-mensaje .enlace { font-size: 11.5px; }
+/* Distintivo de la ruta de cada mensaje (enrutador de intenciones, router.ts). */
+.route-badge { display: inline-block; margin: 2px 0 0; font-size: 10.5px; color: var(--suave); border: 1px solid var(--linea); border-radius: 999px; padding: 0 7px; white-space: nowrap; cursor: help; }
+.mensaje.user > .route-badge { display: table; margin: 4px 0 0 auto; }
+.route-badge.route-direct, .route-badge.route-command { color: #1a7f37; border-color: #aceebb; }
+.route-badge.route-split { color: #8250df; border-color: #d8b9ff; }
+.aparte-cabecera .route-badge { margin: 0; }
 /* Historial con ↑ ↓: editando un mensaje de la cola */
 .history-notice { text-align: right; font-size: 11.5px; margin: 0 4px -2px; }
 /* Lo que el usuario mandó al agente durante su turno (lo leyó antes de acabar). */

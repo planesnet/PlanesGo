@@ -15,6 +15,7 @@ import * as DR from '../direct';
 import * as W from '../workingMemory';
 import * as PR from '../prune';
 import * as RP from '../reparto';
+import * as R from '../router';
 import { TarjetaPropuesta, TarjetaReparto } from './TarjetasReparto';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
@@ -24,7 +25,6 @@ import { withUnanswered } from '../unanswered';
 import { actividad, consumoPorAccion, toolStatusTitle } from '../activity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
-import * as AY from '../ayuda';
 import * as IH from '../inputHistory';
 import Lanzador, { type AbreWeb } from './Lanzador';
 import Texto from './Texto';
@@ -61,7 +61,12 @@ const ALTO_MAX = 240;
 interface Aparte {
   id: string; pregunta: string; destino: Exclude<AP.Destino, 'conversacion'>; texto: string; acciones: number; uso?: Uso;
   curso: boolean; error?: boolean; motivo: string; auto: boolean; incorporada?: boolean; ac?: AbortController;
+  via?: string; // quién la ha respondido (lo dice el servidor): copia, modelo o local/<modelo>
+  engine?: R.Engine; // quién decidió que fuera aparte (enrutador)
 }
+// Quién ha respondido de verdad una pregunta aparte (para el distintivo y el registro del enrutador).
+const executorDeVia = (destino: Aparte['destino'], via?: string): R.Executor =>
+  destino === 'estado' ? 'pgocode' : via?.startsWith('local/') ? 'local-ai' : via === 'copia' ? 'agent-copy' : via === 'modelo' ? 'cheap-model' : R.asideExecutor(destino as R.AsideKind);
 const SITIOS_APARTE: Exclude<AP.Destino, 'conversacion'>[] = ['estado', 'suelta', 'contexto'];
 // Lo aprendido de las correcciones, por proyecto; y el gasto aparte, por sesión (se suma al de la conversación).
 const leeLS = <T,>(k: string, d: T): T => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
@@ -83,7 +88,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Reparto en sesiones paralelas (reparto.ts): la propuesta con su cuenta atrás (por sesión madre), los repartos en
   // marcha o acabados (se guardan), las sesiones madre de cada uno, las hijas que el usuario ha parado y los avisos
   // para el chat de una madre que está trabajando (se añaden al acabar su turno).
-  const [propuestas, setPropuestas] = useState<Record<string, { ses: Sesion; texto: string; prop: RP.Propuesta; hasta: number }>>({});
+  const [propuestas, setPropuestas] = useState<Record<string, { ses: Sesion; texto: string; prop: RP.Propuesta; hasta: number; decision: R.RouteDecision; ms: number }>>({});
   const propuestasRef = useRef(propuestas);
   propuestasRef.current = propuestas;
   const temporizadores = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -353,20 +358,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Al acabar un turno sin error, sale la cola: todos sus mensajes juntos (las órdenes, solas).
   useEffect(() => {
     if (!sesion || !prov?.disponible) return;
-    const { enviar, cola: resto } = C.siguiente(colaSesion, Boolean(enCurso), t => t.startsWith('/') || PL.interpreta(t) !== null || (sesion.directo !== false && DR.detect(t) !== null));
+    // Lo que sale solo (órdenes de pgocode y funciones directas) lo decide el enrutador (router.ts).
+    const { enviar, cola: resto, partes } = C.siguiente(colaSesion, Boolean(enCurso), t => R.standalone(t, sesion.directo !== false));
     if (!enviar) return;
     ponCola(sesion.id, () => resto);
-    envia(enviar.texto, enviar.adjuntos);
+    // Lo encolado con «>» va al agente aunque parezca una orden directa (y sin repartir).
+    const q = R.fromQueue(partes || [enviar.texto]);
+    envia(q.text, enviar.adjuntos, { desdeCola: true, sinDirecto: q.forced, sinReparto: q.forced });
   }, [enCurso, sesion?.id, colaSesion, prov?.disponible]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Con el agente trabajando, Intro deja el mensaje (y sus adjuntos) en la cola.
-  function encola() {
-    const listos = adjuntos.filter(a => !a.subiendo && !a.error);
-    if ((!texto.trim() && !listos.length) || !sesion || subiendo) return;
-    ponCola(sesion.id, c => C.encola(c, texto, listos));
-    setTexto('');
-    setAdjuntos([]);
-  }
 
   // Lo último que ha dicho el agente (para decidir si lo que se escribe es su respuesta).
   const ultimoDelAgente = (ms: Mensaje[]) => {
@@ -400,27 +399,44 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setFotoAbierta(i >= 0 ? { fotos: l, i } : { fotos: [{ src }], i: 0 });
   }, []);
   const cierraAyuda = useCallback(() => setVerAyuda(false), []);
-  // La decisión de adónde irá lo que se escribe (se ve en la etiqueta encima del cuadro, antes de enviar).
-  const situacion = (t: string): AP.Situacion => ({ ocupado: Boolean(enCurso), ultimo: ultimoDelAgente(mensajes), hayConversacion: mensajes.length > 0,
-    adjuntos: adjuntos.filter(a => !a.subiendo && !a.error).length, aprendidas: proyecto ? leeLS(claveAprendidas(proyecto.id), {}) : {},
-    activo: sesion?.decideAparte !== false, ordenPlan: PL.interpreta(t) !== null, alTurno: siempreAlTurno && Boolean(prov?.inyecta), canInject: Boolean(prov?.inyecta) });
-  // Orden directa (direct.ts): la hace pgocode sin el agente. Con el agente trabajando, las preguntas se responden ya
-  // (aparte) y lo mecánico espera en la cola a que acabe su turno.
-  const directaViva = useMemo(() => (prov?.tipo === 'agente' && sesion?.directo !== false && !adjuntos.length ? DR.detect(texto) : null),
-    [texto, prov?.tipo, sesion?.directo, adjuntos.length]);
-  const decisionViva = useMemo(() => (texto.trim() && !AY.esAyuda(texto) && prov?.tipo === 'agente' ? AP.decide(texto, situacion(texto)) : null),
-    [texto, enCurso, mensajes, adjuntos, sesion?.decideAparte, prov?.tipo, prov?.inyecta, siempreAlTurno]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Destino elegido a mano en la etiqueta (o con Alt+Intro): manda sobre la decisión automática.
+  const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
+  useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
+  useEffect(() => setDestinoManual(null), [sesion?.id]);
+  // ENRUTADOR DE INTENCIONES (router.ts, docs/enrutador.md): lo que necesita saber de la sesión para decidir quién
+  // hace qué con un mensaje. La misma decisión sale en la etiqueta encima del cuadro y al enviar.
+  const routeInput = (t: string, ses: Sesion | null | undefined, p = prov): R.RouteInput => ({
+    text: t, isAgent: p?.tipo === 'agente', busy: Boolean(ses && enCursosRef.current[ses.id]), canInject: Boolean(p?.inyecta), alwaysTurn: siempreAlTurno,
+    attachments: adjuntos.filter(a => !a.subiendo && !a.error).length, hasConversation: mensajes.length > 0, lastAgentText: ultimoDelAgente(mensajes),
+    learned: proyecto ? leeLS(claveAprendidas(proyecto.id), {}) : {}, autoAside: ses?.decideAparte !== false, directOn: ses?.directo !== false,
+    permissions: ses ? modoDe(ses) : undefined, child: Boolean(ses?.madre), cutPending: ses?.corte !== undefined && p?.tipo === 'agente',
+    canFork: Boolean(ses?.sesionAgente) && (ses?.agente === 'claude-code' || ses?.agente === 'opencode'),
+  });
+  // registraRuta: cada decisión, una vez: al registro de tiempos del servidor (suceso «ruta»), al recuento de la
+  // sesión (Actividad) y, con t0, cuánto ha tardado en decidirse.
+  // ms: lo que tardó en decidirse, si se registra después de hacerlo (la función directa, la pregunta aparte).
+  const registraRuta = (sesionId: string, s: R.RouteStamp, t0: number, ms = performance.now() - t0) => {
+    post('/api/ruta', R.logPayload(sesionId, s, ms)).catch(() => {});
+    R.saveTally(sesionId, R.tally(R.readTally(sesionId), s));
+    window.dispatchEvent(new CustomEvent('pgo:ruta', { detail: { sesion: sesionId } }));
+  };
+  // La decisión mientras se escribe (la etiqueta encima del cuadro). Solo con agentes (con un modelo por API, todo
+  // va al modelo).
+  const rutaViva = useMemo(() => (texto.trim() && prov?.tipo === 'agente' && sesion ? R.route({ ...routeInput(texto, sesion), busy: Boolean(enCurso), manual: destinoManual || undefined }) : null),
+    [texto, enCurso, mensajes, adjuntos, sesion, prov?.tipo, prov?.inyecta, siempreAlTurno, destinoManual]); // eslint-disable-line react-hooks/exhaustive-deps
   // Mensajes al turno en curso (agentes que los admiten, como Claude Code): los de cada sesión durante su turno,
   // que al acabar se guardan con la respuesta.
   const conTurno = Boolean(enCurso && prov?.inyecta);
   const [inyectados, setInyectados] = useState<Record<string, string[]>>({});
   const inyectadosRef = useRef(inyectados);
   inyectadosRef.current = inyectados;
-  async function alTurno(id: string, t: string, adj: Adjunto[] = []) {
+  // d y t0: la decisión del enrutador, que se registra si el mensaje llega al turno (si no, la registra el envío).
+  async function alTurno(id: string, t: string, adj: Adjunto[] = [], d?: R.RouteDecision, t0 = performance.now()) {
     // Con adjuntos, o si el turno ya acabó o no lo admite: a la cola, como siempre.
-    if (adj.length || !enCursosRef.current[id]) { aConversacion(id, t, adj); return; }
+    if (adj.length || !enCursosRef.current[id]) { aConversacion(id, t, adj, Boolean(d?.forced)); return; }
     try {
       await post('/api/chat/inyecta', { sesion: id, texto: t });
+      if (d) registraRuta(id, R.stamp(d), t0);
       inyectadosRef.current = { ...inyectadosRef.current, [id]: [...(inyectadosRef.current[id] || []), t] };
       setInyectados(inyectadosRef.current);
     } catch {
@@ -433,14 +449,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const u = [...mensajes].reverse().find(m => m.rol === 'assistant' && m.uso);
     return u ? CO.avisoContexto(u.uso?.contexto, u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente) : null;
   }, [mensajes, enCurso, sesion?.agente, Boolean(texto.trim())]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Destino elegido a mano en la etiqueta (o con Alt+Intro): manda sobre la decisión automática.
-  const [destinoManual, setDestinoManual] = useState<AP.Destino | null>(null);
-  useEffect(() => { if (!texto.trim()) setDestinoManual(null); }, [texto]);
-  useEffect(() => setDestinoManual(null), [sesion?.id]);
 
-  // Intro: pgocode decide antes de enviar si va a la conversación (ahora o a la cola) o aparte (ver aparte.ts).
+  // Intro: el ENRUTADOR (router.ts) decide quién hace qué con el mensaje y aquí solo se despacha.
   // forzar: el destino que manda (Alt+Intro → turno en curso); si no, el elegido en la etiqueta o el automático.
   async function decideYEnvia(forzar?: AP.Destino) {
+    const t0 = performance.now();
     const t = texto.trim();
     // Uno de la cola cargado con ↑: Intro lo guarda en su sitio (ni se envía ni se duplica) y vuelve el borrador.
     if (editaCola && sesion) {
@@ -449,79 +462,84 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (n) { ponCola(sesion.id, () => n); setTexto(historial.draft); return; }
     }
     salHistorial();
-    // «/help»: la ayuda, en la interfaz (sin agente ni tokens).
-    if (AY.esAyuda(t)) { setTexto(''); setVerAyuda(true); return; }
     const listos = adjuntos.filter(a => !a.subiendo && !a.error);
+    const elegido = forzar || destinoManual || undefined;
+    const inp: R.RouteInput = { ...routeInput(t, sesion), busy: Boolean(enCurso), attachments: listos.length };
+    let d = R.route({ ...inp, manual: elegido, manualBy: forzar ? 'alt' : 'tag' });
+    // 0. «/help»: la ayuda, en la interfaz (sin agente ni tokens).
+    if (d.route === 'command' && d.detail === 'help') {
+      setTexto(''); setVerAyuda(true);
+      if (sesion) registraRuta(sesion.id, R.stamp(d), t0);
+      return;
+    }
     // Sin texto, solo con adjuntos (una foto): también se envía.
     if ((!t && !listos.length) || !sesion || !proyecto || subiendo) return;
     const ses = sesion;
-    const ultimo = ultimoDelAgente(mensajes);
-    const auto = AP.decide(t, situacion(t));
-    const elegido = forzar || destinoManual;
     // Lo que el usuario elige en contra de lo que habría decidido pgocode se aprende (para los parecidos).
-    if (elegido && !auto.forzado && !auto.duda && elegido !== auto.destino) {
-      ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), t, elegido));
+    if (elegido) {
+      const auto = R.route(inp);
+      const autoDest: AP.Destino = auto.route === 'aside' ? auto.aside! : auto.modifiers.includes('turn') ? 'turno' : 'conversacion';
+      if (!auto.forced && !auto.needsServer && elegido !== autoDest) ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), t, elegido));
     }
-    const d: AP.Decision = elegido ? { destino: elegido, texto: auto.forzado ? auto.texto : t, forzado: true, motivo: forzar ? 'Alt+Intro' : 'elegido por ti' } : auto;
     setDestinoManual(null);
-    // Orden directa con el agente trabajando: la pregunta de estado se responde ya, aparte (sin tocar su turno); lo
-    // mecánico espera en la cola (nunca al turno en curso) y lo hace pgocode cuando acabe.
-    const directa = !elegido && ses.directo !== false && prov?.tipo === 'agente' && !listos.length ? DR.detect(t) : null;
-    if (directa && enCurso) {
-      setTexto(''); setAdjuntos([]);
-      if (DR.isMechanical(directa)) ponCola(ses.id, c => C.encola(c, t, []));
-      else directoAparte(ses, t, directa);
-      return;
-    }
-    if (d.destino === 'turno') {
-      setTexto(''); setAdjuntos([]);
-      await alTurno(ses.id, d.texto, listos);
-      return;
-    }
-    if (d.destino === 'conversacion' && !d.duda) {
-      if (!d.forzado) { if (enCurso) encola(); else envia(); return; }
-      setTexto(''); setAdjuntos([]);
-      aConversacion(ses.id, d.texto, listos, true);
-      return;
-    }
     setTexto(''); setAdjuntos([]);
-    let destino: AP.Destino = d.destino, motivo = d.motivo;
-    if (d.duda) {
-      // Solo con el agente ocupado: un modelo barato con el mensaje y lo último del agente (unos 200 tokens).
-      const r = await Promise.race([post<{ tipo: AP.Destino }>('/api/chat/clasifica', { texto: t, ultimo, sesion: ses.id }).catch(() => null),
-        new Promise<null>(res => setTimeout(() => res(null), 5000))]);
-      destino = r?.tipo || 'conversacion';
-      motivo = r ? 'lo ha decidido el clasificador (modelo barato)' : 'el clasificador no ha respondido';
+    // 2'. Duda entre la conversación y aparte (solo con el agente trabajando): el clasificador del servidor (IA local;
+    // de respaldo, el modelo barato), con tiempo máximo. Sin respuesta, a la conversación.
+    if (d.needsServer === 'classify') {
+      const r = await R.withTimeout(post<{ tipo: AP.Destino; modelo?: string }>('/api/chat/clasifica', { texto: t, ultimo: inp.lastAgentText, sesion: ses.id }), R.CLASSIFY_MS);
+      d = R.resolveClassify(d, r, inp);
     }
-    if (destino === 'conversacion') {
-      if (siempreAlTurno && conTurno) await alTurno(ses.id, t, listos); else aConversacion(ses.id, t, listos);
-      return;
+    switch (d.route) {
+      case 'direct':
+        // Con el agente trabajando: la pregunta de estado se responde ya, aparte (sin tocar su turno); lo mecánico
+        // espera en la cola (nunca al turno en curso) y lo hace pgocode cuando acabe.
+        if (enCurso) {
+          if (d.modifiers.includes('queue')) ponCola(ses.id, c => C.encola(c, t, []));
+          else directoAparte(ses, t, d, t0);
+          return;
+        }
+        break;
+      case 'aside':
+        pregunta(ses, d.text, d.aside!, d.reason, !d.forced, { decision: d, t0 });
+        return;
+      case 'agent':
+        if (d.modifiers.includes('turn')) { await alTurno(ses.id, d.text, listos, d, t0); return; }
+        break;
     }
-    pregunta(ses, d.texto || t, destino, motivo, !d.forzado);
+    // Lo demás (agente, órdenes de planes, función directa, posible reparto): ahora o, con el agente trabajando, a la
+    // cola (lo que el usuario mandó al agente a propósito se encola con «>», para que al salir siga yendo al agente).
+    if (enCursosRef.current[ses.id]) { ponCola(ses.id, c => C.encola(c, d.forced && d.route === 'agent' ? '> ' + d.text : d.text, listos)); return; }
+    envia(d.text, listos, { decision: d, t0 });
   }
 
   // A la conversación: a la cola si el agente está ocupado (la cola sale sola al acabar), si no, se envía.
-  // sinDirecto: lo ha mandado el usuario a la conversación a propósito (prefijo «>» o elegido): al agente, aunque
-  // parezca una orden directa.
+  // sinDirecto: lo ha mandado el usuario a la conversación a propósito (prefijo «>», elegido o «Pásaselo al agente»):
+  // al agente, aunque parezca una orden directa (en la cola, con «>» delante para que lo siga siendo).
   function aConversacion(id: string, t: string, adj: Adjunto[] = [], sinDirecto = false) {
-    if (enCursosRef.current[id] || idActual.current !== id) ponCola(id, c => C.encola(c, t, adj));
-    else envia(t, adj, { aCola: true, sinDirecto });
+    if (enCursosRef.current[id] || idActual.current !== id) ponCola(id, c => C.encola(c, sinDirecto ? '> ' + t : t, adj));
+    else envia(t, adj, { aCola: true, sinDirecto, sinReparto: sinDirecto });
   }
 
-  // Responde una pregunta aparte: el estado, en local; el resto, con /api/chat en modo aparte.
-  async function pregunta(ses: Sesion, q: string, destino: Exclude<AP.Destino, 'conversacion'>, motivo: string, auto: boolean, sustituye?: string) {
+  // Responde una pregunta aparte: el estado, en local; el resto, con /api/chat en modo aparte (el servidor dice quién
+  // la ha respondido: copia de la sesión, IA local o modelo barato). o.decision: la del enrutador (se registra al
+  // saber quién respondió); o.motor «pago»: la suelta, con el modelo de pago aunque haya IA local.
+  async function pregunta(ses: Sesion, q: string, destino: Exclude<AP.Destino, 'conversacion'>, motivo: string, auto: boolean,
+    o: { sustituye?: string; decision?: R.RouteDecision; t0?: number; motor?: 'pago' } = {}) {
     const idA = Math.random().toString(36).slice(2);
     const pon = (f: (l: Aparte[]) => Aparte[]) => setApartes(x => ({ ...x, [ses.id]: f(x[ses.id] || []) }));
     const cambia = (c: Partial<Aparte>) => pon(l => l.map(a => a.id === idA ? { ...a, ...c } : a));
-    const base: Aparte = { id: idA, pregunta: q || '¿Cómo va?', destino, texto: '', acciones: 0, curso: destino !== 'estado', motivo, auto };
+    const base: Aparte = { id: idA, pregunta: q || '¿Cómo va?', destino, texto: '', acciones: 0, curso: destino !== 'estado', motivo, auto, engine: o.decision?.engine ?? 'user' };
     const ms = vivas.current[ses.id] || (idActual.current === ses.id ? mensajes : conversacion(ses.id));
+    let via = '';
+    const msDecision = o.t0 !== undefined ? performance.now() - o.t0 : 0;
+    const registra = () => { if (o.decision) registraRuta(ses.id, { ...R.stamp(o.decision), executor: executorDeVia(destino, via) }, 0, msDecision); };
     if (destino === 'estado') {
       const trabajando = Boolean(enCursosRef.current[ses.id]);
       const ult = [...ms].reverse().find(m => m.rol === 'assistant');
       base.texto = AP.resumenEstado(ult, { trabajando, segundos: (Date.now() - (inicioTurno.current[ses.id] || Date.now())) / 1000, enCola: (colas[ses.id]?.mensajes.length) || 0 });
     }
-    pon(l => sustituye ? l.map(a => a.id === sustituye ? base : a) : [...l, base]);
-    if (destino === 'estado' || !proyecto) return;
+    pon(l => o.sustituye ? l.map(a => a.id === o.sustituye ? base : a) : [...l, base]);
+    if (destino === 'estado' || !proyecto) { registra(); return; }
     const p = proveedores.find(x => x.id === ses.agente);
     if (!p) { cambia({ curso: false, error: true, texto: '⚠ Elige un agente' }); return; }
     const ac = new AbortController();
@@ -534,8 +552,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         proyecto: proyecto.id, proveedor: p.id, modelo: ses.modelo || p.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
         sesion_agente: ses.sesionAgente, esfuerzo: ses.esfuerzo || '', sesion: ses.id, titulo: ses.nombre, autorizadas: ses.autorizadas || [],
         mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '', mensajes: [{ rol: 'user', texto: q }],
-        aparte: destino, contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language, compactar: contextPolicy(ses.agente, ses).compactAt,
+        aparte: destino, aparte_motor: o.motor || '', contexto: sinCopia ? AP.resumenContexto(ms) : '', idioma: navigator.language, compactar: contextPolicy(ses.agente, ses).compactAt,
       }, e => {
+        if (e.via) { via = e.via; cambia({ via }); }
         if (e.texto) texto += e.texto;
         if (e.herramienta && e.herramienta.estado === 'curso') acciones++;
         if (e.uso) {
@@ -551,6 +570,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (!ac.signal.aborted) cambia({ texto: (texto ? texto + '\n\n' : '') + '⚠ ' + (err as Error).message, error: true });
     } finally {
       cambia({ curso: false, ac: undefined });
+      registra();
     }
   }
 
@@ -579,7 +599,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
   // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
-  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string; sesion?: Sesion; sinReparto?: boolean; sinDirecto?: boolean } = {}) {
+  // opc.decision y opc.t0: la decisión del enrutador tomada al pulsar Intro (si no, se toma aquí); opc.reason: el
+  // porqué, cuando lo sabe quien llama (p. ej. pgocode no sabía hacer la orden directa); opc.desdeCola: sale de la cola.
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string; sesion?: Sesion; sinReparto?: boolean; sinDirecto?: boolean;
+    decision?: R.RouteDecision; t0?: number; reason?: string; desdeCola?: boolean } = {}) {
     const t = (forzado ?? texto).trim();
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
     // opc.sesion: el envío es para otra sesión que la abierta (las hijas de un reparto, o la madre tras la cuenta atrás).
@@ -587,41 +610,50 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const prov = opc.sesion ? proveedores.find(p => p.id === opc.sesion!.agente) : provAbierto;
     if ((!t && !listos.length) || !proyecto || !ses || !ses.hosting || !prov || (opc.sesion ? enCursosRef.current[ses.id] : enCurso) || (forzado === undefined && subiendo)) return;
     if (!opc.sinReparto && propuestasRef.current[ses.id]) return; // hay un reparto propuesto a la espera: primero eso
-    // Órdenes directas (direct.ts): compilar, pruebas, commit, estado de git, gasto… las hace pgocode (0 tokens).
-    const directa = !opc.crudo && !opc.sesion && !opc.sinDirecto && prov.tipo === 'agente' && !listos.length && ses.directo !== false ? DR.detect(t) : null;
-    if (directa) {
-      if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
-      await directo(ses, t, directa);
+    // La decisión del enrutador (router.ts): la de Intro o, si el envío no viene de ahí (la cola, un plan, una hija de
+    // un reparto, un reenvío), una nueva con el agente libre y sin preguntas aparte (ya va a la conversación).
+    const t0 = opc.t0 ?? performance.now();
+    let d = opc.decision ?? R.route({ ...routeInput(t, ses, prov), busy: false, attachments: listos.length, noAside: true, raw: opc.crudo,
+      noDirect: opc.sinDirecto || Boolean(opc.sesion), noSplit: opc.sinReparto, hasConversation: conversacion(ses.id).length > 0 });
+    if (opc.reason) d = { ...d, reason: opc.reason };
+    if (opc.desdeCola && !d.modifiers.includes('queue')) d = { ...d, modifiers: [...d.modifiers, 'queue'] };
+    const limpia = () => { if (forzado === undefined) { setTexto(''); setAdjuntos([]); } };
+    // 1. Funciones directas (direct.ts): compilar, pruebas, commit, estado de git, gasto… las hace pgocode (0 tokens).
+    if (d.route === 'direct' && d.direct) {
+      limpia();
+      await directo(ses, t, d.direct, d, t0);
       return;
     }
-    // Órdenes de planes: las de estado se hacen aquí (sin agente ni tokens); crear y revisar van al agente.
-    const orden = opc.crudo ? null : PL.interpreta(t);
+    // 0. Órdenes de planes: las de estado se hacen aquí (sin agente ni tokens); crear, revisar y ejecutar, el agente.
+    const orden = !opc.crudo && d.route === 'command' && d.plan ? d.plan : null;
     if (orden && orden.tipo !== 'nuevo' && orden.tipo !== 'revisar') {
-      if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
-      await ordenPlan(orden, t);
+      limpia();
+      await ordenPlan(orden, t, d, t0);
       return;
     }
     let planRevisado: Plan | undefined;
     if (orden?.tipo === 'revisar') {
       planRevisado = await planNumero(orden.numero);
       if (!planRevisado || planRevisado.estado === 'descartado') {
-        if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
-        nota(t, !planRevisado ? `No hay ningún plan ${orden.numero} en este proyecto.` : `El plan ${orden.numero} está descartado: «reactiva el plan ${orden.numero}» para seguir con él.`);
+        limpia();
+        nota(t, !planRevisado ? `No hay ningún plan ${orden.numero} en este proyecto.` : `El plan ${orden.numero} está descartado: «reactiva el plan ${orden.numero}» para seguir con él.`, { ...d, executor: 'pgocode' }, t0);
         return;
       }
     }
-    // Reparto en sesiones paralelas (reparto.ts): una petición con tres o más partes independientes, en una sesión que
-    // edita dentro de un repositorio git. Decide el servidor (reglas e IA local, sin tokens de pago); aquí, la
-    // tarjeta con la cuenta atrás: si no se pulsa nada, se reparte.
-    if (!opc.sinReparto && !orden && !opc.crudo && prov.tipo === 'agente' && !listos.length && !ses.madre && ses.corte === undefined && RP.candidata(t, modoDe(ses))) {
-      const prop = await Promise.race([proponeReparto(proyecto.id, ses.carpeta, ses.rama, t, modoDe(ses)).catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 3000))]);
-      if (prop?.partes && prop.partes.length >= 3 && !propuestasRef.current[ses.id]) {
-        if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
-        propuestasRef.current = { ...propuestasRef.current, [ses.id]: { ses, texto: t, prop, hasta: Date.now() + prop.espera_s * 1000 } };
+    // 3. Reparto en sesiones paralelas (reparto.ts): una petición con tres o más partes independientes, en una sesión
+    // que edita dentro de un repositorio git. Lo confirma el servidor (reglas y embeddings locales, sin tokens de
+    // pago), con tiempo máximo; aquí, la tarjeta con la cuenta atrás: si no se pulsa nada, se reparte.
+    if (d.needsServer === 'split') {
+      const prop = await R.withTimeout(proponeReparto(proyecto.id, ses.carpeta, ses.rama, t, modoDe(ses)), R.SPLIT_MS);
+      d = R.resolveSplit(d, prop);
+      if (d.route === 'split' && prop && !propuestasRef.current[ses.id]) {
+        limpia();
+        propuestasRef.current = { ...propuestasRef.current, [ses.id]: { ses, texto: t, prop, hasta: Date.now() + prop.espera_s * 1000, decision: d, ms: performance.now() - t0 } };
         setPropuestas(propuestasRef.current);
         temporizadores.current[ses.id] = setTimeout(() => lanzaReparto(ses.id), prop.espera_s * 1000);
         return;
       }
+      if (d.route === 'split') d = { ...d, route: 'agent', executor: 'agent', reason: 'ya hay un reparto propuesto en esta sesión' };
     }
     // Gasto antes del turno, para anotar los avisos que salte (sin interrumpir).
     const gAntes = CO.gasto(forzado !== undefined || opc.sesion ? conversacion(ses.id) : mensajes);
@@ -671,8 +703,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         if (modoRelevo === 'vig') previos = CL.markRelayedOut(previos);
       }
     }
-    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}),
-}];
+    // La ruta queda en el mensaje (el distintivo); los modificadores que se saben al enviar se le añaden.
+    let ruta: R.RouteStamp | undefined = R.stamp(d);
+    if (relevo) ruta = R.addModifier(ruta, 'relay');
+    const base: Mensaje[] = [...previos.filter(m => !m.error), { rol: 'user', texto: opc.visible ?? t, ...(listos.length ? { adjuntos: listos } : {}), ...(relevo ? { relevo } : {}), ruta }];
     let actual: Mensaje[] = [...base, { rol: 'assistant', texto: '' }];
     pon(actual, true);
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
@@ -690,7 +724,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const tAgente = pendiente.text;
     let aEnviar = tAgente;
     const marcaSkill = (k: SkillPgo) => {
-      actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k } : m);
+      if (k.modo === 'elegida') ruta = R.addModifier(ruta, 'skill');
+      actual = actual.map((m, i) => i === actual.length - 2 ? { ...m, skill: k, ...(k.modo === 'elegida' ? { ruta } : {}) } : m);
       pon(actual, true);
     };
     // Crear o revisar un plan: sin skills; el agente recibe la petición de plan (con el plan actual, ya editado).
@@ -717,6 +752,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       setApartes(x => ({ ...x, [id]: (x[id] || []).filter(a => !a.incorporada) }));
     }
     if (relevo) aEnviar = W.relayMessage(memoria, aEnviar);
+    if (ruta) registraRuta(id, ruta, t0);
     const ultimo = (f: (m: Mensaje) => Mensaje) => { actual = [...actual.slice(0, -1), f(actual[actual.length - 1])]; pon(actual); };
     // Avisos de gasto mientras trabaja el agente (no al final): cada umbral una vez por turno, sin interrumpir.
     let gPrevio = gAntes;
@@ -763,6 +799,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
           if (r.podable !== undefined && sesionPrevia) podables.current[sesionPrevia] = Boolean(r.podable);
           actual = PR.applyPruneReport(actual, r);
           ultimo(m => (r.retirados > 0 || r.repuestos ? { ...m, pruned: { tokens: r.retirados, ...(r.repuestos ? { repuestos: r.repuestos } : {}) } } : m));
+        }
+        // Sugerencia de subagentes (modificador que aplica el servidor): al distintivo del mensaje del usuario.
+        if (e.subagentes) {
+          ruta = R.addModifier(ruta, 'subagents');
+          actual = actual.map((m, i) => i === actual.length - 2 && m.rol === 'user' ? { ...m, ruta } : m);
+          pon(actual, true);
         }
         if (e.texto) parte({ tipo: 'texto', texto: e.texto });
         if (e.pensamiento) parte({ tipo: 'pensamiento', texto: e.pensamiento });
@@ -856,12 +898,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // directo: la orden (o la pregunta) y la nota de pgocode con el resultado, en la conversación (el agente no la ve).
   // Mientras se ejecuta, la sesión cuenta como ocupada: lo que se escriba espera en la cola y «Parar» la corta.
-  async function directo(ses: Sesion, t: string, kind: DR.DirectKind) {
+  // d y t0: la decisión del enrutador (se registra cuando pgocode lo ha hecho; si no sabe, la registra el envío al agente).
+  async function directo(ses: Sesion, t: string, kind: DR.DirectKind, d?: R.RouteDecision, t0 = performance.now()) {
     if (!proyecto) return;
     const id = ses.id;
     const previos = conversacion(id);
     const pon = (m: Mensaje[]) => { if (idActual.current === id) setMensajes(m); guardaConversacion(id, m); };
-    const usuario: Mensaje = { rol: 'user', texto: t };
+    const usuario: Mensaje = { rol: 'user', texto: t, ...(d ? { ruta: R.stamp(d) } : {}) };
+    const msDecision = performance.now() - t0;
     const ac = new AbortController();
     const largo = !DR.answeredHere(kind);
     if (largo) {
@@ -876,9 +920,10 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // No se sabe con seguridad cómo hacerlo en este proyecto: al agente, como siempre.
         pon(previos);
         setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
-        await envia(t, [], { sinDirecto: true, sesion: idActual.current === id ? undefined : ses });
+        await envia(t, [], { sinDirecto: true, sesion: idActual.current === id ? undefined : ses, t0, reason: 'pgocode no sabe con seguridad cómo hacerlo en este proyecto: al agente' });
         return;
       }
+      if (d) registraRuta(id, R.stamp(d), t0, msDecision);
       fallo = r.directo.ok === false;
       pon([...previos, usuario, { rol: 'assistant', texto: r.texto, nota: true, directo: r.directo, fin: Date.now() }]);
     } catch (e) {
@@ -896,11 +941,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
 
   // directoAparte: con el agente trabajando, la pregunta de estado se responde ya como pregunta aparte (sin tocar
   // la conversación del turno en curso).
-  async function directoAparte(ses: Sesion, t: string, kind: DR.DirectKind) {
+  async function directoAparte(ses: Sesion, t: string, d: R.RouteDecision, t0: number) {
+    const kind = d.direct!;
+    registraRuta(ses.id, R.stamp(d), t0);
     const idA = Math.random().toString(36).slice(2);
     const pon = (f: (l: Aparte[]) => Aparte[]) => setApartes(x => ({ ...x, [ses.id]: f(x[ses.id] || []) }));
     const cambia = (c: Partial<Aparte>) => pon(l => l.map(a => a.id === idA ? { ...a, ...c } : a));
-    pon(l => [...l, { id: idA, pregunta: t, destino: 'estado', texto: '', acciones: 0, curso: true, motivo: 'lo sabe pgocode (orden directa)', auto: true }]);
+    pon(l => [...l, { id: idA, pregunta: t, destino: 'estado', texto: '', acciones: 0, curso: true, motivo: 'lo sabe pgocode (función directa)', auto: true, engine: 'rules' }]);
     const ms = vivas.current[ses.id] || (idActual.current === ses.id ? mensajes : conversacion(ses.id));
     try {
       const r = await respuestaDirecta(ses, kind, ms);
@@ -920,9 +967,9 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   // Una nota en el chat de la sesión madre (si está trabajando, al acabar su turno: no se pisa su conversación).
-  function anotaMadre(id: string, texto: string, usuario?: string) {
+  function anotaMadre(id: string, texto: string, usuario?: string, ruta?: R.RouteStamp) {
     if (vivas.current[id] && !usuario) { (notasMadre.current[id] ||= []).push(texto); return; }
-    const m: Mensaje[] = [...conversacion(id), ...(usuario ? [{ rol: 'user' as const, texto: usuario }] : []), { rol: 'assistant', texto, nota: true, reparto: true }];
+    const m: Mensaje[] = [...conversacion(id), ...(usuario ? [{ rol: 'user' as const, texto: usuario, ...(ruta ? { ruta } : {}) }] : []), { rol: 'assistant', texto, nota: true, reparto: true }];
     guardaConversacion(id, m);
     if (idActual.current === id) setMensajes(m);
   }
@@ -936,7 +983,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const { [id]: _, ...resto } = propuestasRef.current;
     propuestasRef.current = resto;
     setPropuestas(resto);
-    envia(p.texto, [], { sesion: p.ses, sinReparto: true });
+    envia(p.texto, [], { sesion: p.ses, sinReparto: true, reason: 'propuesta de reparto: has preferido hacerlo en esta sesión' });
   }
 
   // «Repartir» (o la cuenta atrás a cero): las partes pasan a sesiones hijas, de cuatro en cuatro.
@@ -954,7 +1001,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     setRepartos(repartosRef.current);
     RP.guarda(repartosRef.current);
     const n = rep.hijas.length;
-    anotaMadre(p.ses.id, `Repartida en ${n} sesiones paralelas${n > RP.MAX_HIJAS ? ` (${RP.MAX_HIJAS} a la vez, el resto en cola)` : ''}, cada una en su copia del repositorio. Al acabar se unen sus cambios a esta sesión.`, p.texto);
+    anotaMadre(p.ses.id, `Repartida en ${n} sesiones paralelas${n > RP.MAX_HIJAS ? ` (${RP.MAX_HIJAS} a la vez, el resto en cola)` : ''}, cada una en su copia del repositorio. Al acabar se unen sus cambios a esta sesión.`, p.texto, R.stamp(p.decision));
+    registraRuta(p.ses.id, R.stamp(p.decision), 0, p.ms);
     arrancaHijas(rep.id);
   }
 
@@ -978,7 +1026,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       const base = nuevaSesionHija(madre, c.carpeta, c.rama, n, h.parte, h.sesion);
       ponReparto(idR, x => RP.pon({ ...x, ramaMadre: x.ramaMadre || c.rama_madre }, n, { carpeta: c.carpeta, rama: c.rama }));
       alCambiarSesion(base);
-      await envia(RP.mensajeHija({ intro: r.intro, outro: r.outro, partes: r.hijas.map(x => x.parte) }, n), [], { sesion: base, sinReparto: true });
+      await envia(RP.mensajeHija({ intro: r.intro, outro: r.outro, partes: r.hijas.map(x => x.parte) }, n), [], { sesion: base, sinReparto: true, reason: `parte ${n} de un reparto` });
       const ms = conversacion(h.sesion);
       const estado = RP.estadoAlAcabar(paradas.current.delete(h.sesion), ms[ms.length - 1]);
       ponReparto(idR, x => RP.pon(x, n, { estado }));
@@ -1066,9 +1114,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   // Una orden y su respuesta de pgocode en el chat (sin agente): «descarta el plan 2» → «Plan #2 descartado».
-  function nota(orden: string, respuesta: string) {
+  // d y t0: la decisión del enrutador (una orden que ha resuelto pgocode): queda en el mensaje y se registra.
+  function nota(orden: string, respuesta: string, d?: R.RouteDecision, t0 = performance.now()) {
     if (!sesion) return;
-    const m: Mensaje[] = [...conversacion(sesion.id), { rol: 'user', texto: orden }, { rol: 'assistant', texto: respuesta, nota: true }];
+    if (d) registraRuta(sesion.id, R.stamp(d), t0);
+    const m: Mensaje[] = [...conversacion(sesion.id), { rol: 'user', texto: orden, ...(d ? { ruta: R.stamp(d) } : {}) }, { rol: 'assistant', texto: respuesta, nota: true }];
     if (idActual.current === sesion.id) setMensajes(m);
     guardaConversacion(sesion.id, m);
   }
@@ -1080,46 +1130,49 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   // Órdenes de estado de un plan, en local: descartar, reactivar, borrar; y ejecutar (que sí va al agente).
-  async function ordenPlan(o: PL.OrdenPlan, t: string) {
+  // d y t0: la decisión del enrutador. Lo que responde pgocode se registra con la nota; «ejecutar», con el envío al agente.
+  async function ordenPlan(o: PL.OrdenPlan, t: string, d?: R.RouteDecision, t0 = performance.now()) {
     if (!proyecto || o.tipo === 'nuevo' || o.tipo === 'revisar') return;
+    const n = (r: string): void => nota(t, r, d && { ...d, executor: 'pgocode' }, t0);
     const p = await planNumero(o.numero);
-    if (!p) { nota(t, `No hay ningún plan ${o.numero} en este proyecto.`); return; }
+    if (!p) { n(`No hay ningún plan ${o.numero} en este proyecto.`); return; }
     const nombre = `Plan #${p.numero} «${p.titulo}»`;
     try {
       switch (o.tipo) {
         case 'descartar':
-          if (p.estado === 'descartado') { nota(t, `${nombre} ya estaba descartado.`); return; }
+          if (p.estado === 'descartado') { n(`${nombre} ya estaba descartado.`); return; }
           await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'descartado' });
-          marcaPlan(p.ruta, 'descartado'); nota(t, `${nombre} descartado. Puedes reactivarlo («reactiva el plan ${p.numero}») o borrarlo («borra el plan ${p.numero}»).`);
+          marcaPlan(p.ruta, 'descartado'); n(`${nombre} descartado. Puedes reactivarlo («reactiva el plan ${p.numero}») o borrarlo («borra el plan ${p.numero}»).`);
           return;
         case 'reactivar':
-          if (p.estado === 'borrador') { nota(t, `${nombre} ya está por decidir.`); return; }
+          if (p.estado === 'borrador') { n(`${nombre} ya está por decidir.`); return; }
           await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'borrador' });
-          marcaPlan(p.ruta, 'borrador'); nota(t, `${nombre} vuelve a estar por decidir.`);
+          marcaPlan(p.ruta, 'borrador'); n(`${nombre} vuelve a estar por decidir.`);
           return;
         case 'borrar':
-          if (p.estado !== 'descartado') { nota(t, `Solo se borran los planes descartados: «descarta el plan ${p.numero}» antes.`); return; }
+          if (p.estado !== 'descartado') { n(`Solo se borran los planes descartados: «descarta el plan ${p.numero}» antes.`); return; }
           await borraPlan(proyecto.id, directorio, p.ruta);
-          marcaPlan(p.ruta, 'borrado'); nota(t, `${nombre} borrado.`);
+          marcaPlan(p.ruta, 'borrado'); n(`${nombre} borrado.`);
           return;
         case 'ejecutar':
-          if (p.estado === 'descartado') { nota(t, `${nombre} está descartado: «reactiva el plan ${p.numero}» para ejecutarlo.`); return; }
-          await ejecutaPlan(p, t);
+          if (p.estado === 'descartado') { n(`${nombre} está descartado: «reactiva el plan ${p.numero}» para ejecutarlo.`); return; }
+          await ejecutaPlan(p, t, d, t0);
           return;
       }
-    } catch (e) { nota(t, '⚠ ' + (e as Error).message); }
+    } catch (e) { n('⚠ ' + (e as Error).message); }
   }
 
   // Ejecutar: el plan pasa a «ejecutado» y el agente lo recibe con permiso para editar (si la sesión es de solo
   // lectura, solo en este turno).
-  async function ejecutaPlan(p: Plan, orden?: string) {
+  async function ejecutaPlan(p: Plan, orden?: string, d?: R.RouteDecision, t0?: number) {
     if (!sesion || !proyecto || enCurso) return;
     const texto = p.texto ?? (await leePlan(proyecto.id, directorio, p.ruta)).texto ?? '';
     await guardaPlan(proyecto.id, directorio, { ruta: p.ruta, estado: 'ejecutado' });
     marcaPlan(p.ruta, 'ejecutado', p.titulo);
     setPlanAbierto(null);
     const modo = modoDe(sesion);
-    envia(PL.peticionEjecucion(p.ruta, texto), [], { crudo: true, permisos: modo === 'lectura' ? 'editar' : modo, visible: orden || `Ejecuta el plan #${p.numero ?? ''} «${p.titulo}»` });
+    envia(PL.peticionEjecucion(p.ruta, texto), [], { crudo: true, permisos: modo === 'lectura' ? 'editar' : modo, visible: orden || `Ejecuta el plan #${p.numero ?? ''} «${p.titulo}»`,
+      decision: d ?? { route: 'command', detail: 'plan:ejecutar', executor: 'agent', engine: 'user', reason: 'botón «Ejecutar» del plan', modifiers: ['plan'], text: orden || '' }, t0 });
   }
 
   async function descartaPlan(ruta: string) {
@@ -1251,6 +1304,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
                     : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
+                {m.rol === 'user' && m.ruta && <span className={'route-badge route-' + m.ruta.route} title={R.badgeTitle(m.ruta)}>{R.badge(m.ruta)}</span>}
                 {m.directo && <DirectNote d={m.directo} alPasar={t => aConversacion(sesion.id, t, [], true)} />}
                 {(m.inyectados || (enCurso && i === mensajes.length - 1 ? inyectados[sesion.id] : undefined))?.map((x, j) => (
                   <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}</div>
@@ -1289,6 +1343,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <div key={a.id} className="mensaje aparte" role="note" aria-label="Pregunta aparte">
                 <div className="aparte-cabecera">
                   <span className="aparte-etiqueta">Aparte · {AP.NOMBRES[a.destino]}</span>
+                  {(a.via || a.destino === 'estado') && (() => { const s: R.RouteStamp = { route: 'aside', executor: executorDeVia(a.destino, a.via), engine: a.engine || 'user', reason: a.motivo, modifiers: [] };
+                    return <span className="route-badge" title={R.badgeTitle(s) + (a.via?.startsWith('local/') ? ` (${a.via.slice(6)})` : '')}>{R.badge(s)}</span>; })()}
                   <span className="suave pequeno recorta" title={a.motivo}>no queda en la conversación{a.auto ? ' · lo ha decidido pgocode' : ''}</span>
                   <span className="hueco" />
                   <button className="icono" onClick={() => quitaAparte(sesion.id, a)} title={a.curso ? 'Parar y quitar' : 'Quitar'} aria-label="Quitar la pregunta aparte"><Icono n="cerrar" t={13} /></button>
@@ -1300,9 +1356,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   <button className="enlace" title="Enviarla al agente como un mensaje más (a la cola si está trabajando)"
                     onClick={() => { aprendeDe(a, 'conversacion'); quitaAparte(sesion.id, a); aConversacion(sesion.id, a.pregunta); }}>Llevar a la conversación</button>
                   {SITIOS_APARTE.filter(x => x !== a.destino && !(x === 'estado' && a.auto === false && a.pregunta === '¿Cómo va?')).map(x => (
-                    <button key={x} className="enlace" title={x === 'estado' ? 'Responder con el estado del trabajo (sin tokens)' : x === 'suelta' ? 'Responder sin contexto, con un modelo barato' : 'Responder con el contexto de la conversación (copia de la sesión)'}
-                      onClick={() => { aprendeDe(a, x); a.ac?.abort(); pregunta(sesion, a.pregunta, x, 'lo has cambiado tú', false, a.id); }}>{AP.NOMBRES[x]}</button>
+                    <button key={x} className="enlace" title={x === 'estado' ? 'Responder con el estado del trabajo (sin tokens)' : x === 'suelta' ? 'Responder sin contexto: la IA local del equipo (si no está, un modelo barato)' : 'Responder con el contexto de la conversación (copia de la sesión)'}
+                      onClick={() => { aprendeDe(a, x); a.ac?.abort(); pregunta(sesion, a.pregunta, x, 'lo has cambiado tú', false, { sustituye: a.id }); }}>{AP.NOMBRES[x]}</button>
                   ))}
+                  {!a.curso && a.destino === 'suelta' && a.via?.startsWith('local/') && (
+                    <button className="enlace" title="La ha respondido la IA local del equipo (0 tokens): repetirla con el modelo barato de pago"
+                      onClick={() => pregunta(sesion, a.pregunta, 'suelta', 'lo has pedido tú: con el modelo de pago', false, { sustituye: a.id, motor: 'pago' })}>Con el modelo de pago</button>
+                  )}
                   {!a.curso && !a.error && a.texto && a.destino !== 'estado' && (a.incorporada
                     ? <span className="suave pequeno">Irá con tu próximo mensaje al agente</span>
                     : <button className="enlace" title="El agente la conocerá: se añade a tu próximo mensaje (sin gastar un turno solo para ella)"
@@ -1363,14 +1423,16 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                     {c.adjuntos.length === 0 && conTurno && (
                       <button className="enlace aparte-boton" title="Mandarlo ya al turno en curso: el agente lo lee antes de acabar" onClick={() => {
                         ponCola(sesion.id, k => C.quita(k, i));
-                        alTurno(sesion.id, c.texto);
+                        const x = R.fromQueue([c.texto]).text;
+                        alTurno(sesion.id, x, [], R.route({ ...routeInput(x, sesion), busy: true, manual: 'turno' }));
                       }}>Al turno</button>
                     )}
                     {c.adjuntos.length === 0 && (
                       <button className="enlace aparte-boton" title="Preguntarlo aparte, sin que entre en la conversación" onClick={() => {
                         ponCola(sesion.id, k => C.quita(k, i));
-                        if (proyecto) ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), c.texto, 'contexto'));
-                        pregunta(sesion, c.texto, 'contexto', 'lo has llevado aparte', false);
+                        const x = R.fromQueue([c.texto]).text;
+                        if (proyecto) ponLS(claveAprendidas(proyecto.id), AP.aprende(leeLS(claveAprendidas(proyecto.id), {}), x, 'contexto'));
+                        pregunta(sesion, x, 'contexto', 'lo has llevado aparte', false, { decision: R.route({ ...routeInput(x, sesion), busy: true, manual: 'contexto' }), t0: performance.now() });
                       }}>Aparte</button>
                     )}
                     <button className="quita-adjunto" title="Quitar de la cola" aria-label="Quitar mensaje de la cola" onClick={() => ponCola(sesion.id, k => C.quita(k, i))}>×</button>
@@ -1403,27 +1465,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </div>
             )}
             {verAyuda && <Ayuda alTurno={siempreAlTurno} inyecta={Boolean(prov?.inyecta)} alCerrar={cierraAyuda} />}
-            {decisionViva && avisoContexto && (
+            {rutaViva && avisoContexto && (
               <div className="aviso-contexto" role="note">
                 <span>⚠ {avisoContexto}</span>
                 <button className="enlace" onClick={() => alNuevaSesion(sesion.rama)}>Nueva sesión</button>
               </div>
             )}
             {editaCola && <div className="history-notice suave pequeno" role="status">{IH.queueNotice(editaCola.index)}</div>}
-            {decisionViva && !editaCola && directaViva && !destinoManual && (
+            {rutaViva && !editaCola && (
               <div className="destino-mensaje">
-                <button className="enlace" onClick={() => setDestinoManual('conversacion')}
-                  title="Lo hace pgocode sin el agente (0 tokens): el mensaje es solo esa orden. Clic para mandárselo al agente; también con «>» delante o con más palabras.">
-                  {DR.tagText(directaViva, Boolean(enCurso))}
-                </button>
-              </div>
-            )}
-            {decisionViva && !editaCola && !(directaViva && !destinoManual) && (
-              <div className="destino-mensaje">
-                <button className="enlace" onClick={() => setDestinoManual(AP.siguiente(destinoManual || decisionViva.destino, conTurno))}
-                  title={`${destinoManual ? 'Elegido por ti' : 'Lo decide pgocode: ' + decisionViva.motivo}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «//» aparte, «?» estado.`}>
-                  {destinoManual ? AP.etiqueta({ destino: destinoManual === 'turno' && !conTurno ? 'conversacion' : destinoManual, texto: '', motivo: '', forzado: true }, Boolean(enCurso))
-                    : AP.etiqueta(decisionViva, Boolean(enCurso))}
+                {/* La etiqueta sale SIEMPRE del enrutador (router.ts): el destino y, al pasar el ratón, quién lo hace,
+                    quién lo ha decidido y por qué. Clic: elegir otro destino (una función directa, al agente). */}
+                <button className="enlace" onClick={() => setDestinoManual(rutaViva.route === 'direct' || rutaViva.route === 'command' ? 'conversacion'
+                  : AP.siguiente(destinoManual || (rutaViva.route === 'aside' ? rutaViva.aside! : rutaViva.modifiers.includes('turn') ? 'turno' : 'conversacion'), conTurno))}
+                  title={`${R.tagTitle(rutaViva)}. Clic para cambiarlo.${conTurno ? ' Alt+Intro: al turno en curso;' : ''} Prefijos «>» directo a la conversación, «//» aparte, «?» estado.`}>
+                  {R.tagText(rutaViva, Boolean(enCurso))}
                 </button>
                 {destinoManual && <span className="suave pequeno">elegido por ti</span>}
                 {prov?.inyecta && (

@@ -27,3 +27,9 @@ test('la ayuda explica las órdenes que hace pgocode sin el agente', () => {
   assert.match(e.find(x => x.clave.includes('haz commit'))!.que, /Nunca push/);
   assert.match(e.find(x => x.clave.startsWith('Para que'))!.que, /«>»/);
 });
+
+test('la ayuda resume el enrutador y remite a su documentación', () => {
+  const e = A.secciones({ alTurno: true, inyecta: true }).find(s => s.titulo.startsWith('Quién hace qué'))!.entradas;
+  assert.match(e.find(x => x.clave === 'Orden')!.que, /funciones directas .* aparte .* reparto .* agente/);
+  assert.ok(e.some(x => x.que.includes('docs/enrutador.md')));
+});

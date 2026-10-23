@@ -166,7 +166,7 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			ms[len(ms)-1].Texto += "\n\n" + adv.Hint
 			p.Mensajes = ms
 			depuracion.Log(a.Clave, "se sugieren subagentes (%s)", adv.Why)
-			emite(Evento{Texto: "_(pgocode ha sugerido usar subagentes: " + adv.Why + ".)_\n\n"})
+			emite(Evento{Texto: "_(pgocode ha sugerido usar subagentes: " + adv.Why + ".)_\n\n", Subagentes: adv.Why})
 		}
 	}
 	// Antigravity da el consumo acumulado de la conversación (tokens y segundos): se emite solo lo de este turno.
