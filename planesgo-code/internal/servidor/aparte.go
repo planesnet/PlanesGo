@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"planesgo-code/internal/llm"
+	"planesgo-code/internal/selector"
 	"planesgo-code/internal/sesiones"
 )
 
@@ -80,9 +81,9 @@ func (s *Servidor) clasifica(w http.ResponseWriter, r *http.Request, ses *sesion
 		return
 	}
 	inicio := time.Now()
-	tipo, u, err := clasificaMensaje(r.Context(), p.Texto, p.Ultimo)
+	tipo, modelo, u, err := clasificaMensaje(r.Context(), p.Texto, p.Ultimo)
 	if s.Imputacion != nil && p.Sesion != "" {
-		c := map[string]any{"tipo": tipo, "modelo": llm.ModeloClasifica, "ms": time.Since(inicio).Milliseconds(), "entrada": u.Entrada, "salida": u.Salida, "coste": u.Coste}
+		c := map[string]any{"tipo": tipo, "modelo": modelo, "ms": time.Since(inicio).Milliseconds(), "entrada": u.Entrada, "salida": u.Salida, "coste": u.Coste}
 		if err != nil {
 			c["error"] = err.Error()
 		}
@@ -101,20 +102,59 @@ contexto: es una pregunta sobre el trabajo o la conversación que no le pide nad
 suelta: es una pregunta que no tiene que ver con el trabajo (cultura general, otro tema).
 Si dudas, conversacion.`
 
+// sistemaClasificaLocal: lo mismo para el modelo pequeño de la IA local, con ejemplos (sin ellos lo manda casi todo
+// a la conversación).
+const sistemaClasificaLocal = `Clasifica el mensaje que un usuario escribe a un agente de programación mientras trabaja. Responde SOLO una palabra: conversacion, contexto o suelta.
+conversacion: le pide al agente que haga, cambie, pare o tenga en cuenta algo, o contesta a una pregunta del agente (sí, no, adelante, vale).
+contexto: es una PREGUNTA sobre lo que el agente hace o ha hecho (por qué, qué está haciendo, cuánto falta, qué significa algo de su trabajo). No le pide hacer nada.
+suelta: es una PREGUNTA que no tiene nada que ver con el trabajo ni con el código (geografía, tiempo, traducciones, deportes, cultura general).
+Ejemplos:
+«cambia el color del botón a rojo» → conversacion
+«vale, hazlo así» → conversacion
+«no uses esa librería» → conversacion
+«¿por qué has usado un bucle aquí?» → contexto
+«¿en qué paso vas?» → contexto
+«¿qué hace esa función que has creado?» → contexto
+«¿quién ganó el mundial de 2010?» → suelta
+«¿cuántos habitantes tiene Francia?» → suelta`
+
 var tiposClasifica = []string{"conversacion", "contexto", "suelta"}
 
 var clasificaGemini = llm.Gemini
 
-func clasificaMensaje(ctx context.Context, texto, ultimo string) (string, llm.Uso, error) {
+// clasificaLocal: con el modelo de texto de la IA local (sin tokens de pago); en las pruebas se sustituye.
+var clasificaLocal = selector.LocalChat
+
+// clasificaLocalMax: lo que se espera a la IA local (la primera vez carga el modelo); después, Gemini.
+const clasificaLocalMax = 6 * time.Second
+
+// clasificaMensaje: primero la IA local; si no tiene modelo de texto, no responde a tiempo o dice otra cosa, el
+// modelo barato de pago. Devuelve el tipo y el modelo que decidió.
+func clasificaMensaje(ctx context.Context, texto, ultimo string) (string, string, llm.Uso, error) {
 	q := "Mensaje del usuario:\n" + recortaTexto(texto, 1500)
 	if strings.TrimSpace(ultimo) != "" {
 		q = "Lo último que dijo el agente:\n" + recortaTexto(ultimo, 600) + "\n\n" + q
 	}
+	cl, cancela := context.WithTimeout(ctx, clasificaLocalMax)
+	resp, modelo, err := clasificaLocal(cl, sistemaClasificaLocal, q, 8)
+	cancela()
+	if err == nil {
+		if t, ok := tipoClasificaExacto(resp); ok {
+			return t, "local/" + modelo, llm.Uso{}, nil
+		}
+	}
 	resp, u, err := clasificaGemini(ctx, llm.ModeloClasifica, sistemaClasifica, q, 5, 0)
 	if err != nil {
-		return "conversacion", u, err
+		return "conversacion", llm.ModeloClasifica, u, err
 	}
-	return tipoClasifica(resp), u, nil
+	return tipoClasifica(resp), llm.ModeloClasifica, u, nil
+}
+
+// tipoClasificaExacto: la respuesta es una de las palabras (si no, no se sabe: decide el otro modelo).
+func tipoClasificaExacto(resp string) (string, bool) {
+	t := tipoClasifica(resp)
+	r := strings.ToLower(strings.Trim(strings.TrimSpace(resp), ".:*`\"' \n"))
+	return t, strings.HasPrefix(strings.ReplaceAll(r, "ó", "o"), t)
 }
 
 // tipoClasifica: la palabra de la respuesta (sin tildes ni signos); cualquier otra cosa, a la conversación.

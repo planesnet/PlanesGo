@@ -233,6 +233,8 @@ func (s *Selector) Precarga(ctx context.Context) {
 	if m := s.MotorActual(ctx); m.Nombre == localMotorName() {
 		m.Embebe(ctx, "hola", "RETRIEVAL_QUERY")
 	}
+	// Y el modelo de texto, si lo hay (la clasificación de mensajes no espera a que cargue: unos 25 s la primera vez).
+	LocalChat(ctx, "Responde: ok", "ok", 1)
 }
 
 // Vertex calcula un embedding con gemini-embedding-001 en Vertex AI.

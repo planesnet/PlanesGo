@@ -249,3 +249,78 @@ func embedLocal(ctx context.Context, cli *http.Client, texto string) ([]float32,
 func localMotorName() string {
 	return "ollama/" + LocalAIConfig().EmbedModel
 }
+
+// chatModelsKnown: modelos de texto pequeños que se usan solos si están en el servidor y no se ha elegido ninguno.
+var chatModelsKnown = []string{"gemma3:4b", "gemma3:1b", "qwen3:4b", "gemma3:12b"}
+
+// LocalChatModel: el modelo de texto de la IA local: el elegido o, si no hay, uno conocido que tenga el servidor
+// («» si ninguno).
+func LocalChatModel(ctx context.Context) (LocalAI, LocalAIState, string) {
+	c, e := activa(ctx)
+	if e.API == "" {
+		return c, e, ""
+	}
+	tiene := func(m string) bool {
+		for _, x := range e.Models {
+			if x == m || x == m+":latest" {
+				return true
+			}
+		}
+		return false
+	}
+	if c.ChatModel != "" {
+		if tiene(c.ChatModel) {
+			return c, e, c.ChatModel
+		}
+		return c, e, ""
+	}
+	for _, m := range chatModelsKnown {
+		if tiene(m) {
+			return c, e, m
+		}
+	}
+	return c, e, ""
+}
+
+// LocalChat: una respuesta corta del modelo de texto de la IA local (sin tokens de pago). Devuelve el modelo usado.
+func LocalChat(ctx context.Context, sistema, texto string, maxSalida int) (string, string, error) {
+	c, e, modelo := LocalChatModel(ctx)
+	if modelo == "" {
+		return "", "", errors.New("la IA local no tiene modelo de texto")
+	}
+	msgs := []map[string]string{{"role": "system", "content": sistema}, {"role": "user", "content": texto}}
+	ruta, cuerpo := "/api/chat", map[string]any{"model": modelo, "messages": msgs, "stream": false, "keep_alive": "30m",
+		"options": map[string]any{"temperature": 0, "num_predict": maxSalida}}
+	if e.API == "openai" {
+		ruta, cuerpo = "/v1/chat/completions", map[string]any{"model": modelo, "messages": msgs, "temperature": 0, "max_tokens": maxSalida}
+	}
+	b, _ := json.Marshal(cuerpo)
+	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+ruta, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", modelo, err
+	}
+	defer res.Body.Close()
+	var r struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error any `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&r); err != nil || res.StatusCode != http.StatusOK {
+		return "", modelo, fmt.Errorf("IA local: %s %v", res.Status, r.Error)
+	}
+	if len(r.Choices) > 0 {
+		return r.Choices[0].Message.Content, modelo, nil
+	}
+	return r.Message.Content, modelo, nil
+}
