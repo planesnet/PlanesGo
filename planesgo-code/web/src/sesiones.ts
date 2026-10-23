@@ -20,6 +20,7 @@ export interface Sesion {
   avisos?: Avisos;        // avisos y límites de coste de la sesión (lo que falte, los del agente)
   mcp?: string[];         // servidores MCP de Claude Code además de «pgo» (por defecto ninguno: ahorran tokens y procesos)
   decideAparte?: boolean; // pgocode decide qué va a la conversación y qué aparte (por defecto, sí)
+  directo?: boolean;      // pgocode hace él las órdenes mecánicas (compilar, pruebas, commit…) y responde lo que ya sabe, sin el agente (por defecto, sí; direct.ts)
   tipo?: Repo['tipo'];   // hosting que se deduce de su carpeta (respaldo)
   hosting?: TipoHosting; // alojamiento elegido para la sesión (obligatorio)
   esfuerzo?: string;     // nivel de esfuerzo del agente (vacío: el suyo por defecto)

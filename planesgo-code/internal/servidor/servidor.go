@@ -165,6 +165,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat", s.conSesion(s.chat))
 	mux.HandleFunc("POST /api/chat/clasifica", s.conSesion(s.clasifica))
 	mux.HandleFunc("POST /api/chat/inyecta", s.conSesion(s.inyecta))
+	mux.HandleFunc("POST /api/directo", s.conSesion(s.directo))
 	mux.HandleFunc("GET /api/chat/vigencia", s.conSesion(s.vigencia))
 	mux.HandleFunc("POST /api/chat/vigencia", s.conSesion(s.vigenciaChat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))

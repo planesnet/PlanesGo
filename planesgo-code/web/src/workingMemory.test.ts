@@ -119,3 +119,14 @@ test('shouldRelay: el relevo pedido («Barrer ahora» en Antigravity) basta con 
   assert.equal(W.shouldRelay({ ...base, outTokens: 0, forced: true }), null);
   assert.equal(W.shouldRelay({ ...base, outTokens: 3000, forced: true, attachments: 1 }), null);
 });
+
+test('la memoria no lleva las órdenes que hizo pgocode sin el agente', () => {
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'arregla el login' },
+    { rol: 'assistant', texto: 'Hecho' },
+    { rol: 'user', texto: 'pasa los tests' },
+    { rol: 'assistant', texto: '✗ Pruebas', nota: true, directo: { accion: 'test', ok: false } },
+  ];
+  const w = W.collectWorkingMemory(ms);
+  assert.deepEqual(w.turns.map(t => t.request), ['arregla el login']);
+});

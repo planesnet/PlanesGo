@@ -249,6 +249,11 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
             <span className="suave pequeno">Con el agente trabajando, pgocode responde aparte (sin que entre en la conversación) lo que no es para el agente: «¿cómo va?» en local y sin tokens; las preguntas sueltas, con un modelo barato. En la duda, va a la conversación. Siempre puedes forzarlo: «?» estado, «//» aparte.</span>
           </fieldset>
           <fieldset className="notificaciones">
+            <legend>Órdenes directas</legend>
+            <label className="casilla"><input type="checkbox" checked={s.directo !== false} onChange={e => cambia({ directo: e.target.checked ? undefined : false })} /> Lo mecánico lo hace pgocode, sin el agente</label>
+            <span className="suave pequeno">Si el mensaje es solo «compila», «pasa los tests», «haz commit», «¿qué cambios hay?», «¿cuánto llevamos gastado?»…, lo hace pgocode en la carpeta de la sesión (0 tokens) y deja una nota en el chat. Con más palabras («compila y arregla los errores»), o con «&gt;» delante, va al agente. Nunca hace push.</span>
+          </fieldset>
+          <fieldset className="notificaciones">
             <legend>Historial del agente</legend>
             <label className="casilla">
               <input type="checkbox" checked={autoContextOn(s)} onChange={e => cambia({ autoContext: e.target.checked ? undefined : false })} />
