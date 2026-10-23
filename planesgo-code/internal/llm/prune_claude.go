@@ -494,9 +494,12 @@ func claudePlan(plan prunePlan, win []*ocMessage) prunePlan {
 //	sobrecoste de la 1.ª llamada  E = (C − P − X₁)·w − (C − P)·r − X₂·w + R·w
 //	ahorro de cada llamada después     X·r
 //
-// P: dónde empieza lo cambiado; C: hasta dónde llega la caché aprovechable; X₁/X₂: lo que sale antes/después de C;
-// R: lo que se repone. Con la caché fría (más de una hora desde la última llamada), gratis.
-func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, now time.Time) (bool, string) {
+// P: hasta dónde se sigue leyendo de la caché: el prompt de sistema (sys), porque Claude Code solo tiene ahí un
+// punto de caché fijo y lo demás va en el último mensaje: un cambio por la mitad hace reescribir todo lo de después
+// del sistema, no solo desde el primer cambio (medido: un aviso de ~7k escribió 46 266). C: hasta dónde llega la
+// caché aprovechable; X₁/X₂: lo que sale antes/después de C; R: lo que se repone. Con la caché fría (más de una
+// hora desde la última llamada), gratis.
+func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, sys int, now time.Time) (bool, string) {
 	if d.Saved <= 0 && len(d.Restore) == 0 {
 		return false, "nada que retirar"
 	}
@@ -516,6 +519,9 @@ func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, now
 		}
 	}
 	for id, x := range cleared {
+		if x < 0 {
+			continue // lo que vuelve va en R
+		}
 		mark(id)
 		if s.Pos[id] < s.Cache {
 			X1 += x
@@ -530,6 +536,9 @@ func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, now
 	}
 	if P < 0 {
 		P = 0
+	}
+	if sys > 0 {
+		P = min(P, sys) // lo de después del sistema se reescribe entero
 	}
 	C := max(s.Cache, P)
 	X := X1 + X2
@@ -736,26 +745,9 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		}
 	}
 	now := pruneNow()
-	plan := claudePlan(planPruneK(win, sims, pruneYoung, now, c.params()), win)
-	d := pruneChanges(win, plan)
-	cleared := map[string]int{}
-	for _, m := range win {
-		for _, pt := range m.Parts {
-			cur := pt.Data
-			if pt.Current != "" {
-				cur = pt.Current
-			}
-			if nuevo, ok := d.Update[pt.ID]; ok {
-				cleared[pt.ID] = tokensOf(cur) - tokensOf(nuevo)
-			}
-			for _, r := range d.Restore {
-				if r == pt.ID {
-					cleared[pt.ID] = tokensOf(cur) - tokensOf(pt.Data)
-				}
-			}
-		}
-	}
-	vale, porque := claudeCacheWorth(s, d, cleared, now)
+	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true})
+	plan, d := o.Plan, o.D
+	vale, porque := claudeCacheWorth(s, d, claudeCleared(win, o), o.System, now)
 	if force {
 		vale, porque = d.changes(), "barrido pedido por el usuario"
 		if !vale {
@@ -773,10 +765,10 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
 	}
 	if !vale {
-		depuracion.Log("claude-code", "poda %s: %d tokens pendientes (%s)", c.key, d.Saved, porque)
+		depuracion.Log("claude-code", "poda %s: %s (%s)", c.key, d.pendingString(), porque)
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 		c.state.Vig.addCompacted(s.Before)
-		c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
+		c.noteClaudePending(s, o, now)
 		c.save()
 		return c.reportNow(now), nil, nil
 	}
@@ -822,12 +814,25 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
 	c.state.Vig.addCompacted(s.Before)
 	c.noteSweep(max(d.Saved, 0))
-	c.state.Pending, c.state.CacheSuffix, c.state.ForcePending = 0, 0, false
+	c.state.Pending, c.state.CacheSuffix, c.state.ForcePending, c.state.Back, c.state.NoPays = 0, 0, false, 0, false
+	c.state.Context = max(o.Ctx-d.Saved, 0)
 	c.save()
-	depuracion.Log("claude-code", "poda %s: %d tokens fuera (%d vaciados, %d repuestos; %s)", c.key, d.Saved, len(clear), len(d.Restore), porque)
-	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Podable: true, Calibration: calibrationInfo(c.state.Folder)}
+	depuracion.Log("claude-code", "poda %s: %s (%d vaciados, %d repuestos; %s)", c.key, d, len(clear), len(d.Restore), porque)
+	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Podable: true, Calibration: calibrationInfo(c.state.Folder),
+		Threshold: c.state.Threshold, Target: c.state.Target, Context: c.state.Context}
 	rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 	return rep, bak, nil
+}
+
+// noteClaudePending: lo pendiente en Claude Code, con lo que costaría ahora en caché (lo de después del sistema, a
+// precio de escritura) y si compensa (claudeCacheWorth).
+func (c *pruneCollector) noteClaudePending(s *claudeSession, o sweepOutcome, now time.Time) {
+	c.state.Pending, c.state.Back, c.state.CacheSuffix = max(o.D.Saved, 0), o.D.Back, o.Rewrite
+	vale, _ := claudeCacheWorth(s, o.D, claudeCleared(s.Win, o), o.System, now)
+	c.state.NoPays = !vale
+	if o.Ctx > 0 {
+		c.state.Context = o.Ctx
+	}
 }
 
 // markClaudeNow: al acabar el turno, la vigencia con lo nuevo (y los vectores de lo que falte).
@@ -844,7 +849,31 @@ func (c *pruneCollector) markClaudeNow(ctx context.Context, embeddings bool) {
 	if !s.LastCall.IsZero() {
 		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
 	}
-	c.markWin(ctx, s.Win, s.Before, embeddings, true)
+	o := c.markWin(ctx, s.Win, s.Before, embeddings, true)
+	c.noteClaudePending(s, o, pruneNow())
+	c.save()
+	c.publish(c.reportNow(pruneNow()))
+}
+
+// claudeCleared: lo que sale (positivo) o vuelve (negativo) de cada parte que cambia (tokens reales).
+func claudeCleared(win []*ocMessage, o sweepOutcome) map[string]int {
+	cleared := map[string]int{}
+	vuelve := map[string]bool{}
+	for _, id := range o.D.Restore {
+		vuelve[id] = true
+	}
+	for _, m := range win {
+		for _, pt := range m.Parts {
+			cur := curData(pt)
+			if nuevo, ok := o.D.Update[pt.ID]; ok {
+				cleared[pt.ID] = int(float64(tokensOf(cur)-tokensOf(nuevo)) * o.Ratio)
+			}
+			if vuelve[pt.ID] {
+				cleared[pt.ID] = int(float64(tokensOf(cur)-tokensOf(pt.Data)) * o.Ratio)
+			}
+		}
+	}
+	return cleared
 }
 
 // pruneClaude: el barrido al empezar el turno de Claude Code. Devuelve lo que ve la interfaz y, si ha cambiado el
@@ -860,6 +889,7 @@ func pruneClaude(ctx context.Context, p Peticion) (*PruneReport, *claudeBackup) 
 	defer cancela()
 	err := c.do(ce, func() {
 		defer c.setPhase("", 0)
+		c.noteLimits(p)
 		var err error
 		// Un «Barrer ahora» que esperaba a que se cerrara la sesión: ahora.
 		if rep, bak, err = c.sweepClaude(ce, p, p.Mensajes[len(p.Mensajes)-1].Texto, c.state.ForcePending); err != nil {
@@ -885,6 +915,7 @@ func markClaude(p Peticion, ses string) {
 		ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancela()
 		c.setFolder(p.Carpeta)
+		c.noteLimits(p)
 		c.markClaudeNow(ctx, p.Prune == PruneAuto)
 		noteTurn(c.state.Folder)
 	})

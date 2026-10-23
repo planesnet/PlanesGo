@@ -31,6 +31,11 @@ export interface PruneReport {
   cache_caliente?: boolean;   // barrer ahora rompería la caché caliente…
   cache_resto?: number;       // …desde el primer cambio: estos tokens dejan de estar en ella
   forzado_pendiente?: boolean; // un «Barrer ahora» espera al próximo turno (Claude Code con la sesión abierta)
+  no_compensa?: boolean;       // con la caché caliente, barrer ahora cuesta más de lo que ahorra
+  por_reponer?: number;        // tokens que volverían con el próximo barrido (piezas que el agente ha vuelto a citar)
+  umbral?: number;             // el contexto al que compacta el agente
+  objetivo?: number;           // el objetivo de contexto de la sesión (por encima, el hilo retira más)
+  contexto?: number;           // el contexto real de la última llamada (tras un barrido, lo que queda)
   calibracion?: Calibration;   // los pesos de la vigencia del proyecto
 }
 
@@ -43,11 +48,15 @@ export interface Calibration {
   sesiones?: number;
   retiradas?: number; tokens?: number; tokens_paso?: number; de_mas?: number;
   retiradas_generales?: number; tokens_generales?: number; tokens_paso_generales?: number; de_mas_generales?: number;
+  min_piezas?: number; min_retiradas?: number; // lo que hace falta para calibrar
 }
 
 // VIG_CUT: con esta vigencia o más, fuera del contexto del agente. VIG_MIN_OPACITY: lo más desvanecido (legible).
 export const VIG_CUT = 3;
 export const VIG_MIN_OPACITY = 0.4;
+// VIG_IN_MIN_OPACITY: lo más desvanecido de lo que sigue en el contexto del agente (lo superado o con 3+ que aún no
+// ha salido): otro tono que lo que ya está fuera, que es lo único con VIG_MIN_OPACITY y la marca ⤓.
+export const VIG_IN_MIN_OPACITY = 0.6;
 
 function vigOf(x: Vigencia): Vigencia {
   const v: Vigencia = { vigencia: x.vigencia };
@@ -103,11 +112,22 @@ function withPieces(m: Mensaje, piezas: Map<string, Vigencia>): Mensaje {
   return cambia ? { ...m, partes: ps } : m;
 }
 
-// vigOpacity: 1 con vigencia 0, bajando suave hasta VIG_MIN_OPACITY en VIG_CUT o más.
+// vigOpacity: 1 con vigencia 0, bajando suave hasta VIG_IN_MIN_OPACITY en VIG_CUT o más mientras sigue en el
+// contexto del agente; lo que ya está fuera, VIG_MIN_OPACITY.
 export function vigOpacity(v?: Vigencia): number {
+  if (v?.fuera) return VIG_MIN_OPACITY;
   if (!v || !(v.vigencia > 0)) return 1;
   const t = Math.min(v.vigencia / VIG_CUT, 1);
-  return Math.round((1 - (1 - VIG_MIN_OPACITY) * t) * 100) / 100;
+  return Math.round((1 - (1 - VIG_IN_MIN_OPACITY) * t) * 100) / 100;
+}
+
+// vigTone: el tono de una pieza o intercambio: «out» lo que ya no está en el contexto del agente (lo más apagado,
+// con ⤓), «superseded» lo superado que sigue dentro (una edición antigua: otro tono, no tan apagado), «» lo demás.
+export function vigTone(v?: Vigencia): '' | 'out' | 'superseded' {
+  if (!v) return '';
+  if (v.fuera) return 'out';
+  if (v.superada) return 'superseded';
+  return '';
 }
 
 // relativeOpacity: la de una pieza dentro de su mensaje ya desvanecido (las opacidades se multiplican).
@@ -137,7 +157,7 @@ export function vigTitle(v: Vigencia): string {
   if (v.superada) l.push(v.superada);
   if (v.nota) l.push(v.nota);
   if (!l.length) l.push('reciente o instrucciones: vital');
-  if (v.fuera) l.push('fuera del contexto del agente');
+  if (v.fuera) l.push(v.vigencia < VIG_CUT ? 'fuera del contexto del agente (salió con 3 o más; no vuelve aunque baje, salvo que el agente la cite)' : 'fuera del contexto del agente');
   return `vigencia ${v.vigencia > 0 ? coma(v.vigencia, 1) : '0'}: ${l.join(' · ')}`;
 }
 

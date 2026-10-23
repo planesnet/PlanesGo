@@ -229,14 +229,24 @@ type pruneState struct {
 	CacheSuffix  int   `json:"cache_resto,omitempty"`
 	CacheUntil   int64 `json:"cache_hasta,omitempty"`
 	ForcePending bool  `json:"forzado_pendiente,omitempty"`
+	// NoPays: barrer ahora no compensa (la caché caliente cuesta más de lo que se ahorra).
+	NoPays bool `json:"no_compensa,omitempty"`
+	// Back: lo que volvería con el próximo barrido (tokens: piezas que el agente ha vuelto a citar).
+	Back int `json:"por_reponer,omitempty"`
+	// Threshold y Target: el umbral de compactación del agente y el objetivo de contexto de la sesión (tokens; los
+	// del último turno). Context: el contexto real de la última llamada.
+	Threshold int `json:"umbral,omitempty"`
+	Target    int `json:"objetivo,omitempty"`
+	Context   int `json:"contexto,omitempty"`
 }
 
 // reportNow: lo que ve la interfaz del estado (sin lo retirado en este momento).
 func (c *pruneCollector) reportNow(now time.Time) *PruneReport {
 	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending, ForcePending: c.state.ForcePending,
-		Calibration: calibrationInfo(c.state.Folder)}
+		Calibration: calibrationInfo(c.state.Folder), Back: c.state.Back, Threshold: c.state.Threshold,
+		Target: c.state.Target, Context: c.state.Context}
 	if c.state.Pending > 0 && now.UnixMilli() < c.state.CacheUntil {
-		r.CacheWarm, r.CacheSuffix = true, c.state.CacheSuffix
+		r.CacheWarm, r.CacheSuffix, r.NoPays = true, c.state.CacheSuffix, c.state.NoPays
 	}
 	if c.state.Vig != nil {
 		r.Exchanges, r.Pieces = c.state.Vig.report(now)
@@ -511,7 +521,7 @@ func (c *pruneCollector) mark(ctx context.Context, a *Agente, p Peticion, embedd
 // markWin: la vigencia de la ventana del agente con lo último (y los vectores de lo que falte), sin barrer.
 // before: lo anterior a la última compactación del agente (fuera). claude: solo lo que se aplica en Claude Code
 // (claudePlan).
-func (c *pruneCollector) markWin(ctx context.Context, win, before []*ocMessage, embeddings, claude bool) {
+func (c *pruneCollector) markWin(ctx context.Context, win, before []*ocMessage, embeddings, claude bool) sweepOutcome {
 	var s *pruneSims
 	xs := pruneExchanges(win)
 	c.setPhase("marcando", len(xs))
@@ -523,16 +533,17 @@ func (c *pruneCollector) markWin(ctx context.Context, win, before []*ocMessage, 
 		}
 	}
 	c.setRulesOnly(s == nil)
-	plan := planPruneK(win, s, pruneYoung, pruneNow(), c.params())
-	if claude {
-		plan = claudePlan(plan, win)
+	msg := ""
+	if len(xs) > 0 {
+		msg = xs[len(xs)-1].userText()
 	}
-	c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
+	o := decideSweep(sweepInput{Win: win, Sims: s, Young: pruneYoung, Now: pruneNow(), K: c.params(), Msg: msg, Target: c.state.Target, Claude: claude})
+	c.state.Vig = vigSnapshot(o.Plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 	c.state.Vig.addCompacted(before)
-	d := pruneChanges(win, plan)
-	c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
+	c.notePending(o, pruneNow().UnixMilli() >= c.state.CacheUntil)
 	c.save()
 	c.publish(c.reportNow(pruneNow()))
+	return o
 }
 
 // pruneNow: el momento de los cálculos (en las pruebas, una fecha forzada).
@@ -660,16 +671,17 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.setRulesOnly(true)
 	}
 	now := pruneNow()
-	plan := planPruneK(win, s, young, now, c.params())
-	d := pruneChanges(win, plan)
+	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target})
+	plan, d := o.Plan, o.D
 	before := compactedBefore(msgs, win)
 	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
-	if (!force && (!d.worthIt() || (mid != nil && !mid.worth(d, win)))) || !d.changes() {
-		depuracion.Log(a.Clave, "poda %s: %d tokens pendientes (no compensa aún)", c.key, d.Saved)
+	cold := now.UnixMilli() >= c.state.CacheUntil
+	if (!force && !o.pays(cold, mid != nil, c.state.Threshold, c.state.Target)) || !d.changes() {
+		depuracion.Log(a.Clave, "poda %s: %s (no compensa aún: %s)", c.key, d.pendingString(), o.why(cold, mid != nil, c.state.Threshold, c.state.Target))
 		// La vigencia, la de ahora; lo que está fuera, lo que ya estaba.
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 		c.state.Vig.addCompacted(before)
-		c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
+		c.notePending(o, cold)
 		c.save()
 		return c.reportNow(now), nil
 	}
@@ -693,11 +705,13 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
 	c.state.Vig.addCompacted(before)
 	c.noteSweep(max(d.Saved, 0))
-	c.state.Pending, c.state.CacheSuffix = 0, 0
+	c.state.Pending, c.state.CacheSuffix, c.state.Back, c.state.NoPays = 0, 0, 0, false
+	c.state.Context = max(o.Ctx-d.Saved, 0)
 	c.save()
-	depuracion.Log(a.Clave, "poda %s: %d tokens fuera (%d partes cambiadas, %d repuestas, %d quitadas)", c.key, d.Saved,
-		len(d.Update), len(d.Restore), len(d.Delete))
-	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Calibration: calibrationInfo(c.state.Folder)}
+	depuracion.Log(a.Clave, "poda %s: %s (%d partes cambiadas, %d repuestas, %d quitadas; corte %.1f)", c.key, d,
+		len(d.Update), len(d.Restore), len(d.Delete), o.Cut)
+	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Calibration: calibrationInfo(c.state.Folder),
+		Threshold: c.state.Threshold, Target: c.state.Target, Context: c.state.Context}
 	rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
 	return rep, nil
 }
@@ -760,6 +774,7 @@ func pruneOpenCode(ctx context.Context, a *Agente, p Peticion) *PruneReport {
 	defer cancela()
 	err := c.do(ce, func() {
 		defer c.setPhase("", 0)
+		c.noteLimits(p)
 		var err error
 		if rep, err = c.sweep(ce, a, p, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung, nil, false); err != nil {
 			depuracion.Log(a.Clave, "poda %s: %v", p.SesionAgente, err)
@@ -783,6 +798,7 @@ func markOpenCode(a *Agente, p Peticion, ses string) {
 		defer c.setPhase("", 0)
 		ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancela()
+		c.noteLimits(p)
 		c.mark(ctx, a, p, p.Prune == PruneAuto)
 		noteTurn(c.state.Folder)
 	})
@@ -798,14 +814,11 @@ func forgetSnapshot(ses string) {
 	}
 }
 
-// midTurnWorth: si compensa barrer entre pasos de un turno largo por la caché. OpenCode relee el historial de la
-// base de datos en cada paso, así que un barrido entre pasos surte efecto en el siguiente. Con Gemini, escribir en
-// caché no se cobra, pero desde el primer cambio el historial deja de estar en caché una vez: se paga ese resto a
-// precio de entrada (1) en vez de caché (cacheRatio, 0,1 en Gemini) en un paso, y a cambio cada paso siguiente
-// manda «removed» tokens menos (a precio de caché). Compensa si removed·cacheRatio·pasosRestantes > resto·(1−cacheRatio).
-func midTurnWorth(removed, suffix, stepsLeft int, cacheRatio float64) bool {
-	return float64(removed)*cacheRatio*float64(stepsLeft) > float64(suffix)*(1-cacheRatio)
-}
+// Cuándo compensa barrer, por la caché. Gemini (implícita) y Claude Code solo reaprovechan el prefijo hasta su
+// punto de caché fijo, el prompt de sistema (instrucciones y herramientas): cambiar el historial por la mitad hace
+// que TODO lo de después del sistema se vuelva a mandar sin caché una vez (medido: Gemini, con un aviso de «~50k» el
+// paso siguiente mandó 80 247 sin caché y leyó solo 15 682; Claude, con «~7k», escribió 46 266). Contar desde el
+// primer cambio lo subestimaba entre 1,6 y 6,6 veces.
 
 // midSweep: lo que sabe el barrido entre pasos del turno en curso: el contexto de la última llamada y el umbral al
 // que el agente compacta.
@@ -813,50 +826,225 @@ type midSweep struct {
 	Context, Threshold int
 }
 
-// Barrido entre pasos: cada cuántos pasos se mira, los pasos que se suponen por delante (PasosOpenCode es 40) y el
-// precio relativo de la caché de Gemini.
+// Barrido entre pasos: los pasos que se suponen por delante (PasosOpenCode es 40) y el precio relativo de la caché
+// de Gemini. Al empezar el turno, lo retirado se deja de mandar en todos los pasos que quedan hasta la compactación:
+// pruneHorizon. Por encima del objetivo de contexto, el horizonte se triplica (seguir por encima cuesta en cada paso
+// y acerca la compactación).
 const (
 	midStepsLeft  = 10
 	midCacheRatio = 0.1
+	pruneHorizon  = 20
+	// pruneTargetPct: el objetivo de contexto por defecto, en % del umbral de compactación (150k → 60k).
+	pruneTargetPct = 40
 )
 
-// worth: si compensa barrer ahora a mitad de turno: si por la caché se amortiza (midTurnWorth) o si el contexto va
-// ya por la mitad del umbral de compactación. Compactar cuesta más que perder la caché una vez: una llamada con todo
-// el historial para resumirlo, el resumen (salida) y, después, releer lo que hacía falta; en INTRADEMA, OpenCode
-// compactó 4 veces en 45 minutos con 40-68k tokens de lecturas viejas que nadie usaba.
-func (m *midSweep) worth(d pruneDiff, win []*ocMessage) bool {
-	if m.Threshold > 0 && m.Context >= m.Threshold/2 {
-		return true
-	}
-	return midTurnWorth(d.Saved, changedSuffix(win, d), midStepsLeft, midCacheRatio)
+// midTurnWorth: si compensa perder la caché: removed tokens menos en cada uno de los stepsLeft pasos (a precio de
+// caché, cacheRatio) frente a reenviar una vez el resto (rewrite) a precio de entrada en vez de caché.
+func midTurnWorth(removed, rewrite, stepsLeft int, cacheRatio float64) bool {
+	return float64(removed)*cacheRatio*float64(stepsLeft) > float64(rewrite)*(1-cacheRatio)
 }
 
-// changedSuffix: los tokens del historial a partir de la primera parte que cambia (lo que deja de estar en caché).
-func changedSuffix(win []*ocMessage, d pruneDiff) int {
-	cambia := map[string]bool{}
-	for id := range d.Update {
-		cambia[id] = true
+// contextTarget: el objetivo de contexto de la petición (0: sin objetivo).
+func contextTarget(p Peticion) int {
+	if agentOwnCompaction(p) || p.ContextTarget < 0 {
+		return 0
 	}
-	for _, id := range append(append([]string(nil), d.Restore...), d.Delete...) {
-		cambia[id] = true
+	if p.ContextTarget > 0 {
+		return p.ContextTarget
 	}
-	n, desde := 0, false
-	for _, m := range win {
-		for _, p := range m.Parts {
-			desde = desde || cambia[p.ID]
-			if desde {
-				cur := p.Data
-				if p.Current != "" {
-					cur = p.Current
-				}
-				if nuevo, ok := d.Update[p.ID]; ok {
-					cur = nuevo
-				}
-				n += tokensOf(cur)
-			}
+	if n, err := strconv.Atoi(os.Getenv("PGOCODE_CONTEXT_TARGET")); err == nil && n > 0 {
+		return n
+	}
+	return compactThreshold(p) * pruneTargetPct / 100
+}
+
+// noteLimits: el umbral de compactación y el objetivo de la petición de un turno («Barrer ahora» usa los del último).
+func (c *pruneCollector) noteLimits(p Peticion) {
+	c.state.Threshold, c.state.Target = 0, contextTarget(p)
+	if !agentOwnCompaction(p) {
+		c.state.Threshold = compactThreshold(p)
+	}
+}
+
+// lastContext: el contexto real de la última llamada (tokens; 0 si no se sabe) y su posición en win.
+func lastContext(win []*ocMessage) (int, int) {
+	for i := len(win) - 1; i >= 0; i-- {
+		if m := win[i]; m.Role == "assistant" && m.Ctx > 0 {
+			return m.Ctx, i
 		}
 	}
-	return n
+	return 0, -1
+}
+
+func curData(p *ocPart) string {
+	if p.Current != "" {
+		return p.Current
+	}
+	return p.Data
+}
+
+// pruneSystemMin: lo mínimo plausible de lo fijo del agente (instrucciones y herramientas; OpenCode con Gemini
+// ronda 14-16k, Claude Code 17k).
+const pruneSystemMin = 4000
+
+// systemTokens: lo fijo del agente (instrucciones y herramientas): lo mínimo que sobra entre el contexto real de
+// cada llamada y lo estimado de lo que había antes en la ventana (0 si no se sabe). El mínimo, porque las primeras
+// llamadas tras una compactación traían aún lo de antes, y lo que pgocode retiró después pesaba cuando se llamó.
+func systemTokens(win []*ocMessage) int {
+	antes, sys := 0, -1
+	for _, m := range win {
+		if m.Role == "assistant" && m.Ctx > 0 {
+			// Por debajo de pruneSystemMin no es plausible (lo estimado de antes se pasó: lo retirado por pgocode
+			// pesaba entero cuando se llamó).
+			if v := m.Ctx - antes; v >= pruneSystemMin && (sys < 0 || v < sys) {
+				sys = v
+			}
+		}
+		for _, p := range m.Parts {
+			antes += tokensOf(curData(p))
+		}
+	}
+	return max(sys, 0)
+}
+
+// estimateRatio: la relación entre los tokens reales del historial de la sesión (el contexto de la última llamada
+// sin lo fijo) y los estimados (tokensOf); 1 si no se sabe. Entre 0,8 y 1,5: con estTokens, lo medido en las
+// sesiones reales de INTRADEMA sale entre 0,9 y 1,4 (tras una compactación, su resumen no está en la ventana).
+func estimateRatio(win []*ocMessage, sys, ctx, at int) float64 {
+	if ctx <= 0 || at < 0 {
+		return 1
+	}
+	est := 0
+	for _, m := range win[:at] {
+		for _, p := range m.Parts {
+			est += tokensOf(curData(p))
+		}
+	}
+	if est < 20000 || ctx-sys <= 0 {
+		return 1
+	}
+	return min(max(float64(ctx-sys)/float64(est), 0.8), 1.5)
+}
+
+// sweepInput: lo que necesita decideSweep.
+type sweepInput struct {
+	Win    []*ocMessage
+	Sims   *pruneSims
+	Young  int
+	Now    time.Time
+	K      vigParams
+	Msg    string // el último mensaje del usuario (la señal para reponer)
+	Target int    // el objetivo de contexto (0: sin)
+	Claude bool   // solo lo que se aplica en Claude Code
+}
+
+// sweepOutcome: el plan, el cambio (en tokens reales, con estimateRatio) y lo que cuesta en caché.
+type sweepOutcome struct {
+	Plan    prunePlan
+	D       pruneDiff
+	Ratio   float64
+	Ctx     int     // el contexto real de la última llamada
+	System  int     // lo fijo del agente
+	Rewrite int     // lo que se reenvía sin caché una vez si se barre (lo de después del sistema)
+	Cut     float64 // el corte con que sale lo grande y viejo (vigCut, o menos por el objetivo)
+}
+
+// decideSweep: el plan con su vigencia, lo retirado que se queda fuera (stickyOut), y, si el contexto pasa del
+// objetivo, con el corte más bajo para lo grande y viejo (2,5 y después 2) hasta quedar por debajo.
+func decideSweep(in sweepInput) sweepOutcome {
+	o := sweepOutcome{Cut: vigCut}
+	var at int
+	o.Ctx, at = lastContext(in.Win)
+	o.System = systemTokens(in.Win)
+	o.Ratio = estimateRatio(in.Win, o.System, o.Ctx, at)
+	recent := recentText(in.Win, in.Msg)
+	build := func(cut float64) {
+		plan := planPruneCut(in.Win, in.Sims, in.Young, in.Now, in.K, cut)
+		if in.Claude {
+			plan = claudePlan(plan, in.Win)
+		}
+		stickyOut(in.Win, &plan, recent)
+		d := pruneChanges(in.Win, plan)
+		d.scale(o.Ratio)
+		o.Plan, o.D, o.Cut = plan, d, cut
+	}
+	build(vigCut)
+	if in.Target > 0 && o.Ctx > in.Target {
+		for _, cut := range []float64{2.5, 2} {
+			if o.Ctx-o.D.Saved <= in.Target {
+				break
+			}
+			build(cut)
+		}
+	}
+	if o.D.changes() {
+		if o.Ctx > 0 {
+			o.Rewrite = max(o.Ctx-o.System-o.D.Saved, 0)
+		} else {
+			n := 0
+			for _, m := range in.Win {
+				for _, p := range m.Parts {
+					n += tokensOf(curData(p))
+				}
+			}
+			o.Rewrite = max(int(float64(n)*o.Ratio)-o.D.Saved, 0)
+		}
+	}
+	return o
+}
+
+// pays: si compensa barrer ahora (OpenCode). Hace falta que salga bastante (pruneMinTokens). Entre pasos de un
+// turno, solo cerca de compactar (la mitad del umbral): compactar cuesta más que perder la caché (una llamada con
+// todo el historial, el resumen y releer lo que hacía falta), y barrer antes a mitad de turno hacía releer más (en
+// la simulación con las sesiones reales de INTRADEMA, de 29 a 34 podadas de más). Al empezar el turno, con la caché
+// fría siempre; caliente, si se amortiza: por encima de la mitad del umbral, o lo que se ahorra en los pasos por
+// delante (pruneHorizon; el triple por encima del objetivo) frente a reenviar una vez lo de después del sistema. Lo
+// que vuelve (por una cita) se aplica solo con la caché fría o junto con un barrido que compense.
+func (o sweepOutcome) pays(cold, mid bool, threshold, target int) bool {
+	return o.why(cold, mid, threshold, target) == ""
+}
+
+// why: por qué no compensa barrer ahora («» si compensa).
+func (o sweepOutcome) why(cold, mid bool, threshold, target int) string {
+	d := o.D
+	if !d.changes() {
+		return "nada que cambiar"
+	}
+	if d.Saved < pruneMinTokens {
+		if d.Back > 0 && d.Out == 0 && cold && !mid {
+			return "" // solo reponer, con la caché fría: no cuesta caché
+		}
+		return fmt.Sprintf("menos de %d", pruneMinTokens)
+	}
+	if threshold > 0 && o.Ctx >= threshold/2 {
+		return ""
+	}
+	if mid {
+		if o.Ctx <= 0 {
+			return "" // sin el contexto de la llamada, como antes: lo que sale basta
+		}
+		return "entre pasos, solo cerca de compactar"
+	}
+	if cold || o.Ctx <= 0 {
+		return ""
+	}
+	h := pruneHorizon
+	if target > 0 && o.Ctx > target {
+		h *= 3
+	}
+	if midTurnWorth(d.Saved, o.Rewrite, h, midCacheRatio) {
+		return ""
+	}
+	return fmt.Sprintf("caché caliente: reenviar %d sin caché no se amortiza en %d pasos", o.Rewrite, h)
+}
+
+// notePending: lo que saldría y volvería con un barrido ahora, y lo que costaría en caché.
+func (c *pruneCollector) notePending(o sweepOutcome, cold bool) {
+	c.state.Pending, c.state.Back, c.state.CacheSuffix = max(o.D.Saved, 0), o.D.Back, o.Rewrite
+	c.state.NoPays = !o.pays(cold, false, c.state.Threshold, c.state.Target)
+	if o.Ctx > 0 {
+		c.state.Context = o.Ctx
+	}
 }
 
 func init() {
@@ -877,12 +1065,10 @@ func midTurnPrune(a *Agente, p Peticion, ses string, pasos, contexto int) {
 	q := p
 	q.SesionAgente = ses
 	mid := &midSweep{Context: contexto}
-	if !agentOwnCompaction(p) {
-		mid.Threshold = compactThreshold(p)
-	}
 	c.later(func() {
 		ctx, cancela := context.WithTimeout(context.Background(), time.Minute)
 		defer cancela()
+		c.noteLimits(q)
 		rep, err := c.sweep(ctx, a, q, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung+1, mid, false)
 		if err != nil {
 			depuracion.Log(a.Clave, "poda entre pasos %s: %v", ses, err)

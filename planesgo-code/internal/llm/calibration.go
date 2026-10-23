@@ -100,10 +100,11 @@ func calibrationInfo(folder string) *CalibrationInfo {
 		ci := e.CalibrationInfo
 		if ci.General {
 			ci.Params = defaultVig
+			ci.MinPieces, ci.MinCleared = calibMinPieces, calibMinCleared
 		}
 		return &ci
 	}
-	return &CalibrationInfo{Params: defaultVig, General: true}
+	return &CalibrationInfo{Params: defaultVig, General: true, MinPieces: calibMinPieces, MinCleared: calibMinCleared}
 }
 
 // params: los pesos de la sesión del recolector (los de su proyecto).
@@ -310,4 +311,7 @@ type CalibrationInfo struct {
 	BaseTokens    int   `json:"tokens_generales,omitempty"`
 	BaseTokenStep int64 `json:"tokens_paso_generales,omitempty"`
 	BaseOver      int   `json:"de_mas_generales,omitempty"`
+	// Lo que hace falta para calibrar (el progreso: «71 de 150 piezas para calibrar»).
+	MinPieces  int `json:"min_piezas,omitempty"`
+	MinCleared int `json:"min_retiradas,omitempty"`
 }

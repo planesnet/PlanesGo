@@ -65,6 +65,9 @@ type Peticion struct {
 	// Prune: poda automática del historial del agente al empezar el turno (PruneAuto, PruneRules o PruneOff; ver
 	// prune.go). De momento, solo OpenCode.
 	Prune string
+	// ContextTarget: el objetivo de contexto de la sesión (tokens): por encima, la poda retira también lo grande y
+	// viejo con menos vigencia (0: el 40 % del umbral de compactación o PGOCODE_CONTEXT_TARGET; -1: sin objetivo).
+	ContextTarget int
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,

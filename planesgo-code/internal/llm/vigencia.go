@@ -45,6 +45,13 @@ const (
 	vigRelPivot = 0.35
 	// vigSupersededJump: lo superado salta por encima del corte.
 	vigSupersededJump = 3.0
+	// vigBigTokens, vigBigSteps y vigBigRelCap: en proyectos de un solo tema casi todo guarda relación con lo último
+	// (0,45-0,52), y la relación restaba hasta 3 a una lectura enorme y vieja (un CSV de 70k leído una vez siguió
+	// cuatro turnos con vigencia 2,1). En las piezas grandes con muchos pasos encima, la relación resta como mucho
+	// vigBigRelCap: lo que el agente sigue usando lo cita o lo relee, y lo protegen sus últimos pasos.
+	vigBigTokens = 10000
+	vigBigSteps  = 8
+	vigBigRelCap = 1.0
 )
 
 // vigParams: los pesos de la vigencia (el corte sigue en vigCut). Por proyecto, calibrados con su historial
@@ -75,6 +82,7 @@ type vigFactors struct {
 	Sim        *float64 `json:"relacion,omitempty"` // relación con lo último (nil: sin embeddings)
 	At         int64    `json:"en,omitempty"`       // cuándo (ms; 0: sin fecha)
 	Superseded string   `json:"superada,omitempty"` // por qué está superada («» si no)
+	Size       int      `json:"tam,omitempty"`      // pieza: los tokens de su salida (estimados)
 }
 
 // phi: el número áureo.
@@ -113,7 +121,11 @@ func (k vigParams) raw(f vigFactors, hours float64) float64 {
 	if !f.Pinned {
 		v = k.AgeK*logPhi(f.Ago-f.Young) + k.StepK*logPhi(f.Steps-pruneProtectSteps) + k.TimeK*math.Log1p(hours)
 		if f.Sim != nil {
-			v += k.RelK * (k.RelPivot - *f.Sim)
+			rel := k.RelK * (k.RelPivot - *f.Sim)
+			if f.Size >= vigBigTokens && f.Steps-pruneProtectSteps >= vigBigSteps {
+				rel = max(rel, -vigBigRelCap)
+			}
+			v += rel
 		}
 		v = max(v, 0)
 	}

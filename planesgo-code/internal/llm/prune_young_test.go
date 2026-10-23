@@ -216,22 +216,40 @@ func TestChatCompactedAndSteps(t *testing.T) {
 	}
 }
 
-func TestMidSweepWorth(t *testing.T) {
-	d := pruneDiff{Saved: 20000, Update: map[string]string{}}
+func TestSweepPays(t *testing.T) {
+	// Lo fijo del agente (15k), la primera llamada; lo reenviado sin caché es TODO lo de después del sistema (no
+	// desde el primer cambio, como antes: eso lo subestimaba entre 1,6 y 6,6 veces).
 	s := &sesionPrueba{}
 	s.user("x")
 	m := s.assistant(tool("read", map[string]any{"filePath": "/p/a"}, strings.Repeat("a", 90000)))
-	s.assistant(tool("read", map[string]any{"filePath": "/p/b"}, strings.Repeat("b", 300000)))
-	d.Update[m.Parts[0].ID] = `{"type":"tool","state":{"output":""}}`
-	if suf := changedSuffix(s.msgs, d); suf < 100000 {
-		t.Fatalf("resto: %d", suf)
+	m.Ctx = 15000
+	s.assistant(tool("read", map[string]any{"filePath": "/p/b"}, strings.Repeat("b", 3000)))
+	last := s.assistant(tool("read", map[string]any{"filePath": "/p/c"}, strings.Repeat("c", 3000)))
+	last.Ctx = 100000
+	if sys := systemTokens(s.msgs); sys < 14000 || sys > 15000 {
+		t.Fatalf("sistema: %d", sys)
 	}
-	// Lejos del umbral: el resto (100k sin caché) no se amortiza con 20k menos en 10 pasos.
-	if (&midSweep{Context: 50000, Threshold: 150000}).worth(d, s.msgs) {
-		t.Fatal("no compensa")
+	o := sweepOutcome{Ctx: 100000, System: 15000, D: pruneDiff{Saved: 20000, Out: 20000, Update: map[string]string{"x": ""}}}
+	o.Rewrite = o.Ctx - o.System - o.D.Saved // 65k
+	// Caché caliente, lejos del umbral y sin objetivo: 20k menos en 10 pasos no pagan 65k sin caché.
+	if o.pays(false, true, 0, 0) {
+		t.Fatal("entre pasos no compensa")
 	}
-	// A mitad del umbral de compactación, sí.
-	if !(&midSweep{Context: 80000, Threshold: 150000}).worth(d, s.msgs) {
+	// Al empezar el turno (20 pasos por delante) tampoco; con la caché fría, sí.
+	if o.pays(false, false, 0, 0) || !o.pays(true, false, 0, 0) {
+		t.Fatal("al empezar: caliente no, fría sí")
+	}
+	// Por encima del objetivo (60k) el horizonte se triplica: compensa.
+	if !o.pays(false, false, 0, 60000) {
+		t.Fatal("por encima del objetivo compensa")
+	}
+	// A mitad del umbral de compactación, siempre.
+	if !o.pays(false, true, 150000, 0) {
 		t.Fatal("cerca de compactar compensa")
+	}
+	// Poco (menos de pruneMinTokens): no, salvo solo reponer con la caché fría.
+	small := sweepOutcome{D: pruneDiff{Saved: -3000, Back: 3000, Restore: []string{"x"}}}
+	if small.pays(false, false, 0, 0) || !small.pays(true, false, 0, 0) {
+		t.Fatal("reponer: solo con la caché fría")
 	}
 }

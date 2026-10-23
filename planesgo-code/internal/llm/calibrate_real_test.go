@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,13 @@ func TestPruneSimulationReal(t *testing.T) {
 		fin()
 		logResult(t, "antes (lo joven, entero)", antes.simulate(defaultVig, CompactAtDefault))
 		t.Logf("%s: %d mensajes, %d pasos, %d piezas, %d puntos de barrido (%s)", ses, len(msgs), h.Steps, len(h.Pieces), len(h.Points), time.Since(t0).Round(time.Millisecond))
+		simTargetPct = 0
+		logResult(t, "generales sin objetivo de contexto", h.simulate(defaultVig, CompactAtDefault))
+		simTargetPct = pruneTargetPct
+		if n, err := strconv.Atoi(os.Getenv("PGO_PRUEBA_SIM_OBJETIVO")); err == nil { // % del umbral, para probar otros
+			simTargetPct = n
+			defer func() { simTargetPct = pruneTargetPct }()
+		}
 		r := h.simulate(defaultVig, CompactAtDefault)
 		logResult(t, "generales", r)
 		if kj := os.Getenv("PGO_PRUEBA_SIM_K"); kj != "" {
@@ -90,6 +98,7 @@ func TestPruneSimulationReal(t *testing.T) {
 func logResult(t *testing.T, nombre string, r calibResult) {
 	t.Logf("  %s: %d piezas retiradas (%d tokens, %d k tokens·paso); de ellas usadas después %d, podadas de más %d (%.1f %%); piezas usadas en el historial %d/%d",
 		nombre, r.Cleared, r.Tokens, r.TokenSteps/1000, r.Used, r.Over, pctOf(r.Over, r.Cleared), r.UsedTotal, r.Labeled)
+	t.Logf("    contexto de trabajo por paso: real media %d mediana %d → con la poda media %d mediana %d", r.MeanReal, r.MedReal, r.MeanSim, r.MedSim)
 	for i, g := range r.Segs {
 		if g.MaxReal == 0 {
 			continue
@@ -167,4 +176,80 @@ func TestCalibrationReal(t *testing.T) {
 func logTotal(t *testing.T, nombre string, k vigParams, r calibTotal) {
 	t.Logf("%s %+v: %d retiradas, %d tokens, %d k tokens·paso, usadas después %d, podadas de más %d (%.1f %%), piezas %d",
 		nombre, k, r.Cleared, r.Tokens, r.TokenSteps/1000, r.Used, r.Over, pctOf(r.Over, r.Cleared), r.Labeled)
+}
+
+// TestStickyOutReal: el barrido sobre una sesión real (volcada en solo lectura) en un momento dado, con y sin la
+// histéresis de lo retirado (stickyOut): cuánto volvería de golpe. El caso de INTRADEMA: a las 11:41:26 volvieron
+// 24 piezas (~49k), el contexto subió a 154k y OpenCode compactó.
+// PGO_PRUEBA_REPOS=<sesión.json> PGO_PRUEBA_REPOS_EN=<ms> PGO_PRUEBA_SIM_CACHE=<carpeta> go test -run TestStickyOutReal -v ./internal/llm
+func TestStickyOutReal(t *testing.T) {
+	path := os.Getenv("PGO_PRUEBA_REPOS")
+	if path == "" {
+		t.Skip()
+	}
+	en, _ := strconv.ParseInt(os.Getenv("PGO_PRUEBA_REPOS_EN"), 10, 64)
+	ses := strings.TrimSuffix(filepath.Base(path), ".json")
+	msgs := loadDump(t, path)
+	var pre []*ocMessage
+	for _, m := range msgs {
+		if en == 0 || m.Time <= en {
+			pre = append(pre, m)
+		}
+	}
+	vec, fin := dumpVec(t, ses)
+	defer fin()
+	win := pruneWindow(pre)
+	// PGO_PRUEBA_REPOS_ORIG: las partes con original guardado por pgocode (pgocode_prune_original): las que hoy
+	// están repuestas se dan por retiradas, como antes de la reposición de golpe.
+	if f := os.Getenv("PGO_PRUEBA_REPOS_ORIG"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, id := range strings.Fields(string(b)) {
+			ids[id] = true
+		}
+		for _, m := range win {
+			for _, p := range m.Parts {
+				if ids[p.ID] && p.Current == "" && p.isTool() {
+					p.Current, _ = renderPart(p.Data, outEdit(p))
+					if p.Current == p.Data {
+						p.Current = ""
+					}
+				}
+			}
+		}
+	}
+	msg := ""
+	for i := len(win) - 1; i >= 0; i-- {
+		if win[i].Role == "user" {
+			if msg = strings.TrimSpace(quitaIdioma(userTextOf(win[i]))); msg != "" {
+				break
+			}
+		}
+	}
+	var sims *pruneSims
+	if vec != nil {
+		sims = computeSims(win, msg, vec)
+	}
+	now := time.UnixMilli(win[len(win)-1].Time)
+	retiradas := 0
+	for _, m := range win {
+		for _, p := range m.Parts {
+			if p.Current != "" {
+				retiradas++
+			}
+		}
+	}
+	plan := planPruneK(win, sims, pruneYoung+1, now, defaultVig)
+	sin := pruneChanges(win, plan)
+	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung + 1, Now: now, K: defaultVig, Msg: msg, Target: CompactAtDefault * pruneTargetPct / 100})
+	t.Logf("%d mensajes hasta %s, %d partes retiradas por pgocode; contexto %d (sistema %d, relación estimado/real %.2f)",
+		len(pre), now.Format("15:04:05"), retiradas, o.Ctx, o.System, o.Ratio)
+	t.Logf("  sin histéresis: %d repuestas (%d tokens estimados), %s", len(sin.Restore), sin.Back, sin)
+	t.Logf("  con histéresis: %d repuestas, %s (corte %.1f, reenvío sin caché %d)", len(o.D.Restore), o.D, o.Cut, o.Rewrite)
+	if o.D.Back > pruneReviveMax*2 {
+		t.Errorf("vuelve demasiado: %d", o.D.Back)
+	}
 }
