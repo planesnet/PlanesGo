@@ -288,6 +288,9 @@ func claudeTestEnv(t *testing.T, ses string) (string, *claudeFixture) {
 	home, datos := t.TempDir(), t.TempDir()
 	viejoHome, viejoDir, viejoNow, viejoBusy := claudeHomeFunc, pruneDirFunc, pruneNow, claudeBusyFunc
 	t.Cleanup(func() {
+		// Lo que dejó en cola el recolector (el marcado al acabar el turno), antes de restaurar: si no, escribiría
+		// en la carpeta de datos de verdad.
+		drainCollectors()
 		claudeHomeFunc, pruneDirFunc, pruneNow, claudeBusyFunc = viejoHome, viejoDir, viejoNow, viejoBusy
 	})
 	claudeHomeFunc = func() string { return home }

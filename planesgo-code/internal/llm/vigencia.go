@@ -21,11 +21,10 @@ import (
 // recientes (el turno en curso y los dos anteriores) cuentan enteros como vitales, pero cada pieza suya tiene su
 // propia vigencia por pasos, relación con lo que se está haciendo ahora, tiempo y si está superada: así un turno
 // largo puede retirar sus lecturas viejas sin esperar a que el turno acabe. Los pesos (vigParams) se calibran por
-// proyecto con el propio historial (calibration.go); estas constantes son los valores generales.
-// Calibrada con la conversación real de INTRADEMA (43 mensajes en 12 horas) para que el corte en 3 coincida con la
-// poda por niveles que había (TestVigenciaCalibration): el 95,0 % de los intercambios y el 99,3 % de las partes
-// cambiadas (con la antigüedad lineal de antes, el 93,6 %). La relación manda, y la antigüedad y el tiempo empujan poco a poco. Más empinada (vigRelK 30) coincide
-// algo más (95 %), pero el desvanecido pasa a ser casi todo o nada.
+// proyecto con el propio historial (calibrate.go, calibration.go); estas constantes son los valores generales, los
+// de calibrar con todas las sesiones reales de OpenCode juntas (TestCalibrationReal: 8 sesiones de 4 proyectos,
+// 1205 piezas etiquetadas): retiran 767k tokens con un 1,9 % de podadas de más (los de antes, con la antigüedad en
+// pasos a 0,8, el tiempo a 0,15 y el pivote a 0,50: 864k con un 3,3 %).
 
 const (
 	vigCut = 3.0
@@ -34,15 +33,16 @@ const (
 	// antiguo, como la curva del olvido; por sí sola casi nunca llega al corte (lo que manda es la relación).
 	vigAgeK = 0.12
 	// vigStepK: la antigüedad de una pieza en pasos del agente (llamadas al modelo desde entonces), más allá de los
-	// protegidos: también como la serie de Fibonacci (8 pasos más: 0,8·log_φ(9) = 3,65).
-	vigStepK = 0.8
-	// vigTimeK: lo que suma el tiempo: ln(1+h) (1 h: 0,10; 6 h: 0,29; un día: 0,48; una semana: 0,77).
-	vigTimeK = 0.15
+	// protegidos: también como la serie de Fibonacci (8 pasos más: log_φ(9) = 4,57).
+	vigStepK = 1.0
+	// vigTimeK: lo que suma el tiempo: 0,3·ln(1+h) (1 h: 0,21; 6 h: 0,58; un día: 0,97; una semana: 1,55).
+	vigTimeK = 0.3
 	// vigRelK y vigRelPivot: la relación con lo último (similitud coseno con 256 dimensiones). En el pivote no suma
-	// nada; por encima resta y por debajo suma (0,40: 2; 0,35: 3; 0,30: 4). Con antigüedad y tiempo típicos, el
-	// corte cae cerca del umbral de antes (pruneThreshold, 0,38).
+	// nada; por encima resta y por debajo suma (0,30: 1; 0,25: 2; 0,20: 3). La calibración lo baja de 0,50 a 0,35:
+	// con embeddinggemma de 256 dimensiones, lo que el agente sigue usando rara vez baja de 0,35, y la antigüedad en
+	// pasos ya se encarga de lo que se queda atrás.
 	vigRelK     = 20.0
-	vigRelPivot = 0.50
+	vigRelPivot = 0.35
 	// vigSupersededJump: lo superado salta por encima del corte.
 	vigSupersededJump = 3.0
 )
