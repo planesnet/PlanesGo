@@ -93,13 +93,13 @@ func huella(motor string, k skills.Skill) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// MotorActual: Ollama con embeddinggemma si responde y tiene el modelo; si no, Vertex AI.
+// MotorActual: la IA local si responde y tiene el modelo; si no, Vertex AI.
 func (s *Selector) MotorActual(ctx context.Context) Motor {
 	if s.Embebe != nil {
 		return Motor{"prueba", 0.5, s.Embebe}
 	}
 	if !s.SoloVertex && ollamaListo(ctx) {
-		return Motor{"ollama/" + modeloLocal, UmbralLocal, func(ctx context.Context, t, tarea string) ([]float32, error) { return Ollama(ctx, s.HTTP, t, tarea) }}
+		return Motor{localMotorName(), UmbralLocal, func(ctx context.Context, t, tarea string) ([]float32, error) { return Ollama(ctx, s.HTTP, t, tarea) }}
 	}
 	return Motor{"vertex/" + modeloVertex, UmbralVertex, func(ctx context.Context, t, tarea string) ([]float32, error) { return Vertex(ctx, s.HTTP, t, tarea) }}
 }
@@ -204,40 +204,15 @@ func coseno(a, b []float32) float64 {
 	return p / math.Sqrt(na*nb)
 }
 
-var (
-	muOllama     sync.Mutex
-	ollamaVisto  time.Time
-	ollamaEstaba bool
-)
-
-// ollamaListo: Ollama responde y tiene embeddinggemma (se comprueba como mucho cada 30 s).
+// ollamaListo: la IA local (la configurada o, si no responde, el Ollama del equipo) responde y tiene el modelo de
+// embeddings (se comprueba como mucho cada 30 s).
 func ollamaListo(ctx context.Context) bool {
-	muOllama.Lock()
-	defer muOllama.Unlock()
-	if time.Since(ollamaVisto) < 30*time.Second {
-		return ollamaEstaba
-	}
-	ollamaVisto, ollamaEstaba = time.Now(), false
-	ctx, cancela := context.WithTimeout(ctx, 2*time.Second)
-	defer cancela()
-	req, _ := http.NewRequestWithContext(ctx, "GET", ollama+"/api/tags", nil)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer res.Body.Close()
-	var r struct{ Models []struct{ Name string } }
-	json.NewDecoder(res.Body).Decode(&r)
-	for _, m := range r.Models {
-		if m.Name == modeloLocal || m.Name == modeloLocal+":latest" {
-			ollamaEstaba = true
-		}
-	}
-	return ollamaEstaba
+	_, e := activa(ctx)
+	return e.Ready
 }
 
-// Ollama calcula un embedding en local con embeddinggemma (con sus prefijos de búsqueda: consulta / documento).
-// El modelo se queda cargado 30 minutos para que las consultas sigan siendo rápidas.
+// Ollama calcula un embedding con la IA local (localai.go: por defecto el Ollama del equipo con embeddinggemma),
+// con sus prefijos de búsqueda (consulta / documento). En Ollama el modelo se queda cargado 30 minutos.
 func Ollama(ctx context.Context, cli *http.Client, texto, tarea string) ([]float32, error) {
 	if cli == nil {
 		cli = &http.Client{Timeout: 60 * time.Second}
@@ -250,30 +225,12 @@ func Ollama(ctx context.Context, cli *http.Client, texto, tarea string) ([]float
 	} else {
 		texto = "title: none | text: " + texto
 	}
-	cuerpo, _ := json.Marshal(map[string]any{"model": modeloLocal, "input": texto, "keep_alive": "30m"})
-	req, _ := http.NewRequestWithContext(ctx, "POST", ollama+"/api/embed", bytes.NewReader(cuerpo))
-	req.Header.Set("Content-Type", "application/json")
-	res, err := cli.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	var r struct {
-		Embeddings [][]float32 `json:"embeddings"`
-		Error      string      `json:"error"`
-	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&r); err != nil {
-		return nil, fmt.Errorf("ollama: %s", res.Status)
-	}
-	if r.Error != "" || len(r.Embeddings) == 0 {
-		return nil, fmt.Errorf("ollama: %s", r.Error)
-	}
-	return r.Embeddings[0], nil
+	return embedLocal(ctx, cli, texto)
 }
 
 // Precarga deja el modelo local cargado (la primera llamada tarda unos segundos).
 func (s *Selector) Precarga(ctx context.Context) {
-	if m := s.MotorActual(ctx); m.Nombre == "ollama/"+modeloLocal {
+	if m := s.MotorActual(ctx); m.Nombre == localMotorName() {
 		m.Embebe(ctx, "hola", "RETRIEVAL_QUERY")
 	}
 }

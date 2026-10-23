@@ -143,6 +143,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/qa/comentarios", s.conSesion(s.qaComentarios))
 	mux.HandleFunc("POST /api/qa/comentario", s.conSesion(s.qaComenta))
 	mux.HandleFunc("GET /api/avatar", s.conSesion(s.avatar))
+	mux.HandleFunc("GET /api/ia-local", s.conSesion(s.iaLocal))
+	mux.HandleFunc("POST /api/ia-local", s.conSesion(s.iaLocalGuarda))
 	mux.HandleFunc("GET /api/actualizacion", s.conSesion(s.actualizacion))
 	mux.HandleFunc("POST /api/actualizacion/buscar", s.conSesion(s.buscaActualizacion))
 	mux.HandleFunc("POST /api/actualizacion/aplicar", s.conSesion(s.aplicaActualizacion))

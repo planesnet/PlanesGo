@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react';
 import type { Usuario } from '../api';
 import Icono from './Icono';
+import LocalAISettings from './LocalAISettings';
 import { PropertiesModal, type PropertiesSection } from './Modal';
 
-// Application properties (logo menu): account, updates and about.
+// Application properties (logo menu): account, updates, local AI and about.
 
 export interface UpdateStatus { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; trabajando?: string; pausada?: boolean } // trabajando: qué hay en marcha (entonces no se actualiza)
 
-export type AppSection = 'account' | 'updates' | 'about';
+export type AppSection = 'account' | 'updates' | 'localai' | 'about';
 const APP_SECTIONS: readonly PropertiesSection<AppSection>[] = [{ id: 'account', name: 'Cuenta', icon: 'equipo' },
-  { id: 'updates', name: 'Actualizaciones', icon: 'recargar' }, { id: 'about', name: 'Acerca de', icon: 'info' }];
+  { id: 'updates', name: 'Actualizaciones', icon: 'recargar' }, { id: 'localai', name: 'IA local', icon: 'ordenador' },
+  { id: 'about', name: 'Acerca de', icon: 'info' }];
 
 // Update state as shown to the user.
 export function updateText(s: UpdateStatus | null): string {
@@ -63,6 +65,8 @@ export default function AppProperties({ user, avatar, status, initial, onClose, 
             <span className="suave pequeno">La versión nueva se instala sola cuando llevas un rato sin usar la aplicación, sin agentes ni programas en marcha.</span>
           </>}
         </>}
+
+        {section === 'localai' && <LocalAISettings />}
 
         {section === 'about' && <>
           <h3>Acerca de</h3>

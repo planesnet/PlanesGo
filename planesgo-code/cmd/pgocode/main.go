@@ -317,6 +317,8 @@ func main() {
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
 	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.
 	s.Indice.Registro = filepath.Join(filepath.Dir(*dirGrab), "carpetas-proyectos.json")
+	// La IA local (embeddings del hilo de limpieza y del selector): la del equipo o un servidor de la red.
+	selector.SetLocalAIFile(filepath.Join(filepath.Dir(*dirGrab), "ia-local.json"))
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
 	go s.Selector.Precarga(context.Background()) // el modelo local tarda unos segundos en cargarse la primera vez
 	// Imputación directa en Odoo. PlanesGo se duerme solo en los agentes que lanza pgocode (PLANESGO_GESTOR);
