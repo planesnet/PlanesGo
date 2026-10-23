@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -31,6 +32,14 @@ var (
 
 const maxLineas = 1000
 
+// maxRegistro: lo que se guarda como mucho de la salida completa de un programa (su registro, para que el agente
+// lea por partes lo que necesite: «pgo salida» le da la ruta).
+const maxRegistro = 20 << 20
+
+// DirRegistros: la carpeta de los registros de los programas lanzados en una carpeta (la de las salidas completas
+// de los agentes; excluida de git por quien lanza).
+func DirRegistros(carpeta string) string { return filepath.Join(carpeta, ".pgocode", "salidas") }
+
 // Proceso es un programa lanzado (en curso o terminado).
 type Proceso struct {
 	Nombre   string    `json:"nombre"`
@@ -43,6 +52,8 @@ type Proceso struct {
 	Inicio   time.Time `json:"inicio"`
 	Fin      time.Time `json:"fin,omitzero"`
 	Lanzado  string    `json:"lanzado"` // usuario | agente
+	// Registro: el fichero con su salida completa («» si no se pudo crear).
+	Registro string `json:"registro,omitempty"`
 
 	grupo   int    // su grupo de procesos
 	marca   string // PGO_EJECUCION de sus procesos (también los que se van a otro grupo, p. ej. el Odoo de «odt run»)
@@ -50,6 +61,8 @@ type Proceso struct {
 	total   int
 	cancela context.CancelFunc
 	hecho   chan struct{}
+	log     *os.File // el registro abierto (hasta que acaba)
+	logN    int      // lo escrito en él
 }
 
 // Gestor guarda los procesos por nombre. Al lanzar uno con el nombre de otro en curso, el anterior se para.
@@ -95,6 +108,13 @@ func (g *Gestor) Lanza(nombre string, proyecto int, carpeta, orden, lanzado stri
 		return nil, err
 	}
 	p.grupo = cmd.Process.Pid
+	// El registro: la salida completa (la de «pgo salida» son las últimas líneas).
+	if os.MkdirAll(DirRegistros(carpeta), 0o700) == nil {
+		ruta := filepath.Join(DirRegistros(carpeta), "programa-"+nombre+".log")
+		if f, err := os.OpenFile(ruta, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); err == nil {
+			p.log, p.Registro = f, ruta
+		}
+	}
 	g.mu.Lock()
 	g.ps[nombre] = p
 	g.mu.Unlock()
@@ -131,6 +151,16 @@ func (g *Gestor) lee(p *Proceso, r io.Reader) {
 	for sc.Scan() {
 		l := sc.Text()
 		g.mu.Lock()
+		if p.log != nil {
+			switch {
+			case p.logN+len(l)+1 <= maxRegistro:
+				n, _ := p.log.WriteString(l + "\n")
+				p.logN += n
+			case p.logN <= maxRegistro:
+				fmt.Fprintf(p.log, "[registro cortado: más de %d MB; lo último, con «pgo salida»]\n", maxRegistro>>20)
+				p.logN = maxRegistro + 1
+			}
+		}
 		p.lineas = append(p.lineas, l)
 		p.total++
 		if len(p.lineas) > maxLineas {
@@ -148,6 +178,12 @@ func (g *Gestor) lee(p *Proceso, r io.Reader) {
 		}
 	}
 	io.Copy(io.Discard, r)
+	g.mu.Lock()
+	if p.log != nil {
+		p.log.Close()
+		p.log = nil
+	}
+	g.mu.Unlock()
 }
 
 // urlDe saca de una línea de salida la URL local en la que escucha el programa.
@@ -287,13 +323,20 @@ func (g *Gestor) Busca(nombre string) (Proceso, bool) {
 	return c, true
 }
 
-// Salida devuelve las últimas n líneas de un proceso y el total de líneas que lleva.
+// Salida devuelve las últimas n líneas de un proceso y el total de líneas que lleva. Si pide más de las que se
+// guardan en memoria (maxLineas), salen de su registro.
 func (g *Gestor) Salida(nombre string, n int) ([]string, int, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	p := g.ps[nombre]
 	if p == nil {
 		return nil, 0, ErrNoHay
+	}
+	if n > len(p.lineas) && p.total > len(p.lineas) && p.Registro != "" {
+		if b, err := os.ReadFile(p.Registro); err == nil {
+			ls := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+			return ls[max(len(ls)-n, 0):], p.total, nil
+		}
 	}
 	if n <= 0 || n > len(p.lineas) {
 		n = len(p.lineas)

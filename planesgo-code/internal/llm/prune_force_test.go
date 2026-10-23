@@ -62,7 +62,9 @@ func TestForceSweepClaude(t *testing.T) {
 	if err != nil || rep.Removed != 0 || !rep.ForcePending {
 		t.Fatalf("abierta: %+v %v", rep, err)
 	}
-	if !rep.CacheWarm || rep.CacheSuffix <= 0 {
+	// (En este historial casi todo son salidas grandes: con las lecturas y la orden a fichero, lo que queda después
+	// del sistema, lo que dejaría de estar en caché, puede ser 0.)
+	if !rep.CacheWarm || rep.CacheSuffix < 0 || rep.Pending <= 0 {
 		t.Errorf("con la caché caliente, lo que deja de estar en ella: %+v", rep)
 	}
 	claudeBusyFunc = func(string) bool { return false }

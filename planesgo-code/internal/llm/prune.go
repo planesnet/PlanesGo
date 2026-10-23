@@ -439,6 +439,10 @@ type pruneEdit struct {
 	TrimInput bool    // ediciones y escrituras: sin el texto
 	// Keep: se queda como está ahora (lo que pgocode ya retiró no vuelve sin una señal clara; ver stickyOut).
 	Keep bool
+	// Offload: Output es el principio y el final con la ruta de la salida completa (prune_offload.go); File: el
+	// fichero en que hay que guardarla antes de aplicar el cambio («» si es una lectura: está en el propio fichero).
+	Offload bool
+	File    string
 }
 
 // ClearedText: el texto con que OpenCode sustituye lo que retira (y pgocode, en las entradas de las ediciones).

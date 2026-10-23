@@ -20,7 +20,8 @@ const ayudaPgo = `pgo: programas del proyecto en local, desde el agente (el proy
   pgo ejecutar <nombre> <orden…>   arranca el programa en la carpeta actual (sigue al acabar el turno)
   pgo parar <nombre>               lo detiene
   pgo procesos                     lista los programas del proyecto
-  pgo salida <nombre> [n]          últimas n líneas de su salida (100 por defecto)
+  pgo salida <nombre> [n]          últimas n líneas de su salida (sin n, las que quepan de las 100 últimas;
+                                   la salida completa, en el fichero que indica)
   pgo abrir <url>                  abre la URL en el navegador integrado de pgocode
 
 Google Drive, Docs y Sheets (solo lectura, con la cuenta de Google del usuario):
@@ -108,8 +109,14 @@ func pgo(args []string) int {
 				if x.Nombre == args[1] && (x.URL != "" || x.Estado != "curso") {
 					if x.URL != "" {
 						fmt.Printf("Escucha en %s (abierto en el navegador de pgocode).\n", x.URL)
-					} else {
-						fmt.Println(finishedLine(x.Nombre, x.Estado, x.Codigo))
+						return 0
+					}
+					fmt.Println(finishedLine(x.Nombre, x.Estado, x.Codigo))
+					// Lo último de su salida, ya: así no hace falta otra llamada (con todo el contexto) para verla.
+					if raw, err := llama("GET", "salida", nil, url.Values{"nombre": {x.Nombre}, "n": {strconv.Itoa(finishedTail)}}); err == nil {
+						var s salidaProceso
+						json.Unmarshal(raw, &s)
+						fmt.Print(trimmedOutput(s.Lineas, s.Total, s.Registro, outputTotalMax))
 					}
 					return 0
 				}
@@ -141,17 +148,17 @@ func pgo(args []string) int {
 		if len(args) < 2 {
 			return 2
 		}
-		n := "100"
+		n, presupuesto := "100", outputTotalMax
 		if len(args) > 2 {
-			n = args[2]
+			n, presupuesto = args[2], 0 // las que pide (para filtrarlas, p. ej. con grep)
 		}
 		raw, err := llama("GET", "salida", nil, url.Values{"nombre": {args[1]}, "n": {n}})
 		if err != nil {
 			return falla(err)
 		}
-		var s struct{ Lineas []string }
+		var s salidaProceso
 		json.Unmarshal(raw, &s)
-		fmt.Println(strings.Join(s.Lineas, "\n"))
+		fmt.Print(trimmedOutput(s.Lineas, s.Total, s.Registro, presupuesto))
 	case "abrir":
 		if len(args) < 2 {
 			return 2
@@ -302,6 +309,56 @@ func driveQuery(args []string) (string, url.Values, error) {
 		return "", nil, fmt.Errorf("orden desconocida %q", orden)
 	}
 	return orden, q, nil
+}
+
+// salidaProceso: la respuesta de /api/pgo/salida.
+type salidaProceso struct {
+	Lineas   []string
+	Total    int
+	Registro string
+}
+
+const (
+	// finishedTail: las líneas que enseña «pgo ejecutar» de un programa que ya ha acabado.
+	finishedTail = 20
+	// Lo que llega al agente de «pgo salida» como mucho: cada línea y en total (caracteres). Lo demás está en el
+	// registro, que lee por partes si lo necesita.
+	outputLineMax  = 1000
+	outputTotalMax = 8000
+)
+
+// trimmedOutput: las últimas líneas de un programa recortadas (cada una a outputLineMax y, con presupuesto, entre
+// todas a esos caracteres, quedándose con las últimas) y, si falta algo, delante, cuántas líneas faltan y dónde
+// está la salida completa.
+func trimmedOutput(lineas []string, total int, registro string, presupuesto int) string {
+	var sel []string
+	n := 0
+	for i := len(lineas) - 1; i >= 0; i-- {
+		l := lineas[i]
+		if r := []rune(l); len(r) > outputLineMax {
+			l = string(r[:outputLineMax]) + fmt.Sprintf("… [%d caracteres más]", len(r)-outputLineMax)
+		}
+		if presupuesto > 0 && n+len(l)+1 > presupuesto && len(sel) > 0 {
+			break
+		}
+		sel = append(sel, l)
+		n += len(l) + 1
+	}
+	for i, j := 0, len(sel)-1; i < j; i, j = i+1, j-1 {
+		sel[i], sel[j] = sel[j], sel[i]
+	}
+	var b strings.Builder
+	if faltan := max(total, len(lineas)) - len(sel); faltan > 0 {
+		if registro != "" {
+			fmt.Fprintf(&b, "[… %d líneas antes. Salida completa: %s (léela por partes con offset/limit o búscala con grep)]\n", faltan, registro)
+		} else {
+			fmt.Fprintf(&b, "[… %d líneas antes]\n", faltan)
+		}
+	}
+	for _, l := range sel {
+		b.WriteString(l + "\n")
+	}
+	return b.String()
 }
 
 // finishedLine: lo que dice «pgo ejecutar» de un programa que ya ha acabado: cómo (con su código de salida) y

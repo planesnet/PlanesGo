@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestFinishedLine(t *testing.T) {
 	for _, c := range []struct {
@@ -65,5 +69,34 @@ func TestGmailQuery(t *testing.T) {
 		if _, _, err := gmailQuery(bad); err == nil {
 			t.Errorf("%v debería fallar", bad)
 		}
+	}
+}
+
+// Lo que llega al agente de «pgo salida»: las últimas líneas que caben y, si falta algo, dónde está todo.
+func TestTrimmedOutput(t *testing.T) {
+	if got := trimmedOutput([]string{"a", "b"}, 2, "/p/.pgocode/salidas/programa-web.log", outputTotalMax); got != "a\nb\n" {
+		t.Fatalf("entera: %q", got)
+	}
+	var l []string
+	for i := 0; i < 100; i++ {
+		l = append(l, strings.Repeat("x", 150)+fmt.Sprint(i))
+	}
+	l = append(l, strings.Repeat("y", 5000))
+	got := trimmedOutput(l, 2500, "/p/.pgocode/salidas/programa-web.log", outputTotalMax)
+	if len(got) > outputTotalMax+300 || !strings.HasSuffix(got, "[4000 caracteres más]\n") {
+		t.Fatalf("recortada (%d): %.200q … %q", len(got), got, got[len(got)-80:])
+	}
+	if !strings.HasPrefix(got, "[… 24") || !strings.Contains(got, "Salida completa: /p/.pgocode/salidas/programa-web.log") {
+		t.Fatalf("aviso: %.300q", got)
+	}
+	if !strings.Contains(got, strings.Repeat("x", 150)+"99\n") {
+		t.Fatal("las últimas líneas")
+	}
+	// Con n explícito (para filtrar con grep), todas las que pide.
+	if got := trimmedOutput(l, 2500, "/r.log", 0); strings.Count(got, "\n") != 102 || !strings.HasPrefix(got, "[… 2399 líneas antes. Salida completa: /r.log") {
+		t.Fatalf("con n: %d líneas, %.100q", strings.Count(got, "\n"), got)
+	}
+	if got := trimmedOutput(l[:3], 50, "", outputTotalMax); !strings.HasPrefix(got, "[… 47 líneas antes]\n") {
+		t.Fatalf("sin registro: %.80q", got)
 	}
 }

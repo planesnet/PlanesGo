@@ -2,6 +2,9 @@ package procesos
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,5 +65,39 @@ func TestSalidaVaciaNoNil(t *testing.T) {
 	}
 	if b, _ := json.Marshal(l); string(b) != "[]" {
 		t.Errorf("JSON %s", b)
+	}
+}
+
+// El registro: la salida completa en <carpeta>/.pgocode/salidas, aunque en memoria solo queden las últimas líneas.
+func TestRegistro(t *testing.T) {
+	g := Nuevo()
+	dir := t.TempDir()
+	p, err := g.Lanza("largo", 1, dir, "seq 1 3000", "agente", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.hecho
+	for i := 0; i < 50; i++ { // lee acaba un poco después de Wait
+		if c, _ := g.Busca("largo"); c.Registro != "" {
+			if b, _ := os.ReadFile(c.Registro); strings.Count(string(b), "\n") == 3000 {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	c, _ := g.Busca("largo")
+	if c.Registro != filepath.Join(DirRegistros(dir), "programa-largo.log") {
+		t.Fatalf("registro %q", c.Registro)
+	}
+	b, err := os.ReadFile(c.Registro)
+	if err != nil || !strings.HasPrefix(string(b), "1\n2\n") || !strings.HasSuffix(string(b), "\n3000\n") {
+		t.Fatalf("registro completo: %v %d", err, len(b))
+	}
+	if l, total, _ := g.Salida("largo", 0); len(l) != maxLineas || total != 3000 {
+		t.Fatalf("en memoria, las últimas: %d de %d", len(l), total)
+	}
+	// Más de las que hay en memoria: del registro.
+	if l, total, _ := g.Salida("largo", 2000); len(l) != 2000 || total != 3000 || l[0] != "1001" || l[1999] != "3000" {
+		t.Fatalf("del registro: %d de %d", len(l), total)
 	}
 }

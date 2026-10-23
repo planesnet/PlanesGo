@@ -24,8 +24,10 @@ import (
 // cadena, y con ese texto (no con otro) el modelo no se desdice de lo que dedujo. Así que:
 //   - se lee el fichero y se convierte en los mensajes y partes de la poda común (ocMessage/ocPart, con la forma de
 //     OpenCode), para decidir con planPrune exactamente igual que en OpenCode;
-//   - de lo decidido solo se aplica vaciar salidas («Clear»): nada de recortes, ni del texto de las ediciones, ni del
-//     razonamiento; y nunca los resultados de Task/Agent, de Edit/Write ni los errores;
+//   - de lo decidido solo se aplica vaciar salidas («Clear») y las salidas enormes a fichero (principio y final con
+//     la ruta de la completa, con el aviso <persisted-output> de Claude Code: prune_offload.go); nada de otros
+//     recortes, ni del texto de las ediciones, ni del razonamiento; y nunca los resultados de Task/Agent, de
+//     Edit/Write ni los errores;
 //   - se edita en el sitio, entre turnos y sin ningún «claude» de esa sesión en marcha: copia de seguridad en la
 //     carpeta de pgocode (fuera de projects/), temporal en el mismo directorio, fsync y rename. Si el --resume
 //     falla, se restaura la copia y se repite sin podar (agentes.go);
@@ -407,6 +409,15 @@ func (s *claudeSession) convert(ls []*cjLine, cadena []int) ([]*ocMessage, error
 				id := b.ToolUseID
 				s.Where[id] = [2]int{i, j}
 				pd.p.Data = claudePartData(pd.tool, id, pd.input, status, out, imgs)
+				if o, ok := s.Orig[id]; ok && out != ClearedText && imgs == 0 && status == "completed" {
+					// Una salida a fichero de pgocode (principio y final): el original es el guardado.
+					var ob cjBlock
+					json.Unmarshal(o.Block, &ob)
+					if oo, oi := toolOutput(ob.Content); oo != out || oi != 0 {
+						pd.p.Data = claudePartData(pd.tool, id, pd.input, status, oo, oi)
+						pd.p.Current, _ = renderPart(pd.p.Data, pruneEdit{Output: &out})
+					}
+				}
 				if out == ClearedText && imgs == 0 && status == "completed" {
 					if o, ok := s.Orig[id]; ok {
 						var ob cjBlock
@@ -473,18 +484,21 @@ func claudeUserMessage(l *cjLine, t int64, text string) *ocMessage {
 	return m
 }
 
-// claudePlan: de lo decidido, solo lo que se aplica en Claude Code (vaciar salidas que se pueden vaciar).
+// claudePlan: de lo decidido, solo lo que se aplica en Claude Code (vaciar salidas que se pueden vaciar o dejarlas
+// en principio y final con la ruta de la completa).
 func claudePlan(plan prunePlan, win []*ocMessage) prunePlan {
 	for id, e := range plan.Edits {
 		p := partByID(win, id)
-		if !e.Clear || !claudeClearable(p.v.Tool) {
+		if !(e.Clear || e.Offload) || !claudeClearable(p.v.Tool) {
 			delete(plan.Edits, id)
 		}
 	}
 	for _, pv := range plan.Pieces {
 		e, ok := plan.Edits[pv.PartID]
 		pv.Out = ok && e.Clear
-		pv.Note = ""
+		if !ok || !e.Offload {
+			pv.Note = ""
+		}
 	}
 	return plan
 }
@@ -556,9 +570,10 @@ func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, sys
 	return false, fmt.Sprintf("caché caliente: se amortizaría en %.0f llamadas", n)
 }
 
-// applyClaude: el fichero nuevo, con lo que sale vaciado y lo que vuelve repuesto. Las demás líneas, byte a byte.
-// Devuelve también los originales que hay que guardar antes de escribirlo.
-func applyClaude(s *claudeSession, clear []string, restore []string) ([]byte, map[string]claudeOrig, error) {
+// applyClaude: el fichero nuevo, con lo que sale vaciado (o, si está en texts, con ese texto: las salidas a
+// fichero) y lo que vuelve repuesto. Las demás líneas, byte a byte. Devuelve también los originales que hay que
+// guardar antes de escribirlo.
+func applyClaude(s *claudeSession, clear []string, restore []string, texts map[string]string) ([]byte, map[string]claudeOrig, error) {
 	porLinea := map[int]map[int]string{} // línea → índice del bloque → «c» (vaciar) o «r» (reponer)
 	for _, id := range clear {
 		w, ok := s.Where[id]
@@ -612,7 +627,11 @@ func applyClaude(s *claudeSession, clear []string, restore []string) ([]byte, ma
 				}
 				continue
 			}
-			nuevos[id] = claudeOrig{Block: append(json.RawMessage(nil), bs[j]...), ToolUseResult: tur}
+			if o, ya := s.Orig[id]; ya {
+				nuevos[id] = o // ya cambiado antes (p. ej. a fichero y ahora vaciado): el original sigue siendo aquel
+			} else {
+				nuevos[id] = claudeOrig{Block: append(json.RawMessage(nil), bs[j]...), ToolUseResult: tur}
+			}
 			if strings.HasPrefix(id, "img:") {
 				bs[j] = json.RawMessage(`{"type":"text","text":"` + ClearedText + `"}`)
 				continue
@@ -621,7 +640,11 @@ func applyClaude(s *claudeSession, clear []string, restore []string) ([]byte, ma
 			if err := json.Unmarshal(bs[j], &b); err != nil {
 				return nil, nil, err
 			}
-			b["content"], _ = json.Marshal(ClearedText)
+			t, ok := texts[id]
+			if !ok {
+				t = ClearedText
+			}
+			b["content"], _ = json.Marshal(t)
 			if bs[j], err = marshalNoEscape(b); err != nil {
 				return nil, nil, err
 			}
@@ -745,7 +768,8 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		}
 	}
 	now := pruneNow()
-	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true, Empty: c.emptyNext})
+	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true, Empty: c.emptyNext,
+		Dir: offloadDirOf(p.Carpeta)})
 	plan, d := o.Plan, o.D
 	vale, porque := claudeCacheWorth(s, d, claudeCleared(win, o), o.System, now)
 	if force {
@@ -774,10 +798,17 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	}
 	c.setPhase("barriendo", len(d.Update)+len(d.Restore))
 	var clear []string
+	texts := map[string]string{}
 	for id := range d.Update {
 		clear = append(clear, id)
+		if e := plan.Edits[id]; e.Offload && e.Output != nil {
+			texts[id] = *e.Output
+		}
 	}
-	data, nuevos, err := applyClaude(s, clear, d.Restore)
+	if err := writeOffloads(plan, win, d.Update); err != nil {
+		return &PruneReport{Podable: true}, nil, err
+	}
+	data, nuevos, err := applyClaude(s, clear, d.Restore, texts)
 	if err != nil {
 		return &PruneReport{Podable: true}, nil, err
 	}

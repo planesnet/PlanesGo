@@ -194,11 +194,14 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	excluyeDeGit(p.Carpeta) // su registro va a .pgocode/salidas
 	log.Printf("programa lanzado por %s: %s (%s)", ses.Login, p.Nombre, p.Carpeta)
 	if p.URL != "" {
 		s.Eventos.Emite(map[string]any{"tipo": "abrir", "url": p.URL, "proyecto": p.Proyecto, "proceso": p.Nombre})
 	}
-	jsonOK(w, x)
+	// Una copia (con el cerrojo): el proceso lo sigue cambiando su lectura (la URL…).
+	c, _ := s.Procesos.Busca(x.Nombre)
+	jsonOK(w, c)
 }
 
 // quitaConfiguracion: borra un programa guardado (si no estaba, nada).
@@ -439,8 +442,11 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		excluyeDeGit(p.Carpeta) // su registro va a .pgocode/salidas
 		log.Printf("programa lanzado por el agente: %s (%s)", p.Nombre, p.Carpeta)
-		jsonOK(w, x)
+		// Una copia (con el cerrojo): el proceso lo sigue cambiando su lectura (la URL…).
+		c, _ := s.Procesos.Busca(x.Nombre)
+		jsonOK(w, c)
 	case "parar":
 		jsonOK(w, map[string]bool{"parado": s.Procesos.Para(p.Nombre)})
 	case "procesos":
@@ -451,7 +457,8 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		jsonOK(w, map[string]any{"lineas": l, "total": total})
+		x, _ := s.Procesos.Busca(p.Nombre)
+		jsonOK(w, map[string]any{"lineas": l, "total": total, "registro": x.Registro})
 	case "abrir":
 		if !urlWeb(p.URL) {
 			jsonError(w, http.StatusBadRequest, "URL no válida (http o https)")

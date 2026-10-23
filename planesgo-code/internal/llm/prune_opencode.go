@@ -539,7 +539,8 @@ func (c *pruneCollector) markWin(ctx context.Context, win, before []*ocMessage, 
 	if len(xs) > 0 {
 		msg = xs[len(xs)-1].userText()
 	}
-	o := decideSweep(sweepInput{Win: win, Sims: s, Young: pruneYoung, Now: pruneNow(), K: c.params(), Msg: msg, Target: c.state.Target, Claude: claude})
+	o := decideSweep(sweepInput{Win: win, Sims: s, Young: pruneYoung, Now: pruneNow(), K: c.params(), Msg: msg, Target: c.state.Target, Claude: claude,
+		Dir: offloadDirOf(c.state.Folder)})
 	c.state.Vig = vigSnapshot(o.Plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 	c.state.Vig.addCompacted(before)
 	c.notePending(o, pruneNow().UnixMilli() >= c.state.CacheUntil)
@@ -673,7 +674,8 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.setRulesOnly(true)
 	}
 	now := pruneNow()
-	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Empty: c.emptyNext})
+	o := decideSweep(sweepInput{Win: win, Sims: s, Young: young, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Empty: c.emptyNext,
+		Dir: offloadDirOf(p.Carpeta)})
 	plan, d := o.Plan, o.D
 	before := compactedBefore(msgs, win)
 	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
@@ -686,6 +688,9 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.notePending(o, cold)
 		c.save()
 		return c.reportNow(now), nil
+	}
+	if err := writeOffloads(plan, win, d.Update); err != nil {
+		return nil, err
 	}
 	qs, err := pruneStatements(d)
 	if err != nil {
@@ -939,6 +944,7 @@ type sweepInput struct {
 	Target int    // el objetivo de contexto (0: sin)
 	Claude bool   // solo lo que se aplica en Claude Code
 	Empty  bool   // «Vaciar contexto»: todo el historial fuera de vigencia (ForceEmpty)
+	Dir    string // la carpeta de las salidas completas (offloadDirOf; «»: sin salidas a fichero)
 }
 
 // sweepOutcome: el plan, el cambio (en tokens reales, con estimateRatio) y lo que cuesta en caché.
@@ -963,6 +969,7 @@ func decideSweep(in sweepInput) sweepOutcome {
 	recent := recentText(in.Win, in.Msg)
 	build := func(cut float64) {
 		plan := planPruneCut(in.Win, in.Sims, in.Young, in.Now, in.K, cut)
+		offloadPlan(&plan, in.Win, in.Dir, in.Claude)
 		if in.Claude {
 			plan = claudePlan(plan, in.Win)
 		}
