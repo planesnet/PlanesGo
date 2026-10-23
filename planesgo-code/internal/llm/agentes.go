@@ -210,8 +210,26 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 		defer func() { markOpenCode(a, p, sesionOC) }()
 	}
 	err := a.chat(ctx, p, emiteOC)
-	// Pregunta aparte en OpenCode: su copia de la sesión (o la nueva) se borra; nada de reparar ni reintentar.
+	// Pregunta aparte en OpenCode: su copia de la sesión (o la nueva) se borra; nada de reparar la original.
 	if a.Clave == "opencode" && p.Aparte {
+		// Si la conversación está trabajando, la copia se lleva su paso en curso, aún vacío, y Gemini rechaza el
+		// historial: se limpia la copia (sin tocar la original) y se pregunta otra vez desde ella.
+		if err != nil && historialRoto(err) && ctx.Err() == nil && idSesionOC.MatchString(sesionOC) && sesionOC != p.SesionAgente {
+			depuracion.Log(a.Clave, "la copia %s de la pregunta aparte tiene pasos vacíos: se limpia y se repite", sesionOC)
+			copia := sesionOC
+			if e := limpiaCopiaOpenCode(ctx, a, p, copia); e == nil {
+				q := p
+				q.SesionAgente = copia
+				err = a.chat(ctx, q, emiteOC)
+			} else {
+				depuracion.Log(a.Clave, "limpiar la copia %s: %v", copia, e)
+			}
+			if sesionOC != copia {
+				c, cancela := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancela()
+				borraOpenCode(c, a, p, copia)
+			}
+		}
 		if sesionOC != "" && sesionOC != p.SesionAgente {
 			c, cancela := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancela()
@@ -929,6 +947,34 @@ func reparaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) e
 		}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// limpiaCopiaOpenCode: deja válida la copia de una pregunta aparte que Gemini rechazó: quita las partes y pasos
+// vacíos, las respuestas sin contenido (el paso en curso de la conversación original al copiarla) y, al final, la
+// pregunta aparte que no se contestó (se vuelve a hacer).
+func limpiaCopiaOpenCode(ctx context.Context, a *Agente, p Peticion, sesion string) error {
+	if !idSesionOC.MatchString(sesion) {
+		return errors.New("sesión no válida")
+	}
+	defer forgetSnapshot(sesion)
+	en := `message_id IN (SELECT id FROM message WHERE session_id='` + sesion + `')`
+	rotas := `SELECT m.id FROM message m WHERE m.session_id='` + sesion + `' AND json_extract(m.data,'$.role')='assistant' AND NOT EXISTS (` +
+		`SELECT 1 FROM part x WHERE x.message_id=m.id AND ((json_extract(x.data,'$.type') IN ('text','reasoning') AND ` +
+		`length(coalesce(json_extract(x.data,'$.text'),''))>0) OR json_extract(x.data,'$.type')='tool'))`
+	ultima := `SELECT id FROM message WHERE session_id='` + sesion + `' AND json_extract(data,'$.role')='user' AND ` +
+		`time_created=(SELECT max(time_created) FROM message WHERE session_id='` + sesion + `')`
+	for _, q := range []string{
+		`DELETE FROM part WHERE ` + en + ` AND json_extract(data,'$.type') IN ('reasoning','text') AND length(coalesce(json_extract(data,'$.text'),''))=0`,
+		"DELETE FROM part WHERE message_id IN (" + rotas + ")",
+		"DELETE FROM message WHERE id IN (" + rotas + ")",
+		"DELETE FROM part WHERE message_id IN (" + ultima + ")",
+		"DELETE FROM message WHERE id IN (" + ultima + ")",
+	} {
+		if _, err := ocDB(ctx, a, p, q, false); err != nil {
+			return err
 		}
 	}
 	return nil

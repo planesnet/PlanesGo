@@ -583,3 +583,40 @@ func TestWithAttachments(t *testing.T) {
 		t.Errorf("sin texto: %q", got)
 	}
 }
+
+// Pregunta aparte con la conversación trabajando: la copia se lleva el paso en curso (vacío) y Gemini la rechaza.
+// Se limpia la copia (no la original) y se pregunta otra vez desde ella.
+func TestAparteOpenCodeCopiaRota(t *testing.T) {
+	drainCollectors()
+	viejoDB := ocDB
+	defer func() { drainCollectors(); ocDB = viejoDB }()
+	var sentencias []string
+	ocDB = func(_ context.Context, _ *Agente, _ Peticion, q string, _ bool) ([]byte, error) {
+		sentencias = append(sentencias, q)
+		return nil, nil
+	}
+	a, pedidas := opencodeConGuion(`case "$*" in
+*ses_copiaUno*) echo '{"type":"text","sessionID":"ses_copiaDos","part":{"text":"Sí: una SPA con React Router."}}' ;;
+*) echo '{"type":"error","sessionID":"ses_copiaUno","error":{"name":"APIError","data":{"message":"Unable to submit request because it must include at least one parts field"}}}' ;;
+esac`)
+	a.Args = func(base func(string, Peticion) []string) func(string, Peticion) []string {
+		return func(msg string, p Peticion) []string {
+			r := base(msg, p)
+			return append(r[:len(r)-1], msg+" "+p.SesionAgente)
+		}
+	}(a.Args)
+	var texto strings.Builder
+	err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), Aparte: true, SesionAgente: "ses_original1", Mensajes: []Mensaje{{Rol: "user", Texto: "¿una SPA?"}}},
+		func(e Evento) { texto.WriteString(e.Texto) })
+	if err != nil || !strings.Contains(texto.String(), "React Router") {
+		t.Fatalf("err %v, texto %q", err, texto.String())
+	}
+	ps := pedidas()
+	if len(ps) != 2 || ps[0].SesionAgente != "ses_original1" || ps[1].SesionAgente != "ses_copiaUno" {
+		t.Fatalf("peticiones: %+v", ps)
+	}
+	todas := strings.Join(sentencias, "\n")
+	if !strings.Contains(todas, "ses_copiaUno") || strings.Contains(todas, "ses_original1") {
+		t.Errorf("solo se limpia la copia: %s", todas)
+	}
+}
