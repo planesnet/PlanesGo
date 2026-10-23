@@ -19,7 +19,7 @@ import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, T
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
-import { actividad, consumoPorAccion } from '../activity';
+import { actividad, consumoPorAccion, toolStatusTitle } from '../activity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as AY from '../ayuda';
@@ -1540,7 +1540,7 @@ const ParteMensaje = memo(function ParteMensaje({ p, abierta }: { p: Parte; abie
   return (
     <details className={'herramienta ' + h.estado} open={abierta} style={op < 1 ? { opacity: op } : undefined}>
       <summary title={vig ? PR.vigTitle(vig) : undefined}>
-        <span className="punto-h" aria-label={h.estado} />
+        <span className="punto-h" aria-label={toolStatusTitle(h)} title={toolStatusTitle(h)} />
         {vig?.fuera && <span className="vig-out" aria-label="Fuera del contexto del agente">⤓</span>}
         <b>{h.nombre}</b>{h.resumen && <span className="resumen-h recorta">{h.resumen}</span>}
         <Miniaturas rutas={h.capturas} />

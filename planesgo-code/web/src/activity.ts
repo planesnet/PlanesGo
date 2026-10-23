@@ -69,3 +69,12 @@ export function consumoPorAccion(partes: { tipo: string; h?: Herramienta }[], in
   }
   return r;
 }
+
+// toolStatusTitle: qué significa la bolita de una acción (al pasar el ratón): hecha, en curso o por qué falló (la
+// primera línea con contenido de su salida, que es el error del agente).
+export function toolStatusTitle(h: Pick<Herramienta, 'estado' | 'salida'>): string {
+  if (h.estado === 'curso') return 'En curso';
+  if (h.estado !== 'error') return 'Hecha';
+  const motivo = (h.salida || '').split('\n').map(l => l.trim()).find(l => l) || '';
+  return 'Ha fallado' + (motivo ? ': ' + (motivo.length > 200 ? motivo.slice(0, 199) + '…' : motivo) : ' (el agente no dio el motivo)') + '. El agente suele reintentarlo.';
+}
