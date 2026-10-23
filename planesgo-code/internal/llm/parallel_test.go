@@ -84,3 +84,18 @@ func TestParallelHintEnChat(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitRequest(t *testing.T) {
+	r := SplitRequest("En el módulo de facturas:\n\n1. Corrige el redondeo del IVA\n   en las líneas con descuento\n2. Añade el campo «referencia» al pedido\n- Traduce los textos del informe\n\nAl acabar, ejecuta las pruebas.")
+	if r.Intro != "En el módulo de facturas:" || r.Outro != "Al acabar, ejecuta las pruebas." {
+		t.Errorf("intro %q, cierre %q", r.Intro, r.Outro)
+	}
+	if len(r.Items) != 3 || r.Items[0] != "Corrige el redondeo del IVA en las líneas con descuento" || r.Items[2] != "Traduce los textos del informe" {
+		t.Errorf("partes %q", r.Items)
+	}
+	// Los mismos elementos que cuenta listItems.
+	t2 := "uno\n- a\n- b\n  c\n* d"
+	if n := len(SplitRequest(t2).Items); n != len(listItems(t2)) {
+		t.Errorf("%d partes, listItems %d", n, len(listItems(t2)))
+	}
+}
