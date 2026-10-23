@@ -28,8 +28,7 @@ import (
 
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/depuracion"
-	"planesgo-code/internal/google"
-	"planesgo-code/internal/gworkspace"
+	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
@@ -337,9 +336,17 @@ func main() {
 			log.Printf("adjuntos: %d carpetas de más de 30 días borradas", n)
 		}
 	}()
-	// Google Workspace en solo lectura: la cuenta que conecta cada usuario (cliente OAuth y conexiones en la carpeta
-	// de datos); respaldo silencioso, la gcloud del equipo (proyecto de cuota: el de Vertex).
-	s.Google = gworkspace.New(filepath.Dir(*dirGrab), google.Proyecto())
+	// Google (Drive, Docs, Sheets, Slides y Gmail) en solo lectura, a través del navegador integrado de la app de
+	// escritorio (con la sesión de Google que el usuario abra en él). PGO_GOOGLE_PRUEBA: un servidor local que hace de
+	// Google (solo para probar; Electron también tiene que conocerlo).
+	s.Google = gbrowser.New(gbrowser.NewBridge())
+	if o := os.Getenv("PGO_GOOGLE_PRUEBA"); o != "" {
+		s.Google.Bases = gbrowser.Bases{Docs: o, Drive: o, Mail: o}
+	}
+	// Lo que guardaba el acceso a Google de antes (cliente OAuth y tokens): fuera.
+	if quitados := gbrowser.RemoveOAuthLeftovers(filepath.Dir(*dirGrab)); len(quitados) > 0 {
+		log.Printf("google: borrado el acceso OAuth de antes (%s); ahora Google se lee con la sesión del navegador de pgocode", strings.Join(quitados, ", "))
+	}
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

@@ -24,17 +24,16 @@ const ayudaPgo = `pgo: programas del proyecto en local, desde el agente (el proy
                                    la salida completa, en el fichero que indica)
   pgo abrir <url>                  abre la URL en el navegador integrado de pgocode
 
-Google Drive, Docs y Sheets (solo lectura, con la cuenta de Google del usuario):
+Google Drive, Docs, Sheets y Slides (solo lectura, con la sesión de Google del navegador de pgocode):
   pgo drive buscar <texto> [--tipo doc|hoja|presentacion|pdf|carpeta|imagen] [--carpeta <id|url>] [--max N]
   pgo drive listar [<carpeta id|url>]       sin carpeta: «Mi unidad»
   pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
                                    Docs en Markdown, Sheets en CSV; recorta a 40000 caracteres (--max)
 
-Gmail (solo lectura: no envía, borra ni marca nada):
+Gmail (solo lectura, con la misma sesión: no envía, borra ni archiva nada):
   pgo gmail buscar <consulta de Gmail> [--max N]   p. ej. from:ana newer_than:7d, subject:factura has:attachment
   pgo gmail listar [--max N]                       lo más reciente de la bandeja de entrada
-  pgo gmail leer <id de mensaje o hilo> [--mensaje] [--max N]
-                                   el hilo entero (sin lo citado) o, con --mensaje, solo ese; recorta a 20000 caracteres
+  pgo gmail leer <id de hilo> [--max N]            el hilo (sin lo citado); recorta a 20000 caracteres
 `
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
@@ -65,7 +64,12 @@ func pgo(args []string) int {
 		req.Header.Set("X-PGO-Agente", token)
 		req.Header.Set("X-PGO", "1")
 		req.Header.Set("Content-Type", "application/json")
-		res, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+		// Google se lee cargando páginas en el navegador de pgocode: puede tardar más.
+		espera := 60 * time.Second
+		if strings.HasPrefix(orden, "drive-") || strings.HasPrefix(orden, "gmail-") {
+			espera = 4 * time.Minute
+		}
+		res, err := (&http.Client{Timeout: espera}).Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -227,8 +231,6 @@ func gmailQuery(args []string) (string, url.Values, error) {
 				return "", nil, fmt.Errorf("--max tiene que ser un número")
 			}
 			q.Set("max", val)
-		case a == "--mensaje":
-			q.Set("mensaje", "1")
 		case strings.HasPrefix(a, "--"):
 			return "", nil, fmt.Errorf("opción desconocida %s", a)
 		default:
@@ -247,14 +249,11 @@ func gmailQuery(args []string) (string, url.Values, error) {
 		}
 	case "leer":
 		if len(pos) != 1 {
-			return "", nil, fmt.Errorf("di qué leer: el ID de un mensaje o de un hilo")
+			return "", nil, fmt.Errorf("di qué leer: el ID de un hilo (el que da pgo gmail buscar)")
 		}
 		q.Set("ref", pos[0])
 	default:
 		return "", nil, fmt.Errorf("orden desconocida %q", orden)
-	}
-	if q.Get("mensaje") != "" && orden != "leer" {
-		return "", nil, fmt.Errorf("--mensaje solo vale con leer")
 	}
 	return orden, q, nil
 }

@@ -44,6 +44,8 @@ func concreta(patron string) string {
 // (login y versión) y las del agente, que exigen su token (403).
 func TestRutasSinSesion(t *testing.T) {
 	publicas := map[string]bool{"POST /api/login": true, "GET /api/version": true}
+	// Las del canal de Google con Electron: sin sesión de usuario, pero solo con el secreto de la app de escritorio.
+	soloElectron := map[string]bool{"GET /api/escritorio/google/trabajo": true, "POST /api/escritorio/google/resultado": true}
 	s := &Servidor{Puerto: "7801", PermitirNavegador: true, TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen()}
 	h := s.Handler()
 	for _, x := range rutasAPI(t) {
@@ -55,7 +57,9 @@ func TestRutasSinSesion(t *testing.T) {
 			continue
 		}
 		quiere := http.StatusUnauthorized
-		if esRutaAgente(x.patron) {
+		if soloElectron[clave] {
+			quiere = http.StatusForbidden
+		} else if esRutaAgente(x.patron) {
 			quiere = http.StatusForbidden
 		} else if !x.conSesion {
 			t.Errorf("%s: ruta /api/ sin conSesion (si es pública a propósito, añádela a «publicas»)", clave)

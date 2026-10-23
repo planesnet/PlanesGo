@@ -1,144 +1,103 @@
-# Google Workspace en pgocode (Drive, Docs, Sheets y Gmail, solo lectura)
+# Google en pgocode (Drive, Docs, Sheets, Slides y Gmail, solo lectura)
 
-pgocode y sus agentes pueden **buscar, listar y leer** en Google Drive, Docs, Sheets y **Gmail** con la cuenta de
-Google del usuario. Nada de escritura: pgocode solo pide permisos de lectura (`drive.readonly` y `gmail.readonly`) y
-solo hace peticiones `GET` a las APIs de Google (en Gmail: nada de enviar, borrar, marcar como leído ni tocar
-etiquetas).
+pgocode y sus agentes pueden **buscar, listar y leer** en Google Drive, Docs, Sheets, Slides y **Gmail** con la
+sesión de Google que el usuario tenga abierta **en el navegador integrado de pgocode** (el panel Web). No hay nada que
+configurar: ni Propiedades, ni cliente OAuth, ni `gcloud`. Basta con iniciar sesión en Google una vez en el panel Web,
+como en cualquier navegador.
 
-Funciona como Claude u otras aplicaciones de escritorio: la empresa registra **una vez** una aplicación OAuth en
-Google Cloud y cada usuario pulsa **«Conectar con Google»**, ve la pantalla de Google y acepta. No hace falta `gcloud`.
+## Cómo se usa
 
-## 1. Registrar la aplicación (una vez, quien administra Google Cloud)
+1. Abrir el panel **Web** de un proyecto, ir a `accounts.google.com` (o a `drive.google.com`) e iniciar sesión.
+   Si un agente pide algo de Google sin sesión, pgocode abre ahí mismo `accounts.google.com` (como mucho cada 2
+   minutos por proyecto) y el agente recibe «inicia sesión en Google en el panel Web de pgocode».
+2. Pedirle al agente lo que sea («resume el documento https://docs.google.com/document/d/…», «busca en Drive el
+   informe de ventas», «¿qué me ha escrito Ana esta semana?»).
 
-En la [consola de Google Cloud](https://console.cloud.google.com/), proyecto `planes-dev`:
+La sesión del navegador es la del panel Web **del proyecto** (cada proyecto tiene la suya: `persist:navegador-<id>`).
+Si en la del proyecto no hay sesión de Google, pgocode prueba las de los demás proyectos (la más reciente primero, 4
+como mucho) y recuerda la primera que funciona; así basta con iniciar sesión en uno.
 
-1. **APIs y servicios → Biblioteca**: habilitar **Google Drive API**, **Google Sheets API** y **Gmail API** (las
-   cuotas de las peticiones van a este proyecto). Docs se lee exportando por Drive.
-2. **Google Auth Platform → Marca / Pantalla de consentimiento**: tipo **Interna** (solo cuentas de planesnet.com:
-   sin verificación de Google ni pantalla de «aplicación no verificada», aunque `gmail.readonly` sea un ámbito
-   restringido). Nombre: «PlanesGo».
-3. **Acceso a los datos**: ámbitos `openid`, `…/auth/userinfo.email`, `…/auth/drive.readonly` y
-   `…/auth/gmail.readonly`.
-4. **Clientes → Crear cliente**: tipo **Aplicación de escritorio**, nombre «PlanesGo Code». No lleva URI de redirección:
-   Google admite para estos clientes la vuelta a `http://127.0.0.1:<cualquier puerto>`.
-5. **Descargar JSON** del cliente (`client_secret_….apps.googleusercontent.com.json`, con
-   `{"installed":{"client_id":…,"client_secret":…}}`) y pasárselo a cada usuario por un canal interno.
+## Cómo funciona (lo hace el navegador, como lo haría el usuario)
 
-El secreto de un cliente de escritorio no es confidencial para Google (va en cada instalación y lo protege PKCE),
-pero pgocode no lo enseña en la interfaz ni lo escribe en los registros.
+- El agente pide con `pgo drive …` o `pgo gmail …`. El backend (Go, `internal/gbrowser`) decide qué página cargar y
+  se la pide a la app de escritorio por un canal local: Electron (`electron/googleReader.js`) pregunta al backend si
+  hay trabajo (`GET /api/escritorio/google/trabajo`, espera hasta 25 s) y entrega lo leído
+  (`POST /api/escritorio/google/resultado`), los dos con la cookie secreta de la app de escritorio
+  (`pgo_escritorio`); ni el agente ni la interfaz pueden usar ese canal.
+- Electron carga la página en una **ventana oculta** con la misma sesión que el panel Web y devuelve **el texto de la
+  página** (guiones fijos que solo leen el DOM) o, si la página es una exportación que el navegador descarga, el texto
+  de ese fichero (se guarda en una carpeta temporal, se lee y se borra; solo las descargas de esas ventanas: las del
+  panel Web siguen igual).
+- **Límites**: pgocode no lee, copia, exporta ni reutiliza cookies, tokens ni cabeceras de autenticación, y no hace
+  peticiones por su cuenta (nada de `net.request`, `session.fetch` ni `session.cookies`): solo navega. Los guiones no
+  hacen clic ni escriben en ningún formulario. La ventana oculta solo carga páginas de Google por https (`*.google.com`,
+  `*.googleusercontent.com`); si una página lleva a otro sitio, se para. Sin ventanas nuevas, sin sonido.
+- El navegador se anuncia como Chrome (sin «Electron/…»), porque Google no deja iniciar sesión en navegadores que se
+  anuncian como integrados.
+- En modo navegador (`pgocode -navegador`, sin Electron) no está disponible y se dice: «Google se lee a través del
+  navegador integrado de la aplicación de escritorio de pgocode…».
 
-Más adelante, el servidor de PlanesGo podrá servir el cliente a todo el equipo (endpoint de solo lectura,
-autenticado): el gestor ya tiene el gancho (`Manager.ClientSource`); el fichero local manda si existe.
+Qué página carga cada cosa:
 
-## 2. Conectar la cuenta (cada usuario)
+| Orden | Página |
+|---|---|
+| `pgo drive leer` de un Doc | `docs.google.com/document/d/<id>/export?format=md` (si no da un fichero, `format=txt` y, si tampoco, `…/mobilebasic`) |
+| de una hoja de cálculo | las pestañas, de `…/spreadsheets/d/<id>/htmlview`; cada hoja, `…/export?format=csv&gid=<gid>[&range=A1:D20]` |
+| de una presentación | `…/presentation/d/<id>/export/txt` |
+| de una carpeta | `drive.google.com/drive/folders/<id>` (como `listar`) |
+| un ID suelto | antes, `drive.google.com/open?id=<id>`, solo para ver a qué tipo de página lleva |
+| `pgo drive buscar` | `drive.google.com/drive/search?q=<texto> [type:document…]`; con `--carpeta`, el listado de la carpeta filtrado por nombre |
+| `pgo drive listar` | `drive.google.com/drive/my-drive` o la carpeta |
+| `pgo gmail buscar` / `listar` | `mail.google.com/mail/u/0/#search/<consulta>` / `#inbox` (las filas de la lista) |
+| `pgo gmail leer` | la vista de impresión del hilo, `mail.google.com/mail/u/0/?ui=2&view=pt&search=all&th=<id>` |
 
-1. Menú del logo → **Propiedades → Google Workspace**.
-2. Si dice «Falta registrar la aplicación de Google», **Cargar el fichero del cliente…** (o arrastrar el JSON a la
-   sección). Se guarda en `~/.local/share/pgocode/google-oauth-client.json` (0600; solo `client_id`,
-   `client_secret` y `project_id`). Se hace una vez por equipo.
-3. **Conectar con Google**: se abre la página de Google en el **navegador del sistema** (Google bloquea el inicio de
-   sesión en navegadores integrados como el de Electron: «Este navegador o aplicación pueden no ser seguros»). Elegir
-   la cuenta de planesnet.com y aceptar (Google enseña dos permisos: ver los ficheros de Drive y leer el correo). La
-   pestaña dice «pgocode ya puede leer tu cuenta de Google» y la sección pasa a «Conectado como luis@planesnet.com ·
-   solo lectura», con una línea por servicio: **Drive, Docs y Sheets** y **Gmail**, cada uno «autorizado» o «sin
-   autorizar».
-   - Quien se conectó antes de que pgocode leyera Gmail ve Gmail «sin autorizar» y el botón **Volver a conectar**:
-     pide los dos permisos (con `include_granted_scopes=true`, el token nuevo lleva también lo ya concedido).
-   - Si en la página de Google se desmarca uno de los dos, el otro funciona y el desmarcado sale «sin autorizar»
-     (con «Volver a conectar» para pedirlo). Si se desmarcan los dos, no se guarda nada.
-4. **Desconectar** revoca el permiso en Google y borra la conexión del equipo. También se puede quitar en
-   https://myaccount.google.com/permissions (pgocode lo nota en la siguiente renovación y borra la conexión).
+Las búsquedas y listados de Drive y de Gmail se leen del DOM de sus páginas (filas con `data-id` en Drive; `tr.zA`,
+`.bog`, `.y2`… en Gmail). Esas páginas no son una API: si Google cambia su maquetación, puede que haya que retocar
+los guiones de `electron/googleReader.js`. Leer por URL o ID (las exportaciones) es lo más estable.
 
-## Cómo funciona
+## Uso (agentes)
 
-- OAuth 2.0 de aplicación nativa ([RFC 8252](https://www.rfc-editor.org/rfc/rfc8252)) con PKCE S256: el backend abre
-  un puerto efímero en `127.0.0.1`, la URL de consentimiento lleva `state`, el reto PKCE, `access_type=offline` y
-  `prompt=consent`; Google vuelve a `http://127.0.0.1:<puerto>/?code=…&state=…`, el backend cambia el código por los
-  tokens (con el verificador) y cierra el puerto. Se espera como mucho 10 minutos; un nuevo «Conectar» sustituye al
-  anterior.
-- Ámbitos que se piden: `openid email …/drive.readonly …/gmail.readonly`. Los concedidos se guardan con la conexión
-  y se renuevan con el token: Drive sin su permiso responde «la conexión no incluye el permiso de Drive», Gmail sin el
-  suyo «Gmail no está autorizado: … Volver a conectar», sin llegar a llamar a Google. Si en la pantalla de Google se
-  desmarcan los dos, no se guarda nada y se revoca lo concedido.
-- El **token de renovación** se guarda solo en el equipo, uno por usuario de pgocode:
-  `~/.local/share/pgocode/google/<usuario>.json` (carpeta 0700, fichero 0600), con la cuenta y los ámbitos. El
-  **token de acceso** vive en memoria y se renueva solo al caducar o si Google lo rechaza.
-- Los endpoints de Google son fijos en el código (no se toman del JSON del cliente).
-- Usuario de cada petición: la interfaz usa la conexión de quien ha entrado en pgocode; los agentes (`pgo drive`), la
-  del último usuario que ha usado la interfaz o, si en el equipo solo hay una conexión, esa.
-- **Respaldo silencioso**: si el usuario no ha conectado su cuenta y en el equipo hay una `gcloud` ya autorizada con
-  Drive, se usa su token (en memoria; Gmail solo si ese token lleva un ámbito de Gmail). La interfaz lo dice («Con las credenciales de Google de este equipo») pero no
-  enseña órdenes de gcloud; conectar la cuenta propia tiene preferencia.
-
-## Uso
-
-Agentes (orden de terminal; el uso se les añade solo al mensaje que menciona Drive, Docs, Sheets, «documento de
-Google» o una URL de docs.google.com):
+El uso se les añade solo al mensaje que menciona Drive, Docs, Sheets, «documento de Google» o una URL de
+docs.google.com (y el de Gmail, al que habla del correo, el email, Gmail, la bandeja o el buzón):
 
 ```sh
 pgo drive buscar <texto> [--tipo doc|hoja|presentacion|pdf|carpeta|imagen] [--carpeta <id|url>] [--max N]
 pgo drive listar [<carpeta id|url>]          # sin carpeta: «Mi unidad»
 pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
+pgo gmail buscar <consulta de Gmail> [--max N]   # from:ana newer_than:7d, subject:factura has:attachment, is:unread…
+pgo gmail listar [--max N]                       # lo más reciente de la bandeja de entrada
+pgo gmail leer <id de hilo> [--max N]
 ```
 
 - Acepta IDs y URLs de Drive, Docs, Sheets y Slides (la hoja del `#gid=` de una URL de Sheets también).
-- Búsquedas y listados: una línea por fichero, `[tipo] nombre · fecha · id` (30 por defecto, 100 como mucho).
-- Lectura: Docs en Markdown (o texto), Sheets en CSV (todas las hojas visibles, una con `--hoja`, un rango con
-  `--rango`; sin la API de Sheets, la primera hoja exportada por Drive), Slides en texto, ficheros de texto tal cual,
-  carpetas como listado; PDF, imágenes y demás, solo metadatos y enlace (Drive no da su texto).
+- Búsquedas y listados: una línea por fichero, `[tipo] nombre · fecha · id` (lo que enseña Drive; 30 por defecto,
+  100 como mucho).
+- Lectura: Docs en Markdown (o texto), Sheets en CSV (todas las hojas, una con `--hoja`, un rango con `--rango`),
+  Slides en texto, carpetas como listado; de los demás ficheros (PDF, imágenes…), solo el enlace.
 - Recorte: 40 000 caracteres por defecto (`--max` hasta 200 000), con un aviso al final de cómo pedir menos.
+- Gmail: dos líneas por correo, `fecha · remitente · asunto · id · no leído` y el fragmento (20 por defecto, 50
+  como mucho); `leer` da el hilo, cada mensaje sin lo citado de los anteriores, recortado a 20 000 caracteres
+  repartidos entre los mensajes. El ID es el del hilo (el que da `buscar`/`listar`, o el hexadecimal de una URL
+  antigua `#inbox/<id>`).
+- **Privacidad del correo**: solo se lee cuando se pide; nada se guarda; el registro del backend dice solo la orden,
+  cuántos correos y cuánto ha tardado (`gmail: buscar · 12 correos · 840ms`). Nada de enviar, borrar, archivar ni
+  etiquetar. Abrir un hilo en la vista web de Gmail puede marcarlo como leído, como cuando lo abre el usuario.
 
-Gmail (orden de terminal; el uso se añade solo al mensaje que habla del correo, el email, Gmail, la bandeja o el
-buzón, y no a «el campo email», `partner.email` y parecidos):
+## Lo de antes (OAuth)
 
-```sh
-pgo gmail buscar <consulta de Gmail> [--max N]   # from:ana newer_than:7d, subject:factura has:attachment, is:unread…
-pgo gmail listar [--max N]                       # lo más reciente de la bandeja de entrada
-pgo gmail leer <id de mensaje o hilo> [--mensaje] [--max N]
-```
-
-- Búsqueda y listado: dos líneas por correo, `fecha · remitente · asunto · id (hilo X) · no leído` y el fragmento
-  (140 caracteres); 20 por defecto, 50 como mucho, con aviso si Gmail tiene más. Se piden las cabeceras de cada
-  correo (`format=metadata`, 8 a la vez).
-- Lectura: con el ID de un hilo, el hilo entero (de más antiguo a más nuevo) **sin lo citado** de los mensajes
-  anteriores («El … escribió:», «On … wrote:», «-----Mensaje original-----», la cabecera «De:/Enviado:» de
-  Outlook, las líneas con `>`; lo reenviado se queda); con el de un mensaje (o `--mensaje`), solo ese. Cabeceras
-  De, Para, Cc (recortadas si son largas), fecha y asunto; el cuerpo en `text/plain` o, si no hay, el HTML
-  convertido a texto (sin estilos, guiones, imágenes ni enlaces de seguimiento); juegos de caracteres UTF-8,
-  latin-1, latin-9 y windows-1252. Adjuntos: solo nombre, tipo y tamaño (**nunca se descargan**; solo se pide aparte
-  el cuerpo de texto cuando Gmail lo deja fuera por grande).
-- Recorte: 20 000 caracteres por defecto (`--max` hasta 200 000), repartidos entre los mensajes del hilo, con aviso.
-- IDs: los de la API (los que da `pgo gmail buscar`). Las URL de Gmail antiguas (`#inbox/<id hexadecimal>`) valen;
-  las nuevas no llevan ese ID y se dice que se busque el correo.
-
-**Privacidad del correo**: solo se lee cuando el usuario o el agente lo piden; nada se guarda en disco aparte del
-token (ni caché ni copia); el registro del backend dice solo la orden, cuántos correos y cuánto ha tardado
-(`gmail: buscar · 12 correos · 840ms`), nunca la consulta, los IDs ni el contenido.
-
-API del backend (con sesión): `GET /api/google[?probar=1]` (estado), `POST /api/google/conectar` (devuelve la URL de
-Google), `POST /api/google/desconectar`, `POST /api/google/cliente {contenido}` (el JSON del cliente) y
-`GET /api/google/{buscar|listar|leer}` (Drive) y `GET /api/google/gmail/{buscar|listar|leer}` (Gmail: `q`, `max`,
-`ref`, `mensaje=1`); los agentes, `GET /api/pgo/drive-{buscar|listar|leer}` y `GET /api/pgo/gmail-{buscar|listar|leer}`
-con el token de su proyecto (`PGO_TOKEN`). El estado (`/api/google`) lleva `drive` y `gmail` (autorizado o no).
+Hasta la 0.4.97, pgocode leía Google con su propio cliente OAuth (Propiedades → Google Workspace → «Conectar con
+Google») y, si no, con la `gcloud` del equipo. Ya no existe: al arrancar, el backend borra de su carpeta de datos
+`google-oauth-client.json` y los `google/<usuario>.json` (con sus tokens de renovación) y la carpeta `google/` si queda
+vacía (solo ficheros `.json` normales; lo demás no lo toca). El permiso concedido en Google se puede quitar en
+https://myaccount.google.com/permissions («PlanesGo»).
 
 ## Código y pruebas
 
-- `internal/gworkspace/oauth.go` (cliente, conexión, PKCE, renovación, revocación), `auth.go` (token y estado;
-  respaldo de gcloud), `drive.go` (Drive y Sheets, formato compacto), `gmail.go` (Gmail: búsqueda, lectura, MIME,
-  HTML a texto, citas), `internal/servidor/google.go`, `cmd/pgocode/pgo.go` (`pgo drive`, `pgo gmail`), `internal/llm/pgohint.go` (aviso), `web/src/componentes/GoogleSettings.tsx`.
-- Pruebas con un Google simulado (autorización, intercambio con PKCE, renovación, revocación, errores, estado; Gmail:
-  `messages.list`, `messages.get` en `metadata` y `full`, `threads.get`, MIME multipart con texto y HTML, base64url
-  con y sin relleno, adjuntos, ámbito no concedido, 401 y renovación):
-  `go test -race ./internal/gworkspace ./internal/servidor -run 'OAuth|Client|Drive|Google|Status|Read|Gmail|Mail'`.
-- Prueba real (opcional; en una carpeta de pruebas con el `google-oauth-client.json`, no la de datos de pgocode):
-
-  ```sh
-  PGO_PRUEBA_GOOGLE=1 PGO_PRUEBA_GOOGLE_DATOS=<carpeta> PGO_PRUEBA_GOOGLE_USUARIO=luis@planesnet.com \
-    [PGO_PRUEBA_GOOGLE_REF=<id o url de un documento>] [PGO_PRUEBA_GOOGLE_DESCONECTAR=1] \
-    [PGO_PRUEBA_GOOGLE_RECONECTAR=1] [PGO_PRUEBA_GOOGLE_CORREO=<consulta de Gmail>] \
-    go test ./internal/gworkspace -run Real -v -timeout 10m
-  ```
-
-  Si no hay conexión (o con `PGO_PRUEBA_GOOGLE_RECONECTAR=1`, para añadir Gmail a una conexión de antes), escribe la
-  URL de Google: abrirla en el navegador y aceptar (espera 5 minutos). Con Gmail autorizado, lista 3 correos (los
-  recientes o los de la consulta) y lee el hilo del primero recortado a 1500 caracteres.
+- `internal/gbrowser` (canal con Electron, qué página cargar, formato compacto, Gmail, borrado de lo de antes),
+  `internal/servidor/google.go` (rutas del canal y de `pgo drive|gmail`), `electron/googleReader.js` (ventana
+  oculta, descargas, guiones de lectura, sesiones), `cmd/pgocode/pgo.go`, `internal/llm/pgohint.go` (aviso).
+- `go test ./internal/gbrowser ./internal/servidor -run 'Google|Bridge|Read|Search|Gmail|OAuth'` (con un Electron
+  simulado) y `node --test electron/*.test.js` (con una ventana simulada).
+- Para probar la app de escritorio sin Google: `PGO_GOOGLE_PRUEBA=http://127.0.0.1:<puerto>` (en el entorno de
+  Electron, que se lo pasa al backend) hace que el backend pida las páginas a ese servidor local en lugar de a Google
+  y que la ventana oculta lo acepte.

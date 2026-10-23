@@ -57,7 +57,7 @@ func TestGmailQuery(t *testing.T) {
 		{[]string{"buscar", "subject:factura", "--max=5"}, "buscar", "max=5&q=subject%3Afactura"},
 		{[]string{"listar", "--max", "10"}, "listar", "max=10"},
 		{[]string{"leer", "18f0a1b2c3d4e5f6"}, "leer", "ref=18f0a1b2c3d4e5f6"},
-		{[]string{"leer", "18f0a1b2c3d4e5f6", "--mensaje", "--max", "3000"}, "leer", "max=3000&mensaje=1&ref=18f0a1b2c3d4e5f6"},
+		{[]string{"leer", "18f0a1b2c3d4e5f6", "--max", "3000"}, "leer", "max=3000&ref=18f0a1b2c3d4e5f6"},
 	} {
 		o, q, err := gmailQuery(c.args)
 		if err != nil || o != c.orden || q.Encode() != c.want {
@@ -65,7 +65,7 @@ func TestGmailQuery(t *testing.T) {
 		}
 	}
 	for _, bad := range [][]string{nil, {"enviar", "x"}, {"borrar", "x"}, {"buscar"}, {"leer"}, {"leer", "a", "b"},
-		{"listar", "x"}, {"buscar", "x", "--max"}, {"buscar", "x", "--max", "mucho"}, {"buscar", "x", "--mensaje"}, {"buscar", "x", "--marcar"}} {
+		{"listar", "x"}, {"buscar", "x", "--max"}, {"buscar", "x", "--max", "mucho"}, {"leer", "18f0a1b2c3d4e5f6", "--mensaje"}, {"buscar", "x", "--marcar"}} {
 		if _, _, err := gmailQuery(bad); err == nil {
 			t.Errorf("%v debería fallar", bad)
 		}
