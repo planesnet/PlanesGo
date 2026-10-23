@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { get, post, type Usuario } from '../api';
 import Icono from './Icono';
 import Imputacion, { type SesionMarcador } from './Imputacion';
-import AppProperties, { type AppSection, type UpdateStatus } from './AppProperties';
+import AppProperties, { updateText, type AppSection, type UpdateStatus } from './AppProperties';
 import { askConfirm, showMessage } from './Modal';
 
 type EstadoAct = UpdateStatus;
@@ -52,7 +52,23 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
     await post('/api/actualizacion/pausa', { pausada: p }).catch(() => {});
     carga();
   };
-  const buscar = async () => { await post('/api/actualizacion/buscar', {}).catch(() => {}); setTimeout(carga, 3000); };
+  // Buscar actualizaciones: siempre responde algo visible (en Propiedades → Actualizaciones): buscando, el resultado
+  // o por qué no se puede (p. ej. «sin servidor de actualizaciones» en desarrollo).
+  const [checkResult, setCheckResult] = useState('');
+  const buscar = async () => {
+    setAbierto(false);
+    setProperties('updates');
+    setCheckResult('Buscando…');
+    try {
+      const r = await post<{ ok: boolean; error?: string }>('/api/actualizacion/buscar', {});
+      if (!r.ok) { setCheckResult('No se puede buscar: ' + (r.error || 'actualizaciones desactivadas')); return; }
+    } catch (e) { setCheckResult('No se puede buscar: ' + (e as Error).message); return; }
+    setTimeout(async () => {
+      const e = await get<EstadoAct>('/api/actualizacion').catch(() => null);
+      if (e) setAct(e);
+      setCheckResult(!e ? 'No se ha podido leer el resultado.' : e.error ? 'No se ha podido comprobar: ' + e.error : e.estado === 'al-dia' ? 'Tienes la última versión.' : updateText(e));
+    }, 3000);
+  };
 
   const etiqueta = act && ({
     pendiente: { texto: `Actualizar a v${act.nueva}`, titulo: act.pausada ? 'Actualizaciones automáticas en pausa: pulsa para actualizar ahora' : 'Pulsa para actualizar ahora (si no, se instalará sola cuando lleves un rato sin usar la app)' },
@@ -98,7 +114,7 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
       {etiqueta && (act!.estado === 'pendiente'
         ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
         : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}
-      {properties && <AppProperties user={usuario} avatar={foto} status={act} initial={properties} onClose={() => setProperties(null)}
+      {properties && <AppProperties user={usuario} avatar={foto} status={act} initial={properties} checkResult={checkResult} onClose={() => { setProperties(null); setCheckResult(''); }}
         onCheck={buscar} onTogglePause={pausa} onApply={aplicar} onLogout={alSalir} />}
     </header>
   );

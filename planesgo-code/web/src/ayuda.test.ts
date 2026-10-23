@@ -28,8 +28,14 @@ test('la ayuda explica las órdenes que hace pgocode sin el agente', () => {
   assert.match(e.find(x => x.clave.startsWith('Para que'))!.que, /«>»/);
 });
 
-test('la ayuda resume el enrutador y remite a su documentación', () => {
+test('la ayuda resume el enrutador', () => {
   const e = A.secciones({ alTurno: true, inyecta: true }).find(s => s.titulo.startsWith('Quién hace qué'))!.entradas;
   assert.match(e.find(x => x.clave === 'Orden')!.que, /funciones directas .* aparte .* reparto .* agente/);
-  assert.ok(e.some(x => x.que.includes('docs/enrutador.md')));
+});
+
+test('la ayuda no remite a ficheros que el usuario no tiene y explica contexto, programas y copias', () => {
+  const todo = A.secciones({ alTurno: true, inyecta: true }).flatMap(s => s.entradas);
+  assert.ok(!todo.some(e => /docs\//.test(e.que)));
+  for (const c of ['Continuar desde aquí', 'Barrer ahora', 'Hilo de limpieza', 'Relevo', 'Duplicar sin historial', 'Programas', 'pgo ejecutar', 'Copias de trabajo', 'Alt+Intro'])
+    assert.ok(todo.some(e => e.clave === c), c);
 });

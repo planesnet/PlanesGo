@@ -169,3 +169,21 @@ func TestRegistro(t *testing.T) {
 		t.Error("registro nil")
 	}
 }
+
+// Una rama recién creada sin commits está «fusionada» para git (su punta está en main), pero no tiene nada propio.
+func TestRamaNuevaSinCommits(t *testing.T) {
+	r, run := repoPrueba(t)
+	ctx := context.Background()
+	dir := filepath.Join(filepath.Dir(r), "nueva")
+	if err := PreparaRama(ctx, r, "nueva", dir); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := EstadoCopia(ctx, dir); !e.SinCommits {
+		t.Fatalf("rama nueva: %+v", e)
+	}
+	run(dir, "commit", "-q", "--allow-empty", "-m", "trabajo")
+	run(r, "merge", "-q", "--ff-only", "nueva")
+	if e, _ := EstadoCopia(ctx, dir); e.SinCommits || !e.Fusionada {
+		t.Fatalf("rama con commit fusionada: %+v", e)
+	}
+}

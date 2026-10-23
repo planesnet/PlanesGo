@@ -34,6 +34,9 @@ type Estado struct {
 	SinSubir  int    `json:"sin_subir"` // commits que no están en ningún remoto ni en la rama por defecto
 	Defecto   string `json:"defecto"`   // rama por defecto del repositorio
 	Fusionada bool   `json:"fusionada"` // la rama ya está en la rama por defecto
+	// SinCommits: la rama no tiene commits propios (recién creada: su registro solo dice «Created from»). Entonces
+	// «fusionada» engaña: no se ha unido nada, no hay nada que unir.
+	SinCommits bool `json:"sin_commits,omitempty"`
 }
 
 // SePuedeQuitar: es una copia de trabajo y quitarla no pierde nada.
@@ -157,6 +160,9 @@ func EstadoCopia(ctx context.Context, dir string) (Estado, error) {
 			}
 		}
 	}
+	if e.Rama != "" && e.Rama != e.Defecto {
+		e.SinCommits = sinCommitsPropios(ctx, dir, e.Rama)
+	}
 	args := []string{"rev-list", "--count", "HEAD", "--not"}
 	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "@{u}"); err == nil {
 		args = append(args, "@{u}")
@@ -170,6 +176,20 @@ func EstadoCopia(ctx context.Context, dir string) (Estado, error) {
 		return e, errors.New("no se han podido contar los commits sin subir")
 	}
 	return e, nil
+}
+
+// sinCommitsPropios: el registro (reflog) de la rama solo tiene su creación: nadie ha hecho commit en ella.
+func sinCommitsPropios(ctx context.Context, dir, rama string) bool {
+	l, err := git(ctx, dir, "reflog", "show", "--format=%gs", "refs/heads/"+rama, "--")
+	if err != nil || strings.TrimSpace(l) == "" {
+		return false
+	}
+	for _, x := range strings.Split(l, "\n") {
+		if !strings.HasPrefix(x, "branch: Created from") {
+			return false
+		}
+	}
+	return true
 }
 
 // QuitaCopia quita una copia de trabajo (git worktree remove, sin forzar) si no tiene nada que se pierda y, si

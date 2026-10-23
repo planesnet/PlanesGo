@@ -1,6 +1,7 @@
 package procesos
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -44,5 +45,22 @@ func TestLanzaYPara(t *testing.T) {
 	}
 	if l, _, _ := g.Salida("web", 10); len(l) != 1 {
 		t.Errorf("salida %q", l)
+	}
+}
+
+// Un programa sin salida devuelve una lista vacía, no nil (en JSON, null tumbaba la interfaz al hacer join).
+func TestSalidaVaciaNoNil(t *testing.T) {
+	g := Nuevo()
+	p, err := g.Lanza("callado", 1, t.TempDir(), "true", "usuario", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.hecho
+	l, _, err := g.Salida("callado", 10)
+	if err != nil || l == nil {
+		t.Fatalf("salida %v (%v)", l, err)
+	}
+	if b, _ := json.Marshal(l); string(b) != "[]" {
+		t.Errorf("JSON %s", b)
 	}
 }

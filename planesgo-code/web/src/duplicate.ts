@@ -5,9 +5,9 @@
 import type { Sesion } from './sesiones';
 
 // Campos que NO se copian: la identidad, el nombre (se calcula), la conversación con el agente y el plan en
-// revisión y el «Continuar desde aquí» pendiente (son de la conversación) y las fechas. Todo lo demás (también los
+// revisión y el «Continuar desde aquí» pendiente (son de la conversación), las fechas y si está archivada. Todo lo demás (también los
 // campos que se añadan) se copia.
-const NOT_COPIED = ['id', 'nombre', 'sesionAgente', 'plan', 'corte', 'creada', 'ultima'] as const satisfies readonly (keyof Sesion)[];
+const NOT_COPIED = ['id', 'nombre', 'sesionAgente', 'plan', 'corte', 'creada', 'ultima', 'archivada'] as const satisfies readonly (keyof Sesion)[];
 
 const COPY_SUFFIX = / · copia \d+$/;
 

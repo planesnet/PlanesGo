@@ -108,8 +108,8 @@ type Estado struct {
 	Estado   string    `json:"estado"`          // desactivada | al-dia | descargando | pendiente | aplicando | manual | error
 	Nueva    string    `json:"nueva,omitempty"` // versión preparada o disponible
 	Error    string    `json:"error,omitempty"`
-	Revisado time.Time `json:"revisado,omitempty"`
-	Pausada  bool      `json:"pausada"` // el usuario ha pausado las actualizaciones automáticas
+	Revisado time.Time `json:"revisado,omitzero"` // sin revisar nunca: no va (con omitempty salía «0001-01-01»)
+	Pausada  bool      `json:"pausada"`           // el usuario ha pausado las actualizaciones automáticas
 }
 
 // Actualizador revisa, descarga y aplica las actualizaciones.

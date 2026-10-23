@@ -298,7 +298,8 @@ func (g *Gestor) Salida(nombre string, n int) ([]string, int, error) {
 	if n <= 0 || n > len(p.lineas) {
 		n = len(p.lineas)
 	}
-	return append([]string(nil), p.lineas[len(p.lineas)-n:]...), p.total, nil
+	// Nunca nil: en JSON sería null y la interfaz espera una lista.
+	return append([]string{}, p.lineas[len(p.lineas)-n:]...), p.total, nil
 }
 
 // EnCurso cuenta los procesos en marcha.

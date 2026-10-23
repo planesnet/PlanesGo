@@ -239,7 +239,8 @@ func (s *Servidor) procesosBorraConfig(w http.ResponseWriter, r *http.Request, s
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.AvisaProcesos()
+	// Avisa a la interfaz (Actividad → Programas se recarga).
+	s.Eventos.Emite(map[string]string{"tipo": "procesos"})
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
@@ -276,7 +277,8 @@ func (s *Servidor) procesosGuarda(w http.ResponseWriter, r *http.Request, ses *s
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.AvisaProcesos()
+	// Avisa a la interfaz (Actividad → Programas se recarga).
+	s.Eventos.Emite(map[string]string{"tipo": "procesos"})
 	jsonOK(w, map[string]bool{"ok": true})
 }
 

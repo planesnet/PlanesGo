@@ -81,8 +81,17 @@ export function toolStatusTitle(h: Pick<Herramienta, 'estado' | 'salida'>): stri
 
 // silenceLabel: si el agente lleva un rato sin mandar nada (un minuto o más), cuánto: así se ve que sigue vivo y que
 // la espera es del modelo (OpenCode solo avisa de una acción cuando ha terminado; un fichero grande tarda minutos).
-export function silenceLabel(ms: number): string {
+// Con una acción en curso (m: el mensaje del agente) la espera es de esa acción, no del modelo: «la orden sigue en
+// marcha (N min)».
+export function silenceLabel(ms: number, m?: Mensaje): string {
   if (!(ms >= 60_000)) return '';
   const min = Math.floor(ms / 60_000);
+  const curso = (m?.partes || []).filter(p => p.tipo === 'herramienta' && p.h.estado === 'curso' && !p.h.padre).map(p => (p as { h: Herramienta }).h);
+  if (curso.length) {
+    const h = curso[curso.length - 1];
+    const nombre = h.nombre.replace(/^mcp__[^_]+__/, '');
+    const que = /^(bash|shell|run|run_command|exec|terminal)$/i.test(nombre) ? 'la orden' : /^(task|agent|invoke_subagent)$/i.test(nombre) ? 'el subagente' : `«${nombre}»`;
+    return ` · ${que} sigue en marcha (${min} min)`;
+  }
   return ` · sin novedades desde hace ${min} min (el modelo está generando o esperando respuesta)`;
 }

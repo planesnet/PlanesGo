@@ -760,7 +760,7 @@ func Agentes() []Proveedor {
 		&Agente{Clave: "antigravity", Nombre: "Antigravity", Programa: "agy", Lee: leeAntigravity, Modos: true,
 			Modelos: []string{"gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low", "gemini-3.8-flash-high",
 				"gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "gemini-3.1-pro-low"},
-			Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
+			// Sin Esfuerzos: el modelo ya lo lleva (-low/-medium/-high); dos mandos para lo mismo confundían.
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"--output-format", "stream-json"}
 				// Solo lectura: modo plan (no cambia ficheros); «editar»: accept-edits (edita, pero sin consola deniega

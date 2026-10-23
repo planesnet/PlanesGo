@@ -3,9 +3,11 @@ import { escuchaAvisos, get, listaCopias, post, quitaCopia, type Proveedor, type
 import * as S from './sesiones';
 import * as C from './copias';
 import { duplicateSession as duplicateSessionOf } from './duplicate';
+import { newSessionDefaults, rememberedModel, rememberModel } from './sessionDefaults';
 import type { PedidoWeb } from './componentes/Navegador';
 import { leeAjustes, AJUSTES_DEFECTO, type AjustesProyecto } from './ajustes';
 import Acceso from './componentes/Acceso';
+import ErrorBoundary from './componentes/ErrorBoundary';
 import Proyectos from './componentes/Proyectos';
 import Chat from './componentes/Chat';
 import Artefactos from './componentes/Artefactos';
@@ -156,7 +158,7 @@ export default function App() {
       let s = l.find(x => x.id === quiere) || null;
       // Nueva sesión pedida desde la lista: se abre su ventana (no se crea hasta confirmar).
       if (quiere === 'nueva' && proveedores.length) {
-        setDialogo({ sesion: S.nueva(proyecto.id, '', '', agentePorDefecto()), nueva: true });
+        setDialogo({ sesion: conDefectos(S.nueva(proyecto.id, '', '', agentePorDefecto()), l), nueva: true });
       }
       setSesiones(l);
       setSesion(s);
@@ -194,6 +196,7 @@ export default function App() {
 
   const cambiaSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
+    rememberModel(usuario.login, s.agente, s.modelo);
     const l = S.guarda(usuario.login, s);
     // Con el proyecto activo de ahora (no el de cuando se llamó: un turno que acaba en segundo plano llama a
     // esto con la función de cuando empezó); las de otros proyectos solo se guardan.
@@ -208,16 +211,20 @@ export default function App() {
 
   // Nueva sesión: se abre su ventana. Con rama (cambiar de rama en la cabecera) va ya elegida; si es la misma
   // rama de la sesión abierta (resolver una issue), también su carpeta y su alojamiento.
+  // Una sesión nueva: modo «editar» (no el de la última: podía ser «auto»), el alojamiento de la última del proyecto
+  // y el último modelo elegido con su agente (sessionDefaults.ts).
+  const conDefectos = (s: S.Sesion, l: S.Sesion[]) => newSessionDefaults(s, { sessions: l, projectHosting: ajustes.hosting?.tipo,
+    model: usuario ? rememberedModel(usuario.login, s.agente, proveedores.find(p => p.id === s.agente)?.modelos || []) : undefined });
   const nuevaSesion = useCallback((rama?: string, nombre?: string, envio?: string) => {
     if (!usuario || !proyecto) return;
     const s = S.nueva(proyecto.id, '', rama ?? '', sesion?.agente || agentePorDefecto(), nombre);
-    s.permisos = sesion?.permisos;
     if (sesion && rama && rama === sesion.rama) { s.carpeta = sesion.carpeta; s.hosting = sesion.hosting; }
-    setDialogo({ sesion: s, nueva: true, envio });
-  }, [usuario, proyecto, sesion, agentePorDefecto]);
+    setDialogo({ sesion: conDefectos(s, sesiones), nueva: true, envio });
+  }, [usuario, proyecto, sesion, sesiones, agentePorDefecto, ajustes, proveedores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const guardaDialogo = useCallback((s: S.Sesion, r: S.Repo | null) => {
     if (!usuario || !dialogo) return;
+    rememberModel(usuario.login, s.agente, s.modelo);
     const l = S.guarda(usuario.login, s);
     if (s.proyecto === proyecto?.id) {
       setSesiones(l);
@@ -299,6 +306,21 @@ export default function App() {
     return () => window.removeEventListener('pgo:reubica-sesion', reubica);
   }, [usuario, cambiaSesion]);
 
+  // Archivar sesiones (Actividad, al quitar la copia de trabajo que usaban): salen de la lista principal.
+  useEffect(() => {
+    const archiva = (e: Event) => {
+      const d = (e as CustomEvent<{ proyecto: number; ids: string[] }>).detail;
+      if (!usuario) return;
+      let l: S.Sesion[] = S.lista(usuario.login, d.proyecto);
+      for (const s of l.filter(x => d.ids.includes(x.id))) l = S.guarda(usuario.login, { ...s, archivada: true });
+      if (d.proyecto !== proyectoId.current) return;
+      setSesiones(l);
+      setSesion(x => (x && d.ids.includes(x.id) ? null : x));
+    };
+    window.addEventListener(S.ARCHIVE_SESSIONS, archiva);
+    return () => window.removeEventListener(S.ARCHIVE_SESSIONS, archiva);
+  }, [usuario]);
+
   // «Duplicar sin historial»: la copia se guarda y se abre (si es de otro proyecto, al abrir ese proyecto).
   const duplicateSession = useCallback((p: Proyecto, s: S.Sesion) => {
     if (!usuario) return;
@@ -322,18 +344,18 @@ export default function App() {
       sesion={sesion ? { id: sesion.id, proyecto: sesion.proyecto, nombreProyecto: proyecto?.nombre, tareaId: sesion.tareaId, tarea: sesion.tarea } : undefined} />
     <div className={'arnes' + (panel ? '' : ' sin-panel')}
       style={panel && anchoPanel ? { gridTemplateColumns: `auto minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
-      <Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
+      <ErrorBoundary area="la lista de proyectos"><Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
         onDuplicateSession={duplicateSession}
-        alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} />
-      <Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
-        alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} />
-      {panel && <Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
-        pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} />}
-    {dialogo && <DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login} inicial={dialogo.seccion}
-      proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} />}
+        alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} /></ErrorBoundary>
+      <ErrorBoundary area="el chat" resetKey={sesionDelProyecto?.id}><Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+        alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} /></ErrorBoundary>
+      {panel && <ErrorBoundary area="el panel" resetKey={sesionDelProyecto?.id}><Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
+        pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} /></ErrorBoundary>}
+    {dialogo && <ErrorBoundary area="la ventana de la sesión"><DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login} inicial={dialogo.seccion}
+      proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} /></ErrorBoundary>}
     <Dialogs />
     </div>
     </div>

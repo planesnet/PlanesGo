@@ -48,7 +48,23 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
+// cookie: nombre antiguo de la cookie de sesión, el mismo en todos los puertos (dos pgocode en el mismo host se
+// pisaban la sesión). Ahora cada servidor usa la suya (cookieSesion); la antigua se acepta para no echar a nadie.
 const cookie = "pgo_sesion"
+
+// cookieSesion: el nombre de la cookie de sesión de este servidor, con su puerto (las cookies no distinguen puertos).
+func (s *Servidor) cookieSesion() string {
+	if s.Puerto == "" {
+		return cookie
+	}
+	return cookie + "_" + s.Puerto
+}
+
+// poneCookieSesion guarda el token de sesión en la cookie de este servidor (vacío: la borra).
+func (s *Servidor) poneCookieSesion(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{Name: s.cookieSesion(), Value: token, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: maxAge})
+}
 
 // cookieEscritorio la pone Electron en su ventana con el TokenEscritorio.
 const cookieEscritorio = "pgo_escritorio"
@@ -328,7 +344,13 @@ type manejador func(http.ResponseWriter, *http.Request, *sesiones.Sesion)
 
 func (s *Servidor) conSesion(f manejador) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(cookie)
+		c, err := r.Cookie(s.cookieSesion())
+		antigua := false
+		if err != nil && s.cookieSesion() != cookie {
+			// Compatibilidad: la cookie de antes (sin puerto). Si es de este servidor, pasa a la nueva y se borra.
+			c, err = r.Cookie(cookie)
+			antigua = err == nil
+		}
 		if err != nil {
 			jsonError(w, http.StatusUnauthorized, "inicia sesión")
 			return
@@ -337,6 +359,10 @@ func (s *Servidor) conSesion(f manejador) http.HandlerFunc {
 		if !ok {
 			jsonError(w, http.StatusUnauthorized, "la sesión ha caducado: vuelve a entrar")
 			return
+		}
+		if antigua {
+			s.poneCookieSesion(w, r, ses.Token, int(sesiones.Duracion.Seconds()))
+			http.SetCookie(w, &http.Cookie{Name: cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		}
 		f(w, r, ses)
 	}
@@ -409,8 +435,7 @@ func (s *Servidor) login(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookie, Value: ses.Token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: int(sesiones.Duracion.Seconds())})
+	s.poneCookieSesion(w, r, ses.Token, int(sesiones.Duracion.Seconds()))
 	log.Printf("sesión abierta: %s (uid %d)", u.Login, u.UID)
 	jsonOK(w, map[string]any{"nombre": u.Nombre, "login": u.Login})
 }
@@ -420,6 +445,7 @@ func (s *Servidor) logout(w http.ResponseWriter, r *http.Request, ses *sesiones.
 	defer cancel()
 	s.Odoo.Cierra(ctx, ses.OdooSesion)
 	s.Sesiones.Borra(ses.Token)
+	s.poneCookieSesion(w, r, "", -1)
 	http.SetCookie(w, &http.Cookie{Name: cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	jsonOK(w, map[string]bool{"ok": true})
 }
@@ -466,8 +492,12 @@ func (s *Servidor) actualizacion(w http.ResponseWriter, r *http.Request, ses *se
 		return
 	}
 	e := s.Actualizador.Estado()
-	jsonOK(w, map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
-		"revisado": e.Revisado, "ocupado": s.Ocupado(), "trabajando": s.TrabajoEnCurso(), "pausada": e.Pausada})
+	res := map[string]any{"version": e.Version, "estado": e.Estado, "nueva": e.Nueva, "error": e.Error,
+		"ocupado": s.Ocupado(), "trabajando": s.TrabajoEnCurso(), "pausada": e.Pausada}
+	if !e.Revisado.IsZero() { // sin revisar nunca, no va (la interfaz dice «nunca»; antes salía «31/12/01»)
+		res["revisado"] = e.Revisado
+	}
+	jsonOK(w, res)
 }
 
 // sinUsoAntes: tiempo sin que el usuario toque la app (ni tenga nada a medio escribir) antes de actualizar sola.
@@ -537,9 +567,16 @@ func (s *Servidor) aplicaActualizacion(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Servidor) buscaActualizacion(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	if s.Actualizador != nil {
-		s.Actualizador.BuscarYa()
+	// Sin actualizador o desactivado (desarrollo, sin servidor…): se dice por qué, para que el botón responda algo.
+	if s.Actualizador == nil {
+		jsonOK(w, map[string]any{"ok": false, "error": "sin servidor de actualizaciones"})
+		return
 	}
+	if e := s.Actualizador.Estado(); e.Estado == "desactivada" {
+		jsonOK(w, map[string]any{"ok": false, "error": e.Error})
+		return
+	}
+	s.Actualizador.BuscarYa()
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
@@ -553,6 +590,15 @@ func (s *Servidor) avatar(w http.ResponseWriter, r *http.Request, ses *sesiones.
 	w.Header().Set("Content-Type", tipo)
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Write(b)
+}
+
+// carpetaAjena: por qué no vale la carpeta de una sesión. Si ya no existe es casi siempre una copia de trabajo que
+// se quitó (Actividad → Copias de trabajo): decirlo así, no «no es del proyecto».
+func carpetaAjena(carpeta, proyecto string) string {
+	if _, err := os.Stat(carpeta); errors.Is(err, os.ErrNotExist) {
+		return fmt.Sprintf("la carpeta %s ya no existe (la copia de trabajo se quitó): vuelve a crearla eligiendo la rama en las propiedades de la sesión, o elige otra carpeta", carpeta)
+	}
+	return fmt.Sprintf("la carpeta %s no es del proyecto «%s»: elígela en las propiedades de la sesión (la carpeta de la sesión es la que decide el repositorio)", carpeta, proyecto)
 }
 
 func (s *Servidor) yo(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -684,7 +730,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		}
 	}
 	if p.Carpeta != "" && !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
-		jsonError(w, http.StatusForbidden, fmt.Sprintf("la carpeta %s no es del proyecto «%s»: elígela en los ajustes de la sesión (la carpeta de la sesión es la que decide el repositorio)", p.Carpeta, nombre))
+		jsonError(w, http.StatusForbidden, carpetaAjena(p.Carpeta, nombre))
 		return
 	}
 	if info.NecesitaDir && p.Carpeta == "" {
@@ -695,7 +741,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	// Nunca con la carpeta personal (ni la raíz) como carpeta de trabajo: el agente recorrería todo el equipo y
 	// leería lo que encontrase (pasó: un turno de OpenCode leyó el registro de pgocode y gastó 2,48 $).
 	if casa, _ := os.UserHomeDir(); p.Carpeta != "" && (filepath.Clean(p.Carpeta) == "/" || filepath.Clean(p.Carpeta) == filepath.Clean(casa) || dentroDe(filepath.Clean(p.Carpeta), casa)) {
-		jsonError(w, http.StatusBadRequest, "la carpeta de la sesión es tu carpeta personal (o una superior): elige la del proyecto en los ajustes de la sesión")
+		jsonError(w, http.StatusBadRequest, "la carpeta de la sesión es tu carpeta personal (o una superior): elige la del proyecto en las propiedades de la sesión")
 		return
 	}
 	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)

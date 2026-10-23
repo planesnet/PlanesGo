@@ -39,4 +39,8 @@ test('silencio del agente: nada antes de un minuto; luego, cuánto', () => {
   assert.equal(A.silenceLabel(59_000), '');
   assert.equal(A.silenceLabel(NaN), '');
   assert.match(A.silenceLabel(3 * 60_000 + 5000), /hace 3 min/);
+  // Con una orden en curso, la espera es de la orden, no del modelo.
+  const m = { rol: 'assistant' as const, texto: '', partes: [{ tipo: 'herramienta' as const, h: { id: 't', nombre: 'Bash', estado: 'curso' as const, resumen: 'make lento' } }] };
+  assert.equal(A.silenceLabel(4 * 60_000, m), ' · la orden sigue en marcha (4 min)');
+  assert.match(A.silenceLabel(4 * 60_000, { ...m, partes: [] }), /el modelo está generando/);
 });

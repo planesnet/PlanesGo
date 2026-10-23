@@ -1240,7 +1240,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       <header className="cabecera">
         {proyecto && sesion ? (
           <nav className="miga" aria-label="Ubicación de la sesión">
-            <button className="miga-item" onClick={alAjustes} title={nombreHosting(sesion.hosting || hosting || repo?.tipo) + ' · ajustes de la sesión'}><Hosting tipo={sesion.hosting || hosting || repo?.tipo} t={16} /></button>
+            <button className="miga-item" onClick={alAjustes} title={nombreHosting(sesion.hosting || hosting || repo?.tipo) + ' · propiedades de la sesión'}><Hosting tipo={sesion.hosting || hosting || repo?.tipo} t={16} /></button>
             {repo?.repositorio && <><span className="sep">/</span><span className="miga-item" title={repo.remoto}><Icono n="repo" t={14} /> {repo.repositorio}</span></>}
             {sesion.carpeta && <><span className="sep">/</span><span className="miga-item" title={sesion.carpeta}><Icono n="carpeta" t={14} /> {nombreCarpeta(sesion.carpeta)}</span></>}
             <span className="sep">·</span>
@@ -1321,8 +1321,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 {(m.inyectados || (enCurso && i === mensajes.length - 1 ? inyectados[sesion.id] : undefined))?.map((x, j) => (
                   <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}</div>
                 ))}
-                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
-                {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en la conversación hasta este turno (sin las preguntas aparte)">{CO.tokens(acumulados[i])} en la conversación</span></div>}
+                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id], m)}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
+                {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en toda la conversación hasta este turno, sumando todos sus turnos (sin las preguntas aparte). No es lo que ocupa el contexto.">{CO.tokens(acumulados[i])} acumulados</span></div>}
                 {m.relevo && (
                   <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>
                     ↻ Contexto renovado: de {CO.tokens(m.relevo.de)} a {CO.tokens(m.relevo.a)} tokens
@@ -1403,7 +1403,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {!sesion.hosting && (
               <div className="aviso-sesion">
                 <Icono n="info" t={15} /> Falta elegir el alojamiento de la sesión.
-                <button className="enlace" onClick={alAjustes}>Completar ajustes</button>
+                <button className="enlace" onClick={alAjustes}>Completar propiedades</button>
               </div>
             )}
             {/* Lo que el agente tiene en marcha (subagentes, órdenes en segundo plano): explica por qué sigue ocupado. */}
@@ -1529,7 +1529,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </button>
               <textarea ref={area} rows={1} value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={teclas}
                 onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); adjunta(fs); } }}
-                placeholder={!sesion.hosting ? 'Completa los ajustes de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? (conTurno && siempreAlTurno ? 'Escribe; le llega ya al agente… (/help)' : 'Escribe; irá a la cola… («>» al turno, «?» estado, «//» aparte · /help)')
+                placeholder={!sesion.hosting ? 'Completa los propiedades de la sesión' : !prov?.disponible ? 'Elige un agente disponible' : enCurso ? (conTurno && siempreAlTurno ? 'Escribe; le llega ya al agente… (/help)' : 'Escribe; irá a la cola… («>» al turno, «?» estado, «//» aparte · /help)')
                   : 'Escribe… (/plan para crear un plan · /help para la ayuda)'}
                 disabled={!prov?.disponible || !sesion.hosting} />
               {enCurso
@@ -1570,7 +1570,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               {gastoSesion.turnos > 0 && (
                 <button className={'gasto gasto-' + nivelGasto} onClick={alAjustes}
                   title={[...alertas.map(x => '⚠ ' + x.texto), `Gasto de esta sesión: ${CO.dinero(gastoSesion.coste)} · ${CO.tokens(gastoSesion.entrada)} de entrada y ${CO.tokens(gastoSesion.salida)} de salida en ${gastoSesion.turnos} turnos.`,
-                    CO.PLANES[sesion.agente] || '', `Aviso: ${avisos.avisoCoste ? CO.dinero(avisos.avisoCoste) : '—'} · límite: ${avisos.limiteCoste ? CO.dinero(avisos.limiteCoste) : '—'}${avisos.avisoTokens ? ' · aviso ' + CO.tokens(avisos.avisoTokens) + ' tokens' : ''} (ajustes de la sesión, «Notificaciones»)`].filter(Boolean).join('\n')}>
+                    CO.PLANES[sesion.agente] || '', `Aviso: ${avisos.avisoCoste ? CO.dinero(avisos.avisoCoste) : '—'} · límite: ${avisos.limiteCoste ? CO.dinero(avisos.limiteCoste) : '—'}${avisos.avisoTokens ? ' · aviso ' + CO.tokens(avisos.avisoTokens) + ' tokens' : ''} (propiedades de la sesión, «Notificaciones»)`].filter(Boolean).join('\n')}>
                   {nivelGasto !== 'ok' && <span aria-hidden>⚠ </span>}{CO.dinero(gastoSesion.coste)} · {CO.tokens(gastoSesion.entrada + gastoSesion.salida)}
                 </button>
               )}
@@ -1659,7 +1659,7 @@ const BloqueTarea = memo(function BloqueTarea({ t, h, internas, abierta }: { t: 
     <details className={'tarea-agente ' + estado} open={abierta}>
       <summary>
         <span className="punto-h" aria-label={estado} />
-        <span className="tarea-tipo">{T.NOMBRES[t.tipo || ''] || 'Tarea'}{t.subtipo ? ' · ' + t.subtipo : ''}{t.segundo_plano && t.tipo === 'subagente' ? ' · en segundo plano' : ''}</span>
+        <span className="tarea-tipo">{T.NOMBRES[t.tipo || ''] || 'Tarea'}{t.subtipo ? ' · ' + t.subtipo : ''}{t.segundo_plano && t.tipo === 'subagente' ? ' · en paralelo' : ''}</span>
         <span className="recorta">{t.titulo || h?.resumen || h?.nombre}</span>
         {estado === 'curso' && t.progreso && <span className="tarea-progreso recorta suave pequeno">{t.progreso}</span>}
         {estado === 'parada' && <span className="suave pequeno">parada</span>}

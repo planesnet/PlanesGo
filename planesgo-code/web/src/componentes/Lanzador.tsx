@@ -150,7 +150,7 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
         <div className="lanzador-programas">
           {vivos > 0
             ? <button className="icono" onClick={paraTodo} title={`Parar los programas en marcha (${vivos})`} aria-label="Parar los programas"><Icono n="parar" t={13} /></button>
-            : <button className="icono" onClick={ejecutaTodo} disabled={!cfg.length || !carpeta} title={cfg.length ? 'Ejecutar los programas del proyecto' : 'Guarda antes algún programa'} aria-label="Ejecutar los programas"><Icono n="ejecutar" t={13} /></button>}
+            : <button className="icono" onClick={ejecutaTodo} disabled={!cfg.length || !carpeta} title={cfg.length ? 'Ejecutar los programas del proyecto' : 'No hay programas guardados'} aria-label="Ejecutar los programas"><Icono n="ejecutar" t={13} /></button>}
           <button className="lanzador-cuenta" onClick={() => setVerProgramas(v => !v)} aria-expanded={verProgramas} title="Programas del proyecto">
             <span className={'punto ' + (vivos ? 'ok' : '')} /> {vivos}/{programas.length}<Icono n="bajar" t={10} />
           </button>
