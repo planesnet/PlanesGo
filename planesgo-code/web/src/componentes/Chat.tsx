@@ -6,6 +6,7 @@ import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
 import * as TS from '../todoSync';
+import * as PA from '../projectActivity';
 import TodoSyncList, { todoCount } from './TodoSyncList';
 import * as CO from '../costes';
 import { autoContextOn, contextPolicy, lastContext, relayAsBackup } from '../contextPolicy';
@@ -235,6 +236,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   useEffect(() => {
     idActual.current = sesion?.id;
     setMensajes(sesion ? vivas.current[sesion.id] || conversacion(sesion.id) : []);
+    if (sesion) PA.mark(sesion.proyecto, sesion.id, { unread: false }); // vista: ya no está «sin leer»
   }, [sesion?.id]);
 
   // Vigencia (prune.ts): cada mensaje y herramienta se desvanece según la suya, salvo con la gestión automática del
@@ -793,6 +795,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
     const ac = new AbortController();
     setEnCursos(x => ({ ...x, [id]: ac }));
+    PA.mark(ses.proyecto, id, { working: true }); // el proyecto se queda arriba en la lista mientras trabaja
     inicioTurno.current[id] = Date.now();
     if (inyectadosRef.current[id]) { const { [id]: _, ...resto } = inyectadosRef.current; inyectadosRef.current = resto; setInyectados(resto); }
     let sesionAgente = sesionPrevia;
@@ -978,6 +981,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
+      // Respuesta que el usuario no está viendo: el proyecto sigue arriba, marcado, hasta que abra la sesión.
+      PA.mark(ses.proyecto, id, { working: false, unread: idActual.current !== id && !ac.signal.aborted });
       // El nombre, del primer mensaje del usuario (no de uno que haya redactado pgocode, como «Pásaselo al agente»).
       alCambiarSesion({ ...ses, nombre: ses.nombre || (opc.generado ? '' : nombreDe(t || listos.map(a => a.nombre).join(", "))), sesionAgente, ultima: Date.now(), corte: undefined });
       if (!ac.signal.aborted && sesionAgente) refrescaVigencia(ses, sesionAgente);

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { identificador, lista as sesionesDe, ordenaConHijas, titulo, type Repo, type Sesion } from '../sesiones';
+import * as PA from '../projectActivity';
 import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Hosting } from './Marca';
@@ -83,6 +84,13 @@ export default function Proyectos(props: Props) {
     }
   }, [lista]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Proyectos con el agente trabajando o con respuestas sin ver (projectActivity.ts): se quedan arriba.
+  const [actividad, setActividad] = useState(PA.current());
+  useEffect(() => {
+    const f = () => setActividad(PA.current());
+    window.addEventListener(PA.PROJECT_ACTIVITY, f);
+    return () => window.removeEventListener(PA.PROJECT_ACTIVITY, f);
+  }, []);
   // Sin buscar: solo los recientes, en orden de uso. Buscando: todos los proyectos de Odoo.
   const buscando = filtro.trim() !== '';
   const visibles = useMemo(() => {
@@ -109,6 +117,8 @@ export default function Proyectos(props: Props) {
                 <button className="grupo-nombre recorta" onClick={() => alElegir(p)} title={(p.cliente?.nombre || 'Sin cliente') + (p.carpetas.length ? '\n' + p.carpetas.join('\n') : '')}>
                   {p.nombre}
                 </button>
+                {actividad[p.id]?.working.length ? <span className="proyecto-trabaja" title="El agente está trabajando en este proyecto" aria-label="Trabajando" />
+                  : actividad[p.id]?.unread.length ? <span className="proyecto-sin-leer" title="Hay respuestas del agente que aún no has visto" aria-label="Respuestas sin ver" /> : null}
                 <button className="icono grupo-nueva" onClick={() => props.alNuevaSesion(p)} title="Nueva sesión" aria-label={'Nueva sesión en ' + p.nombre}>
                   <Icono n="nuevo" t={14} />
                 </button>
@@ -148,12 +158,14 @@ export default function Proyectos(props: Props) {
             </span>
           </button>
         )) : <>
+          {/* Arriba: el proyecto abierto y los que tienen al agente trabajando o respuestas sin ver. */}
           {visibles.filter(p => p.id === actual?.id).map(grupo)}
+          {PA.order(visibles.filter(p => p.id !== actual?.id && PA.busy(actividad, p.id)), actividad).map(grupo)}
           {/* El resto de proyectos, pegados al borde inferior del panel. */}
-          {visibles.some(p => p.id !== actual?.id) && (
-            <div className={'otros-proyectos' + (visibles.some(p => p.id === actual?.id) ? '' : ' solos')}>
-              {visibles.some(p => p.id === actual?.id) && <p className="titulo-lista">Otros proyectos</p>}
-              {visibles.filter(p => p.id !== actual?.id).map(grupo)}
+          {visibles.some(p => p.id !== actual?.id && !PA.busy(actividad, p.id)) && (
+            <div className={'otros-proyectos' + (visibles.some(p => p.id === actual?.id || PA.busy(actividad, p.id)) ? '' : ' solos')}>
+              {visibles.some(p => p.id === actual?.id || PA.busy(actividad, p.id)) && <p className="titulo-lista">Otros proyectos</p>}
+              {visibles.filter(p => p.id !== actual?.id && !PA.busy(actividad, p.id)).map(grupo)}
             </div>
           )}
         </>}

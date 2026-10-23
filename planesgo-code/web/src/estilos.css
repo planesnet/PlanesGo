@@ -1087,3 +1087,8 @@ button.miga-item:hover { background: var(--hover); }
 .ctx-written { background: #d98a00; }
 .ctx-fresh { background: var(--error, #d33); }
 .ctx-fresh-txt { color: var(--error, #d33); }
+
+/* Lista de proyectos: trabajando (gira) o con respuestas sin ver (punto azul). */
+.proyecto-trabaja { width: 9px; height: 9px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento); animation: pensando-gira .8s linear infinite; }
+.proyecto-sin-leer { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--acento); }
+@media (prefers-reduced-motion: reduce) { .proyecto-trabaja { animation: none; } }
