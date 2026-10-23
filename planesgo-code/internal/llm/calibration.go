@@ -112,7 +112,7 @@ func (c *pruneCollector) params() vigParams { return vigParamsFor(c.state.Folder
 // noteTurn: un turno acabado en una sesión del proyecto: el primero y cada calibEvery, se recalibra en segundo
 // plano.
 func noteTurn(folder string) {
-	if folder == "" {
+	if folder == "" || !calibEnabled {
 		return
 	}
 	muVigParams.Lock()
@@ -125,7 +125,7 @@ func noteTurn(folder string) {
 	e.Turns++
 	due := e.Turns%calibEvery == 1
 	calibSave()
-	if due && calibEnabled && !calibQueued[folder] {
+	if due && !calibQueued[folder] {
 		select {
 		case calibQueue <- folder:
 			calibQueued[folder] = true
@@ -133,7 +133,7 @@ func noteTurn(folder string) {
 		}
 	}
 	muVigParams.Unlock()
-	if due && calibEnabled {
+	if due {
 		calibOnce.Do(func() { go calibWorker() })
 	}
 }
