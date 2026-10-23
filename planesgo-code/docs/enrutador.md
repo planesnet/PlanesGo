@@ -213,4 +213,6 @@ con el agente trabajando (con el agente libre no hay nada que interrumpir: en la
   Workspace). Un mensaje sobre Drive va al agente como cualquier otro. No hay función directa («busca en drive X»):
   la detección estricta de `direct.ts` reconoce mensajes que son *enteros* una orden fija, y aquí el resultado casi
   siempre lo necesita el agente en su contexto para seguir; leerlo él cuesta lo mismo que pegárselo después.
+  Igual **Gmail** (solo lectura): `pgo gmail buscar|listar|leer`, con su línea de uso solo en el mensaje que habla
+  del correo, el email, Gmail o la bandeja (no en «el campo email» y parecidos).
   Código: `internal/gworkspace`, `internal/servidor/google.go`, `cmd/pgocode/pgo.go`; ver `docs/google-workspace.md`.

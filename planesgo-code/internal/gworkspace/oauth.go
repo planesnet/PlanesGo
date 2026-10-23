@@ -43,8 +43,9 @@ const ClientFile = "google-oauth-client.json"
 // connDir: la carpeta (dentro de la de datos) de las conexiones de cada usuario.
 const connDir = "google"
 
-// OAuthScopes: lo que se pide a Google: la cuenta y leer Drive (nada más).
-const OAuthScopes = "openid email " + ScopeDriveReadonly
+// OAuthScopes: lo que se pide a Google: la cuenta, leer Drive y leer Gmail (nada más). En la pantalla de Google se
+// puede desmarcar Drive o Gmail: lo que quede marcado funciona y lo otro sale como no autorizado.
+const OAuthScopes = "openid email " + ScopeDriveReadonly + " " + ScopeGmailReadonly
 
 // Origen del cliente OAuth.
 const (
@@ -387,6 +388,8 @@ func (m *Manager) StartAuth(ctx context.Context, login string) (string, error) {
 		"state":                 {f.state},
 		"access_type":           {"offline"}, // para tener token de renovación
 		"prompt":                {"consent"}, // siempre lo da (también si ya se aceptó antes)
+		// Al volver a conectar (p. ej. para añadir Gmail), el token nuevo lleva también lo concedido antes.
+		"include_granted_scopes": {"true"},
 	}
 	if strings.Contains(login, "@") {
 		q.Set("login_hint", login)
@@ -443,7 +446,7 @@ func (m *Manager) callback(w http.ResponseWriter, r *http.Request, login string,
 		var msg string
 		switch e := q.Get("error"); {
 		case e == "access_denied":
-			msg = "Has cancelado el permiso en Google: pgocode sigue sin acceso a Drive."
+			msg = "Has cancelado el permiso en Google: pgocode no ha cambiado su acceso a tu cuenta."
 		case e != "":
 			msg = "Google no ha dado el permiso (" + firstLine(e+" "+q.Get("error_description")) + ")."
 		case q.Get("code") == "":
@@ -484,10 +487,10 @@ func (m *Manager) exchange(ctx context.Context, login string, client *OAuthClien
 	}
 	scopes := strings.Fields(t.Scope)
 	sort.Strings(scopes)
-	if !hasDrive(scopes) {
-		// En la pantalla de Google se pueden desmarcar permisos: sin Drive no sirve; se devuelve lo concedido.
+	if !hasDrive(scopes) && !hasGmail(scopes) {
+		// En la pantalla de Google se pueden desmarcar permisos: sin Drive ni Gmail no sirve; se devuelve lo concedido.
 		m.revoke(ctx, firstNonEmpty(t.RefreshToken, t.AccessToken))
-		return errors.New("No has marcado el permiso de ver tus ficheros de Google Drive: vuelve a conectar y márcalo")
+		return errors.New("No has marcado ningún permiso (ver tus ficheros de Google Drive o leer tu correo de Gmail): vuelve a conectar y márcalos.")
 	}
 	if t.RefreshToken == "" {
 		return errors.New("Google no ha dado un token de renovación: vuelve a conectar")
@@ -579,7 +582,7 @@ func page(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(code)
-	title, text := "pgocode ya puede leer tu Google Drive", "Conectado en solo lectura. Puedes cerrar esta pestaña y volver a pgocode."
+	title, text := "pgocode ya puede leer tu cuenta de Google", "Conectado en solo lectura. Puedes cerrar esta pestaña y volver a pgocode."
 	if msg != "" {
 		title, text = "No se ha podido conectar con Google", msg+" Puedes cerrar esta pestaña."
 	}

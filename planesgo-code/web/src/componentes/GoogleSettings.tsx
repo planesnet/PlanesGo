@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { get, post } from '../api';
 import Icono from './Icono';
-import { clientFileProblem, clientText, googleActions, googleStatusText, scopeNames, type GoogleStatus } from '../googleWorkspace';
+import { clientFileProblem, clientText, googleActions, googleServices, googleStatusText, scopeNames, type GoogleStatus } from '../googleWorkspace';
 
-// «Google Workspace» (Propiedades): Drive, Docs y Sheets en solo lectura para pgocode y sus agentes («pgo drive»).
+// «Google Workspace» (Propiedades): Drive, Docs, Sheets y Gmail en solo lectura para pgocode y sus agentes («pgo drive»,
+// «pgo gmail»). Cada servicio sale con su estado: si a la conexión le falta uno, «Volver a conectar» pide los dos.
 // Cada usuario conecta su cuenta con «Conectar con Google» (la página de Google se abre en el navegador del sistema:
 // Google no deja iniciar sesión en el navegador integrado). La aplicación de Google («PlanesGo») se registra una vez
 // por empresa; su fichero del cliente se carga aquí (botón o arrastrándolo), nunca pegado en un campo.
@@ -72,9 +73,10 @@ export default function GoogleSettings() {
   return <div className={'google-settings' + (dragging ? ' google-drop' : '')}
     onDragOver={e => { if (a.loadClient) { e.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={a.loadClient ? onDrop : undefined}>
     <h3>Google Workspace</h3>
-    <span className="suave pequeno">Drive, Docs y Sheets en <b>solo lectura</b>, para ti y para los agentes (<code>pgo drive buscar|listar|leer</code>), con tu cuenta de Google. El permiso se guarda solo en este equipo.</span>
+    <span className="suave pequeno">Drive, Docs, Sheets y Gmail en <b>solo lectura</b>, para ti y para los agentes (<code>pgo drive …</code>, <code>pgo gmail …</code>), con tu cuenta de Google. Los correos solo se leen cuando se piden; el permiso se guarda solo en este equipo.</span>
     <dl className="session-ids">
       <div><dt>Estado</dt><dd className={s?.conectado ? '' : 'aviso-txt'}>{busy && !s ? 'Comprobando…' : googleStatusText(s)}</dd></div>
+      {googleServices(s).map(x => <div key={x.name}><dt>{x.name}</dt><dd className={x.ok ? '' : 'aviso-txt'}>{x.text}</dd></div>)}
       {s?.conectado && !!s.ambitos?.length && <div><dt>Permisos</dt><dd>{scopeNames(s.ambitos).join(' · ')}</dd></div>}
       {s?.cliente && <div><dt>Aplicación de Google</dt><dd>{clientText(s)}</dd></div>}
     </dl>
@@ -90,7 +92,7 @@ export default function GoogleSettings() {
     {notice && <div className="suave pequeno" role="status">{notice}</div>}
     {error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
     <div className="fila-config app-actions">
-      {a.connect && <button type="button" className="primario" disabled={busy} onClick={connect}><Icono n="conectar" t={13} /> Conectar con Google</button>}
+      {a.connect && <button type="button" className="primario" disabled={busy} onClick={connect}><Icono n="conectar" t={13} /> {a.reconnect ? 'Volver a conectar' : 'Conectar con Google'}</button>}
       {a.disconnect && <button type="button" className="boton-secundario" disabled={busy} onClick={disconnect}><Icono n="desconectar" t={13} /> Desconectar</button>}
       {a.loadClient && <button type="button" className="boton-secundario" disabled={busy} onClick={() => fileInput.current?.click()}>
         <Icono n="carpeta" t={13} /> {s?.cliente ? 'Cambiar el fichero del cliente…' : 'Cargar el fichero del cliente…'}</button>}

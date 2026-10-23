@@ -206,6 +206,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))
 	mux.HandleFunc("GET /api/google", s.conSesion(s.googleEstado))
 	mux.HandleFunc("GET /api/google/{orden}", s.conSesion(s.googleDrive))
+	mux.HandleFunc("GET /api/google/gmail/{orden}", s.conSesion(s.googleGmail))
 	mux.HandleFunc("POST /api/google/conectar", s.conSesion(s.googleConecta))
 	mux.HandleFunc("POST /api/google/desconectar", s.conSesion(s.googleDesconecta))
 	mux.HandleFunc("POST /api/google/cliente", s.conSesion(s.googleCliente))

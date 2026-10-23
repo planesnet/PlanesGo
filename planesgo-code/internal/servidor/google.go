@@ -6,14 +6,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"planesgo-code/internal/gworkspace"
 	"planesgo-code/internal/sesiones"
 )
 
-// Google Workspace (Drive, Docs y Sheets), solo lectura, con la cuenta de Google que cada usuario de pgocode conecta
+// Google Workspace (Drive, Docs, Sheets y Gmail), solo lectura, con la cuenta de Google que cada usuario de pgocode conecta
 // («Conectar con Google»: OAuth de escritorio, internal/gworkspace). La interfaz ve el estado, conecta y desconecta;
-// el agente busca, lista y lee con «pgo drive …» (con la cuenta del usuario que usa la interfaz).
+// el agente busca, lista y lee con «pgo drive …» y «pgo gmail …» (con la cuenta del usuario que usa la interfaz).
 
 // GET /api/google[?probar=1]: el estado del acceso del usuario (cuenta, ámbitos, si falta el cliente…).
 func (s *Servidor) googleEstado(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
@@ -114,13 +115,58 @@ func (s *Servidor) driveOrden(w http.ResponseWriter, r *http.Request, orden stri
 	jsonOK(w, map[string]any{"texto": gworkspace.FormatFiles(fs), "ficheros": fs})
 }
 
-// driveStatus: el código HTTP de cada error.
+// GET /api/google/gmail/{orden}: buscar, listar o leer correos (desde la interfaz, con la cuenta del usuario).
+func (s *Servidor) googleGmail(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	s.gmailOrden(w, r.WithContext(gworkspace.WithUser(r.Context(), ses.Login)), r.PathValue("orden"))
+}
+
+// gmailOrden: buscar (q) | listar (lo reciente de la bandeja de entrada) | leer (ref; mensaje=1: solo ese mensaje),
+// solo lectura. Responde el texto compacto (el que ve el agente) y los datos. En el registro, solo la orden, cuántos
+// correos y cuánto ha tardado: nunca la consulta, los identificadores ni el contenido.
+func (s *Servidor) gmailOrden(w http.ResponseWriter, r *http.Request, orden string) {
+	if s.Google == nil {
+		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
+		return
+	}
+	q := r.URL.Query()
+	max, _ := strconv.Atoi(q.Get("max"))
+	t0 := time.Now()
+	var res map[string]any
+	var n int
+	var err error
+	switch orden {
+	case "buscar", "listar":
+		var l gworkspace.MailList
+		if orden == "buscar" {
+			l, err = s.Google.SearchMail(r.Context(), q.Get("q"), max)
+		} else {
+			l, err = s.Google.RecentMail(r.Context(), max)
+		}
+		n, res = len(l.Mails), map[string]any{"texto": gworkspace.FormatMails(l), "correos": l.Mails, "hay_mas": l.More}
+	case "leer":
+		var c gworkspace.MailContent
+		c, err = s.Google.ReadMail(r.Context(), gworkspace.MailReadParams{Ref: q.Get("ref"), MessageOnly: q.Get("mensaje") == "1", Max: max})
+		n, res = len(c.Messages), map[string]any{"texto": gworkspace.FormatMailContent(c), "recortado": c.Truncated}
+	default:
+		jsonError(w, http.StatusNotFound, "orden desconocida")
+		return
+	}
+	if err != nil {
+		log.Printf("gmail: %s falla tras %s", orden, time.Since(t0).Round(time.Millisecond))
+		jsonError(w, driveStatus(err), err.Error())
+		return
+	}
+	log.Printf("gmail: %s · %d correos · %s", orden, n, time.Since(t0).Round(time.Millisecond))
+	jsonOK(w, res)
+}
+
+// driveStatus: el código HTTP de cada error (Drive y Gmail).
 func driveStatus(err error) int {
 	var ae *gworkspace.APIError
 	switch {
-	case errors.Is(err, gworkspace.ErrNoAccess), errors.Is(err, gworkspace.ErrNoClient):
+	case errors.Is(err, gworkspace.ErrNoAccess), errors.Is(err, gworkspace.ErrNoClient), errors.Is(err, gworkspace.ErrNoGmail):
 		return http.StatusServiceUnavailable
-	case errors.Is(err, gworkspace.ErrNotFound):
+	case errors.Is(err, gworkspace.ErrNotFound), errors.Is(err, gworkspace.ErrMailNotFound):
 		return http.StatusNotFound
 	case errors.As(err, &ae):
 		return http.StatusBadGateway

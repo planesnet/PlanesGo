@@ -61,6 +61,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Programas', que: 'Los programas del proyecto (un Odoo, un servicio…) se definen en Propiedades de la sesión → Programas y se ejecutan o paran desde Actividad o el lanzador, sin tokens' },
       { clave: 'pgo ejecutar', que: 'El agente arranca un programa con «pgo ejecutar <nombre> <orden>» (lo para con «pgo parar <nombre>»): sale en Actividad con su salida' },
       { clave: 'pgo drive', que: 'El agente busca, lista y lee en Google Drive, Docs y Sheets (solo lectura): «pgo drive buscar <texto>», «pgo drive listar [carpeta]», «pgo drive leer <id|url> [--hoja X] [--rango A1:D20]». Basta con mencionar Drive, un documento de Google o pegar su URL. Acceso: Propiedades → Google Workspace → «Conectar con Google» (con tu cuenta; se guarda solo en este equipo)' },
+      { clave: 'pgo gmail', que: 'El agente busca y lee tu Gmail en solo lectura (no envía, borra ni marca nada): «pgo gmail buscar <consulta>» con la sintaxis de Gmail (from:ana newer_than:7d), «pgo gmail listar», «pgo gmail leer <id> [--mensaje]». Basta con mencionar el correo o la bandeja. Si Gmail sale sin autorizar: Propiedades → Google Workspace → «Volver a conectar»' },
       { clave: 'Copias de trabajo', que: 'Cada rama de una sesión vive en su copia (git worktree). Actividad las lista y deja quitar las que no pierden nada; las sesiones que la usaban se archivan' },
     ] },
     { titulo: 'En la interfaz', entradas: [

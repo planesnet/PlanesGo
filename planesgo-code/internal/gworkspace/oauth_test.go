@@ -117,7 +117,7 @@ func (o *fakeOAuth) browser(t *testing.T, authURL string, mutate func(q url.Valu
 		t.Fatal(err)
 	}
 	q := u.Query()
-	for k, v := range map[string]string{"client_id": testClientID, "response_type": "code", "scope": OAuthScopes, "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent"} {
+	for k, v := range map[string]string{"client_id": testClientID, "response_type": "code", "scope": OAuthScopes, "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"} {
 		if q.Get(k) != v {
 			t.Errorf("%s = %q", k, q.Get(k))
 		}
@@ -152,7 +152,7 @@ func newOAuthTest(t *testing.T) (*Manager, *fakeOAuth) {
 		codes: map[string]string{}, redirects: map[string]string{}, refresh: map[string]string{}}
 	srv := httptest.NewServer(o.handler(t))
 	t.Cleanup(srv.Close)
-	m := &Manager{Endpoints: Endpoints{TokenInfo: srv.URL + "/tokeninfo", Drive: srv.URL + "/drive/v3", Sheets: srv.URL + "/sheets/v4",
+	m := &Manager{Endpoints: Endpoints{TokenInfo: srv.URL + "/tokeninfo", Drive: srv.URL + "/drive/v3", Sheets: srv.URL + "/sheets/v4", Gmail: srv.URL + "/gmail/v1",
 		Auth: srv.URL + "/oauth/auth", Token: srv.URL + "/oauth/token", Revoke: srv.URL + "/oauth/revoke"},
 		HTTP: srv.Client(), Dir: t.TempDir()}
 	return m, o
@@ -169,7 +169,7 @@ func connect(t *testing.T, m *Manager, o *fakeOAuth, login string) {
 		t.Fatalf("en curso: %+v", st)
 	}
 	code, body := o.browser(t, u, nil)
-	if code != 200 || !strings.Contains(body, "ya puede leer tu Google Drive") {
+	if code != 200 || !strings.Contains(body, "ya puede leer tu cuenta de Google") {
 		t.Fatalf("%d %s", code, body)
 	}
 }
@@ -402,12 +402,12 @@ func TestOAuthCallbackErrors(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 
-	// Desmarca el permiso de Drive: no sirve, se revoca lo concedido y no se guarda nada.
+	// Desmarca Drive y Gmail: no sirve, se revoca lo concedido y no se guarda nada.
 	o.mu.Lock()
 	o.scope = "openid https://www.googleapis.com/auth/userinfo.email"
 	o.mu.Unlock()
 	u, _ = m.StartAuth(ctx, "luis")
-	if _, body := o.browser(t, u, nil); !strings.Contains(body, "permiso de ver tus ficheros") {
+	if _, body := o.browser(t, u, nil); !strings.Contains(body, "ningún permiso") {
 		t.Fatal(body)
 	}
 	if st := m.Status(ctx, "luis", false); st.Connected || !strings.Contains(st.Problem, "Drive") || m.hasConnection("luis") || len(o.revoked) != 1 {

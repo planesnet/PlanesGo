@@ -1,11 +1,15 @@
 package servidor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"planesgo-code/internal/gworkspace"
@@ -58,6 +62,90 @@ func TestPgoDrive(t *testing.T) {
 	// La interfaz sin sesión: nada.
 	if c, _ := pide("GET", "/api/google", ""); c == http.StatusOK {
 		t.Fatal("estado sin sesión")
+	}
+}
+
+// El agente busca y lee en Gmail con el token de su proyecto («pgo gmail …»); solo GET; el registro dice cuántos
+// correos y cuánto ha tardado, nunca la consulta ni el contenido.
+func TestPgoGmail(t *testing.T) {
+	var mu sync.Mutex
+	scope := gworkspace.ScopeDriveReadonly + " " + gworkspace.ScopeGmailReadonly
+	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.URL.Path != "/tokeninfo" {
+			t.Errorf("petición que no es de lectura: %s %s", r.Method, r.URL.Path)
+		}
+		switch {
+		case r.URL.Path == "/tokeninfo":
+			mu.Lock()
+			sc := scope
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]string{"scope": sc, "email": "luis@planesnet.com", "expires_in": "3600"})
+		case r.URL.Path == "/gmail/v1/users/me/messages" && r.URL.Query().Get("q") == "from:ana":
+			w.Write([]byte(`{"messages":[{"id":"18f0000000000001","threadId":"18f0000000000001"}]}`))
+		case r.URL.Path == "/gmail/v1/users/me/messages/18f0000000000001":
+			w.Write([]byte(`{"id":"18f0000000000001","threadId":"18f0000000000001","snippet":"secreto del correo","internalDate":"1760961780000",` +
+				`"payload":{"mimeType":"text/plain","headers":[{"name":"From","value":"Ana <ana@x.es>"},{"name":"Subject","value":"Asunto confidencial"}],"body":{"data":"Q3VlcnBvIGNvbmZpZGVuY2lhbA=="}}}`))
+		default:
+			w.WriteHeader(404)
+			w.Write([]byte(`{"error":{"code":404,"message":"Not found"}}`))
+		}
+	}))
+	defer g.Close()
+	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(),
+		Google: &gworkspace.Manager{Endpoints: gworkspace.Endpoints{TokenInfo: g.URL + "/tokeninfo", Gmail: g.URL + "/gmail/v1"},
+			HTTP: g.Client(), Fetch: func(context.Context, string) (string, error) { return "tok", nil }}}
+	h := s.Handler()
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	pide := func(ruta, token string) (int, string) {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:7801"+ruta, nil)
+		r.Header.Set("X-PGO", "1")
+		if token != "" {
+			r.Header.Set("X-PGO-Agente", token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	if c, _ := pide("/api/pgo/gmail-buscar?q=from%3Aana&proyecto=7", ""); c != http.StatusForbidden {
+		t.Fatalf("sin token: %d", c)
+	}
+	c, b := pide("/api/pgo/gmail-buscar?q=from%3Aana&proyecto=7", s.tokenProyecto(7))
+	if c != http.StatusOK || !strings.Contains(b, " · Asunto confidencial · 18f0000000000001") {
+		t.Fatalf("%d %s", c, b)
+	}
+	c, b = pide("/api/pgo/gmail-leer?ref=18f0000000000001&mensaje=1&proyecto=7", s.tokenProyecto(7))
+	if c != http.StatusOK || !strings.Contains(b, "Cuerpo confidencial") {
+		t.Fatalf("%d %s", c, b)
+	}
+	if c, b := pide("/api/pgo/gmail-leer?ref=18f0000000000999&proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound || !strings.Contains(b, "no existe ese correo") {
+		t.Fatalf("%d %s", c, b)
+	}
+	for _, o := range []string{"enviar", "borrar", "marcar"} {
+		if c, _ := pide("/api/pgo/gmail-"+o+"?proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound {
+			t.Fatalf("%s: %d", o, c)
+		}
+	}
+	l := logs.String()
+	if !strings.Contains(l, "gmail: buscar · 1 correos") || !strings.Contains(l, "gmail: leer · 1 correos") {
+		t.Errorf("registro: %s", l)
+	}
+	for _, secret := range []string{"ana", "confidencial", "secreto", "18f0000000000001", "from"} {
+		if strings.Contains(strings.ToLower(l), secret) {
+			t.Errorf("el registro lleva %q: %s", secret, l)
+		}
+	}
+	// Sin el permiso de Gmail: 503 con qué hacer.
+	mu.Lock()
+	scope = gworkspace.ScopeDriveReadonly
+	mu.Unlock()
+	s.Google.Fetch = func(context.Context, string) (string, error) { return "tok2", nil }
+	if st := s.Google.Status(context.Background(), "luis", true); !st.Connected || st.Gmail || !st.Drive {
+		t.Fatalf("%+v", st)
+	}
+	if c, b := pide("/api/pgo/gmail-listar?proyecto=7", s.tokenProyecto(7)); c != http.StatusServiceUnavailable || !strings.Contains(b, "Gmail no está autorizado") {
+		t.Fatalf("%d %s", c, b)
 	}
 }
 

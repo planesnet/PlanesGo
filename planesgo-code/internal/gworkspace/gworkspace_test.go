@@ -20,6 +20,8 @@ type fakeGoogle struct {
 	expired   map[string]bool   // token que la API rechaza con 401
 	needQuota bool              // Drive exige x-goog-user-project
 	noSheets  bool              // la API de Sheets no está habilitada
+	noGmail   bool              // la API de Gmail no está habilitada
+	gmailDeny bool              // Gmail dice que el token no tiene el ámbito (aunque el token diga que sí)
 	calls     []string
 	quotaSeen string
 }
@@ -156,6 +158,7 @@ func (g *fakeGoogle) handler(t *testing.T) http.Handler {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"valueRanges": vrs})
 	})
+	g.gmailRoutes(t, mux, auth)
 	return mux
 }
 
@@ -165,7 +168,7 @@ func newTest(t *testing.T, g *fakeGoogle, fetch map[string]string) (*Manager, *i
 	t.Cleanup(srv.Close)
 	n := new(int)
 	var mu sync.Mutex
-	m := &Manager{Endpoints: Endpoints{TokenInfo: srv.URL + "/tokeninfo", Drive: srv.URL + "/drive/v3", Sheets: srv.URL + "/sheets/v4"},
+	m := &Manager{Endpoints: Endpoints{TokenInfo: srv.URL + "/tokeninfo", Drive: srv.URL + "/drive/v3", Sheets: srv.URL + "/sheets/v4", Gmail: srv.URL + "/gmail/v1"},
 		HTTP: srv.Client(), QuotaProject: "planes-dev",
 		Fetch: func(_ context.Context, src string) (string, error) {
 			mu.Lock()
@@ -396,6 +399,8 @@ func TestParseRef(t *testing.T) {
 //
 //	PGO_PRUEBA_GOOGLE=1 PGO_PRUEBA_GOOGLE_DATOS=<carpeta con google-oauth-client.json> \
 //	  [PGO_PRUEBA_GOOGLE_USUARIO=luis@planesnet.com] [PGO_PRUEBA_GOOGLE_REF=<id o url>] [PGO_PRUEBA_GOOGLE_DESCONECTAR=1] \
+//	  [PGO_PRUEBA_GOOGLE_RECONECTAR=1 (vuelve a pedir el permiso aunque ya esté conectado: para añadir Gmail)] \
+//	  [PGO_PRUEBA_GOOGLE_CORREO=<consulta de Gmail> (si no, lo reciente de la bandeja)] \
 //	  go test ./internal/gworkspace -run Real -v -timeout 10m
 //
 // Si el usuario no está conectado, escribe la URL de Google (ábrela en el navegador y acepta) y espera 5 minutos.
@@ -415,7 +420,7 @@ func TestReal(t *testing.T) {
 	m.Fetch = nil // sin el respaldo de gcloud: se prueba la conexión propia
 	ctx := WithUser(context.Background(), login)
 	st := m.Status(ctx, login, true)
-	if !st.Connected {
+	if !st.Connected || os.Getenv("PGO_PRUEBA_GOOGLE_RECONECTAR") == "1" {
 		u, err := m.StartAuth(ctx, login)
 		if err != nil {
 			t.Fatal(err)
@@ -431,17 +436,44 @@ func TestReal(t *testing.T) {
 	if !st.Connected {
 		t.Fatal(st.Problem)
 	}
-	fs, err := m.List(ctx, "", 5)
-	if err != nil {
-		t.Fatal(err)
+	if st.Drive {
+		fs, err := m.List(ctx, "", 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log("\n" + FormatFiles(fs))
+	} else {
+		t.Log("Drive sin autorizar en esta conexión")
 	}
-	t.Log("\n" + FormatFiles(fs))
-	if ref := os.Getenv("PGO_PRUEBA_GOOGLE_REF"); ref != "" {
+	if ref := os.Getenv("PGO_PRUEBA_GOOGLE_REF"); ref != "" && st.Drive {
 		c, err := m.Read(ctx, ReadParams{Ref: ref, Max: 2000})
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Log("\n" + FormatContent(c))
+	}
+	// Gmail (si la conexión lo tiene): lo reciente de la bandeja (o la consulta dada) y el primero, recortado.
+	if !st.Gmail {
+		t.Log("Gmail sin autorizar en esta conexión (vuelve a conectar para pedirlo)")
+	} else {
+		var l MailList
+		var err error
+		if q := os.Getenv("PGO_PRUEBA_GOOGLE_CORREO"); q != "" {
+			l, err = m.SearchMail(ctx, q, 3)
+		} else {
+			l, err = m.RecentMail(ctx, 3)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log("\n" + FormatMails(l))
+		if len(l.Mails) > 0 {
+			c, err := m.ReadMail(ctx, MailReadParams{Ref: l.Mails[0].ThreadID, Max: 1500})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Log("\n" + FormatMailContent(c))
+		}
 	}
 	if os.Getenv("PGO_PRUEBA_GOOGLE_DESCONECTAR") == "1" {
 		if err := m.Disconnect(ctx, login); err != nil {

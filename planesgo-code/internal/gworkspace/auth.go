@@ -1,4 +1,5 @@
-// Package gworkspace: acceso de SOLO LECTURA a Google Workspace (Drive, Docs y Sheets) para pgocode y sus agentes.
+// Package gworkspace: acceso de SOLO LECTURA a Google Workspace (Drive, Docs, Sheets y Gmail) para pgocode y sus
+// agentes.
 //
 // Camino principal (oauth.go): la aplicación OAuth «PlanesGo» (cliente de escritorio registrado una vez por la
 // empresa) y, por cada usuario de pgocode, «Conectar con Google»: el navegador del sistema enseña la pantalla de
@@ -36,14 +37,22 @@ const (
 	ScopeDrive         = "https://www.googleapis.com/auth/drive"
 )
 
+// Ámbitos de Gmail que permiten leer los correos (pgocode pide solo el de lectura; los otros, si el token de gcloud
+// los lleva, también sirven: pgocode solo hace GET).
+const (
+	ScopeGmailReadonly = "https://www.googleapis.com/auth/gmail.readonly"
+	scopeGmailModify   = "https://www.googleapis.com/auth/gmail.modify"
+	scopeMailFull      = "https://mail.google.com/"
+)
+
 // EnvQuotaProject: el proyecto de cuota (cabecera x-goog-user-project) si no vale el de por defecto.
 const EnvQuotaProject = "PGOCODE_GOOGLE_QUOTA_PROJECT"
 
 // Endpoints de Google (en las pruebas, los de un servidor simulado). Los de OAuth son fijos (no los del fichero del
 // cliente): así un fichero manipulado no puede mandar el secreto ni los tokens a otro sitio.
 type Endpoints struct {
-	TokenInfo, Drive, Sheets string
-	Auth, Token, Revoke      string
+	TokenInfo, Drive, Sheets, Gmail string
+	Auth, Token, Revoke             string
 }
 
 // GoogleEndpoints: los de verdad.
@@ -51,6 +60,7 @@ var GoogleEndpoints = Endpoints{
 	TokenInfo: "https://oauth2.googleapis.com/tokeninfo",
 	Drive:     "https://www.googleapis.com/drive/v3",
 	Sheets:    "https://sheets.googleapis.com/v4",
+	Gmail:     "https://gmail.googleapis.com/gmail/v1",
 	Auth:      "https://accounts.google.com/o/oauth2/v2/auth",
 	Token:     "https://oauth2.googleapis.com/token",
 	Revoke:    "https://oauth2.googleapis.com/revoke",
@@ -67,6 +77,10 @@ const (
 var (
 	ErrNoGcloud = errors.New("no está la herramienta gcloud de Google en este equipo")
 	ErrNoAccess = errors.New("no hay acceso de lectura a Google Drive: conecta tu cuenta de Google en pgocode (Propiedades → Google Workspace → Conectar con Google)")
+	// ErrNoGmail: la cuenta conectada no ha dado permiso de leer el correo (o no hay cuenta conectada).
+	ErrNoGmail = errors.New("Gmail no está autorizado: en pgocode, Propiedades → Google Workspace → «Volver a conectar» (o «Conectar con Google») y marca el permiso de leer tu correo")
+	// errNoDriveScope: la cuenta está conectada, pero sin el permiso de Drive (se desmarcó en Google).
+	errNoDriveScope = fmt.Errorf("%w (la conexión no incluye el permiso de Drive: vuelve a conectar y márcalo)", ErrNoAccess)
 )
 
 // TokenInfo: lo que dice Google de un token (sin el token).
@@ -204,26 +218,25 @@ func hasDrive(scopes []string) bool {
 	return contains(scopes, ScopeDriveReadonly) || contains(scopes, ScopeDrive)
 }
 
-// token devuelve un token con acceso a Drive: el de la conexión propia del usuario o, si no tiene, el de gcloud.
-func (m *Manager) token(ctx context.Context) (string, error) {
+// hasGmail: los ámbitos permiten leer el correo.
+func hasGmail(scopes []string) bool {
+	return contains(scopes, ScopeGmailReadonly) || contains(scopes, scopeGmailModify) || contains(scopes, scopeMailFull)
+}
+
+// token devuelve el token de esta petición: el de la conexión propia del usuario o, si no tiene, el de gcloud (con
+// sus ámbitos, para saber si sirve para Drive o para Gmail).
+func (m *Manager) token(ctx context.Context) (*cachedToken, error) {
 	if u := m.userFor(ctx); u != "" {
-		c, err := m.oauthToken(ctx, u)
-		if err != nil {
-			return "", err
-		}
-		return c.token, nil
+		return m.oauthToken(ctx, u)
 	}
 	m.mu.Lock()
 	if c := m.cached; c != nil && m.now().Before(c.info.Expiry) {
 		m.mu.Unlock()
-		return c.token, nil
+		return c, nil
 	}
 	m.mu.Unlock()
 	c, _, err := m.resolve(ctx)
-	if err != nil {
-		return "", err
-	}
-	return c.token, nil
+	return c, err
 }
 
 // resolve pide el token a gcloud (respaldo): el de ADC y, si no lleva Drive, el de la sesión de gcloud. Sin gcloud
@@ -311,7 +324,9 @@ func (m *Manager) tokenInfo(ctx context.Context, tok string) (TokenInfo, error) 
 
 // Status: lo que ve la interfaz (nunca un token ni el secreto del cliente).
 type Status struct {
-	Connected     bool     `json:"conectado"`                  // hay un token que puede leer Drive
+	Connected     bool     `json:"conectado"`                  // hay un token que puede leer Drive o Gmail
+	Drive         bool     `json:"drive"`                      // puede leer Drive (también Docs y Sheets)
+	Gmail         bool     `json:"gmail"`                      // puede leer el correo (Gmail)
 	Email         string   `json:"email,omitempty"`            // la cuenta de Google
 	Scopes        []string `json:"ambitos,omitempty"`          // los del token
 	Source        string   `json:"fuente,omitempty"`           // oauth | adc | gcloud
@@ -363,6 +378,7 @@ func (m *Manager) Status(ctx context.Context, login string, fresh bool) Status {
 			st.Scopes = c.info.Scopes
 		}
 		st.ReadOnly = contains(st.Scopes, ScopeDriveReadonly) && !contains(st.Scopes, ScopeDrive)
+		st.Drive, st.Gmail = hasDrive(st.Scopes), hasGmail(st.Scopes)
 		return st
 	}
 	// Sin conexión propia: el respaldo de gcloud, en silencio (sin enseñar sus errores).
@@ -385,6 +401,7 @@ func (m *Manager) Status(ctx context.Context, login string, fresh bool) Status {
 	}
 	st.Connected, st.Source, st.Email, st.Scopes = true, c.source, info.Email, info.Scopes
 	st.ReadOnly = contains(info.Scopes, ScopeDriveReadonly) && !contains(info.Scopes, ScopeDrive)
+	st.Drive, st.Gmail = hasDrive(info.Scopes), hasGmail(info.Scopes)
 	return st
 }
 

@@ -384,7 +384,8 @@ func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
 	return ok && p.Proyecto == proyecto
 }
 
-// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir y drive-buscar|listar|leer.
+// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-buscar|listar|leer y
+// gmail-buscar|listar|leer.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	var p struct {
 		Proyecto int    `json:"proyecto"`
@@ -413,6 +414,11 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	// Google Drive (solo lectura): pgo drive buscar|listar|leer.
 	if o, ok := strings.CutPrefix(r.PathValue("orden"), "drive-"); ok && r.Method == http.MethodGet {
 		s.driveOrden(w, r, o)
+		return
+	}
+	// Gmail (solo lectura): pgo gmail buscar|listar|leer.
+	if o, ok := strings.CutPrefix(r.PathValue("orden"), "gmail-"); ok && r.Method == http.MethodGet {
+		s.gmailOrden(w, r, o)
 		return
 	}
 	switch r.PathValue("orden") {

@@ -22,13 +22,25 @@ const driveHint = "(pgocode: para Google Drive/Docs/Sheets usa la orden de termi
 // cuentan (la carpeta docs/, las hojas de estilo).
 var driveWords = regexp.MustCompile(`(?i)\bdrive\b|\bgoogle\s+(?:docs?|sheets?|slides)\b|\b(?:docs|drive|sheets)\.google\.com\b|\b(?:documentos?|docs?|hojas?|hojas?\s+de\s+c[aá]lculo)\s+de\s+google\b`)
 
+// gmailHint: el uso de «pgo gmail» (Gmail en solo lectura).
+const gmailHint = "(pgocode: para el correo de Gmail usa la orden de terminal «pgo» (solo lectura, con la cuenta de Google del usuario; no envía ni modifica nada): " +
+	"`pgo gmail buscar <consulta con la sintaxis de Gmail, p. ej. from:ana newer_than:7d>` [--max N]; `pgo gmail listar` (lo reciente de la bandeja); " +
+	"`pgo gmail leer <id de mensaje o hilo> [--mensaje] [--max N]` (el hilo sin lo citado; recorta a 20000 caracteres).)"
+
+// gmailWords: el mensaje habla del correo del usuario (Gmail, correos, email, la bandeja…).
+var gmailWords = regexp.MustCompile(`(?i)\bgmail\b|\bcorreos?\b|\be-?mails?\b|\bbandeja\b|\binbox\b|\bbuz[oó]n\b|\bmail\.google\.com\b`)
+
+// mailNoise: «email» o «correo» como dato de un programa (un campo, una columna, user.email…), no el correo del
+// usuario: se quita antes de buscar gmailWords.
+var mailNoise = regexp.MustCompile(`(?i)\b(?:campos?|field|columnas?|column|atributos?|propiedad|variables?|par[aá]metros?|validaci[oó]n|valida[rd]?|formato|tipo|plantillas?)\s+(?:(?:el|la|los|las|un|una|de|del|de\s+la)\s+)?(?:correo(?:\s+electr[oó]nico)?|e-?mail)\b|[\w)\]]\.e-?mail\b|\be-?mail\s*[(:=]`)
+
 var (
 	pgoWord = regexp.MustCompile(`(?i)\bpgo\b`)
 	pgoVerb = regexp.MustCompile(`(?i)\bpgo\s+(?:ejecutar|parar|procesos|salida|abrir)\b|\b(?:ejecut|arranc|lanz|levant|parar|det[eé]n|salida|abr[eií]|procesos?|programas?|servidor)`)
 )
 
 // pgoHintFor: la línea de uso de «pgo» si el mensaje la menciona (ejecutar, parar, salida, abrir…) y la de
-// «pgo drive» si habla de Google Drive, Docs o Sheets; "" si nada. Las órdenes («/pgo …», la skill de imputación)
+// «pgo drive» si habla de Google Drive, Docs o Sheets y la de «pgo gmail» si habla del correo; "" si nada. Las órdenes («/pgo …», la skill de imputación)
 // no cuentan.
 func pgoHintFor(text string) string {
 	t := strings.TrimSpace(text)
@@ -41,6 +53,9 @@ func pgoHintFor(text string) string {
 	}
 	if driveWords.MatchString(t) {
 		hs = append(hs, driveHint)
+	}
+	if gmailWords.MatchString(mailNoise.ReplaceAllString(t, " ")) {
+		hs = append(hs, gmailHint)
 	}
 	return strings.Join(hs, "\n")
 }

@@ -2,20 +2,21 @@
 // node --test src/googleWorkspace.test.ts
 
 export interface GoogleStatus {
-  conectado: boolean; email?: string; ambitos?: string[]; fuente?: 'oauth' | 'adc' | 'gcloud'; solo_lectura?: boolean;
+  conectado: boolean; drive?: boolean; gmail?: boolean; email?: string; ambitos?: string[]; fuente?: 'oauth' | 'adc' | 'gcloud'; solo_lectura?: boolean;
   desde?: string; cliente: boolean; cliente_origen?: 'fichero' | 'servidor'; cliente_proyecto?: string;
   en_curso?: boolean; problema?: string;
 }
 
 const DRIVE_RO = 'https://www.googleapis.com/auth/drive.readonly';
 const DRIVE = 'https://www.googleapis.com/auth/drive';
+const GMAIL_RO = 'https://www.googleapis.com/auth/gmail.readonly';
 
 // googleStatusText: el estado en una línea.
 export function googleStatusText(s: GoogleStatus | null): string {
   if (!s) return '—';
   if (s.en_curso) return 'Esperando a que aceptes en la página de Google…';
   if (s.conectado) {
-    const access = s.solo_lectura ? 'solo lectura de Drive' : 'Drive completo (pgocode solo lee)';
+    const access = s.drive && !s.solo_lectura ? 'Drive completo (pgocode solo lee)' : 'solo lectura';
     if (s.fuente !== 'oauth') return `Con las credenciales de Google de este equipo${s.email ? ` (${s.email})` : ''} · ${access}`;
     return `Conectado como ${s.email || 'tu cuenta de Google'} · ${access}`;
   }
@@ -23,11 +24,23 @@ export function googleStatusText(s: GoogleStatus | null): string {
   return 'Sin conectar';
 }
 
-// googleActions: qué botones enseña la sección.
-export function googleActions(s: GoogleStatus | null): { connect: boolean; disconnect: boolean; loadClient: boolean } {
-  if (!s) return { connect: false, disconnect: false, loadClient: false };
+// googleActions: qué botones enseña la sección. reconnect: la cuenta está conectada pero le falta un permiso (p. ej.
+// conectada antes de que pgocode leyera Gmail): el botón de conectar dice «Volver a conectar» (pide los dos).
+export function googleActions(s: GoogleStatus | null): { connect: boolean; reconnect: boolean; disconnect: boolean; loadClient: boolean } {
+  if (!s) return { connect: false, reconnect: false, disconnect: false, loadClient: false };
   const own = s.conectado && s.fuente === 'oauth';
-  return { connect: s.cliente && !own && !s.en_curso, disconnect: own, loadClient: !s.cliente || s.cliente_origen === 'fichero' };
+  const reconnect = own && (!s.drive || !s.gmail);
+  return { connect: s.cliente && (!own || reconnect) && !s.en_curso, reconnect, disconnect: own, loadClient: !s.cliente || s.cliente_origen === 'fichero' };
+}
+
+export interface GoogleService { name: string; ok: boolean; text: string }
+
+// googleServices: Drive y Gmail con su estado (solo si hay acceso a Google).
+export function googleServices(s: GoogleStatus | null): GoogleService[] {
+  if (!s?.conectado) return [];
+  const missing = s.fuente === 'oauth' ? 'sin autorizar: «Volver a conectar» y marca el permiso en la página de Google' : 'sin autorizar: conecta tu cuenta de Google';
+  const row = (name: string, ok: boolean, what: string): GoogleService => ({ name, ok, text: ok ? `autorizado · ${what}` : missing });
+  return [row('Drive, Docs y Sheets', Boolean(s.drive), 'pgo drive'), row('Gmail', Boolean(s.gmail), 'pgo gmail (solo leer: no envía ni marca nada)')];
 }
 
 // scopeNames: los ámbitos del token en palabras cortas.
@@ -35,6 +48,7 @@ export function scopeNames(ambitos?: string[]): string[] {
   return (ambitos || []).map(a => {
     if (a === DRIVE_RO) return 'Drive (solo lectura)';
     if (a === DRIVE) return 'Drive';
+    if (a === GMAIL_RO) return 'Gmail (solo lectura)';
     if (a === 'openid') return 'identidad';
     if (a.endsWith('/userinfo.email') || a === 'email') return 'correo';
     if (a.endsWith('/cloud-platform')) return 'Google Cloud';

@@ -77,17 +77,44 @@ const fileFields = "id,name,mimeType,modifiedTime,size,webViewLink,owners(emailA
 
 // ---- peticiones ----
 
-// get hace un GET autenticado y devuelve como mucho limit bytes (truncated: había más). Si Google rechaza el token,
-// pide otro una vez; si pide un proyecto de cuota, lo manda desde entonces.
+// api: a qué API va una petición (decide qué permiso hace falta y qué se dice si falta).
+type api int
+
+const (
+	apiDrive api = iota // Drive y Sheets
+	apiGmail
+)
+
+// get hace un GET autenticado a Drive o Sheets (ver getAPI).
 func (m *Manager) get(ctx context.Context, u string, limit int64) (body []byte, truncated bool, err error) {
+	return m.getAPI(ctx, apiDrive, u, limit)
+}
+
+// getAPI hace un GET autenticado y devuelve como mucho limit bytes (truncated: había más). Si el token no lleva el
+// permiso de esa API, ni lo intenta. Si Google rechaza el token, pide otro una vez; si pide un proyecto de cuota, lo
+// manda desde entonces. Solo GET: nada que escriba, envíe, borre ni marque.
+func (m *Manager) getAPI(ctx context.Context, which api, u string, limit int64) (body []byte, truncated bool, err error) {
+	noAccess, hint := ErrNoAccess, "Hay que habilitar las APIs de Google Drive y Google Sheets en el proyecto de Google Cloud de la aplicación (consola de Google Cloud → APIs y servicios)"
+	if which == apiGmail {
+		noAccess, hint = ErrNoGmail, "Hay que habilitar la API de Gmail en el proyecto de Google Cloud de la aplicación (consola de Google Cloud → APIs y servicios)"
+	}
 	retried, quotaTried := false, false
 	for {
-		tok, err := m.token(ctx)
+		c, err := m.token(ctx)
 		if err != nil {
+			if which == apiGmail && errors.Is(err, ErrNoAccess) {
+				return nil, false, ErrNoGmail
+			}
 			return nil, false, err
 		}
+		switch {
+		case which == apiGmail && !hasGmail(c.info.Scopes):
+			return nil, false, ErrNoGmail
+		case which == apiDrive && c.source == SourceOAuth && !hasDrive(c.info.Scopes):
+			return nil, false, errNoDriveScope
+		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Authorization", "Bearer "+c.token)
 		m.mu.Lock()
 		quota := m.useQuota && m.QuotaProject != ""
 		m.mu.Unlock()
@@ -121,13 +148,15 @@ func (m *Manager) get(ctx context.Context, u string, limit int64) (body []byte, 
 			m.useQuota = true
 			m.mu.Unlock()
 			continue
+		case res.StatusCode == http.StatusNotFound && which == apiGmail:
+			return nil, false, ErrMailNotFound
 		case res.StatusCode == http.StatusNotFound:
 			return nil, false, ErrNotFound
 		case res.StatusCode == http.StatusForbidden && (e.Reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT" || e.Reason == "insufficientPermissions"):
 			m.forget(ctx)
-			return nil, false, ErrNoAccess
+			return nil, false, noAccess
 		case res.StatusCode == http.StatusForbidden && needsQuota(e):
-			e.Hint = "Hay que habilitar las APIs de Google Drive y Google Sheets en el proyecto de Google Cloud de la aplicación (consola de Google Cloud → APIs y servicios)"
+			e.Hint = hint
 		}
 		return nil, false, e
 	}
@@ -170,7 +199,11 @@ func apiError(code int, body []byte) *APIError {
 }
 
 func (m *Manager) getJSON(ctx context.Context, u string, v any) error {
-	b, trunc, err := m.get(ctx, u, maxDownload)
+	return m.getAPIJSON(ctx, apiDrive, u, v)
+}
+
+func (m *Manager) getAPIJSON(ctx context.Context, which api, u string, v any) error {
+	b, trunc, err := m.getAPI(ctx, which, u, maxDownload)
 	if err != nil {
 		return err
 	}

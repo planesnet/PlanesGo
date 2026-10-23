@@ -28,6 +28,12 @@ Google Drive, Docs y Sheets (solo lectura, con la cuenta de Google del usuario):
   pgo drive listar [<carpeta id|url>]       sin carpeta: «Mi unidad»
   pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
                                    Docs en Markdown, Sheets en CSV; recorta a 40000 caracteres (--max)
+
+Gmail (solo lectura: no envía, borra ni marca nada):
+  pgo gmail buscar <consulta de Gmail> [--max N]   p. ej. from:ana newer_than:7d, subject:factura has:attachment
+  pgo gmail listar [--max N]                       lo más reciente de la bandeja de entrada
+  pgo gmail leer <id de mensaje o hilo> [--mensaje] [--max N]
+                                   el hilo entero (sin lo citado) o, con --mensaje, solo ese; recorta a 20000 caracteres
 `
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
@@ -168,11 +174,82 @@ func pgo(args []string) int {
 		var r struct{ Texto string }
 		json.Unmarshal(raw, &r)
 		fmt.Print(r.Texto)
+	case "gmail":
+		orden, q, err := gmailQuery(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "pgo gmail:", err)
+			fmt.Fprint(os.Stderr, ayudaPgo)
+			return 2
+		}
+		raw, err := llama("GET", "gmail-"+orden, nil, q)
+		if err != nil {
+			return falla(err)
+		}
+		var r struct{ Texto string }
+		json.Unmarshal(raw, &r)
+		fmt.Print(r.Texto)
 	default:
 		fmt.Fprint(os.Stderr, ayudaPgo)
 		return 2
 	}
 	return 0
+}
+
+// gmailQuery: la orden (buscar | listar | leer) y los parámetros de «pgo gmail …». La consulta va tal cual a Gmail
+// (sus operadores: from:, to:, subject:, newer_than:, has:attachment, is:unread…).
+func gmailQuery(args []string) (string, url.Values, error) {
+	if len(args) == 0 {
+		return "", nil, fmt.Errorf("falta la orden (buscar, listar o leer)")
+	}
+	orden, rest := args[0], args[1:]
+	q := url.Values{}
+	var pos []string
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		name, val, hasVal := strings.Cut(a, "=")
+		switch {
+		case name == "--max":
+			if !hasVal {
+				if i+1 >= len(rest) {
+					return "", nil, fmt.Errorf("falta el valor de --max")
+				}
+				i++
+				val = rest[i]
+			}
+			if n, err := strconv.Atoi(val); err != nil || n <= 0 {
+				return "", nil, fmt.Errorf("--max tiene que ser un número")
+			}
+			q.Set("max", val)
+		case a == "--mensaje":
+			q.Set("mensaje", "1")
+		case strings.HasPrefix(a, "--"):
+			return "", nil, fmt.Errorf("opción desconocida %s", a)
+		default:
+			pos = append(pos, a)
+		}
+	}
+	switch orden {
+	case "buscar":
+		if len(pos) == 0 {
+			return "", nil, fmt.Errorf("di qué buscar (con la sintaxis de Gmail: from:ana newer_than:7d…)")
+		}
+		q.Set("q", strings.Join(pos, " "))
+	case "listar":
+		if len(pos) > 0 {
+			return "", nil, fmt.Errorf("listar no lleva consulta (para buscar: pgo gmail buscar <consulta>)")
+		}
+	case "leer":
+		if len(pos) != 1 {
+			return "", nil, fmt.Errorf("di qué leer: el ID de un mensaje o de un hilo")
+		}
+		q.Set("ref", pos[0])
+	default:
+		return "", nil, fmt.Errorf("orden desconocida %q", orden)
+	}
+	if q.Get("mensaje") != "" && orden != "leer" {
+		return "", nil, fmt.Errorf("--mensaje solo vale con leer")
+	}
+	return orden, q, nil
 }
 
 // driveQuery: la orden (buscar | listar | leer) y los parámetros de «pgo drive …».
