@@ -801,14 +801,9 @@ button.miga-item:hover { background: var(--hover); }
 .menu-programas .programa-lanzador button { width: auto; flex: none; padding: 3px; }
 
 /* Pestaña Actividad: agente, subagentes y tareas, programas y planes */
-.actividad { display: grid; gap: 16px; padding: 10px 12px 18px; align-content: start; }
+.actividad { display: grid; gap: 12px; padding: 10px 12px 18px; align-content: start; }
 .actividad section { display: grid; gap: 4px; }
 .actividad h4 { margin: 0 0 2px; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
-.act-agente { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.act-tarea { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; font-size: 12.5px; }
-.act-tarea:hover { background: var(--hover); }
-.act-tarea-texto { flex: 1; min-width: 0; display: grid; }
-.act-tarea.parada { opacity: .7; }
 .act-hechas summary { cursor: pointer; }
 /* Copias de trabajo (git worktree) en Actividad */
 .copia { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; font-size: 12.5px; }
@@ -1028,3 +1023,48 @@ button.miga-item:hover { background: var(--hover); }
 .sesiones-archivadas .sesion { opacity: .75; }
 /* Actualizaciones: el resultado de «Buscar actualizaciones». */
 .app-check { margin: 0; }
+
+/* Actividad en vivo (Actividad.tsx, liveActivity.ts): una línea por cosa en marcha, como un monitor de procesos. */
+.act-vivo { gap: 1px; }
+.act-fila { display: grid; grid-template-columns: 8px auto minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 3px 6px; border-radius: 6px; font-size: 12.5px; min-width: 0; }
+.act-fila:hover { background: var(--hover); }
+.act-fila.principal { padding: 6px; background: var(--superficie); border: 1px solid var(--linea); font-size: 13px; }
+.act-fila.principal.curso { border-color: color-mix(in srgb, #d98a00 45%, var(--linea)); }
+.act-punto { width: 8px; height: 8px; border-radius: 50%; background: var(--tenue); }
+.act-punto.curso { background: #d98a00; animation: latido 1s infinite alternate; }
+.act-punto.ok { background: #2e8b57; }
+.act-punto.error { background: var(--error); }
+.act-punto.parada { background: var(--tenue); }
+.act-punto.libre { background: #2e8b57; opacity: .6; }
+.act-punto.cola { background: var(--acento); }
+.act-tipo { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--suave); white-space: nowrap; }
+.act-que { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-que b { font-weight: 600; }
+.act-num { font: 11.5px ui-monospace, monospace; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.act-fila.ok .act-que, .act-fila.parada .act-que { color: var(--suave); }
+.act-vivo .act-hechas { margin-top: 2px; }
+.act-vivo .act-hechas > summary { padding: 2px 6px; }
+.act-pie { margin: 0; }
+/* La lista de tareas del agente, arriba: lo que hace ahora, bien visible. */
+.act-todo { border: 1px solid var(--linea); border-radius: 8px; padding: 8px 10px; background: var(--superficie); font-size: 13px; }
+.act-todo.viva { border-color: color-mix(in srgb, var(--acento) 45%, var(--linea)); }
+.act-todo > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.act-todo > summary::-webkit-details-marker { display: none; }
+.act-todo-barra { flex: 1; height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; min-width: 30px; }
+.act-todo-barra > span { display: block; height: 100%; background: var(--acento); transition: width .3s; }
+.act-todo-cuenta { font: 600 12px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.act-todo-ahora { margin: 8px 0 4px; padding: 6px 8px; border-radius: 6px; font-weight: 600; background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--texto); border-left: 3px solid var(--acento); overflow-wrap: anywhere; }
+.act-todo-ahora.siguiente { font-weight: 500; }
+.act-todo-ahora.hecha { background: color-mix(in srgb, #2e8b57 12%, transparent); border-left-color: #2e8b57; font-weight: 500; }
+.act-todo ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; }
+.act-todo li { display: flex; gap: 6px; align-items: baseline; padding: 1px 2px; min-width: 0; overflow-wrap: anywhere; }
+.act-todo li > span { flex: none; width: 1em; text-align: center; color: var(--suave); }
+.act-todo li.hecho { color: var(--tenue); text-decoration: line-through; }
+.act-todo li.curso { font-weight: 600; color: var(--acento); }
+.act-todo li.curso > span { color: var(--acento); }
+/* Panel estrecho: el tipo y los tokens se quitan (siguen en el title). */
+@container (max-width: 340px) { .act-tipo, .act-fila .act-num.suave { display: none; } .act-fila { grid-template-columns: 8px minmax(0, 1fr) auto; } }
+.actividad { container-type: inline-size; }
+/* La línea del agente: lo que hace ahora, debajo y entero (hasta dos líneas). */
+.act-ahora { grid-column: 2 / -1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--texto); }
+@container (max-width: 340px) { .act-ahora { grid-column: 2 / -1; } }

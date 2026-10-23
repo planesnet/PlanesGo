@@ -22,7 +22,8 @@ import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, T
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
-import { actividad, consumoPorAccion, silenceLabel, toolStatusTitle } from '../activity';
+import { actividad, consumoPorAccion, currentAction, silenceLabel, toolStatusTitle } from '../activity';
+import * as LA from '../liveActivity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as IH from '../inputHistory';
@@ -153,12 +154,6 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     }
     return undefined;
   }, [mensajes, enCurso]);
-  // Actividad (pestaña del panel): el chat avisa de las tareas de su sesión y de si el agente está trabajando.
-  useEffect(() => {
-    if (!sesion) return;
-    const tareas = mensajes.flatMap(m => m.tareas || []);
-    window.dispatchEvent(new CustomEvent('pgo:actividad', { detail: { sesion: sesion.id, tareas, trabajando: Boolean(enCurso) } }));
-  }, [mensajes, enCurso, sesion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // La pestaña Actividad puede pedir ejecutar un plan (lo hace el chat, que tiene la sesión).
   useEffect(() => {
     const pide = (e: Event) => { const p = (e as CustomEvent<Plan>).detail; if (p) ejecutaPlan(p); };
@@ -249,6 +244,32 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const [limpieza, setLimpieza] = useState<Record<string, { r?: PR.PruneReport; busy?: boolean }>>({});
   const podables = useRef<Record<string, boolean>>({});
   const ponLimpieza = (id: string, c: { r?: PR.PruneReport; busy?: boolean }) => setLimpieza(x => ({ ...x, [id]: { ...x[id], ...c } }));
+  // Actividad (pestaña del panel, liveActivity.ts): el chat publica lo que sabe de su sesión con cada evento del
+  // agente (como mucho 4 por segundo) y, mientras trabaja, cada 5 s (para que «pensando» pase a «esperando al
+  // modelo»): estado, acción en curso, tiempos, tokens del turno, contexto, cola, preguntas aparte y tareas.
+  const publicaActividad = useRef<() => void>(() => {});
+  publicaActividad.current = () => {
+    if (!sesion) return;
+    const u = mensajes[mensajes.length - 1];
+    const vivo = enCurso && u?.rol === 'assistant' ? u : undefined;
+    const umbral = CL.compactAt(limpieza[sesion.id]?.r);
+    const serie = CL.contextSeries(mensajes, umbral, 1);
+    const silencio = Date.now() - (ultimoEvento.current[sesion.id] || Date.now());
+    const g = vivo?.vivo || vivo?.uso;
+    LA.publishSnapshot({
+      sesion: sesion.id, tareas: mensajes.flatMap(m => m.tareas || []), trabajando: Boolean(enCurso),
+      accion: vivo ? currentAction(vivo, silencio) : undefined, inicio: enCurso ? inicioTurno.current[sesion.id] : undefined,
+      ultimoEvento: ultimoEvento.current[sesion.id], tokensTurno: g ? g.entrada + g.salida : undefined,
+      contexto: serie[serie.length - 1]?.tokens, umbral, enCola: cola.length, colaParada: Boolean(colaSesion.parada),
+      apartes: apartesSesion.filter(a => a.curso).map(a => ({ id: a.id, pregunta: a.pregunta })),
+    });
+  };
+  useEffect(() => { publicaActividad.current(); }, [mensajes, enCurso, sesion?.id, colas, apartes, limpieza]);
+  useEffect(() => {
+    if (!enCurso) return;
+    const t = setInterval(() => publicaActividad.current(), 5000);
+    return () => clearInterval(t);
+  }, [enCurso]);
   const pideVigencia = useCallback(async (s: Sesion, sesionAgente: string | undefined, ms: Mensaje[], mensaje?: string, soloEstado = false): Promise<PR.PruneReport | null> => {
     const pol = contextPolicy(s.agente, s);
     if (pol.vig === 'none' || (pol.vig === 'agent' && !sesionAgente)) return null;
@@ -865,7 +886,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // Los tokens de cada acción, como los de la conversación hasta ella (los de antes del turno y los de este).
         if (e.herramienta) parte({ tipo: 'herramienta', h: e.herramienta.tokens ? { ...e.herramienta, tokens: gAntes.entrada + gAntes.salida + e.herramienta.tokens } : e.herramienta });
         if (e.vivo) ultimo(m => ({ ...m, vivo: e.vivo }));
-        if (e.tarea) ultimo(m => ({ ...m, tareas: T.fusiona(m.tareas, e.tarea!) }));
+        if (e.tarea) ultimo(m => ({ ...m, tareas: T.fusiona(m.tareas, T.conTiempos(m.tareas, e.tarea!, Date.now())) }));
         // Puede haber varios consumos en un turno (OpenCode da uno por paso; Claude con tareas en segundo plano, más
         // de un «result»): se suman, salvo el contexto, que es el de la última llamada.
         if (e.uso) {
@@ -912,7 +933,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         ultimo(m => ({ ...m, pruned: { ...m.pruned, tokens: (m.pruned?.tokens || 0) + barrido } }));
       }
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
-      if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
+      if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted, Date.now()) }));
       ultimo(m => { const { vivo: _, ...r } = m; return { ...r, fin: Date.now(), ...(punto && sesionAgente ? { punto: { sesion: sesionAgente, id: punto } } : {}) }; });
       // Relevo: lo que ocupa de verdad el contexto de la sesión nueva (la memoria más lo fijo del agente).
       const ctxNuevo = actual[actual.length - 1].uso?.contexto;

@@ -7,21 +7,6 @@ import type { Reparto } from './reparto.ts';
 
 const ses = (x: Partial<Sesion>): Sesion => ({ id: 's', nombre: '', proyecto: 1, carpeta: '/c', rama: 'main', agente: 'claude-code', creada: 0, ultima: 0, ...x });
 
-test('countLabel: en marcha y terminados', () => {
-  assert.equal(A.countLabel(0, 0), '0');
-  assert.equal(A.countLabel(2, 0), '2');
-  assert.equal(A.countLabel(0, 3), '0 en marcha · 3 terminados');
-  assert.equal(A.countLabel(1, 2, true), '1 en marcha · 2 terminadas');
-});
-
-test('taskLine: un subagente terminado muestra lo que devolvió y sus tokens, no la ruta del .output', () => {
-  const l = A.taskLine({ id: 'a', tipo: 'subagente', estado: 'ok', salida: 'He revisado los tres módulos: todo bien.', detalle: '/tmp/x/a.output', progreso: 'Explore · 12 herramientas · 23456 tokens' });
-  assert.equal(l.text, 'He revisado los tres módulos: todo bien. · 23 k tokens');
-  assert.match(l.title, /a\.output/);
-  assert.equal(A.taskLine({ id: 'b', tipo: 'segundo_plano', estado: 'ok', detalle: '/tmp/b.output' }).text, '/tmp/b.output');
-  assert.equal(A.taskLine({ id: 'c', tipo: 'subagente', estado: 'curso', progreso: 'leyendo' }).text, 'leyendo');
-});
-
 test('childStatus: según el reparto guardado, no solo la rama', () => {
   const madre = ses({ id: 'm', rama: 'main' });
   const h = (n: number) => ses({ id: 'h' + n, madre: 'm', parte: n, rama: 'pgo/m-' + n });

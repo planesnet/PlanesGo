@@ -4,35 +4,44 @@ import * as AP from '../activityPanel';
 import * as RP from '../reparto';
 import * as C from '../copias';
 import { ARCHIVE_SESSIONS, conversacion, titulo, type Sesion } from '../sesiones';
-import * as T from '../tareas';
+import * as LA from '../liveActivity';
 import * as R from '../router';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, PLANS_CHANGED, type Plan } from './Planes';
 import Programas from './Programas';
 import { askConfirm } from './Modal';
 
-// Actividad: todo lo que corre a la vez en el proyecto, en un sitio. El agente de la sesión (si está trabajando),
-// sus subagentes, tareas en segundo plano y lista de tareas; los programas del proyecto (fuera del agente, también
-// los que adoptó pgocode), los planes guardados y las copias de trabajo (git worktree) de los repositorios.
+// Actividad: todo lo que corre a la vez en el proyecto, en un sitio y en vivo, como un monitor de procesos: arriba la
+// lista de tareas del agente (con la que hace ahora); después una línea por cosa en marcha (el agente y lo que hace,
+// sus subagentes, las subtareas en paralelo, las órdenes en segundo plano, las preguntas aparte, los programas); al
+// final, solo si hay, los planes y las copias de trabajo (git worktree). Nada de textos fijos: lo que explica cada
+// cosa va al pasar el ratón o en «¿qué es cada cosa?».
 
 export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], directorio, versionProcesos, alAbrir }: {
   proyecto: Proyecto; carpeta: string; sesion?: Sesion | null; sesiones?: Sesion[]; directorio?: string; versionProcesos: number; alAbrir: (url: string) => void;
 }) {
-  // Tareas de la sesión: las guardadas en su conversación y, en vivo, las que avisa el chat.
-  const [tareas, setTareas] = useState<T.Tarea[]>([]);
-  const [trabajando, setTrabajando] = useState(false);
+  // Lo que pasa en la sesión: la última instantánea del chat (liveActivity.ts) si la hay (también a mitad de turno,
+  // aunque el panel se abra ahora) y, si no, las tareas guardadas en su conversación. Se actualiza con cada aviso.
+  const [snap, setSnap] = useState<LA.LiveSnapshot | undefined>(undefined);
   useEffect(() => {
-    setTareas(sesion ? conversacion(sesion.id).flatMap(m => m.tareas || []) : []);
-    setTrabajando(false);
+    setSnap(sesion ? LA.lastSnapshot(sesion.id) || { sesion: sesion.id, tareas: conversacion(sesion.id).flatMap(m => m.tareas || []), trabajando: false } : undefined);
     const aviso = (e: Event) => {
-      const d = (e as CustomEvent<{ sesion: string; tareas: T.Tarea[]; trabajando: boolean }>).detail;
-      if (d.sesion !== sesion?.id) return;
-      setTareas(d.tareas);
-      setTrabajando(d.trabajando);
+      const d = (e as CustomEvent<LA.LiveSnapshot>).detail;
+      if (d.sesion === sesion?.id) setSnap(d);
     };
-    window.addEventListener('pgo:actividad', aviso);
-    return () => window.removeEventListener('pgo:actividad', aviso);
+    window.addEventListener(LA.ACTIVITY_EVENT, aviso);
+    return () => window.removeEventListener(LA.ACTIVITY_EVENT, aviso);
   }, [sesion?.id]);
+  // Pulso de 1 s mientras algo corre: los tiempos avanzan solos.
+  const [ahora, setAhora] = useState(Date.now());
+  const pulso = LA.needsPulse(snap);
+  useEffect(() => {
+    setAhora(Date.now());
+    if (!pulso) return;
+    const t = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [pulso]);
+  const trabajando = Boolean(snap?.trabajando);
 
   // Enrutador de intenciones (router.ts): cuántos mensajes de la sesión han ido a cada sitio.
   const [rutas, setRutas] = useState<R.RouteTally>({});
@@ -43,12 +52,17 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
     return () => window.removeEventListener('pgo:ruta', aviso);
   }, [sesion?.id]);
 
-  const vivas = T.vivas(tareas);
-  const hechas = tareas.filter(t => t.tipo !== 'lista' && t.estado !== 'curso').reverse().slice(0, 15);
-  const deTipo = (l: T.Tarea[], sub: boolean) => l.filter(t => (t.tipo === 'subagente') === sub);
-  // Subtareas en paralelo: las sesiones hijas de esta (reparto de pgocode).
-  const hijas = sesion ? sesiones.filter(s => s.madre === sesion.id).sort((a, b) => (a.parte || 0) - (b.parte || 0)) : [];
-  const lista = [...tareas].reverse().find(t => t.tipo === 'lista');
+  const todo = LA.todoView(snap?.tareas || []);
+  const listas = LA.liveLists(snap, ahora);
+  // Subtareas en paralelo: las sesiones hijas de esta (reparto de pgocode), con el estado real de cada una y de su unión.
+  const repartos = RP.lee();
+  const hijas = (sesion ? sesiones.filter(s => s.madre === sesion.id).sort((a, b) => (a.parte || 0) - (b.parte || 0)) : []).map(h => {
+    const st = AP.childStatus(h, sesion, repartos);
+    const r: LA.Row = { id: h.id, dot: st.kind === 'ok' ? 'ok' : st.kind === 'aviso' ? 'error' : 'curso', kind: 'parte ' + (h.parte || ''),
+      name: titulo(h), detail: st.text, time: '', tokens: '', title: st.text + (h.carpeta ? '\n' + h.carpeta : '') };
+    return r;
+  });
+  const terminados = [...listas.subagentsDone, ...listas.backgroundDone, ...hijas.filter(h => h.dot === 'ok')];
 
   // Planes del proyecto.
   const [planes, setPlanes] = useState<Plan[] | null>(null);
@@ -61,100 +75,49 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
     window.addEventListener(PLANS_CHANGED, aviso);
     return () => window.removeEventListener(PLANS_CHANGED, aviso);
   }, [proyecto.id, directorio]); // eslint-disable-line react-hooks/exhaustive-deps
-  const repartos = RP.lee();
 
   return (
     <div className="actividad">
-      <section>
-        <h4>Agente{sesion ? <span className="suave"> · {sesion.nombre || 'sesión actual'}</span> : null}</h4>
-        {!sesion ? <p className="suave pequeno">Sin sesión abierta.</p> : (
-          <p className="act-agente"><span className={'punto-h' + (trabajando ? ' curso' : '')} /> {trabajando ? 'Trabajando' : 'Libre'}
-            {vivas.length > 0 && <span className="suave"> · {vivas.length} en marcha</span>}</p>
+      {todo && <TodoBoard v={todo} trabajando={trabajando} />}
+
+      <section className="act-vivo" aria-label="Lo que está en marcha" aria-live="off">
+        {!sesion ? <p className="suave pequeno">Sin sesión abierta.</p> : <LiveRow r={LA.agentRow(snap, ahora)} principal />}
+        {listas.subagents.map(r => <LiveRow key={r.id} r={r} />)}
+        {hijas.filter(h => h.dot !== 'ok').map(r => <LiveRow key={r.id} r={r} />)}
+        {listas.background.map(r => <LiveRow key={r.id} r={r} />)}
+        {listas.asides.map(r => <LiveRow key={r.id} r={r} />)}
+        {terminados.length > 0 && (
+          <details className="act-hechas">
+            <summary className="suave pequeno">{terminados.length} {terminados.length === 1 ? 'terminado' : 'terminados'}</summary>
+            {terminados.map(r => <LiveRow key={r.id} r={r} />)}
+          </details>
         )}
       </section>
 
-      {sesion && (
+      {/* Solo los programas en marcha (los guardados, plegados): se definen en Propiedades de la sesión → Programas. */}
+      <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} asSection />
+
+      {planes && planes.length > 0 && (
         <section>
-          <h4 title="Quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Más en /help.">Enrutador</h4>
-          <p className="suave pequeno">{R.summary(rutas)}</p>
+          <h4>Planes <span className="gh-cuenta">{planes.length}</span>
+            <button className="icono" onClick={cargaPlanes} title="Volver a cargar" aria-label="Volver a cargar los planes"><Icono n="recargar" t={13} /></button></h4>
+          <ul className="planes">
+            {planes.map(p => (
+              <li key={p.ruta}><button onClick={() => setPlan(p.ruta)} title={p.ruta}>
+                <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span><EstadoPlan e={p.estado} />
+                <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
+              </button></li>
+            ))}
+          </ul>
         </section>
       )}
 
-      <ConceptGuide />
-
-      <section>
-        <h4>Subagentes <span className="gh-cuenta">{AP.countLabel(deTipo(vivas, true).length, deTipo(hechas, true).length)}</span></h4>
-        <p className="suave pequeno">Los lanza el agente dentro de su turno. Cada uno con su propio contexto: lo que lee no entra en tu conversación, solo su resumen. Trabajan en la misma carpeta y rama de la sesión.</p>
-        {deTipo(vivas, true).length === 0 && deTipo(hechas, true).length === 0 && <p className="suave pequeno">Ninguno en esta sesión todavía.</p>}
-        {deTipo(vivas, true).map(t => <FilaTarea key={t.id} t={t} />)}
-        {deTipo(hechas, true).length > 0 && (
-          <details className="act-hechas">
-            <summary className="suave pequeno">Terminados ({deTipo(hechas, true).length})</summary>
-            {deTipo(hechas, true).map(t => <FilaTarea key={t.id} t={t} />)}
-          </details>
-        )}
-      </section>
-
-      <section>
-        <h4>Subtareas en paralelo <span className="gh-cuenta">{hijas.length}</span></h4>
-        <p className="suave pequeno">Las lanza pgocode al repartir una petición con partes independientes: cada una es una sesión aparte, con su conversación, en su propia copia del repositorio y su rama <code>pgo/…</code>. Al acabar, pgocode une su rama a la tuya (en local: no se sube nada a GitHub).</p>
-        {hijas.length === 0 && <p className="suave pequeno">Ninguna: esta sesión no ha repartido nada.</p>}
-        {hijas.map(h => {
-          // El estado real de la hija y de su unión (el reparto guardado), no solo su rama.
-          const st = AP.childStatus(h, sesion, repartos);
-          return (
-            <div key={h.id} className={'act-tarea ' + (st.kind === 'ok' ? 'ok' : st.kind === 'aviso' ? 'error' : 'curso')}>
-              <span className="tarea-tipo">Parte {h.parte}</span>
-              <span className="act-tarea-texto">
-                <span className="recorta">{titulo(h)}</span>
-                <span className="suave pequeno recorta" title={st.text + (h.carpeta ? '\n' + h.carpeta : '')}>{st.text}</span>
-              </span>
-            </div>
-          );
-        })}
-      </section>
-
-      <section>
-        <h4>En segundo plano <span className="gh-cuenta">{AP.countLabel(deTipo(vivas, false).length, deTipo(hechas, false).length, true)}</span></h4>
-        <p className="suave pequeno">Órdenes que el agente dejó en marcha (un servidor, una compilación larga). No ocupan contexto mientras corren; su salida solo entra si el agente la lee.</p>
-        {deTipo(vivas, false).length === 0 && deTipo(hechas, false).length === 0 && <p className="suave pequeno">Nada en marcha.</p>}
-        {deTipo(vivas, false).map(t => <FilaTarea key={t.id} t={t} />)}
-        {deTipo(hechas, false).length > 0 && (
-          <details className="act-hechas">
-            <summary className="suave pequeno">Terminadas ({deTipo(hechas, false).length})</summary>
-            {deTipo(hechas, false).map(t => <FilaTarea key={t.id} t={t} />)}
-          </details>
-        )}
-      </section>
-
-      {lista && (
-      <section>
-        <h4>Lista de tareas del agente</h4>
-          <details className="lista-tareas-agente" open>
-            <summary>Lista de tareas · {(lista.elementos || []).filter(e => e.estado === 'hecho').length}/{lista.elementos?.length || 0}</summary>
-            <ul>{(lista.elementos || []).map((e, i) => <li key={i} className={e.estado}><span aria-hidden>{e.estado === 'hecho' ? '☑' : e.estado === 'curso' ? '◐' : '☐'}</span> {e.texto}</li>)}</ul>
-          </details>
-      </section>
-      )}
-
-      {/* Solo si hay programas guardados o en marcha: se definen en Propiedades de la sesión → Programas. */}
-      <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} asSection />
-
-      <section>
-        <h4>Planes <span className="gh-cuenta">{planes?.length ?? 0}</span>
-          <button className="icono" onClick={cargaPlanes} title="Volver a cargar" aria-label="Volver a cargar los planes"><Icono n="recargar" t={13} /></button></h4>
-        {planes && planes.length === 0 && <p className="suave pequeno">Sin planes. Elige el modo «Plan» en el chat para crear uno.</p>}
-        <ul className="planes">
-          {(planes || []).map(p => (
-            <li key={p.ruta}><button onClick={() => setPlan(p.ruta)} title={p.ruta}>
-              <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span><EstadoPlan e={p.estado} />
-              <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
-            </button></li>
-          ))}
-        </ul>
-      </section>
-
       <CopiasTrabajo proyecto={proyecto.id} sesiones={sesiones} />
+
+      {sesion && Object.keys(rutas).length > 0 && (
+        <p className="act-pie suave pequeno" title="Enrutador: quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Más en /help.">{R.summary(rutas)}</p>
+      )}
+      <ConceptGuide />
 
       {plan && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={plan} ocupado={trabajando}
         alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()} alBorrar={() => cargaPlanes()}
@@ -163,36 +126,60 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   );
 }
 
-// ConceptGuide: qué es cada cosa que corre a la vez y cómo se relaciona con el contexto y con git/GitHub.
-function ConceptGuide() {
+// TodoBoard: la lista de tareas del agente, arriba del todo: la que está haciendo AHORA, destacada; las hechas,
+// tachadas; el progreso. Acabada y con el agente libre, plegada en una línea.
+function TodoBoard({ v, trabajando }: { v: LA.TodoView; trabajando: boolean }) {
+  const viva = trabajando || !v.finished;
+  const pct = Math.round((v.done / v.total) * 100);
   return (
-    <details className="act-conceptos">
-      <summary className="suave pequeno">¿Subagente, subtarea, segundo plano…? Qué es cada cosa</summary>
-      <table>
-        <thead><tr><th /><th>Quién la lanza</th><th>Contexto</th><th>Carpeta y rama</th><th>Git y GitHub</th></tr></thead>
-        <tbody>
-          <tr><th>Subagente</th><td>El agente, dentro de su turno (pgocode puede sugerírselo)</td><td>Propio: lo que lee no llena tu conversación; solo vuelve su resumen</td><td>Las de la sesión</td><td>No crea ramas ni commits: sus cambios son los de la sesión</td></tr>
-          <tr><th>Subtarea en paralelo</th><td>pgocode, al repartir una petición con partes independientes</td><td>Una sesión aparte, con su conversación</td><td>Su propia copia (git worktree) y rama <code>pgo/…</code></td><td>Al acabar se une a tu rama (merge local). Nada se sube a GitHub</td></tr>
-          <tr><th>En segundo plano</th><td>El agente (una orden que sigue en marcha)</td><td>No ocupa contexto; su salida entra si la lee</td><td>Las de la sesión</td><td>—</td></tr>
-          <tr><th>Lista de tareas</th><td>El agente, para organizarse</td><td>Va en su contexto (es corta)</td><td>—</td><td>—</td></tr>
-          <tr><th>Programa</th><td>Tú (desde Actividad o el lanzador) o el agente</td><td>Fuera del agente: no gasta tokens</td><td>La de la sesión</td><td>—</td></tr>
-        </tbody>
-      </table>
+    <details className={'act-todo' + (viva ? ' viva' : '')} open={viva || undefined} title="La lista de tareas que el agente lleva para organizarse (TodoWrite, TaskCreate…)">
+      <summary>
+        <b>Tareas del agente</b>
+        <span className="act-todo-barra" aria-hidden><span style={{ width: pct + '%' }} /></span>
+        <span className="act-todo-cuenta">{v.done}/{v.total}</span>
+      </summary>
+      {v.current ? <div className="act-todo-ahora">▶ Ahora: {v.current.texto}</div>
+        : trabajando && v.next ? <div className="act-todo-ahora siguiente">Siguiente: {v.next.texto}</div>
+        : v.finished ? <div className="act-todo-ahora hecha">✓ Todas hechas</div> : null}
+      <ol>
+        {v.items.map((e, i) => <li key={i} className={e.estado}><span aria-hidden>{e.estado === 'hecho' ? '✓' : e.estado === 'curso' ? '▶' : '○'}</span> {e.texto}</li>)}
+      </ol>
     </details>
   );
 }
 
-function FilaTarea({ t }: { t: T.Tarea }) {
-  const l = AP.taskLine(t);
+// LiveRow: una línea de la lista en vivo: punto de estado, qué es, nombre y lo que hace, tiempo y tokens.
+function LiveRow({ r, principal }: { r: LA.Row; principal?: boolean }) {
   return (
-    <div className={'act-tarea ' + (t.estado || '')}>
-      <span className="punto-h" aria-label={t.estado} />
-      <span className="tarea-tipo">{T.NOMBRES[t.tipo || ''] || 'Tarea'}{t.subtipo ? ' · ' + t.subtipo : ''}</span>
-      <span className="act-tarea-texto">
-        <span className="recorta">{t.titulo || t.id}</span>
-        {l.text && <span className="suave pequeno recorta" title={l.title}>{l.text}</span>}
-      </span>
+    <div className={'act-fila ' + r.dot + (principal ? ' principal' : '')} title={r.title}>
+      <span className={'act-punto ' + r.dot} aria-label={r.dot} />
+      <span className="act-tipo">{r.kind}</span>
+      <span className="act-que"><b>{r.name}</b>{r.detail && !principal ? <span className="suave"> · {r.detail}</span> : null}</span>
+      <span className="act-num">{r.time}</span>
+      <span className="act-num suave">{r.tokens}</span>
+      {principal && r.detail ? <span className="act-ahora">{r.detail}</span> : null}
     </div>
+  );
+}
+
+// ConceptGuide: qué es cada cosa que corre a la vez y cómo se relaciona con el contexto y con git/GitHub.
+function ConceptGuide() {
+  return (
+    <details className="act-conceptos">
+      <summary className="suave pequeno">¿Qué es cada cosa?</summary>
+      <table>
+        <thead><tr><th /><th>Quién la lanza</th><th>Contexto</th><th>Carpeta y rama</th><th>Git y GitHub</th></tr></thead>
+        <tbody>
+          <tr><th>Agente</th><td>Tú, con cada mensaje. Debajo, lo que hace ahora; a la derecha, tiempo del turno, tokens del turno y % de contexto (sobre donde compacta)</td><td>La conversación de la sesión</td><td>Las de la sesión</td><td>Hace commits si se lo pides</td></tr>
+          <tr><th>Subagente</th><td>El agente, dentro de su turno (pgocode puede sugerírselo)</td><td>Propio: lo que lee no llena tu conversación; solo vuelve su resumen</td><td>Las de la sesión</td><td>No crea ramas ni commits: sus cambios son los de la sesión</td></tr>
+          <tr><th>Subtarea en paralelo</th><td>pgocode, al repartir una petición con partes independientes</td><td>Una sesión aparte, con su conversación</td><td>Su propia copia (git worktree) y rama <code>pgo/…</code></td><td>Al acabar se une a tu rama (merge local). Nada se sube a GitHub</td></tr>
+          <tr><th>En segundo plano</th><td>El agente (una orden que sigue en marcha)</td><td>No ocupa contexto; su salida entra si la lee</td><td>Las de la sesión</td><td>—</td></tr>
+          <tr><th>Lista de tareas</th><td>El agente, para organizarse</td><td>Va en su contexto (es corta)</td><td>—</td><td>—</td></tr>
+          <tr><th>Pregunta aparte</th><td>Tú (con «//») o el enrutador</td><td>No entra en la conversación</td><td>Las de la sesión</td><td>—</td></tr>
+          <tr><th>Programa</th><td>Tú (desde Actividad o el lanzador) o el agente</td><td>Fuera del agente: no gasta tokens</td><td>La de la sesión</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </details>
   );
 }
 
@@ -232,11 +219,11 @@ function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Ses
       if (usuarios.length) window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto, ids: usuarios.map(s => s.id) } }));
     } catch (e) { setError((e as Error).message); } finally { setQuitando(''); carga(); }
   };
+  if (!error && !copias?.length) return null;
   return (
     <section>
       <h4>Copias de trabajo <span className="gh-cuenta">{copias?.length ?? 0}</span>
         <button className="icono" onClick={carga} title="Volver a cargar" aria-label="Volver a cargar las copias de trabajo"><Icono n="recargar" t={13} /></button></h4>
-      {copias && copias.length === 0 && !error && <p className="suave pequeno">Sin copias de trabajo (git worktree) en los repositorios del proyecto.</p>}
       {error && <p className="error pequeno">{error}</p>}
       {(copias || []).map(c => {
         const e = C.estado(c);
