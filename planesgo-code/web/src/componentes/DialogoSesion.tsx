@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { PRUNE_MIN_TOKENS } from '../workingMemory';
-import { get, post, type Proveedor } from '../api';
+import { COPIES_CHANGED, get, post, type Proveedor } from '../api';
+import type { ProgramDraft } from '../programs';
+import { rememberedModel } from '../sessionDefaults';
 import { leeAjustes, TIPOS_HOSTING, type TipoHosting } from '../ajustes';
 import { identificador, titulo, type Repo, type Sesion } from '../sesiones';
 import Icono from './Icono';
@@ -8,7 +10,7 @@ import { Agente, Hosting } from './Marca';
 import * as CO from '../costes';
 import { autoContextOn } from '../contextPolicy';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
-import ProgramSettings from './ProgramSettings';
+import ProgramSettings, { saveProgramChanges } from './ProgramSettings';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
 // Lo primero, la rama del repositorio; después el nombre, el alojamiento
@@ -37,6 +39,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
   const [guardando, setGuardando] = useState(false);
   const [tareas, setTareas] = useState<{ id: number; nombre: string }[] | null>(null);
   const [mcps, setMcps] = useState<string[] | null>(null);
+  const [programs, setPrograms] = useState<ProgramDraft | null>(null); // borrador de Programas (se guarda con «Guardar»)
   useEffect(() => { if (s.carpeta) get<string[]>(`/api/agentes/mcp?proyecto=${s.proyecto}&carpeta=${encodeURIComponent(s.carpeta)}`).then(setMcps).catch(() => setMcps([])); }, [s.proyecto, s.carpeta]);
   useEffect(() => { get<{ id: number; nombre: string }[]>(`/api/proyecto/tareas?proyecto=${sesion.proyecto}`).then(setTareas).catch(() => setTareas([])); }, [sesion.proyecto]);
   const cambia = (c: Partial<Sesion>) => setS(x => ({ ...x, ...c }));
@@ -96,14 +99,16 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
       if (!(await askConfirm(`Se clonará ${remoto.trim()} en:\n${s.carpeta}\n\ncon la rama «${rama}» (la del repositorio si existe; si no, nueva). ¿Continuar?`))) return;
     } else if (!conRepo && info?.copias[rama] !== s.carpeta) {
       const aviso = s.rama === NUEVA
-        ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y se descargará en:\n${s.carpeta}\n\n¿Continuar?`
-        : `La rama «${rama}» no está descargada en local. Se descargará en:\n${s.carpeta}\n\n¿Continuar?`;
+        ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y una copia de trabajo (git worktree) suya en:\n${s.carpeta}\n\n¿Continuar?`
+        : `La rama «${rama}» no tiene copia en local. Se creará una copia de trabajo (git worktree) en:\n${s.carpeta}\n\n¿Continuar?`;
       if (!(await askConfirm(aviso))) return;
     }
     setGuardando(true);
     setError('');
     try {
       const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, sesion: s.id, rama, carpeta: s.carpeta, remoto: pideRemoto ? remoto.trim() : '' });
+      window.dispatchEvent(new Event(COPIES_CHANGED));
+      if (programs && sesion.carpeta) await saveProgramChanges(s.proyecto, sesion.carpeta, programs);
       const cambioDeContexto = !nueva && (rama !== sesion.rama || s.carpeta !== sesion.carpeta || s.agente !== sesion.agente);
       alGuardar({ ...s, rama, tipo: repo.tipo, sesionAgente: cambioDeContexto ? undefined : s.sesionAgente }, repo);
     } catch (e) { setError((e as Error).message); setGuardando(false); }
@@ -114,7 +119,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
   const incomplete: Partial<Record<SessionSection, boolean>> = { general: !rama || !s.hosting || !s.carpeta, agent: !s.agente };
   return (
     <PropertiesModal title={nueva ? 'Nueva sesión' : <><span className="suave">Propiedades ·</span> {titulo(sesion)}</>}
-      label={nueva ? 'Nueva sesión' : 'Propiedades de la sesión'} className="ajustes-sesion" onClose={alCerrar}
+      label={nueva ? 'Nueva sesión' : 'Propiedades'} className="ajustes-sesion" onClose={alCerrar}
       sections={SESSION_SECTIONS.filter(x => !nueva || x.id !== 'programs').map(x => ({ ...x, incomplete: incomplete[x.id] }))} initial={inicial}
       footer={<>
         {error && <p className="error footer-error">{error}</p>}
@@ -180,7 +185,9 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           <h3>Agente</h3>
           <label>Agente
             <span className="con-icono"><Agente id={s.agente} t={15} />
-              <select value={s.agente} onChange={e => cambia({ agente: e.target.value, modelo: undefined, esfuerzo: undefined })}>
+              <select value={s.agente} onChange={e => cambia({ agente: e.target.value, esfuerzo: undefined,
+                // El último modelo elegido con ese agente (si no, el suyo por defecto).
+                modelo: rememberedModel(login, e.target.value, proveedores.find(p => p.id === e.target.value)?.modelos || []) })}>
                 {proveedores.map(p => <option key={p.id} value={p.id} disabled={!p.disponible}>{p.nombre}{p.disponible ? '' : ' — ' + p.motivo}</option>)}
               </select>
             </span>
@@ -298,13 +305,14 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           </label>
         </>}
 
-        {section === 'programs' && <ProgramSettings proyecto={s.proyecto} carpeta={sesion.carpeta} />}
+        {section === 'programs' && <ProgramSettings proyecto={s.proyecto} carpeta={sesion.carpeta} value={programs} onChange={setPrograms} />}
         {section === 'ids' && <>
           <h3>Identificador</h3>
           <span className="suave pequeno">Para localizar la sesión en los registros de pgocode (tiempos y depuracion.log) y su conversación en el agente. Pásaselo a quien vaya a investigarla.</span>
           <dl className="session-ids">
-            {([['Sesión de pgocode', sesion.id], ['Sesión del agente', sesion.sesionAgente || ''], ['Agente', sesion.agente],
-              ['Proyecto', String(sesion.proyecto)], ['Carpeta', sesion.carpeta], ['Rama', sesion.rama]] as const).map(([k, v]) => (
+            {/* Con lo elegido en la ventana (agente, carpeta, rama), no con lo guardado: en «Nueva sesión» se ve lo que será. */}
+            {([['Sesión de pgocode', s.id], ['Sesión del agente', s.agente === sesion.agente ? s.sesionAgente || '' : ''], ['Agente', s.agente],
+              ['Proyecto', String(s.proyecto)], ['Carpeta', s.carpeta], ['Rama', rama]] as const).map(([k, v]) => (
               <div key={k}>
                 <dt>{k}</dt>
                 <dd>{v ? <><code className="recorta" title={v}>{v}</code><CopyButton text={v} label={k} /></>
@@ -312,7 +320,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
               </div>
             ))}
           </dl>
-          <div><CopyButton text={identificador(sesion)} label="todo" wide /></div>
+          <div><CopyButton text={identificador({ ...s, rama, sesionAgente: s.agente === sesion.agente ? s.sesionAgente : undefined })} label="todo" wide /></div>
         </>}
       </>}
     </PropertiesModal>

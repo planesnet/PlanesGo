@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { listaCopias, quitaCopia, type Proyecto } from '../api';
+import { COPIES_CHANGED, listaCopias, quitaCopia, type Proyecto } from '../api';
+import * as AP from '../activityPanel';
+import * as RP from '../reparto';
 import * as C from '../copias';
-import { conversacion, titulo, type Sesion } from '../sesiones';
+import { ARCHIVE_SESSIONS, conversacion, titulo, type Sesion } from '../sesiones';
 import * as T from '../tareas';
 import * as R from '../router';
 import Icono from './Icono';
-import { EditorPlan, Estado as EstadoPlan, listaPlanes, type Plan } from './Planes';
+import { EditorPlan, Estado as EstadoPlan, listaPlanes, PLANS_CHANGED, type Plan } from './Planes';
 import Programas from './Programas';
 import { askConfirm } from './Modal';
 
@@ -52,7 +54,14 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   const [planes, setPlanes] = useState<Plan[] | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
   const cargaPlanes = () => listaPlanes(proyecto.id, directorio).then(setPlanes).catch(() => setPlanes([]));
-  useEffect(() => { cargaPlanes(); }, [proyecto.id, directorio]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    cargaPlanes();
+    // Un plan guardado o borrado en otro sitio (p. ej. «/plan» en el chat): se recarga la lista.
+    const aviso = () => cargaPlanes();
+    window.addEventListener(PLANS_CHANGED, aviso);
+    return () => window.removeEventListener(PLANS_CHANGED, aviso);
+  }, [proyecto.id, directorio]); // eslint-disable-line react-hooks/exhaustive-deps
+  const repartos = RP.lee();
 
   return (
     <div className="actividad">
@@ -66,7 +75,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
 
       {sesion && (
         <section>
-          <h4 title="Quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Ver docs/enrutador.md o /help.">Enrutador</h4>
+          <h4 title="Quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Más en /help.">Enrutador</h4>
           <p className="suave pequeno">{R.summary(rutas)}</p>
         </section>
       )}
@@ -74,7 +83,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
       <ConceptGuide />
 
       <section>
-        <h4>Subagentes <span className="gh-cuenta">{deTipo(vivas, true).length}</span></h4>
+        <h4>Subagentes <span className="gh-cuenta">{AP.countLabel(deTipo(vivas, true).length, deTipo(hechas, true).length)}</span></h4>
         <p className="suave pequeno">Los lanza el agente dentro de su turno. Cada uno con su propio contexto: lo que lee no entra en tu conversación, solo su resumen. Trabajan en la misma carpeta y rama de la sesión.</p>
         {deTipo(vivas, true).length === 0 && deTipo(hechas, true).length === 0 && <p className="suave pequeno">Ninguno en esta sesión todavía.</p>}
         {deTipo(vivas, true).map(t => <FilaTarea key={t.id} t={t} />)}
@@ -90,21 +99,23 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
         <h4>Subtareas en paralelo <span className="gh-cuenta">{hijas.length}</span></h4>
         <p className="suave pequeno">Las lanza pgocode al repartir una petición con partes independientes: cada una es una sesión aparte, con su conversación, en su propia copia del repositorio y su rama <code>pgo/…</code>. Al acabar, pgocode une su rama a la tuya (en local: no se sube nada a GitHub).</p>
         {hijas.length === 0 && <p className="suave pequeno">Ninguna: esta sesión no ha repartido nada.</p>}
-        {hijas.map(h => (
-          <div key={h.id} className="act-tarea">
-            <span className="tarea-tipo">Parte {h.parte}</span>
-            <span className="act-tarea-texto">
-              <span className="recorta">{titulo(h)}</span>
-              <span className="suave pequeno recorta" title={h.carpeta}>{h.rama === sesion?.rama
-                ? <>unida: sus cambios ya están en <code>{sesion?.rama}</code></>
-                : <><code>{h.rama || 'sin rama'}</code> → se unirá a <code>{sesion?.rama || 'tu rama'}</code></>}</span>
-            </span>
-          </div>
-        ))}
+        {hijas.map(h => {
+          // El estado real de la hija y de su unión (el reparto guardado), no solo su rama.
+          const st = AP.childStatus(h, sesion, repartos);
+          return (
+            <div key={h.id} className={'act-tarea ' + (st.kind === 'ok' ? 'ok' : st.kind === 'aviso' ? 'error' : 'curso')}>
+              <span className="tarea-tipo">Parte {h.parte}</span>
+              <span className="act-tarea-texto">
+                <span className="recorta">{titulo(h)}</span>
+                <span className="suave pequeno recorta" title={st.text + (h.carpeta ? '\n' + h.carpeta : '')}>{st.text}</span>
+              </span>
+            </div>
+          );
+        })}
       </section>
 
       <section>
-        <h4>En segundo plano <span className="gh-cuenta">{deTipo(vivas, false).length}</span></h4>
+        <h4>En segundo plano <span className="gh-cuenta">{AP.countLabel(deTipo(vivas, false).length, deTipo(hechas, false).length, true)}</span></h4>
         <p className="suave pequeno">Órdenes que el agente dejó en marcha (un servidor, una compilación larga). No ocupan contexto mientras corren; su salida solo entra si el agente la lee.</p>
         {deTipo(vivas, false).length === 0 && deTipo(hechas, false).length === 0 && <p className="suave pequeno">Nada en marcha.</p>}
         {deTipo(vivas, false).map(t => <FilaTarea key={t.id} t={t} />)}
@@ -126,11 +137,8 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
       </section>
       )}
 
-      <section>
-        <h4>Programas del proyecto</h4>
-        <p className="suave pequeno">Fuera del agente y sin tokens: los guardados, los lanzados aquí y los que el agente dejó en marcha. Se definen en las propiedades de la sesión.</p>
-        <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />
-      </section>
+      {/* Solo si hay programas guardados o en marcha: se definen en Propiedades de la sesión → Programas. */}
+      <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} asSection />
 
       <section>
         <h4>Planes <span className="gh-cuenta">{planes?.length ?? 0}</span>
@@ -146,7 +154,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
         </ul>
       </section>
 
-      <CopiasTrabajo proyecto={proyecto.id} />
+      <CopiasTrabajo proyecto={proyecto.id} sesiones={sesiones} />
 
       {plan && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={plan} ocupado={trabajando}
         alCerrar={() => { setPlan(null); cargaPlanes(); }} alCambio={() => cargaPlanes()} alBorrar={() => cargaPlanes()}
@@ -167,7 +175,7 @@ function ConceptGuide() {
           <tr><th>Subtarea en paralelo</th><td>pgocode, al repartir una petición con partes independientes</td><td>Una sesión aparte, con su conversación</td><td>Su propia copia (git worktree) y rama <code>pgo/…</code></td><td>Al acabar se une a tu rama (merge local). Nada se sube a GitHub</td></tr>
           <tr><th>En segundo plano</th><td>El agente (una orden que sigue en marcha)</td><td>No ocupa contexto; su salida entra si la lee</td><td>Las de la sesión</td><td>—</td></tr>
           <tr><th>Lista de tareas</th><td>El agente, para organizarse</td><td>Va en su contexto (es corta)</td><td>—</td><td>—</td></tr>
-          <tr><th>Programa</th><td>Tú o el agente (<code>pgo ejecutar</code>)</td><td>Fuera del agente: no gasta tokens</td><td>La de la sesión</td><td>—</td></tr>
+          <tr><th>Programa</th><td>Tú (desde Actividad o el lanzador) o el agente</td><td>Fuera del agente: no gasta tokens</td><td>La de la sesión</td><td>—</td></tr>
         </tbody>
       </table>
     </details>
@@ -175,13 +183,14 @@ function ConceptGuide() {
 }
 
 function FilaTarea({ t }: { t: T.Tarea }) {
+  const l = AP.taskLine(t);
   return (
     <div className={'act-tarea ' + (t.estado || '')}>
       <span className="punto-h" aria-label={t.estado} />
       <span className="tarea-tipo">{T.NOMBRES[t.tipo || ''] || 'Tarea'}{t.subtipo ? ' · ' + t.subtipo : ''}</span>
       <span className="act-tarea-texto">
         <span className="recorta">{t.titulo || t.id}</span>
-        {(t.progreso || t.detalle) && <span className="suave pequeno recorta" title={t.detalle}>{t.estado === 'curso' ? t.progreso : t.detalle}</span>}
+        {l.text && <span className="suave pequeno recorta" title={l.title}>{l.text}</span>}
       </span>
     </div>
   );
@@ -189,19 +198,38 @@ function FilaTarea({ t }: { t: T.Tarea }) {
 
 // Copias de trabajo (git worktree) de los repositorios del proyecto: de pgocode, de subagentes o del usuario.
 // «Quitar» solo aparece si no se pierde nada; si la rama está fusionada, se borra también (git branch -d).
-function CopiasTrabajo({ proyecto }: { proyecto: number }) {
+function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Sesion[] }) {
   const [copias, setCopias] = useState<C.Copia[] | null>(null);
   const [error, setError] = useState('');
   const [quitando, setQuitando] = useState('');
   const carga = () => { setError(''); listaCopias(proyecto).then(setCopias).catch(e => { setCopias([]); setError((e as Error).message); }); };
-  useEffect(() => { setCopias(null); carga(); }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setCopias(null);
+    carga();
+    // Se recarga sola al acabar un turno de la sesión (puede haber creado o quitado copias) y cuando un reparto crea
+    // o une las de sus hijas. Varios avisos seguidos, una sola carga.
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const pronto = () => { clearTimeout(t); t = setTimeout(carga, 800); };
+    let trabajando = false;
+    const actividad = (e: Event) => {
+      const d = (e as CustomEvent<{ trabajando: boolean }>).detail;
+      if (trabajando && !d.trabajando) pronto();
+      trabajando = d.trabajando;
+    };
+    window.addEventListener(COPIES_CHANGED, pronto);
+    window.addEventListener('pgo:actividad', actividad);
+    return () => { clearTimeout(t); window.removeEventListener(COPIES_CHANGED, pronto); window.removeEventListener('pgo:actividad', actividad); };
+  }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
   const quita = async (c: C.Copia) => {
-    if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Continuar?', { danger: true }))) return;
+    // Las sesiones que trabajan en esa carpeta se quedarían sin ella: se dice cuáles y se archivan.
+    const usuarios = C.copyUsers(c, sesiones);
+    if (!(await askConfirm(C.explicaQuitar(c, true, usuarios) + '\n\n¿Continuar?', { danger: true, okText: usuarios.length ? 'Quitar y archivar' : 'Quitar' }))) return;
     setQuitando(c.carpeta);
     setError('');
     try {
       const r = await quitaCopia(proyecto, c.carpeta, true);
       if (r.aviso) setError(r.aviso);
+      if (usuarios.length) window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto, ids: usuarios.map(s => s.id) } }));
     } catch (e) { setError((e as Error).message); } finally { setQuitando(''); carga(); }
   };
   return (

@@ -210,6 +210,9 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 		f    Fondo
 	}
 	vivas := map[string]viva{}
+	// Órdenes en primer plano que Claude Code también avisa como tarea (local_bash sin is_backgrounded ni
+	// run_in_background): ya se ven como herramienta; no son «En segundo plano».
+	primerPlano := map[string]bool{}
 	lista := &listaClaude{}
 	contexto := 0
 	// Consumo real del turno, también en vivo. «usage» del result es el del turno pero solo del agente principal;
@@ -324,6 +327,12 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 			continue
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
+			if ev.Subtype == "task_started" && ev.TipoTarea == "local_bash" && !ev.SegundoPlano && ordenes[ev.TaskToolUse] == "" {
+				primerPlano[ev.TaskID] = true
+			}
+			if primerPlano[ev.TaskID] {
+				continue
+			}
 			switch {
 			case ev.Subtype == "task_started":
 				tipo := "subagente"

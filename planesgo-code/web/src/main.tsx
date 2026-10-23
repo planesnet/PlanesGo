@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import ErrorBoundary from './componentes/ErrorBoundary';
 import './estilos.css';
 import { post } from './api';
 
@@ -13,4 +14,4 @@ const informa = (mensaje: string, pila?: string) => {
 window.addEventListener('error', e => informa(e.message, e.error?.stack));
 window.addEventListener('unhandledrejection', e => { const r = e.reason as Error | undefined; informa(r?.message || String(e.reason), r?.stack); });
 
-createRoot(document.getElementById('raiz')!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById('raiz')!).render(<StrictMode><ErrorBoundary area="Planes Go Code" className="pantalla"><App /></ErrorBoundary></StrictMode>);

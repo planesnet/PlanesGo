@@ -1002,3 +1002,24 @@ button.miga-item:hover { background: var(--hover); }
 .direct-output pre { margin: 4px 0 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--panel); font-size: 11.5px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
 .direct-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 11.5px; color: var(--tenue); }
 .direct-footer .enlace { font-size: 12px; }
+
+/* Arreglos de la parte «actividad» (localizados) */
+/* La columna del chat no se desborda: el nombre de la herramienta no se parte («Bas / h») y el resumen o la salida
+   de una orden larga en error se recortan dentro de la columna. */
+.herramienta, .herramienta > summary { min-width: 0; max-width: 100%; }
+.herramienta.error { overflow: hidden; }
+.herramienta summary b { flex: none; white-space: nowrap; }
+.herramienta summary .resumen-h { flex: 1 1 0; }
+.herramienta .entrada-h, .herramienta .salida-h { max-width: 100%; box-sizing: border-box; }
+/* Un componente que falla se queda en su sitio con el error (ErrorBoundary.tsx). */
+.error-limite { display: grid; gap: 8px; align-content: start; justify-items: start; padding: 16px; min-width: 0; color: var(--texto); }
+.error-limite code { color: var(--error); max-width: 100%; }
+.error-limite.pantalla { margin: 15vh auto; max-width: 560px; }
+/* Copias de trabajo: rama recién creada, sin commits. */
+.copia-estado.sin_cambios { color: var(--suave); border-color: var(--linea); }
+/* Sesiones archivadas, plegadas al final de la lista del proyecto. */
+.sesiones-archivadas > summary { cursor: pointer; padding: 3px 8px; list-style: none; }
+.sesiones-archivadas > summary::-webkit-details-marker { display: none; }
+.sesiones-archivadas .sesion { opacity: .75; }
+/* Actualizaciones: el resultado de «Buscar actualizaciones». */
+.app-check { margin: 0; }

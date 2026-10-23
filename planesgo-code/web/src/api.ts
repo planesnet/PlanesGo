@@ -120,8 +120,11 @@ export const quitaCopia = (proyecto: number, carpeta: string, borrarRama: boolea
 // Reparto en sesiones paralelas (reparto.ts): proponerlo, crear la copia de una hija y unir su rama a la de la madre.
 export const proponeReparto = (proyecto: number, carpeta: string, rama: string, texto: string, permisos: string) =>
   post<Propuesta>('/api/reparto/propone', { proyecto, carpeta, rama, texto, permisos });
+// COPIES_CHANGED: aviso de que han cambiado las copias de trabajo (Actividad → Copias de trabajo se recarga).
+export const COPIES_CHANGED = 'pgo:copias';
+const avisaCopias = <T,>(r: T) => { window.dispatchEvent(new Event(COPIES_CHANGED)); return r; };
 export const preparaHija = (proyecto: number, sesion: string, carpeta: string, n: number, hija: string) =>
-  post<{ carpeta: string; rama: string; rama_madre: string }>('/api/reparto/prepara', { proyecto, sesion, carpeta, n, hija });
+  post<{ carpeta: string; rama: string; rama_madre: string }>('/api/reparto/prepara', { proyecto, sesion, carpeta, n, hija }).then(avisaCopias);
 export interface UnionHija { estado: 'unida' | 'sin_cambios' | 'conflicto' | 'pendiente' | 'error'; motivo?: string; ficheros?: string[]; commit?: boolean; quitada: boolean; rama_borrada: boolean; aviso?: string }
 export const uneHija = (proyecto: number, madre: string, ramaMadre: string, hija: string, rama: string, n: number) =>
-  post<UnionHija>('/api/reparto/une', { proyecto, madre, rama_madre: ramaMadre, hija, rama, n });
+  post<UnionHija>('/api/reparto/une', { proyecto, madre, rama_madre: ramaMadre, hija, rama, n }).then(avisaCopias);

@@ -27,8 +27,16 @@ export function updateText(s: UpdateStatus | null): string {
   }
 }
 
-export default function AppProperties({ user, avatar, status, initial, onClose, onCheck, onTogglePause, onApply, onLogout }: {
+// checkedText: cuándo se buscó la última vez («nunca» si no consta: antes salía la fecha cero, «31/12/01»).
+export function checkedText(revisado?: string): string {
+  const d = revisado ? new Date(revisado) : null;
+  if (!d || isNaN(d.getTime()) || d.getFullYear() < 2000) return 'nunca';
+  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+export default function AppProperties({ user, avatar, status, initial, checkResult, onClose, onCheck, onTogglePause, onApply, onLogout }: {
   user: Usuario; avatar: ReactNode; status: UpdateStatus | null; initial?: AppSection; onClose: () => void;
+  checkResult?: string; // lo que ha dado «Buscar actualizaciones» (buscando…, al día, o por qué no se puede)
   onCheck: () => void; onTogglePause: () => void; onApply: () => void; onLogout: () => void;
 }) {
   const version = status?.version || user.version || '—';
@@ -54,12 +62,13 @@ export default function AppProperties({ user, avatar, status, initial, onClose, 
           <dl className="session-ids">
             <div><dt>Versión instalada</dt><dd>{version}</dd></div>
             <div><dt>Estado</dt><dd>{updateText(status)}</dd></div>
-            {status?.revisado && <div><dt>Última comprobación</dt><dd>{new Date(status.revisado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}</dd></div>}
+            <div><dt>Última comprobación</dt><dd>{checkedText(status?.revisado)}</dd></div>
           </dl>
           <div className="fila-config app-actions">
             <button type="button" className="boton-secundario" onClick={onCheck}><Icono n="recargar" t={13} /> Buscar actualizaciones</button>
             {status?.estado === 'pendiente' && <button type="button" className="primario" onClick={onApply}>Actualizar a v{status.nueva}</button>}
           </div>
+          {checkResult && <p className="suave pequeno app-check" role="status">{checkResult}</p>}
           {status && status.estado !== 'desactivada' && <>
             <label className="casilla"><input type="checkbox" checked={!status.pausada} onChange={onTogglePause} /> Actualizar automáticamente</label>
             <span className="suave pequeno">La versión nueva se instala sola cuando llevas un rato sin usar la aplicación, sin agentes ni programas en marcha.</span>

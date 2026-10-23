@@ -14,11 +14,14 @@ const q = (proyecto: number, directorio?: string) => `proyecto=${proyecto}&direc
 export const leePlan = (proyecto: number, directorio: string | undefined, ruta: string) =>
   get<Plan>(`/api/planes/leer?${q(proyecto, directorio)}&ruta=${encodeURIComponent(ruta)}`);
 export const listaPlanes = (proyecto: number, directorio?: string) => get<Plan[]>(`/api/planes?${q(proyecto, directorio)}`);
+// PLANS_CHANGED: aviso de que un plan se ha guardado o borrado (Actividad → Planes se recarga, p. ej. tras «/plan»).
+export const PLANS_CHANGED = 'pgo:planes';
+const avisaPlanes = <T,>(r: T) => { window.dispatchEvent(new Event(PLANS_CHANGED)); return r; };
 export const guardaPlan = (proyecto: number, directorio: string | undefined, p: Partial<Plan>) =>
-  post<Plan>('/api/planes', { ...p, proyecto, directorio: directorio || '' });
+  post<Plan>('/api/planes', { ...p, proyecto, directorio: directorio || '' }).then(avisaPlanes);
 // Solo los descartados se pueden borrar.
 export const borraPlan = (proyecto: number, directorio: string | undefined, ruta: string) =>
-  post('/api/planes/borrar', { proyecto, directorio: directorio || '', ruta });
+  post('/api/planes/borrar', { proyecto, directorio: directorio || '', ruta }).then(avisaPlanes);
 
 const ESTADOS: Record<EstadoPlan | 'borrado', string> = { borrador: 'Por decidir', ejecutado: 'Ejecutado', descartado: 'Descartado', borrado: 'Borrado' };
 const nombre = (ruta: string) => ruta.split('/').pop() || ruta;

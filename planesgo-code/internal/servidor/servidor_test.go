@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/sesiones"
 )
 
@@ -81,5 +82,53 @@ func TestSoloEscritorio(t *testing.T) {
 	h2.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Errorf("sin token ni -navegador: %d", w.Code)
+	}
+}
+
+// La cookie de sesión lleva el puerto: dos pgocode en el mismo host no se pisan la sesión. La antigua (sin puerto)
+// se acepta una vez y pasa a la nueva.
+func TestCookieConPuerto(t *testing.T) {
+	a := &Servidor{Puerto: "8004", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(), Odoo: &odoo.Cliente{URL: "http://odoo"}}
+	b := &Servidor{Puerto: "8005", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen()}
+	if a.cookieSesion() == b.cookieSesion() {
+		t.Fatalf("mismo nombre de cookie en dos puertos: %s", a.cookieSesion())
+	}
+	ses, err := a.Sesiones.Crea(2, "Prueba", "prueba", "sesion-odoo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Handler()
+	pide := func(c *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://localhost:8004/api/yo", nil)
+		r.AddCookie(c)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	// La nueva vale; la de otro puerto (otro nombre) no cuenta.
+	if w := pide(&http.Cookie{Name: "pgo_sesion_8005", Value: ses.Token}); w.Code != 401 {
+		t.Errorf("cookie de otro puerto: %d", w.Code)
+	}
+	w := pide(&http.Cookie{Name: cookie, Value: ses.Token})
+	if w.Code == 401 {
+		t.Fatalf("cookie antigua rechazada: %s", w.Body.String())
+	}
+	var nueva, borrada bool
+	for _, c := range w.Result().Cookies() {
+		nueva = nueva || (c.Name == "pgo_sesion_8004" && c.Value == ses.Token)
+		borrada = borrada || (c.Name == cookie && c.MaxAge < 0)
+	}
+	if !nueva || !borrada {
+		t.Errorf("la antigua no pasa a la nueva: %v", w.Result().Cookies())
+	}
+}
+
+// Una carpeta de sesión que ya no existe (copia de trabajo quitada) no se explica como «no es del proyecto».
+func TestCarpetaAjena(t *testing.T) {
+	if m := carpetaAjena(t.TempDir()+"/quitada", "P"); !strings.Contains(m, "copia de trabajo se quitó") {
+		t.Errorf("carpeta quitada: %q", m)
+	}
+	if m := carpetaAjena(t.TempDir(), "P"); !strings.Contains(m, "no es del proyecto «P»") {
+		t.Errorf("carpeta ajena: %q", m)
 	}
 }

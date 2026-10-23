@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { get, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
 import Icono from './Icono';
 import { askConfirm } from './Modal';
-import { OPEN_PROGRAM_SETTINGS } from './ProgramSettings';
 
 // Programas del proyecto en local (un Odoo, un servicio, lo que se está desarrollando): los guardados en
 // .psf/ejecutar.json de la carpeta de la sesión, los que están en marcha (lanzados aquí o por el agente con «pgo»)
-// y su salida. Cuando un programa dice su URL, pgocode la abre en el navegador integrado.
-export default function Programas({ proyecto, carpeta, version, alAbrir }: {
-  proyecto: Proyecto; carpeta: string; version: number; alAbrir: (url: string) => void;
+// y su salida. Cuando un programa dice su URL, pgocode la abre en el navegador integrado. Aquí solo se ejecutan,
+// se paran y se ve su salida: se definen en Propiedades de la sesión → Programas. asSection (Actividad): con su
+// título y solo si hay alguno guardado o en marcha (si no, nada).
+export default function Programas({ proyecto, carpeta, version, alAbrir, asSection }: {
+  proyecto: Proyecto; carpeta: string; version: number; alAbrir: (url: string) => void; asSection?: boolean;
 }) {
   const [procs, setProcs] = useState<Proceso[]>([]);
   const [cfg, setCfg] = useState<ConfigPrograma[]>([]);
@@ -17,7 +18,7 @@ export default function Programas({ proyecto, carpeta, version, alAbrir }: {
 
   const carga = () => get<{ procesos: Proceso[]; configuraciones: ConfigPrograma[] }>(
     `/api/procesos?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}`)
-    .then(r => { setProcs(r.procesos); setCfg(r.configuraciones); }).catch(e => setError(e.message));
+    .then(r => { setProcs(r.procesos || []); setCfg(r.configuraciones || []); }).catch(e => setError(e.message));
   useEffect(() => { carga(); }, [proyecto.id, carpeta, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lanza = async (c: ConfigPrograma, guardar = false) => {
@@ -32,37 +33,48 @@ export default function Programas({ proyecto, carpeta, version, alAbrir }: {
   const enMarcha = new Map(procs.map(p => [p.nombre, p]));
   const sinGuardar = procs.filter(p => !cfg.some(c => c.nombre === p.nombre));
 
+  const filas = [...cfg.map(c => ({ c, p: enMarcha.get(c.nombre) })), ...sinGuardar.map(p => ({ c: { nombre: p.nombre, orden: p.orden, url: p.url }, p }))];
+  const lista = filas.map(({ c, p }) => (
+    <div key={c.nombre} className="programa">
+      <div className="programa-fila">
+        <span className={'punto ' + (p?.estado === 'curso' ? 'ok' : p?.estado === 'error' ? 'fallo' : '')} title={p?.estado || 'parado'} />
+        <span className="programa-texto">
+          <b className="recorta">{c.nombre}{p?.lanzado === 'agente' && <span className="etiqueta">agente</span>}</b>
+          <code className="recorta" title={c.orden}>{c.orden}</code>
+        </span>
+        {p?.url && p.estado === 'curso' && (
+          <button className="icono" onClick={() => alAbrir(p.url!)} title={'Abrir ' + p.url} aria-label="Abrir en el navegador"><Icono n="web" t={15} /></button>
+        )}
+        {p && <button className="icono" onClick={() => setVerSalida(v => v === c.nombre ? null : c.nombre)} aria-pressed={verSalida === c.nombre} title="Salida" aria-label="Salida"><Icono n="bajar" t={14} /></button>}
+        {p?.estado === 'curso'
+          ? <button className="icono" onClick={() => para(c.nombre)} title="Parar" aria-label="Parar"><Icono n="parar" t={14} /></button>
+          : <button className="icono" onClick={() => lanza(c)} disabled={!carpeta} title="Ejecutar" aria-label="Ejecutar"><Icono n="ejecutar" t={14} /></button>}
+        {p && p.estado !== 'curso' && !cfg.some(x => x.nombre === c.nombre) && (
+          <button className="icono" onClick={() => para(c.nombre, true)} title="Quitar de la lista" aria-label="Quitar"><Icono n="cerrar" t={13} /></button>
+        )}
+      </div>
+      {p && verSalida === c.nombre && <Salida nombre={c.nombre} enCurso={p.estado === 'curso'} />}
+    </div>
+  ));
+
+  if (asSection) return <>
+    {(filas.length > 0 || error) && (
+      <section>
+        <h4>Programas del proyecto</h4>
+        <p className="suave pequeno">Fuera del agente y sin tokens: los guardados, los lanzados aquí y los que el agente dejó en marcha.</p>
+        <div className="programas">
+          {error && <p className="error">{error}</p>}
+          {lista}
+        </div>
+      </section>
+    )}
+    <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} asSection />
+  </>;
   return (
     <div className="programas">
-      {!carpeta && <p className="suave">La sesión no tiene carpeta local: elige una en los ajustes de la sesión.</p>}
       {error && <p className="error">{error}</p>}
-      {[...cfg.map(c => ({ c, p: enMarcha.get(c.nombre) })), ...sinGuardar.map(p => ({ c: { nombre: p.nombre, orden: p.orden, url: p.url }, p }))].map(({ c, p }) => (
-        <div key={c.nombre} className="programa">
-          <div className="programa-fila">
-            <span className={'punto ' + (p?.estado === 'curso' ? 'ok' : p?.estado === 'error' ? 'fallo' : '')} title={p?.estado || 'parado'} />
-            <span className="programa-texto">
-              <b className="recorta">{c.nombre}{p?.lanzado === 'agente' && <span className="etiqueta">agente</span>}</b>
-              <code className="recorta" title={c.orden}>{c.orden}</code>
-            </span>
-            {p?.url && p.estado === 'curso' && (
-              <button className="icono" onClick={() => alAbrir(p.url!)} title={'Abrir ' + p.url} aria-label="Abrir en el navegador"><Icono n="web" t={15} /></button>
-            )}
-            {p && <button className="icono" onClick={() => setVerSalida(v => v === c.nombre ? null : c.nombre)} aria-pressed={verSalida === c.nombre} title="Salida" aria-label="Salida"><Icono n="bajar" t={14} /></button>}
-            {p?.estado === 'curso'
-              ? <button className="icono" onClick={() => para(c.nombre)} title="Parar" aria-label="Parar"><Icono n="parar" t={14} /></button>
-              : <button className="icono" onClick={() => lanza(c)} disabled={!carpeta} title="Ejecutar" aria-label="Ejecutar"><Icono n="ejecutar" t={14} /></button>}
-            {p && p.estado !== 'curso' && !cfg.some(x => x.nombre === c.nombre) && (
-              <button className="icono" onClick={() => para(c.nombre, true)} title="Quitar de la lista" aria-label="Quitar"><Icono n="cerrar" t={13} /></button>
-            )}
-          </div>
-          {p && verSalida === c.nombre && <Salida nombre={c.nombre} enCurso={p.estado === 'curso'} />}
-        </div>
-      ))}
-      {cfg.length === 0 && procs.length === 0 && carpeta && (
-        <p className="suave pequeno">Aún no hay programas. Defínelos en las propiedades de la sesión o pide al agente que lo ejecute con <code>pgo ejecutar</code>.</p>
-      )}
-      {carpeta && <button className="enlace" onClick={() => window.dispatchEvent(new Event(OPEN_PROGRAM_SETTINGS))}
-        title="Propiedades de la sesión → Programas"><Icono n="ajustes" t={13} /> Definir programas…</button>}
+      {lista}
+      {filas.length === 0 && !error && <p className="suave pequeno">No hay programas guardados ni en marcha.</p>}
       <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} />
     </div>
   );
@@ -74,7 +86,7 @@ const edad = (s: number) => s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min' 
 
 // Programas externos: los que tienes escuchando en un puerto y no lanzó pgocode (un Odoo que arrancó un agente
 // fuera de pgocode…), del proyecto y del resto de tus carpetas de trabajo, para verlos y pararlos.
-function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version: number; alAbrir: (url: string) => void }) {
+function Externos({ proyecto, version, alAbrir, asSection }: { proyecto: Proyecto; version: number; alAbrir: (url: string) => void; asSection?: boolean }) {
   const [l, setL] = useState<{ proyecto: EnRed[]; otros: EnRed[] } | null>(null);
   const [error, setError] = useState('');
   const [parando, setParando] = useState<number[]>([]);
@@ -107,9 +119,11 @@ function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version:
       </div>
     </div>
   );
+  const Caja = asSection ? 'section' : 'div';
+  const titulo = <>Otros programas en marcha <span className="suave pequeno">(fuera de pgocode)</span></>;
   return (
-    <div className="externos">
-      <h5>Otros programas en marcha <span className="suave pequeno">(fuera de pgocode)</span></h5>
+    <Caja className="externos">
+      {asSection ? <h4>{titulo}</h4> : <h5>{titulo}</h5>}
       {error && <p className="error">{error}</p>}
       {l.proyecto.length > 0 ? l.proyecto.map(fila) : <p className="suave pequeno">Ninguno de este proyecto.</p>}
       {l.otros.length > 0 && (
@@ -118,7 +132,7 @@ function Externos({ proyecto, version, alAbrir }: { proyecto: Proyecto; version:
           {l.otros.map(fila)}
         </details>
       )}
-    </div>
+    </Caja>
   );
 }
 
@@ -130,7 +144,7 @@ function Salida({ nombre, enCurso }: { nombre: string; enCurso: boolean }) {
   useEffect(() => {
     let vivo = true;
     const lee = () => get<{ lineas: string[] }>(`/api/procesos/salida?nombre=${encodeURIComponent(nombre)}&n=400`)
-      .then(r => { if (vivo) setLineas(r.lineas); }).catch(() => {});
+      .then(r => { if (vivo) setLineas(r.lineas || []); }).catch(() => {});
     lee();
     const t = enCurso ? setInterval(() => { if (!document.hidden) lee(); }, 1500) : undefined;
     return () => { vivo = false; if (t) clearInterval(t); };

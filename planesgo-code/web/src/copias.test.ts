@@ -30,3 +30,12 @@ test('explicaQuitar', () => {
   assert.match(C.explicaQuitar(copia({ fusionada: true }), true), /git branch -d/);
   assert.match(C.explicaQuitar(copia({}), true), /La rama se conserva/);
 });
+
+test('explicaQuitar: dice qué sesiones usan la copia y que se archivan; copia sin commits', () => {
+  const s = (nombre: string) => ({ id: nombre, nombre, proyecto: 1, carpeta: '/c', rama: 'dev', agente: 'claude-code', creada: 0, ultima: 0 });
+  assert.match(C.explicaQuitar(copia({}), true, [s('Una')]), /La usa esta sesión, que se quedaría sin carpeta:\n· Una\nSe archivará/);
+  assert.match(C.explicaQuitar(copia({}), true, [s('A'), s('B')]), /La usan 2 sesiones.*\n· A\n· B\nSe archivarán/);
+  assert.doesNotMatch(C.explicaQuitar(copia({}), true), /archiv/);
+  assert.equal(C.estado(copia({ fusionada: true, sin_commits: true })), 'sin_cambios');
+  assert.equal(C.copyUsers(copia({}), [s('A'), { ...s('B'), carpeta: '/otra' }, { ...s('C'), archivada: true }]).map(x => x.id).join(), 'A');
+});

@@ -14,7 +14,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
   return [
     { titulo: 'Teclas', entradas: [
       { clave: 'Intro', que: intro },
-      ...(o.inyecta ? [{ clave: 'Alt+Intro', que: 'Al turno en curso, aunque «Siempre al turno» esté desactivado' }] : []),
+      ...(o.inyecta ? [{ clave: 'Alt+Intro', que: 'Al turno en curso, aunque «Siempre al turno» esté desactivado (con adjuntos, a la cola)' }] : []),
       { clave: 'Ctrl+Intro · Mayús+Intro', que: 'Nueva línea' },
       { clave: '↑ ↓', que: 'Mensajes anteriores (en la primera o la última línea): los de la cola se editan en su sitio; los enviados se cargan para mandarlos otra vez. Esc o ↓ al final: vuelve lo que escribías' },
       { clave: 'Esc', que: 'Cerrar esta ayuda, menús y diálogos' },
@@ -40,13 +40,27 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: '¿qué ficheros has tocado?', que: 'Los que ha editado el agente en la conversación y los que tienen cambios según git' },
       { clave: '¿cuánto llevamos gastado?', que: 'Tokens y coste de la sesión' },
       { clave: '¿en qué rama estamos? · ¿qué has hecho?', que: 'Rama y carpeta; las acciones del agente en su último turno' },
-      { clave: 'Para que lo haga el agente', que: 'Dilo con más palabras («compila tú y revisa los avisos»), pon «>» delante o pulsa la etiqueta antes de enviar. Se desactiva en los ajustes de la sesión' },
+      { clave: 'Para que lo haga el agente', que: 'Dilo con más palabras («compila tú y revisa los avisos»), pon «>» delante o pulsa la etiqueta antes de enviar. Se desactiva en las propiedades de la sesión' },
     ] },
     { titulo: 'Quién hace qué (enrutador)', entradas: [
       { clave: 'Orden', que: 'Cada mensaje va a un solo sitio, el primero que encaja: órdenes de pgocode → funciones directas (0 tokens) → pregunta aparte → reparto en subtareas → el agente. En la duda, al agente' },
       { clave: 'Aparte', que: 'Estado: pgocode (0 tokens) · con contexto: una copia de la sesión del agente · suelta: la IA local del equipo (si no está, un modelo barato)' },
       { clave: 'Etiqueta y distintivo', que: 'La etiqueta encima del cuadro dice adónde irá; al pasar el ratón, quién lo hace, quién lo ha decidido y por qué. Cada mensaje enviado lleva su ruta' },
-      { clave: 'Actividad', que: 'Cuántos mensajes de la sesión han ido a cada sitio y cuántos sin tokens de pago. Todo, en docs/enrutador.md' },
+      { clave: 'Reparto', que: 'Una petición con varias partes independientes (una lista de 3 o más) se puede repartir en subtareas en paralelo: cada una en su sesión y su copia de trabajo; al acabar se unen a tu rama' },
+      { clave: 'Actividad', que: 'Cuántos mensajes de la sesión han ido a cada sitio y cuántos sin tokens de pago' },
+    ] },
+    { titulo: 'Contexto del agente', entradas: [
+      { clave: 'Hilo de limpieza', que: 'El indicador del contexto: cuánto ocupa la conversación del agente y lo que ya no hace falta. Antes de cada turno pgocode retira lo que no está vigente (lecturas superadas, salidas largas…) y lo repone si vuelve a hacer falta' },
+      { clave: 'Barrer ahora', que: 'Retira ya lo que no hace falta, sin esperar al próximo turno (puede costar caché: el aviso dice si compensa)' },
+      { clave: 'Relevo', que: 'Si el agente no deja tocar su historial (o la caché ha caducado), sigue en una conversación nueva con una memoria de trabajo de lo vigente' },
+      { clave: 'Continuar desde aquí', que: 'En una respuesta: el agente sigue desde ese punto, olvidando lo de después (sigue en la vista)' },
+    ] },
+    { titulo: 'Sesiones, programas y copias', entradas: [
+      { clave: 'Duplicar sin historial', que: 'Menú ⋮ de la sesión: otra con los mismos ajustes y la conversación vacía (el agente empieza de cero)' },
+      { clave: 'Archivar', que: 'Menú ⋮ de la sesión: sale de la lista (queda en «Archivadas», con su conversación)' },
+      { clave: 'Programas', que: 'Los programas del proyecto (un Odoo, un servicio…) se definen en Propiedades de la sesión → Programas y se ejecutan o paran desde Actividad o el lanzador, sin tokens' },
+      { clave: 'pgo ejecutar', que: 'El agente arranca un programa con «pgo ejecutar <nombre> <orden>» (lo para con «pgo parar <nombre>»): sale en Actividad con su salida' },
+      { clave: 'Copias de trabajo', que: 'Cada rama de una sesión vive en su copia (git worktree). Actividad las lista y deja quitar las que no pierden nada; las sesiones que la usaban se archivan' },
     ] },
     { titulo: 'En la interfaz', entradas: [
       { clave: 'Etiqueta de destino', que: 'Clic para cambiar adónde va el mensaje antes de enviarlo' },

@@ -29,6 +29,7 @@ export interface Sesion {
   tarea?: string;
   madre?: string;        // sesión madre de la que es hija (reparto en sesiones paralelas: reparto.ts)
   parte?: number;        // número de la parte que hace (desde 1)
+  archivada?: boolean;   // archivada (p. ej. se quitó su copia de trabajo): fuera de la lista principal, con su conversación
   corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;
@@ -39,8 +40,12 @@ export interface Repo { tipo: 'local' | 'odoo.sh' | 'autopyme.com'; repositorio?
 const clave = (login: string, proyecto: number) => `pgo:sesiones:${login.toLowerCase()}:${proyecto}`;
 const claveConv = (id: string) => 'pgo:conv:' + id;
 
+// sessionOrder: orden estable de la lista, las más nuevas primero (por creación). Antes era por la última actividad,
+// que se apuntaba al acabar cada turno: la sesión saltaba arriba al recibir su título y se elegía la que no era.
+export const sessionOrder = (a: Sesion, b: Sesion) => (b.creada || 0) - (a.creada || 0) || a.id.localeCompare(b.id);
+
 export function lista(login: string, proyecto: number): Sesion[] {
-  try { return (JSON.parse(localStorage.getItem(clave(login, proyecto)) || '[]') as Sesion[]).sort((a, b) => b.ultima - a.ultima); } catch { return []; }
+  try { return (JSON.parse(localStorage.getItem(clave(login, proyecto)) || '[]') as Sesion[]).sort(sessionOrder); } catch { return []; }
 }
 
 function guardaLista(login: string, proyecto: number, l: Sesion[]) {
@@ -50,7 +55,7 @@ function guardaLista(login: string, proyecto: number, l: Sesion[]) {
 export function guarda(login: string, s: Sesion): Sesion[] {
   const l = [s, ...lista(login, s.proyecto).filter(x => x.id !== s.id)];
   guardaLista(login, s.proyecto, l);
-  return l.sort((a, b) => b.ultima - a.ultima);
+  return l.sort(sessionOrder);
 }
 
 export function borra(login: string, s: Sesion): Sesion[] {
@@ -79,6 +84,9 @@ export function ordenaConHijas(l: Sesion[]): { s: Sesion; hija: boolean }[] {
   }
   return out;
 }
+
+// ARCHIVE_SESSIONS: evento para archivar sesiones ({proyecto, ids}); lo atiende App.tsx (que guarda la lista).
+export const ARCHIVE_SESSIONS = 'pgo:archiva-sesiones';
 
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
 
