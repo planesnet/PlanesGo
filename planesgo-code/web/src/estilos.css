@@ -964,3 +964,23 @@ button.miga-item:hover { background: var(--hover); }
 /* Propiedades de la sesión → Programas: cada programa guardado. */
 .programa-def { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--linea); }
 .programa-def .programa-texto { display: grid; flex: 1; min-width: 0; }
+
+/* «Pensando…» / «Trabajando…»: un indicador que gira delante y un brillo que recorre la palabra, para que se vea
+   que el agente sigue vivo. Sin animación si el sistema pide menos movimiento. */
+.pensando::before {
+  content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
+  border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento);
+  border-radius: 50%; animation: pensando-gira .8s linear infinite;
+}
+.pensando {
+  background: linear-gradient(90deg, var(--suave) 0%, var(--suave) 40%, var(--texto) 50%, var(--suave) 60%, var(--suave) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text;
+  animation: pensando-brillo 2.2s ease-in-out infinite;
+}
+.pensando:not(:has(*)) { color: transparent; }
+@keyframes pensando-gira { to { transform: rotate(360deg); } }
+@keyframes pensando-brillo { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pensando::before, .pensando { animation: none; }
+  .pensando:not(:has(*)) { color: var(--suave); }
+}
