@@ -108,3 +108,28 @@ test('respuestas con lo que ya sabe pgocode', () => {
   assert.match(t, /He arreglado el login/);
   assert.match(D.lastTurnAnswer([]), /aún no ha hecho/);
 });
+
+test('plural en la nota del commit y del diff', () => {
+  assert.match(D.resultNote({ accion: 'commit', ok: true, hash: 'abc', rama: 'main', mensaje: 'x', ficheros: ['a'] }).texto, /\n\n1 fichero · /);
+  assert.match(D.resultNote({ accion: 'commit', ok: true, hash: 'abc', rama: 'main', mensaje: 'x', ficheros: ['a', 'b'] }).texto, /2 ficheros · /);
+  assert.match(D.resultNote({ accion: 'diff', ok: true, ficheros: ['a'], salida: 'x' }).texto, /\(1 fichero\)/);
+});
+
+test('lo que hizo pgocode desde el último turno del agente, en una línea', () => {
+  const c = D.resultNote({ accion: 'commit', ok: true, hash: 'abc123', rama: 'main', mensaje: 'Añade el IVA', ficheros: ['a'] });
+  const t = D.resultNote({ accion: 'test', ok: true, orden: 'make test', segundos: 1 });
+  const mal = D.resultNote({ accion: 'build', ok: false, orden: 'make build', segundos: 1, errores: 'x' });
+  const nota = (r: { texto: string; directo: D.DirectNote }): Mensaje => ({ rol: 'assistant', texto: r.texto, nota: true, directo: r.directo });
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'haz algo' }, nota(t), { rol: 'assistant', texto: 'hecho' },
+    { rol: 'user', texto: 'haz commit' }, nota(c), { rol: 'user', texto: 'pasa los tests' }, nota(t),
+    { rol: 'user', texto: '¿qué cambios hay?' }, { rol: 'assistant', texto: 'Sin cambios', nota: true, directo: { accion: 'status', ok: true } },
+  ];
+  assert.equal(D.sinceLastTurn(ms), '(pgocode, desde tu último turno: commit abc123 "Añade el IVA"; pruebas ✓ (`make test`).)');
+  // Nada desde el último turno: nada.
+  assert.equal(D.sinceLastTurn([...ms, { rol: 'user', texto: 'x' }, { rol: 'assistant', texto: 'y' }]), '');
+  // Lo que ya va en el mensaje («Pásaselo al agente») no se repite.
+  const conFallo = [...ms, nota(mal)];
+  assert.match(D.sinceLastTurn(conFallo), /compilar ✗/);
+  assert.doesNotMatch(D.sinceLastTurn(conFallo, D.agentMessage(mal.directo)), /compilar/);
+});

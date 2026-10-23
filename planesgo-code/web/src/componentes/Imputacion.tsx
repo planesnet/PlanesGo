@@ -210,7 +210,7 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
             <button className="boton-secundario" onClick={valida} disabled={validando}>{validando ? 'Validando…' : 'Validar el registro de hoy'}</button>
             {validacion && <>
               <span className="suave pequeno" title={validacion.fichero}>
-                {validacion.sucesos} sucesos · {validacion.errores ? <b className="v-error">{validacion.errores} errores</b> : 'sin errores'} · {validacion.avisos.filter(a => a.gravedad === 'aviso').length} avisos
+                {validacion.sucesos} sucesos · {validacion.errores ? <b className="v-error">{validacion.errores} {validacion.errores === 1 ? 'error' : 'errores'}</b> : 'sin errores'} · {validacion.avisos.filter(a => a.gravedad === 'aviso').length} avisos
               </span>
               {validacion.lineas.length > 0 && (
                 <table className="v-lineas">

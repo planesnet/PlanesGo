@@ -254,7 +254,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           <fieldset className="notificaciones">
             <legend>Preguntas aparte</legend>
             <label className="casilla"><input type="checkbox" checked={s.decideAparte !== false} onChange={e => cambia({ decideAparte: e.target.checked })} /> Decidir automáticamente qué va al contexto</label>
-            <span className="suave pequeno">Con el agente trabajando, pgocode responde aparte (sin que entre en la conversación) lo que no es para el agente: «¿cómo va?» en local y sin tokens; las preguntas sueltas, con un modelo barato. En la duda, va a la conversación. Siempre puedes forzarlo: «?» estado, «//» aparte.</span>
+            <span className="suave pequeno">Con el agente trabajando, pgocode responde aparte (sin que entre en la conversación) lo que no es para el agente: «¿cómo va?» en local y sin tokens; las preguntas sueltas, con la IA local del equipo (si no está, un modelo barato). En la duda, va a la conversación. Siempre puedes forzarlo: «?» estado, «//» aparte.</span>
           </fieldset>
           <fieldset className="notificaciones">
             <legend>Órdenes directas</legend>

@@ -115,11 +115,12 @@ type Union struct {
 
 // UneHija une la rama de la hija n a la rama actual de la madre (que tiene que seguir siendo ramaMadre) con
 // «git merge --no-ff», solo si el árbol de la madre está limpio. Antes, lo que la hija dejó sin commitear se
-// guarda en un commit en su rama («pgocode: parte N»). Con conflicto, «git merge --abort»: la madre queda como
+// guarda en un commit en su rama («pgocode: parte N — <su texto>»). Con conflicto, «git merge --abort»: la madre queda como
 // estaba y la rama de la hija se conserva. Si la unión va bien, se quita la copia de la hija (y su rama).
 // El que llama garantiza que no hay un agente trabajando en ninguna de las dos carpetas y que no se une a la vez en
 // el mismo repositorio.
-func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n int) (Union, error) {
+// parte: el texto de la parte, para los mensajes de los commits (puede ir vacío).
+func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n int, parte string) (Union, error) {
 	if !ramaDeHijaValida(rama) {
 		return Union{}, errors.New("nombre de rama no válido")
 	}
@@ -143,7 +144,7 @@ func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n i
 		if out, err := gitSalida(ctx, hijaDir, "add", "-A"); err != nil {
 			return Union{}, fmt.Errorf("no se han podido guardar los cambios de la parte %d: %s", n, out)
 		}
-		args := append(identidad(ctx, hijaDir), "commit", "-q", "-m", fmt.Sprintf("pgocode: parte %d", n))
+		args := append(identidad(ctx, hijaDir), "commit", "-q", "-m", MensajeParte(n, parte))
 		if out, err := gitSalida(ctx, hijaDir, args...); err != nil {
 			return Union{}, fmt.Errorf("no se han podido guardar los cambios de la parte %d: %s", n, out)
 		}
@@ -162,7 +163,7 @@ func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n i
 	if _, err := git(ctx, madreDir, "merge-base", "--is-ancestor", rama, "HEAD"); err == nil {
 		u.Estado = "sin_cambios" // ya está en la rama de la madre (o no hizo nada)
 	} else {
-		args := append(identidad(ctx, madreDir), "merge", "--no-ff", "--no-edit", "-m", fmt.Sprintf("pgocode: une la parte %d (%s)", n, rama), rama)
+		args := append(identidad(ctx, madreDir), "merge", "--no-ff", "--no-edit", "-m", fmt.Sprintf("pgocode: une la parte %d (%s)", n, rama)+resumenParte(parte), rama)
 		if out, err := gitSalida(ctx, madreDir, args...); err != nil {
 			fich, _ := git(ctx, madreDir, "diff", "--name-only", "--diff-filter=U")
 			if _, e := git(ctx, madreDir, "rev-parse", "-q", "--verify", "MERGE_HEAD"); e == nil {
@@ -184,6 +185,25 @@ func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n i
 		u.Aviso = err.Error()
 	}
 	return u, nil
+}
+
+// MensajeParte: el mensaje del commit de lo que una parte dejó sin commitear: «pgocode: parte 2 — añade el cupón
+// VERANO» (sin su texto, «pgocode: parte 2»).
+func MensajeParte(n int, parte string) string {
+	return fmt.Sprintf("pgocode: parte %d", n) + resumenParte(parte)
+}
+
+// resumenParte: « — <la primera línea de la parte>» recortada, o nada.
+func resumenParte(parte string) string {
+	l := strings.Join(strings.Fields(strings.SplitN(strings.TrimSpace(parte), "\n", 2)[0]), " ")
+	l = strings.TrimRight(l, ".:;, ")
+	if l == "" {
+		return ""
+	}
+	if r := []rune(l); len(r) > 72 {
+		l = strings.TrimSpace(string(r[:71])) + "…"
+	}
+	return " — " + l
 }
 
 // QuitaUnida quita la copia de trabajo de una hija cuya rama ya está unida a la actual de la madre (git worktree

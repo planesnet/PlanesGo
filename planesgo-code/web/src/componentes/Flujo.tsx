@@ -325,7 +325,7 @@ function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Is
         {iconoPR(p)}
         <span className="gh-cuerpo">
           <span className="gh-texto"><b>{p.titulo}</b> <span className="suave">#{p.numero}</span></span>
-          <span className="gh-meta">{p.borrador ? 'Borrador' : 'Abierta'} · quiere fusionar {p.commits} commits en <code>{p.base}</code> desde <code>{p.rama}</code></span>
+          <span className="gh-meta">{p.borrador ? 'Borrador' : 'Abierta'} · quiere fusionar {p.commits} {p.commits === 1 ? 'commit' : 'commits'} en <code>{p.base}</code> desde <code>{p.rama}</code></span>
         </span>
       </button>
       <div className="gh-chips">
@@ -333,7 +333,7 @@ function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Is
         <Revision r={p.revision} />
         {p.fusionable === 'CONFLICTING' ? <span className="gh-chip" style={{ color: ROJO }}><Oct n="x" t={13} /> Conflictos</span>
           : p.fusionable === 'MERGEABLE' ? <span className="gh-chip" style={{ color: VERDE }}><Oct n="check" t={13} /> Sin conflictos</span> : null}
-        <span className="gh-chip"><b style={{ color: VERDE }}>+{p.mas.toLocaleString()}</b>&nbsp;<b style={{ color: ROJO }}>−{p.menos.toLocaleString()}</b>&nbsp;· {p.ficheros} ficheros</span>
+        <span className="gh-chip"><b style={{ color: VERDE }}>+{p.mas.toLocaleString()}</b>&nbsp;<b style={{ color: ROJO }}>−{p.menos.toLocaleString()}</b>&nbsp;· {p.ficheros} {p.ficheros === 1 ? 'fichero' : 'ficheros'}</span>
       </div>
       <div className="gh-diffbarra" title={`+${p.mas} −${p.menos}`}><span style={{ width: `${(p.mas / total) * 100}%` }} /></div>
       {p.issues.length > 0 && <div className="gh-cierra">Cierra: {p.issues.map(n => {

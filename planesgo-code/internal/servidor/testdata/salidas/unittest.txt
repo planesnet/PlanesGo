@@ -1,0 +1,25 @@
+E.F
+======================================================================
+ERROR: test_error (test_a.TestA.test_error)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "test_a.py", line 8, in test_error
+    helper(5)
+    ~~~~~~^^^
+  File "test_a.py", line 3, in helper
+    raise ValueError("valor malo: %r" % x)
+ValueError: valor malo: 5
+
+======================================================================
+FAIL: test_suma (test_a.TestA.test_suma)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "test_a.py", line 6, in test_suma
+    self.assertEqual(1 + 1, 3)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^
+AssertionError: 2 != 3
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (failures=1, errors=1)

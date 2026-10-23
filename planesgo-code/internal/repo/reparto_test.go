@@ -101,7 +101,7 @@ func TestUnionLimpiaYSeQuitaLaCopia(t *testing.T) {
 		hs = append(hs, c)
 	}
 	for i, c := range hs {
-		u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", i+1)
+		u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", i+1, []string{"", "Añade el cupón VERANO.\nCon pruebas", ""}[i])
 		if err != nil || u.Estado != "unida" || !u.Quitada || !u.Rama || (i == 1) != u.Commit {
 			t.Fatalf("hija %d: %+v %v", i+1, u, err)
 		}
@@ -123,7 +123,8 @@ func TestUnionLimpiaYSeQuitaLaCopia(t *testing.T) {
 	if m, _ := git(ctx, r, "log", "--merges", "--format=%s"); strings.Count(m, "pgocode: une la parte") != 3 {
 		t.Errorf("merges: %q", m)
 	}
-	if m, _ := git(ctx, r, "log", "--all", "--format=%s"); !strings.Contains(m, "pgocode: parte 2") {
+	if m, _ := git(ctx, r, "log", "--all", "--format=%s"); !strings.Contains(m, "pgocode: parte 2 — Añade el cupón VERANO\n") ||
+		!strings.Contains(m, "pgocode: une la parte 2 (pgo/") || !strings.Contains(m, ") — Añade el cupón VERANO") {
 		t.Errorf("sin el commit automático: %q", m)
 	}
 	if l := ListaCopias(ctx, r); len(l) != 0 {
@@ -143,10 +144,10 @@ func TestUnionConConflictoSeConserva(t *testing.T) {
 		run(c.Carpeta, "add", "-A")
 		run(c.Carpeta, "commit", "-q", "-m", "parte")
 	}
-	if u, err := UneHija(ctx, r, a.Carpeta, a.Rama, "main", 1); err != nil || u.Estado != "unida" {
+	if u, err := UneHija(ctx, r, a.Carpeta, a.Rama, "main", 1, ""); err != nil || u.Estado != "unida" {
 		t.Fatalf("%+v %v", u, err)
 	}
-	u, err := UneHija(ctx, r, b.Carpeta, b.Rama, "main", 2)
+	u, err := UneHija(ctx, r, b.Carpeta, b.Rama, "main", 2, "")
 	if err != nil || u.Estado != "conflicto" || len(u.Ficheros) != 1 || u.Ficheros[0] != "base.txt" || u.Quitada {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -172,7 +173,7 @@ func TestUnionPendienteSiLaMadreEstaSucia(t *testing.T) {
 	run(c.Carpeta, "add", "-A")
 	run(c.Carpeta, "commit", "-q", "-m", "p")
 	escribe(t, r, "suelto.txt", "sin seguimiento\n")
-	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1)
+	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1, "")
 	if err != nil || u.Estado != "pendiente" || !strings.Contains(u.Motivo, "cambios sin guardar") || u.Quitada {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -181,14 +182,14 @@ func TestUnionPendienteSiLaMadreEstaSucia(t *testing.T) {
 	}
 	// Limpia la madre: ahora se une.
 	os.Remove(filepath.Join(r, "suelto.txt"))
-	if u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1); err != nil || u.Estado != "unida" || !u.Quitada {
+	if u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1, ""); err != nil || u.Estado != "unida" || !u.Quitada {
 		t.Fatalf("%+v %v", u, err)
 	}
 	// Cambios en un fichero versionado también cuentan.
 	c2, _ := hija(t, r, 2)
 	escribe(t, c2.Carpeta, "y.txt", "y\n")
 	escribe(t, r, "base.txt", "modificado\n")
-	if u, _ := UneHija(ctx, r, c2.Carpeta, c2.Rama, "main", 2); u.Estado != "pendiente" {
+	if u, _ := UneHija(ctx, r, c2.Carpeta, c2.Rama, "main", 2, ""); u.Estado != "pendiente" {
 		t.Fatalf("%+v", u)
 	}
 	// Con lo de la hija ya guardado en su rama (commit automático): no se pierde.
@@ -203,7 +204,7 @@ func TestUnionPendienteSiLaMadreCambiaDeRama(t *testing.T) {
 	c, ramaMadre := hija(t, r, 1)
 	escribe(t, c.Carpeta, "x.txt", "x\n")
 	run(r, "checkout", "-q", "-b", "otra")
-	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, ramaMadre, 1)
+	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, ramaMadre, 1, "")
 	if err != nil || u.Estado != "pendiente" || !strings.Contains(u.Motivo, "ya no está en la rama") {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -213,7 +214,7 @@ func TestUnionSinCambios(t *testing.T) {
 	ctx := context.Background()
 	r, _ := madreConFichero(t)
 	c, _ := hija(t, r, 1)
-	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1)
+	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1, "")
 	if err != nil || u.Estado != "sin_cambios" || !u.Quitada || !u.Rama || existe(c.Carpeta) {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -228,7 +229,7 @@ func TestUnionConStashNoQuitaLaCopia(t *testing.T) {
 	run(c.Carpeta, "commit", "-q", "-m", "p")
 	escribe(t, c.Carpeta, "guardado.txt", "g\n")
 	run(c.Carpeta, "stash", "push", "-q", "-u")
-	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1)
+	u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1, "")
 	if err != nil || u.Estado != "unida" || u.Quitada || u.Aviso == "" || !existe(c.Carpeta) {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -241,17 +242,17 @@ func TestUnionRechazaLoQueNoEsDeReparto(t *testing.T) {
 	if err := PreparaRama(ctx, r, "dev", d); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UneHija(ctx, r, d, "dev", "main", 1); err == nil {
+	if _, err := UneHija(ctx, r, d, "dev", "main", 1, ""); err == nil {
 		t.Error("unió una rama sin el prefijo de reparto")
 	}
-	if _, err := UneHija(ctx, r, r, "pgo/x-1", "main", 1); err == nil {
+	if _, err := UneHija(ctx, r, r, "pgo/x-1", "main", 1, ""); err == nil {
 		t.Error("unió la carpeta principal")
 	}
 	// Una copia de otro repositorio.
 	o, runO := madreConFichero(t)
 	_ = runO
 	c, _ := hija(t, o, 1)
-	if _, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1); err == nil {
+	if _, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", 1, ""); err == nil {
 		t.Error("unió la copia de otro repositorio")
 	}
 	// La madre no se toca.
@@ -308,7 +309,7 @@ func TestCuatroHijasALaVez(t *testing.T) {
 			defer wg.Done()
 			mu.Lock() // la unión se serializa por repositorio (lo hace el servidor)
 			defer mu.Unlock()
-			if u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", n+1); err != nil || u.Estado != "unida" || !u.Quitada {
+			if u, err := UneHija(ctx, r, c.Carpeta, c.Rama, "main", n+1, ""); err != nil || u.Estado != "unida" || !u.Quitada {
 				t.Errorf("hija %d: %+v %v", n+1, u, err)
 			}
 		}()
@@ -320,4 +321,17 @@ func TestCuatroHijasALaVez(t *testing.T) {
 		}
 	}
 	_ = run
+}
+
+func TestMensajeParte(t *testing.T) {
+	if m := MensajeParte(3, ""); m != "pgocode: parte 3" {
+		t.Error(m)
+	}
+	largo := strings.Repeat("palabra ", 20)
+	if m := MensajeParte(1, "  añade   el cupón\nmás detalle"); m != "pgocode: parte 1 — añade el cupón" {
+		t.Error(m)
+	}
+	if m := []rune(MensajeParte(1, largo)); len(m) > 100 || m[len(m)-1] != '…' {
+		t.Error(string(m))
+	}
 }

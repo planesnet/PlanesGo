@@ -403,7 +403,9 @@ func runDirect(ctx context.Context, dir, orden string, env []string, max time.Du
 }
 
 // Líneas que suelen ser errores: de compiladores, pruebas (Go, node --test, jest, pytest) y linters.
-var errorLine = regexp.MustCompile(`(?i)(\berror\b|\berr!|\bfail(ed|ure|s)?\b|\bpanic\b|✗|✖|×|\bexception\b|traceback|^\s*not ok\b|^\s*at .*:\d+:\d+|^[^\s].*:\d+(:\d+)?:\s|\bexpected\b|\bassert(ion)?\b|\bundefined\b|cannot|no such|\bwarning\b.*\berror)`)
+// Las excepciones con nombre (AssertionError, ValueError, NullPointerException…) distinguen mayúsculas.
+var errorLine = regexp.MustCompile(`(?i)((?-i:\b\w*(Error|Exception)\b)|\berror\b|\berr!|\bfail(ed|ure|s)?\b|\bpanic\b|✗|✕|✖|×|^\s*● |\bexception\b|traceback|^\s*not ok\b|^\s*at .*:\d+:\d+|^[^\s].*:\d+(:\d+)?:\s|\bexpected\b|\bassert(ion)?\b|\bundefined\b|cannot|no such|\bwarning\b.*\berror)`)
+var traceback = regexp.MustCompile(`^\s*Traceback \(most recent call last\)`)
 var ansi = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
 
 // trimOutput: la salida para el chat (las líneas de error que no estén al final, y el final) y solo los errores
@@ -417,15 +419,23 @@ func trimOutput(out string) (string, string) {
 	// Errores: las líneas que lo parecen y la siguiente (suele ser el detalle), sin repetir.
 	var errs []string
 	marked := make([]bool, len(lines))
+	indented := func(l string) bool { return strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t") }
 	for i, l := range lines {
 		if strings.TrimSpace(l) == "" || !errorLine.MatchString(l) {
 			continue
 		}
-		for j := i; j <= i+1 && j < len(lines); j++ {
-			// La siguiente, solo si es su detalle (sangrada).
-			if j > i && !strings.HasPrefix(lines[j], " ") && !strings.HasPrefix(lines[j], "\t") {
-				break
+		// Con la línea, su detalle: la siguiente si va sangrada; tras un Traceback de Python, todos los marcos
+		// sangrados hasta la primera línea sin sangría (la excepción), incluida.
+		last := i
+		if traceback.MatchString(l) {
+			last = i + 1
+			for last < len(lines) && (indented(lines[last]) || strings.TrimSpace(lines[last]) == "") {
+				last++
 			}
+		} else if i+1 < len(lines) && indented(lines[i+1]) {
+			last = i + 1
+		}
+		for j := i; j <= last && j < len(lines); j++ {
 			if !marked[j] && strings.TrimSpace(lines[j]) != "" {
 				marked[j] = true
 				errs = append(errs, lines[j])
@@ -433,7 +443,7 @@ func trimOutput(out string) (string, string) {
 		}
 	}
 	if len(errs) > directMaxErrLines {
-		errs = append(errs[:directMaxErrLines], fmt.Sprintf("[… %d líneas más]", len(errs)-directMaxErrLines))
+		errs = append(errs[:directMaxErrLines], fmt.Sprintf("[… %s más]", lineCount(len(errs)-directMaxErrLines)))
 	}
 	errores := limitText(strings.Join(errs, "\n"), directMaxErrors)
 	// Salida: el final; y, si hay errores antes, esos primero.
@@ -450,12 +460,12 @@ func trimOutput(out string) (string, string) {
 			}
 		}
 		if len(before) > 25 {
-			before = append(before[:25], fmt.Sprintf("[… %d líneas de error más]", len(before)-25))
+			before = append(before[:25], fmt.Sprintf("[… %s de error más]", lineCount(len(before)-25)))
 		}
 		if len(before) > 0 {
 			parts = append(parts, strings.Join(before, "\n"))
 		}
-		parts = append(parts, fmt.Sprintf("[… %d líneas …]", tailFrom))
+		parts = append(parts, fmt.Sprintf("[… %s …]", lineCount(tailFrom)))
 	}
 	parts = append(parts, strings.Join(lines[tailFrom:], "\n"))
 	salida := strings.Join(parts, "\n")
@@ -463,6 +473,14 @@ func trimOutput(out string) (string, string) {
 		salida = "[…]\n" + salida[len(salida)-directMaxOutput:]
 	}
 	return salida, errores
+}
+
+// lineCount: «1 línea», «3 líneas».
+func lineCount(n int) string {
+	if n == 1 {
+		return "1 línea"
+	}
+	return fmt.Sprintf("%d líneas", n)
 }
 
 func limitText(s string, n int) string {

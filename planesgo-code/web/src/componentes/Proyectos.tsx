@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { identificador, lista as sesionesDe, ordenaConHijas, titulo, type Repo, type Sesion } from '../sesiones';
@@ -293,49 +293,67 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
   // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
   const [renombrando, setRenombrando] = useState<string | null>(null);
+  // Madres con sus partes ya unidas desplegadas (por defecto, plegadas).
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
+  const despliega = (id: string) => setAbiertas(x => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // Las archivadas (p. ej. se quitó su copia de trabajo) van aparte, plegadas al final: no se pierden.
   const archivadas = lista.filter(s => s.archivada);
-  const fila = (s: Sesion, hija: boolean) => (
-    <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '') + (hija ? ' hija' : '')}>
-      {renombrando === s.id ? (
-        <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
-      ) : (
-        <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
-          <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
-          <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
-          {hija && <span className="insignia-parte" title="Sesión hija: una parte de un reparto en paralelo">parte {s.parte}</span>}
-          {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
-        </button>
-      )}
-      <button className="icono puntos" onClick={e => { const ancla = e.currentTarget; setMenu(m => m?.id === s.id ? null : { id: s.id, ancla }); }}
-        title="Más opciones" aria-label="Más opciones de la sesión" aria-haspopup="menu" aria-expanded={menu?.id === s.id}>
-        <Icono n="puntos" t={15} />
-      </button>
-      {menu?.id === s.id && (
-        <MenuSesion ancla={menu.ancla} alCerrar={() => setMenu(null)} opciones={[
-          { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
-          // Para analizar la sesión (registro de tiempos, depuracion.log, conversación del agente) a partir de sus ids.
-          { icono: 'copiar', texto: 'Copiar identificador', accion: () => navigator.clipboard.writeText(identificador(s)).catch(() => {}) },
-          // Misma configuración, conversación vacía: el agente empieza de cero.
-          { icono: 'nuevo', texto: 'Duplicar sin historial', accion: () => onDuplicateSession(proyecto, s) },
-          s.archivada
-            ? { icono: 'recargar', texto: 'Desarchivar', accion: () => alCambiarSesion({ ...s, archivada: undefined }) }
-            : { icono: 'descargar', texto: 'Archivar', accion: () => alCambiarSesion({ ...s, archivada: true }) },
-          { icono: 'borrar', texto: 'Borrar', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`, { okText: 'Borrar', danger: true })) alBorrarSesion(s); } },
-          null,
-          { icono: 'ajustes', texto: 'Propiedades', accion: () => alAjustesSesion(s) },
-        ]} />
-      )}
-    </div>
-  );
   return (
     <div className="sesiones">
       {lista.length === archivadas.length && <p className="sin-sesiones">Sin sesiones</p>}
-      {ordenaConHijas(lista.filter(s => !s.archivada)).map(({ s, hija }) => fila(s, hija))}
+      {ordenaConHijas(lista.filter(s => !s.archivada), abiertas, sesion?.id).map(({ s, hija, unidas, plegadas }) => (
+        <Fragment key={s.id}>
+        <div className={'sesion' + (sesion?.id === s.id ? ' activa' : '') + (hija ? ' hija' : '')}>
+          {renombrando === s.id ? (
+            <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
+          ) : (
+            <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
+              <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
+              <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
+              {hija && <span className="insignia-parte" title="Sesión hija: una parte de un reparto en paralelo">parte {s.parte}</span>}
+              {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
+            </button>
+          )}
+          <button className="icono puntos" onClick={e => { const ancla = e.currentTarget; setMenu(m => m?.id === s.id ? null : { id: s.id, ancla }); }}
+            title="Más opciones" aria-label="Más opciones de la sesión" aria-haspopup="menu" aria-expanded={menu?.id === s.id}>
+            <Icono n="puntos" t={15} />
+          </button>
+          {menu?.id === s.id && (
+            <MenuSesion ancla={menu.ancla} alCerrar={() => setMenu(null)} opciones={[
+              { icono: 'lapiz', texto: 'Renombrar', accion: () => setRenombrando(s.id) },
+              // Para analizar la sesión (registro de tiempos, depuracion.log, conversación del agente) a partir de sus ids.
+              { icono: 'copiar', texto: 'Copiar identificador', accion: () => navigator.clipboard.writeText(identificador(s)).catch(() => {}) },
+              // Misma configuración, conversación vacía: el agente empieza de cero.
+              { icono: 'nuevo', texto: 'Duplicar sin historial', accion: () => onDuplicateSession(proyecto, s) },
+              s.archivada
+                ? { icono: 'recargar', texto: 'Desarchivar', accion: () => alCambiarSesion({ ...s, archivada: undefined }) }
+                : { icono: 'descargar', texto: 'Archivar', accion: () => alCambiarSesion({ ...s, archivada: true }) },
+              { icono: 'borrar', texto: 'Borrar', peligro: true, accion: async () => { if (await askConfirm(`¿Borrar la sesión «${titulo(s)}» y su conversación?`, { okText: 'Borrar', danger: true })) alBorrarSesion(s); } },
+              null,
+              { icono: 'ajustes', texto: 'Propiedades', accion: () => alAjustesSesion(s) },
+            ]} />
+          )}
+        </div>
+        {unidas ? (
+          <button className="enlace sesiones-unidas suave pequeno" onClick={() => despliega(s.id)} aria-expanded={!plegadas}
+            title="Partes de un reparto que ya se han unido a esta sesión">
+            {plegadas ? '▸' : '▾'} {unidas} {unidas === 1 ? 'parte unida' : 'partes unidas'}
+          </button>
+        ) : null}
+        </Fragment>
+      ))}
       {archivadas.length > 0 && (
         <details className="sesiones-archivadas" open={archivadas.some(s => s.id === sesion?.id)}>
           <summary className="suave pequeno">Archivadas ({archivadas.length})</summary>
-          {archivadas.map(s => fila(s, false))}
+          {archivadas.map(s => (
+            <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '')}>
+              <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
+                <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
+                <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
+              </button>
+              <button className="icono" onClick={() => alCambiarSesion({ ...s, archivada: undefined })} title="Desarchivar" aria-label={'Desarchivar ' + titulo(s)}><Icono n="recargar" t={13} /></button>
+            </div>
+          ))}
         </details>
       )}
     </div>

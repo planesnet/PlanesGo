@@ -27,6 +27,7 @@ export interface Hija {
   ficheros?: string[];  // los que chocan
   aviso?: string;       // la copia o la rama se conservan
   quitada?: boolean;    // su copia ya se ha quitado
+  resolving?: boolean;  // en conflicto: se le ha pedido al agente de la madre que una la rama y resuelva el choque
 }
 
 export interface Reparto {
@@ -95,7 +96,8 @@ export function pon(r: Reparto, n: number, cambios: Partial<Hija>): Reparto {
 export const hijasDe = (l: Reparto[], madre: string) => Math.max(0, ...l.filter(r => r.madre === madre).flatMap(r => r.hijas.map(h => h.idx || h.n)));
 
 // Una hija que ha acabado bien y aún no se ha unido (o quedó pendiente): se puede unir.
-export const seUne = (h: Hija) => (h.estado === 'hecha' || h.estado === 'parada') && !h.quitada && (h.union === 'sin' || h.union === 'pendiente' || h.union === 'error');
+// En conflicto, después de pedírselo al agente de la madre (al volver a unir, si ya lo ha unido él, sale «sin cambios»).
+export const seUne = (h: Hija) => (h.estado === 'hecha' || h.estado === 'parada') && !h.quitada && (h.union === 'sin' || h.union === 'pendiente' || h.union === 'error' || (h.union === 'conflicto' && Boolean(h.resolving)));
 
 // Todas las hijas han acabado (o se pararon) y las que acabaron bien tienen su unión resuelta o a la espera del usuario.
 export const acabado = (r: Reparto) => r.hijas.every(h => h.estado === 'hecha' || h.estado === 'parada' || h.estado === 'error');
@@ -123,9 +125,16 @@ export const NOMBRE_HIJA: Record<EstadoHija, string> = { espera: 'en cola', trab
 
 export interface DatosHija { respuesta: string; entrada: number; salida: number; coste: number }
 
-// La última respuesta del agente en una conversación, para el resumen (sin avisos de error).
+// La última respuesta del agente en una conversación, para el resumen (sin avisos de error). Sus bloques de texto
+// (separados por herramientas) van con un salto: en el texto seguido del mensaje quedan pegados («…su estilo.Sigo…»).
 export function ultimaRespuesta(ms: Mensaje[]): string {
-  for (let i = ms.length - 1; i >= 0; i--) if (ms[i].rol === 'assistant' && !ms[i].nota && ms[i].texto.trim()) return ms[i].texto.trim();
+  for (let i = ms.length - 1; i >= 0; i--) {
+    const m = ms[i];
+    if (m.rol !== 'assistant' || m.nota) continue;
+    const bloques = (m.partes || []).flatMap(p => (p.tipo === 'texto' && p.texto.trim() ? [p.texto.trim()] : []));
+    const t = bloques.length ? bloques.join('\n\n') : m.texto.trim();
+    if (t) return t;
+  }
   return '';
 }
 
@@ -171,6 +180,12 @@ export function resumen(r: Reparto, datos: Record<string, DatosHija>): string {
 
 // La unión hecha a mano (botón «Unir cambios»), en una frase para el chat de la madre.
 export const fraseManual = (h: Hija) => `Parte ${h.n}: ${fraseUnion(h)}.`;
+
+// El mensaje para que el agente de la sesión madre una la rama de una parte en conflicto y resuelva el choque.
+export function mensajeResolver(h: Hija, ramaMadre: string): string {
+  const f = (h.ficheros || []).map(x => '`' + x + '`').join(', ');
+  return `Une la rama \`${h.rama}\` (parte ${h.n} del reparto: ${recorta(h.parte, 120)}) a la rama actual${ramaMadre ? ` (\`${ramaMadre}\`)` : ''} con \`git merge ${h.rama}\` y resuelve los conflictos${f ? ` en ${f}` : ''} conservando lo de las dos partes. Después comprueba que compila y pasan las pruebas, y haz el commit de la unión.`;
+}
 
 // Aviso inmediato en el chat de la madre por un conflicto.
 export function avisoConflicto(h: Hija): string {

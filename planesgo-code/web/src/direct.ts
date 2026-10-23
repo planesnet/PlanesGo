@@ -8,6 +8,7 @@
 import type { Herramienta, Mensaje, Uso } from './api';
 import { changedFiles, ultimoTexto } from './aparte.ts';
 import * as CO from './costes.ts';
+import { plural } from './plural.ts';
 
 export type DirectKind = 'build' | 'test' | 'typecheck' | 'lint' | 'commit' | 'status' | 'diff' | 'files' | 'cost' | 'where' | 'last_turn';
 
@@ -28,6 +29,8 @@ export interface DirectNote {
   salida?: string;      // recortada (errores y final)
   errores?: string;     // solo lo relevante, para pasárselo al agente
   carpeta?: string;
+  hash?: string;        // commit: el hash corto y su mensaje (para decírselo al agente en su próximo mensaje)
+  mensaje?: string;
 }
 
 // Respuesta de /api/directo.
@@ -103,7 +106,8 @@ export function resultNote(r: DirectResult): { texto: string; directo: DirectNot
     case 'commit':
       if (r.ok && r.hash) {
         l.push(`✓ **Commit** ${code(r.hash)} en ${code(r.rama || '')}: «${r.mensaje}»`);
-        l.push(`${r.ficheros?.length || 0} ficheros · mensaje ${r.via?.startsWith('local/') ? `redactado por la IA local (${r.via.slice(6)})` : 'por reglas (sin IA local)'}. No se ha subido nada (sin push).`);
+        directo.hash = r.hash; directo.mensaje = r.mensaje;
+        l.push(`${plural(r.ficheros?.length || 0, 'fichero')} · mensaje ${r.via?.startsWith('local/') ? `redactado por la IA local (${r.via.slice(6)})` : 'por reglas (sin IA local)'}. No se ha subido nada (sin push).`);
         directo.salida = r.salida;
       } else if (r.ok) l.push('✓ **Commit**: no hay cambios que commitear.');
       else { l.push(`✗ **Commit**: ha fallado (${code(r.orden || 'git commit')}).`); directo.salida = r.salida; directo.errores = r.errores || r.salida; }
@@ -114,7 +118,7 @@ export function resultNote(r: DirectResult): { texto: string; directo: DirectNot
       break;
     case 'diff':
       if (!r.ok) { l.push(`✗ ${r.motivo || 'No se ha podido leer el diff.'}`); break; }
-      l.push(r.ficheros?.length ? `**Diff** frente al último commit (${r.ficheros.length} ficheros):` : '**Sin cambios** frente al último commit.');
+      l.push(r.ficheros?.length ? `**Diff** frente al último commit (${plural(r.ficheros.length, 'fichero')}):` : '**Sin cambios** frente al último commit.');
       if (r.ficheros?.length) directo.salida = r.salida;
       break;
     case 'where':
@@ -179,4 +183,28 @@ export function agentMessage(n: DirectNote): string {
 function cut(t: string, n: number, oneLine = true) {
   const x = oneLine ? t.replace(/\s+/g, ' ').trim() : t;
   return x.length > n ? x.slice(0, n - 1) + '…' : x;
+}
+
+const SHORT: Partial<Record<DirectKind, string>> = { build: 'compilar', test: 'pruebas', typecheck: 'tipos', lint: 'lint' };
+
+// sinceLastTurn: lo que ha hecho pgocode sin el agente (commits, compilar, pruebas…) desde el último turno del agente,
+// en una línea corta para su próximo mensaje («pgocode, desde tu último turno: commit abc123 "…"; pruebas ✓»), para
+// que no razone con un estado viejo (p. ej. creer que algo está sin commitear). Vacío si no ha hecho nada. Lo que ya
+// va en el mensaje (la orden de «Pásaselo al agente») no se repite.
+export function sinceLastTurn(ms: Mensaje[], message = ''): string {
+  let i = ms.length - 1;
+  while (i >= 0 && !(ms[i].rol === 'assistant' && !ms[i].nota && !ms[i].error && !ms[i].fuera)) i--;
+  const l: string[] = [];
+  for (const m of ms.slice(i + 1)) {
+    const d = m.directo;
+    if (!d || d.curso || d.ok === undefined || !isMechanical(d.accion)) continue;
+    if (d.accion === 'commit') {
+      if (d.ok && d.hash) l.push(`commit ${d.hash} "${cut(d.mensaje || '', 80)}"`);
+      else if (!d.ok) l.push('commit ✗');
+      continue;
+    }
+    if (d.orden && message.includes(d.orden)) continue;
+    l.push(`${SHORT[d.accion]} ${d.ok ? '✓' : '✗'}${d.orden ? ` (${code(d.orden)})` : ''}`);
+  }
+  return l.length ? `(pgocode, desde tu último turno: ${l.slice(-6).join('; ')}.)` : '';
 }

@@ -30,6 +30,7 @@ export interface Sesion {
   madre?: string;        // sesión madre de la que es hija (reparto en sesiones paralelas: reparto.ts)
   parte?: number;        // número de la parte que hace (desde 1)
   archivada?: boolean;   // archivada (p. ej. se quitó su copia de trabajo): fuera de la lista principal, con su conversación
+  merged?: boolean;      // hija terminada y unida a la madre (su copia ya no existe): va plegada bajo la madre
   corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;
@@ -72,15 +73,20 @@ export function nueva(proyecto: number, carpeta: string, rama: string, agente: s
 }
 
 // ordenaConHijas: la lista con cada hija justo debajo de su madre (si la madre está en la lista), en el orden de
-// sus partes; el resto, como venía. «hija»: cuelga de una madre de la lista.
-export function ordenaConHijas(l: Sesion[]): { s: Sesion; hija: boolean }[] {
+// sus partes; el resto, como venía. «hija»: cuelga de una madre de la lista. Las hijas ya unidas (merged) van
+// plegadas bajo su madre salvo que esté en «abiertas» (o sean la sesión activa): la madre lleva cuántas tiene unidas
+// («unidas») y si están plegadas.
+export function ordenaConHijas(l: Sesion[], abiertas: ReadonlySet<string> = new Set(), activa?: string): { s: Sesion; hija: boolean; unidas?: number; plegadas?: boolean }[] {
   const ids = new Set(l.map(s => s.id));
   const hijasDe = (m: string) => l.filter(s => s.madre === m).sort((a, b) => (a.parte || 0) - (b.parte || 0));
-  const out: { s: Sesion; hija: boolean }[] = [];
+  const out: { s: Sesion; hija: boolean; unidas?: number; plegadas?: boolean }[] = [];
   for (const s of l) {
     if (s.madre && ids.has(s.madre)) continue; // va con su madre
-    out.push({ s, hija: false });
-    for (const h of hijasDe(s.id)) out.push({ s: h, hija: true });
+    const hs = hijasDe(s.id);
+    const unidas = hs.filter(h => h.merged).length;
+    const plegadas = unidas > 0 && !abiertas.has(s.id);
+    out.push({ s, hija: false, ...(unidas ? { unidas, plegadas } : {}) });
+    for (const h of hs) if (!(plegadas && h.merged && h.id !== activa)) out.push({ s: h, hija: true });
   }
   return out;
 }
