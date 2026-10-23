@@ -30,8 +30,9 @@ func TestClaudeSettings(t *testing.T) {
 		t.Error("claudeSettings cambia entre llamadas")
 	}
 	cl := Agentes()[0].(*Agente)
-	if args := strings.Join(cl.Args("hola", Peticion{}), " "); !strings.Contains(args, "--settings {\"skillOverrides\"") {
-		t.Errorf("sin --settings: %s", args)
+	args := strings.Join(cl.Args("hola", Peticion{}), " ")
+	if strings.Count(args, "--settings ") != 1 || !strings.Contains(args, `"skillOverrides"`) || !strings.Contains(args, `"bashOutputMaxChars"`) {
+		t.Errorf("un solo --settings con las skills y el límite de salidas: %s", args)
 	}
 }
 

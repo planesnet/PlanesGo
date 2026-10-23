@@ -46,7 +46,17 @@ func claudeSettings() string {
 	for _, n := range append(append([]string(nil), claudeSkillsOff...), skills.Sustituidas...) {
 		o[n] = "off"
 	}
-	b, _ := json.Marshal(map[string]any{"skillOverrides": o})
+	cfg := map[string]any{"skillOverrides": o}
+	// Y en el mismo --settings (Claude Code toma solo uno), el límite de salidas de órdenes (prune_offload.go).
+	if s := claudeOffloadSettings(); s != "" {
+		var extra map[string]any
+		if json.Unmarshal([]byte(s), &extra) == nil {
+			for k, v := range extra {
+				cfg[k] = v
+			}
+		}
+	}
+	b, _ := json.Marshal(cfg)
 	return string(b)
 }
 
