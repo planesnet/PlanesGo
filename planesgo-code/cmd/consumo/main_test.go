@@ -319,7 +319,7 @@ func TestRelayStrategy(t *testing.T) {
 	h := []exchange{
 		{Message: "Las pruebas fallan. Arregla el fallo del descuento sin tocar las pruebas.", Reply: "Arreglado: el descuento es un porcentaje.",
 			Parts: []uiPart{{Tipo: "herramienta", H: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.py", Estado: "ok"}},
-				{Tipo: "herramienta", H: &llm.Herramienta{ID: "2", Nombre: "Bash", Resumen: "python3 -m unittest discover -s tests", Estado: "ok"}},
+				{Tipo: "herramienta", H: &llm.Herramienta{ID: "2", Nombre: "Bash", Resumen: "python3 -m unittest discover -s tests", Estado: "ok", Salida: "OK"}},
 				{Tipo: "texto", Texto: "Arreglado: el descuento es un porcentaje."}},
 			Usage: Medida{Contexto: 17000}},
 	}
