@@ -5,6 +5,7 @@
 // siguiente evento). Funciones puras: node --test src/liveActivity.test.ts
 import type { Elemento, Tarea } from './tareas.ts';
 import { tokensOfProgress } from './activityPanel.ts';
+import type { SyncView } from './todoSync.ts';
 
 export const ACTIVITY_EVENT = 'pgo:actividad';
 
@@ -21,6 +22,7 @@ export interface LiveSnapshot {
   enCola?: number;        // mensajes esperando en la cola
   colaParada?: boolean;   // la cola se detuvo (un turno falló)
   apartes?: { id: string; pregunta: string; inicio?: number }[]; // preguntas aparte en curso
+  todo?: SyncView;        // la lista de tareas del agente sincronizada con lo que hace (todoSync.ts: sessionTodo)
 }
 
 // ---- Almacén (uno por pestaña): la última instantánea de cada sesión y el envío con límite de frecuencia ----
@@ -71,7 +73,7 @@ export interface TodoView { done: number; total: number; current?: Elemento; nex
 
 // todoView: la última lista de tareas del agente, con la que está en curso (o la siguiente pendiente) y el progreso.
 export function todoView(tareas: Tarea[]): TodoView | undefined {
-  const l = [...tareas].reverse().find(t => t.tipo === 'lista');
+  const l = [...tareas].reverse().find(t => t.tipo === 'lista' && !t.padre);
   const items = l?.elementos || [];
   if (!items.length) return undefined;
   const done = items.filter(e => e.estado === 'hecho').length;

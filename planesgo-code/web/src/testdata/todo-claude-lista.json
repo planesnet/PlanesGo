@@ -1,0 +1,250 @@
+{
+ "nota": "Claude Code (TaskCreate/TaskUpdate), muestra de internal/llm/testdata/agentes/claude-8-lista.jsonl pasada por el lector de Go.",
+ "eventos": [
+  {
+   "h": {
+    "entrada": "{\"query\":\"select:TaskCreate,TaskUpdate\",\"max_results\":2}",
+    "nombre": "ToolSearch",
+    "resumen": "select:TaskCreate,TaskUpdate"
+   }
+  },
+  {
+   "h": {
+    "entrada": "{\"subject\":\"Crear a.txt\",\"description\":\"Escribir a.txt con el texto 'hola'\",\"activeForm\":\"Creando a.txt\"}",
+    "nombre": "TaskCreate",
+    "resumen": "Escribir a.txt con el texto 'hola'"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"subject\":\"Crear b.txt\",\"description\":\"Escribir b.txt con el texto 'hola'\",\"activeForm\":\"Creando b.txt\"}",
+    "nombre": "TaskCreate",
+    "resumen": "Escribir b.txt con el texto 'hola'"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"subject\":\"Crear c.txt\",\"description\":\"Escribir c.txt con el texto 'hola'\",\"activeForm\":\"Creando c.txt\"}",
+    "nombre": "TaskCreate",
+    "resumen": "Escribir c.txt con el texto 'hola'"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"1\",\"status\":\"in_progress\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "in_progress"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "curso"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"file_path\":\"/tmp/prueba/prueba2/a.txt\",\"content\":\"hola\"}",
+    "nombre": "Write",
+    "resumen": "/tmp/prueba/prueba2/a.txt"
+   }
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"1\",\"status\":\"completed\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "completed"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"2\",\"status\":\"in_progress\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "in_progress"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "curso"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"file_path\":\"/tmp/prueba/prueba2/b.txt\",\"content\":\"hola\"}",
+    "nombre": "Write",
+    "resumen": "/tmp/prueba/prueba2/b.txt"
+   }
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"2\",\"status\":\"completed\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "completed"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"3\",\"status\":\"in_progress\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "in_progress"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "curso"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"file_path\":\"/tmp/prueba/prueba2/c.txt\",\"content\":\"hola\"}",
+    "nombre": "Write",
+    "resumen": "/tmp/prueba/prueba2/c.txt"
+   }
+  },
+  {
+   "texto": "Ya he creado c.txt y ahora marco la última tarea como completada."
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"3\",\"status\":\"completed\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "completed"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "hecho"
+    }
+   ]
+  },
+  {
+   "texto": "\n\nHe completado las tres tareas, una tras otra y sin subagentes. Creé `a.txt`, `b.txt` y `c.txt`, cada uno con el texto `hola`. Marqué cada tarea en curso antes de escribir su fichero y completada justo después.\n\nLos ficheros están en `/tmp/claude-1000/-home-luis-cowork-psfcode/b08d56fe-6fec-4262-aba8-ef8491a8a9aa/scratchpad/prueba2/`."
+  }
+ ],
+ "fuente": "claude (claude-8-lista.jsonl)",
+ "verdad": [
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  0,
+  -1,
+  -1,
+  1,
+  -1,
+  -1,
+  2,
+  -1
+ ]
+}

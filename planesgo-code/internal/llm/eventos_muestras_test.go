@@ -418,3 +418,30 @@ func TestBloquesDeTextoSeparados(t *testing.T) {
 		t.Errorf("bloques: %q", r)
 	}
 }
+
+// La lista de un subagente va aparte (con Padre) y no pisa la del agente principal; las canceladas, como tales.
+func TestListaClaudeSubagente(t *testing.T) {
+	todo := func(padre, id string, todos string) string {
+		return `{"type":"assistant","parent_tool_use_id":"` + padre + `","message":{"content":[{"type":"tool_use","id":"` + id +
+			`","name":"TodoWrite","input":{"todos":` + todos + `}}]}}` + "\n"
+	}
+	in := todo("", "t1", `[{"content":"Principal","status":"in_progress"},{"content":"Quitada","status":"cancelled"}]`) +
+		todo("toolu_sub", "t2", `[{"content":"Del subagente","status":"pending"}]`)
+	var ls []Tarea
+	if err := leeClaudeCode(strings.NewReader(in), func(e Evento) {
+		if e.Tarea != nil && e.Tarea.Tipo == "lista" {
+			ls = append(ls, *e.Tarea)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ls) != 2 {
+		t.Fatalf("listas: %+v", ls)
+	}
+	if ls[0].ID != "lista" || ls[0].Padre != "" || estadosLista(ls[0]) != "curso:Principal=curso;Quitada=cancelada;" {
+		t.Errorf("principal: %+v", ls[0])
+	}
+	if ls[1].ID != "lista:toolu_sub" || ls[1].Padre != "toolu_sub" || estadosLista(ls[1]) != "ok:Del subagente=pendiente;" {
+		t.Errorf("subagente: %+v", ls[1])
+	}
+}

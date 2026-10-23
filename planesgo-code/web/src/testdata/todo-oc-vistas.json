@@ -1,0 +1,548 @@
+{
+ "nota": "OpenCode (Gemini), turno real: actualiza la lista a tiempo; la inferencia no debe cambiar nada.",
+ "fuente": "opencode",
+ "peticion": "",
+ "eventos": [
+  {
+   "texto": "## Objective\n- Mejorar el componente de búsqueda y panel de control (`ViewSearch` en `src/components/ViewList.tsx` y barras de control asociadas) para replicar la disposición nativa de Odoo (según la captura adjunta `/proyecto/.pgocode/adjuntos/mvk3sn9okxje/104554-image.png`: zona izquierda con botón `Nuevo`, título, indicador `N seleccionados` y `Acciones`; zona central con buscador integrado con"
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"offset\": 1905, \"limit\": 150, \"filePath\": \"/proyecto/src/App.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/DesignProposalsModal.tsx",
+    "entrada": "{\"limit\": 200, \"offset\": 1, \"filePath\": \"/proyecto/src/components/DesignProposalsModal.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/index.css",
+    "entrada": "{\"filePath\": \"/proyecto/src/index.css\", \"offset\": 1, \"limit\": 250}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"limit\": 70, \"offset\": 520, \"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"offset\": 980, \"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\", \"limit\": 50}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ViewList.tsx",
+    "entrada": "{\"limit\": 260, \"offset\": 1, \"filePath\": \"/proyecto/src/components/ViewList.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ViewList.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ViewList.tsx\", \"offset\": 261, \"limit\": 160}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"limit\": 150, \"offset\": 300, \"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectReportsView.tsx",
+    "entrada": "{\"limit\": 100, \"offset\": 520, \"filePath\": \"/proyecto/src/components/ProjectReportsView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"limit\": 140, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"offset\": 180}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"offset\": 320, \"limit\": 260}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectReportsView.tsx",
+    "entrada": "{\"offset\": 1, \"filePath\": \"/proyecto/src/components/ProjectReportsView.tsx\", \"limit\": 302}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"offset\": 650, \"limit\": 260, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"offset\": 150, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"limit\": 180}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"limit\": 140, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"offset\": 910}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"offset\": 500, \"limit\": 150, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"limit\": 150, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"offset\": 740}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"limit\": 110, \"offset\": 890, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"offset\": 300, \"limit\": 160, \"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsKanbanView.tsx",
+    "entrada": "{\"offset\": 1, \"limit\": 120, \"filePath\": \"/proyecto/src/components/ProjectsKanbanView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsCalendarView.tsx",
+    "entrada": "{\"limit\": 120, \"filePath\": \"/proyecto/src/components/ProjectsCalendarView.tsx\", \"offset\": 1}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsGanttView.tsx",
+    "entrada": "{\"limit\": 120, \"offset\": 1, \"filePath\": \"/proyecto/src/components/ProjectsGanttView.tsx\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Unificar las vistas/temas en dos opciones: Vista similar a Odoo (odoo) y Vista industrial (industrial) en DesignProposalsModal, OdooNavbar y App.tsx",
+     "estado": "curso"
+    },
+    {
+     "texto": "Rediseñar ViewSearch en ViewList.tsx siguiendo la disposición nativa de Odoo 18 (zona izquierda con Nuevo/Título/Seleccionados/Acciones, zona central con buscador con chips y menú desplegable Filtros/Agrupar por, zona derecha con paginador del recordset 1-N / N < > y selector de tipo de vista)",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Integrar el nuevo ViewSearch y paginación en ProjectsListView, ProjectReportsView, ProjectManagementView y ProjectWorkflowPanelView",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Revisar y corregir todos los contrastes de texto, fondos, bordes, badges, inputs y tablas en index.css para [data-theme=\"odoo\"] y [data-theme=\"industrial\"]",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Verificar con TypeScript (npx tsc --noEmit) y Playwright que tanto en Vista similar a Odoo como en Vista industrial todo se ve con excelente contraste y la barra de búsqueda funciona perfectamente",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/DesignProposalsModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/DesignProposalsModal.tsx\", \"limit\": 60, \"offset\": 201}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/App.tsx\", \"limit\": 40, \"offset\": 385}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/DesignProposalsModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/DesignProposalsModal.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/DesignProposalsModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/DesignProposalsModal.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/App.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Unificar las vistas/temas en dos opciones: Vista similar a Odoo (odoo) y Vista industrial (industrial) en DesignProposalsModal, OdooNavbar y App.tsx",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar ViewSearch en ViewList.tsx siguiendo la disposición nativa de Odoo 18 (zona izquierda con Nuevo/Título/Seleccionados/Acciones, zona central con buscador con chips y menú desplegable Filtros/Agrupar por, zona derecha con paginador del recordset 1-N / N < > y selector de tipo de vista)",
+     "estado": "curso"
+    },
+    {
+     "texto": "Integrar el nuevo ViewSearch y paginación en ProjectsListView, ProjectReportsView, ProjectManagementView y ProjectWorkflowPanelView",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Revisar y corregir todos los contrastes de texto, fondos, bordes, badges, inputs y tablas en index.css para [data-theme=\"odoo\"] y [data-theme=\"industrial\"]",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Verificar con TypeScript (npx tsc --noEmit) y Playwright que tanto en Vista similar a Odoo como en Vista industrial todo se ve con excelente contraste y la barra de búsqueda funciona perfectamente",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ViewList.tsx",
+    "entrada": "{\"offset\": 75, \"limit\": 100, \"filePath\": \"/proyecto/src/components/ViewList.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ViewList.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ViewList.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ViewList.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ViewList.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Unificar las vistas/temas en dos opciones: Vista similar a Odoo (odoo) y Vista industrial (industrial) en DesignProposalsModal, OdooNavbar y App.tsx",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar ViewSearch en ViewList.tsx siguiendo la disposición nativa de Odoo 18 (zona izquierda con Nuevo/Título/Seleccionados/Acciones, zona central con buscador con chips y menú desplegable Filtros/Agrupar por, zona derecha con paginador del recordset 1-N / N < > y selector de tipo de vista)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Integrar el nuevo ViewSearch y paginación en ProjectsListView, ProjectReportsView, ProjectManagementView y ProjectWorkflowPanelView",
+     "estado": "curso"
+    },
+    {
+     "texto": "Revisar y corregir todos los contrastes de texto, fondos, bordes, badges, inputs y tablas en index.css para [data-theme=\"odoo\"] y [data-theme=\"industrial\"]",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Verificar con TypeScript (npx tsc --noEmit) y Playwright que tanto en Vista similar a Odoo como en Vista industrial todo se ve con excelente contraste y la barra de búsqueda funciona perfectamente",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"offset\": 25, \"limit\": 70}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"offset\": 370, \"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"limit\": 115}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/App.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/App.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectReportsView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectReportsView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectReportsView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectReportsView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"limit\": 50, \"offset\": 1}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"offset\": 230, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"limit\": 60}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"limit\": 80, \"offset\": 645, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"newString\": \"import {\\n  ViewSearch,\\n  ViewList,\\n  ViewCalendar,\\n  ViewActionItem,\\n  ViewGroupByOption,\\n  ViewListColumn,\\n  OdooViewType,\\n} from './ViewList';\", \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"oldString\": \"import {\\n  ViewList,\\n  ViewCalendar,\\n  ViewActionItem,\\n  ViewGroupByOption,\\n  ViewListColumn,\\n} from './ViewList';\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto/src",
+    "entrada": "{\"pattern\": \"getGroupKey\", \"path\": \"/proyecto/src\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"path\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"pattern\": \"taskGroupBy\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"offset\": 980, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"limit\": 55}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"limit\": 115, \"offset\": 630, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"limit\": 140, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"offset\": 900}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"limit\": 35, \"offset\": 1}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"offset\": 1030, \"limit\": 45}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"newString\": \"import {\\n  ViewSearch,\\n  ViewList,\\n  ViewListColumn,\\n  ViewGroupByOption,\\n  ViewActionItem,\\n} from './ViewList';\", \"oldString\": \"import {\\n  ViewList,\\n  ViewListColumn,\\n  ViewGroupByOption,\\n  ViewActionItem,\\n} from './ViewList';\", \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"limit\": 190, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"offset\": 545}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Unificar las vistas/temas en dos opciones: Vista similar a Odoo (odoo) y Vista industrial (industrial) en DesignProposalsModal, OdooNavbar y App.tsx",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Rediseñar ViewSearch en ViewList.tsx siguiendo la disposición nativa de Odoo 18 (zona izquierda con Nuevo/Título/Seleccionados/Acciones, zona central con buscador con chips y menú desplegable Filtros/Agrupar por, zona derecha con paginador del recordset 1-N / N < > y selector de tipo de vista)",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Integrar el nuevo ViewSearch y paginación en ProjectsListView, ProjectReportsView, ProjectManagementView y ProjectWorkflowPanelView",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Revisar y corregir todos los contrastes de texto, fondos, bordes, badges, inputs y tablas en index.css para [data-theme=\"odoo\"] y [data-theme=\"industrial\"]",
+     "estado": "curso"
+    },
+    {
+     "texto": "Verificar con TypeScript (npx tsc --noEmit) y Playwright que tanto en Vista similar a Odoo como en Vista industrial todo se ve con excelente contraste y la barra de búsqueda funciona perfectamente",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "edit",
+    "resumen": "/proyecto/src/index.css",
+    "entrada": "{\"filePath\": \"/proyecto/src/index.css\", \"newString\": \"[Old tool result content cleared]\", \"oldString\": \"[Old tool result content cleared]\"}"
+   }
+  }
+ ],
+ "verdad": [
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  3
+ ]
+}

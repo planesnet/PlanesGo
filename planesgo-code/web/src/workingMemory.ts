@@ -86,8 +86,9 @@ export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
         else commands.push({ cmd, ok: h.estado === 'ok' });
       }
     }
-    const lista = m.tareas?.find(t => t.tipo === 'lista');
-    if (lista?.elementos?.length) tasks = lista.elementos.map(e => ({ text: e.texto, state: e.estado }));
+    const lista = m.tareas?.find(t => t.tipo === 'lista' && !t.padre);
+    // Las canceladas, como hechas (como hasta ahora): la memoria de trabajo no cambia.
+    if (lista?.elementos?.length) tasks = lista.elementos.map(e => ({ text: e.texto, state: e.estado === 'cancelada' ? 'hecho' : e.estado }));
     const t = lastText(m);
     if (t && !m.error) {
       lastAnswer = t;

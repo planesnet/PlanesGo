@@ -141,7 +141,7 @@ type Tarea struct {
 // Elemento de una lista de tareas del agente.
 type Elemento struct {
 	Texto  string `json:"texto"`
-	Estado string `json:"estado"` // pendiente | curso | hecho
+	Estado string `json:"estado"` // pendiente | curso | hecho | cancelada
 }
 
 // Herramienta es una llamada del agente a una herramienta (leer, editar, ejecutar…).

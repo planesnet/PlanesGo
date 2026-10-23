@@ -1,0 +1,143 @@
+{
+ "nota": "Claude Code, claude-9-lista-resume.jsonl (con la lista guardada): «Borrar b.txt» queda sin hacer.",
+ "eventos": [
+  {
+   "h": {
+    "entrada": "{\"subject\":\"Crear d.txt\",\"description\":\"Escribir d.txt con el texto 'hola'\",\"activeForm\":\"Creando d.txt\"}",
+    "nombre": "TaskCreate",
+    "resumen": "Escribir d.txt con el texto 'hola'"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear d.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"subject\":\"Borrar b.txt\",\"description\":\"Eliminar el fichero b.txt\",\"activeForm\":\"Borrando b.txt\"}",
+    "nombre": "TaskCreate",
+    "resumen": "Eliminar el fichero b.txt"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear d.txt",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Borrar b.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"4\",\"status\":\"in_progress\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "in_progress"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear d.txt",
+     "estado": "curso"
+    },
+    {
+     "texto": "Borrar b.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "entrada": "{\"file_path\":\"/tmp/prueba/prueba2/d.txt\",\"content\":\"hola\"}",
+    "nombre": "Write",
+    "resumen": "/tmp/prueba/prueba2/d.txt"
+   }
+  },
+  {
+   "h": {
+    "entrada": "{\"taskId\":\"4\",\"status\":\"completed\"}",
+    "nombre": "TaskUpdate",
+    "resumen": "completed"
+   }
+  },
+  {
+   "lista": [
+    {
+     "texto": "Crear a.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear b.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear c.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Crear d.txt",
+     "estado": "hecho"
+    },
+    {
+     "texto": "Borrar b.txt",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "texto": "He añadido las dos tareas a la lista. Creé `d.txt` con el texto `hola`: marqué la tarea en curso antes de escribir el fichero y completada después.\n\nLa tarea 'Borrar b.txt' sigue pendiente, así que `b.txt` sigue sin borrar."
+  }
+ ],
+ "fuente": "claude (claude-9-lista-resume.jsonl)",
+ "verdad": [
+  -1,
+  -1,
+  -1,
+  3,
+  -1
+ ]
+}

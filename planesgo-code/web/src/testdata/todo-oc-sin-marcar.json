@@ -1,0 +1,301 @@
+{
+ "nota": "OpenCode (Gemini), turno real: escribe la lista al principio y no la vuelve a tocar en 34 acciones.",
+ "fuente": "opencode",
+ "peticion": "\"Ademá quiero que no repitas la información en la misma pantalla, es decir por ejemplo el nº de pedido en el formulario aparece en la cabecera y en varios sitios más , solo tiene que salir en la cabecera.\n\nLa definición de las plantillas tiene que estar en el apartado de ajustes.\n\nLos ajustes de pro",
+ "eventos": [
+  {
+   "lista": [
+    {
+     "texto": "Inspeccionar pantallas (ProjectManagementView, ProjectWorkflowPanelView, modales, etc.) y eliminar información repetida (nº de pedido/referencia, cliente, fechas, etc.) dejándola solo en la cabecera",
+     "estado": "curso"
+    },
+    {
+     "texto": "Verificar permisos de gestión de proyectos en Odoo (project.group_project_manager) desde el backend Go y exponerlo en /api/odoo/status y endpoints de ajustes",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Mover la definición de plantillas al apartado de Ajustes de Proyectos y restringir los Ajustes de Proyectos exclusivamente a usuarios con permiso project.group_project_manager de Odoo",
+     "estado": "pendiente"
+    },
+    {
+     "texto": "Ejecutar prueba completa E2E de ciclo de vida de un proyecto con N elementos (definir plantillas, asignarlas, marcar subtareas/checklists, avanzar etapas hasta finalizar el proyecto) y verificar que no hay errores",
+     "estado": "pendiente"
+    }
+   ]
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"limit\": 260, \"offset\": 1, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"offset\": 1, \"limit\": 260}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"limit\": 260, \"offset\": 1, \"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/NotesPanel.tsx",
+    "entrada": "{\"offset\": 1, \"filePath\": \"/proyecto/src/components/NotesPanel.tsx\", \"limit\": 200}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"offset\": 261, \"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"limit\": 320}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"offset\": 261, \"limit\": 350, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/OdooNavbar.tsx",
+    "entrada": "{\"limit\": 220, \"filePath\": \"/proyecto/src/components/OdooNavbar.tsx\", \"offset\": 261}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"offset\": 1, \"limit\": 260, \"filePath\": \"/proyecto/src/components/ProjectModal.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"offset\": 600, \"limit\": 300, \"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"offset\": 261, \"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"limit\": 350}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/odoo/proyectos.go",
+    "entrada": "{\"offset\": 390, \"limit\": 180, \"filePath\": \"/proyecto/internal/odoo/proyectos.go\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/odoo/proyectos.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/proyectos.go\", \"limit\": 190, \"offset\": 570}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/NotesPanel.tsx",
+    "entrada": "{\"limit\": 120, \"offset\": 201, \"filePath\": \"/proyecto/src/components/NotesPanel.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"offset\": 340, \"limit\": 140, \"filePath\": \"/proyecto/src/components/ProjectTable.tsx\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"limit\": 140, \"offset\": 240}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsListView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsListView.tsx\", \"limit\": 140, \"offset\": 480}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectsKanbanView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectsKanbanView.tsx\", \"offset\": 1, \"limit\": 140}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"offset\": 1, \"limit\": 160}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto/internal",
+    "entrada": "{\"pattern\": \"referenciaPedido|ReferenciaPedido\", \"path\": \"/proyecto/internal\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto/src",
+    "entrada": "{\"pattern\": \"referenciaPedido|ordenCompra\", \"path\": \"/proyecto/src\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectWorkflowPanelView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectWorkflowPanelView.tsx\", \"limit\": 230, \"offset\": 900}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"offset\": 580, \"limit\": 400}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectManagementView.tsx",
+    "entrada": "{\"filePath\": \"/proyecto/src/components/ProjectManagementView.tsx\", \"offset\": 1150, \"limit\": 350}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto/internal",
+    "entrada": "{\"pattern\": \"PED-\", \"path\": \"/proyecto/internal\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "grep",
+    "resumen": "/proyecto",
+    "entrada": "{\"path\": \"/proyecto\", \"pattern\": \"PED-\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectTable.tsx",
+    "entrada": "{\"limit\": 240, \"filePath\": \"/proyecto/src/components/ProjectTable.tsx\", \"offset\": 480}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/ProjectModal.tsx",
+    "entrada": "{\"offset\": 610, \"filePath\": \"/proyecto/src/components/ProjectModal.tsx\", \"limit\": 370}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/TaskModal.tsx",
+    "entrada": "{\"limit\": 320, \"filePath\": \"/proyecto/src/components/TaskModal.tsx\", \"offset\": 160}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/src/components/NotesPanel.tsx",
+    "entrada": "{\"limit\": 170, \"filePath\": \"/proyecto/src/components/NotesPanel.tsx\", \"offset\": 320}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/odoo/cliente.go",
+    "entrada": "{\"limit\": 140, \"filePath\": \"/proyecto/internal/odoo/cliente.go\", \"offset\": 1}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/servidor/servidor.go",
+    "entrada": "{\"limit\": 140, \"offset\": 1, \"filePath\": \"/proyecto/internal/servidor/servidor.go\"}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/servidor/servidor.go",
+    "entrada": "{\"offset\": 141, \"filePath\": \"/proyecto/internal/servidor/servidor.go\", \"limit\": 120}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/odoo/cliente.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/cliente.go\", \"limit\": 230, \"offset\": 420}"
+   }
+  },
+  {
+   "h": {
+    "nombre": "read",
+    "resumen": "/proyecto/internal/odoo/proyectos_test.go",
+    "entrada": "{\"filePath\": \"/proyecto/internal/odoo/proyectos_test.go\", \"offset\": 1, \"limit\": 120}"
+   }
+  }
+ ],
+ "verdad": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  -1,
+  -1,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  1,
+  -1
+ ]
+}
