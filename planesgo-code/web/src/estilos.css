@@ -935,7 +935,6 @@ button.miga-item:hover { background: var(--hover); }
 .cleaner-btn.rules .cleaner-icon { opacity: .45; }
 .cleaner-btn.working .cleaner-icon { animation: cleaner-spin 1.1s linear infinite; color: var(--acento); }
 @keyframes cleaner-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .cleaner-btn.working .cleaner-icon { animation: none; } }
 .cleaner-pct { font-variant-numeric: tabular-nums; }
 .cleaner-pop { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 20; width: 320px; max-width: calc(100vw - 24px); background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 10px 12px; display: grid; gap: 8px; font-size: 12px; }
 .cleaner-title { font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
@@ -988,25 +987,13 @@ button.miga-item:hover { background: var(--hover); }
 .programa-def { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--linea); }
 .programa-def .programa-texto { display: grid; flex: 1; min-width: 0; }
 
-/* «Pensando…» / «Trabajando…»: un indicador que gira delante y un brillo que recorre la palabra, para que se vea
-   que el agente sigue vivo. Sin animación si el sistema pide menos movimiento. */
+/* «Pensando…» / «Trabajando…»: un indicador que gira delante para que se vea que el agente sigue vivo. */
 .pensando::before {
   content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
   border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento);
-  border-radius: 50%; animation: pensando-gira .8s linear infinite;
+  border-radius: 50%; will-change: transform; animation: pensando-gira .8s linear infinite;
 }
-.pensando {
-  background: linear-gradient(90deg, var(--suave) 0%, var(--suave) 40%, var(--texto) 50%, var(--suave) 60%, var(--suave) 100%);
-  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text;
-  animation: pensando-brillo 2.2s ease-in-out infinite;
-}
-.pensando:not(:has(*)) { color: transparent; }
 @keyframes pensando-gira { to { transform: rotate(360deg); } }
-@keyframes pensando-brillo { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .pensando::before, .pensando { animation: none; }
-  .pensando:not(:has(*)) { color: var(--suave); }
-}
 .cleaner-what { margin: 0; }
 .cleaner-now b { font-size: 18px; font-variant-numeric: tabular-nums; }
 
@@ -1087,6 +1074,5 @@ button.miga-item:hover { background: var(--hover); }
 .ctx-fresh-txt { color: var(--error, #d33); }
 
 /* Lista de proyectos: trabajando (gira) o con respuestas sin ver (punto azul). */
-.proyecto-trabaja { width: 9px; height: 9px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento); animation: pensando-gira .8s linear infinite; }
+.proyecto-trabaja { width: 9px; height: 9px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento); will-change: transform; animation: pensando-gira .8s linear infinite; }
 .proyecto-sin-leer { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--acento); }
-@media (prefers-reduced-motion: reduce) { .proyecto-trabaja { animation: none; } }
