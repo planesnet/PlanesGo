@@ -51,12 +51,16 @@ type calibCand struct {
 }
 
 // out: si sale con los pesos k (lo mismo que decide planPruneK, sin el margen para volver de lo ya retirado).
-func (c *calibCand) out(k vigParams) bool {
+func (c *calibCand) out(k vigParams) bool { return c.outCut(k, vigCut) }
+
+// outCut: out con el corte del objetivo de contexto para lo grande y viejo (planPruneCut).
+func (c *calibCand) outCut(k vigParams, cut float64) bool {
 	pv := k.raw(c.F, c.H)
+	pc := budgetCut(cut, c.F.Size, c.F.Steps, c.Young)
 	if c.Young {
-		return pv >= vigCut
+		return pv >= pc
 	}
-	if pv >= vigCut && (c.F.Superseded != "" || (!c.F.Pinned && (c.Propia || c.F.Steps > pruneProtectSteps))) {
+	if pv >= pc && (c.F.Superseded != "" || (!c.F.Pinned && (c.Propia || c.F.Steps > pruneProtectSteps))) {
 		return true
 	}
 	return k.raw(c.XF, c.XH) >= vigCut
@@ -67,6 +71,8 @@ type calibPoint struct {
 	Step  int
 	Mid   bool // entre pasos de un turno (si no, al empezarlo)
 	Ctx   int  // el contexto de la última llamada (tokens; 0 si no se sabe)
+	Sys   int  // lo fijo del agente (systemTokens)
+	Cold  bool // al empezar el turno, con la caché ya fría (más de openCodeCacheTTL desde la llamada anterior)
 	Seg   int
 	Cands []calibCand
 }
@@ -100,7 +106,11 @@ func buildHistory(msgs []*ocMessage, vec vecFunc) *calibHistory {
 				turnMsg = t
 			}
 			if turnMsg != "" && i > 0 {
+				n := len(h.Points)
 				h.addPoint(msgs[:i], turnMsg, pruneYoung, step, false, vec)
+				if len(h.Points) > n && m.Time > 0 {
+					h.Points[n].Cold = m.Time-lastCallUntil(msgs[:i], 0) > openCodeCacheTTL.Milliseconds()
+				}
 			}
 			enTurno = 0
 			continue
@@ -148,7 +158,7 @@ func (h *calibHistory) addPoint(prefix []*ocMessage, msg string, young, step int
 		}
 	}
 	plan := planPruneK(win, sims, young, now, defaultVig)
-	pt := calibPoint{Step: step, Mid: mid, Ctx: ctx, Seg: h.SegOf[step]}
+	pt := calibPoint{Step: step, Mid: mid, Ctx: ctx, Sys: systemTokens(win), Seg: h.SegOf[step]}
 	parts := map[string]*ocPart{}
 	for _, m := range win {
 		for _, p := range m.Parts {
@@ -377,6 +387,8 @@ type calibResult struct {
 	Over       int   // podadas de más (habría tenido que releerlas)
 	Labeled    int   // piezas del historial
 	UsedTotal  int   // piezas usadas después de llegar (etiqueta USADA)
+	// El contexto de trabajo (tokens por paso, real y con la poda simulada): la media y la mediana.
+	MeanReal, MeanSim, MedReal, MedSim int
 	// Por tramo: tokens retirados y el contexto máximo real y simulado.
 	Segs []calibSeg
 	At   map[*calibPiece]int // en qué paso salió cada pieza
@@ -422,6 +434,9 @@ func (h *calibHistory) simulate(k vigParams, threshold int) calibResult {
 	return r
 }
 
+// simTargetPct: el objetivo de contexto en la simulación, en % del umbral (en las pruebas, 0 para comparar sin él).
+var simTargetPct = pruneTargetPct
+
 // sweepSim: lo que sale en cada punto de barrido con los pesos k (sin el detalle por tramo).
 func (h *calibHistory) sweepSim(k vigParams, threshold int) calibResult {
 	r := calibResult{At: map[*calibPiece]int{}, Labeled: len(h.Pieces)}
@@ -430,25 +445,47 @@ func (h *calibHistory) sweepSim(k vigParams, threshold int) calibResult {
 			r.UsedTotal++
 		}
 	}
+	target := threshold * simTargetPct / 100
 	for _, pt := range h.Points {
-		nuevo := 0
-		var sale []*calibCand
 		fuera := 0
 		for i := range pt.Cands {
-			c := &pt.Cands[i]
-			if _, ya := r.At[c.P]; ya {
-				fuera += c.Tokens
-				continue
-			}
-			if c.out(k) {
-				nuevo += c.Tokens
-				sale = append(sale, c)
+			if _, ya := r.At[pt.Cands[i].P]; ya {
+				fuera += pt.Cands[i].Tokens
 			}
 		}
-		if nuevo < pruneMinTokens {
+		sel := func(cut float64) (int, []*calibCand) {
+			nuevo := 0
+			var sale []*calibCand
+			for i := range pt.Cands {
+				c := &pt.Cands[i]
+				if _, ya := r.At[c.P]; !ya && c.outCut(k, cut) {
+					nuevo += c.Tokens
+					sale = append(sale, c)
+				}
+			}
+			return nuevo, sale
+		}
+		nuevo, sale := sel(vigCut)
+		ctx := max(pt.Ctx-fuera, 0)
+		if pt.Ctx > 0 {
+			ctx = max(ctx, 1) // conocido (lo estimado fuera puede pasar del real): no es «sin contexto»
+		}
+		if target > 0 && pt.Ctx > 0 && ctx > target {
+			for _, cut := range []float64{2.5, 2} {
+				if ctx-nuevo <= target {
+					break
+				}
+				nuevo, sale = sel(cut)
+			}
+		}
+		if len(sale) == 0 {
 			continue
 		}
-		if pt.Mid && threshold > 0 && pt.Ctx > 0 && pt.Ctx-fuera < threshold/2 {
+		o := sweepOutcome{Ctx: ctx, System: pt.Sys, D: pruneDiff{Saved: nuevo, Out: nuevo, Delete: []string{""}}}
+		if pt.Ctx > 0 {
+			o.Rewrite = max(ctx-pt.Sys-nuevo, 0)
+		}
+		if !o.pays(pt.Cold, pt.Mid, threshold, target) {
 			continue
 		}
 		for _, c := range sale {
@@ -478,6 +515,8 @@ func (h *calibHistory) segments(r *calibResult, threshold int) {
 		}
 	}
 	r.Segs = make([]calibSeg, h.NSegs)
+	var reales, sims []int
+	defer func() { r.MeanReal, r.MedReal = meanMedian(reales); r.MeanSim, r.MedSim = meanMedian(sims) }()
 	for s := 1; s <= h.Steps; s++ {
 		g := &r.Segs[h.SegOf[s]]
 		if g.First == 0 {
@@ -495,6 +534,7 @@ func (h *calibHistory) segments(r *calibResult, threshold int) {
 			}
 		}
 		sim := max(ctx-out, 0)
+		reales, sims = append(reales, ctx), append(sims, sim)
 		g.MaxReal, g.MaxSim, g.OutAtLastStep = max(g.MaxReal, ctx), max(g.MaxSim, sim), out
 		if threshold > 0 && ctx >= threshold && g.ReachReal == 0 {
 			g.ReachReal = s
@@ -506,6 +546,20 @@ func (h *calibHistory) segments(r *calibResult, threshold int) {
 	for cp, at := range r.At {
 		r.Segs[h.SegOf[max(at, 1)]].Removed += tok[cp]
 	}
+}
+
+// meanMedian: la media y la mediana.
+func meanMedian(v []int) (int, int) {
+	if len(v) == 0 {
+		return 0, 0
+	}
+	s := append([]int(nil), v...)
+	sort.Ints(s)
+	t := 0
+	for _, x := range s {
+		t += x
+	}
+	return t / len(s), s[len(s)/2]
 }
 
 // ---- búsqueda de los pesos ----

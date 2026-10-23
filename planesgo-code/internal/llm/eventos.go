@@ -262,7 +262,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 	llamadas := map[string]llamadaClaude{}
 	cerradas := map[string]bool{}
 	vivo := func() *Uso {
-		u := Uso{Entrada: hecho.Entrada, Salida: hecho.Salida}
+		u := Uso{Entrada: hecho.Entrada, Salida: hecho.Salida, Contexto: contexto} // contexto: el del paso en curso (hilo de limpieza)
 		for _, l := range llamadas {
 			u.Entrada += l.entrada()
 			u.Salida += l.Salida

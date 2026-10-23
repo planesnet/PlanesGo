@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,8 +28,9 @@ import (
 //     texto de las ediciones antiguas y el razonamiento; las salidas largas, con sus primeras y últimas líneas. Y
 //     las lecturas o salidas grandes con vigencia propia (por su relación) de 3 o más (dos granos de embedding).
 //   - L3: vigencia de 3 o más. Sus herramientas pasan a la marca nativa; los textos del usuario y del agente, que
-//     son pequeños, se quedan. El original lo guarda pgocode con su embedding: si un mensaje nuevo se le parece
-//     («fallo de página»), su vigencia baja y vuelve (se repone con el siguiente barrido que compense; ver worthIt).
+//     son pequeños, se quedan. El original lo guarda pgocode: lo retirado no vuelve aunque su vigencia baje
+//     (histéresis), solo si el agente o el usuario citan algo que solo estaba ahí, y como mucho pruneReviveMax tokens
+//     por barrido (stickyOut): reponer de golpe reinflaba el contexto y el agente puede releer lo que necesite.
 //
 // Lo que se quita deja una línea que dice qué era y cómo recuperarlo: equivocarse cuesta una relectura, no un
 // error. El marcado (embeddings y estado de cada intercambio) se hace en segundo plano según llega cada cosa
@@ -176,9 +178,9 @@ func (p *ocPart) isTool() bool {
 	return p.v.Type == "tool" && p.v.State.Status == "completed" && p.v.State.Time.Compacted == 0
 }
 
-// tokensOf: lo que ocupa lo que se manda al modelo de una parte. Las salidas de herramientas (código con números de
-// línea, JSON) salen a unos 3 caracteres por token con Gemini (medido: una lectura de 61k caracteres eran 24k
-// tokens, y aún así esto se queda corto); el texto, a unos 4.
+// tokensOf: lo que ocupa lo que se manda al modelo de una parte (estimado con estTokens: los datos numéricos, como un
+// CSV, salen a 1,2-1,5 caracteres por token con Gemini; el código, a unos 2,5; el texto, a unos 4). Lo que ocupa de
+// verdad en cada sesión se ajusta con el uso real de sus llamadas (estimateRatio).
 func tokensOf(data string) int {
 	var v partView
 	if json.Unmarshal([]byte(data), &v) != nil {
@@ -187,13 +189,37 @@ func tokensOf(data string) int {
 	switch v.Type {
 	case "tool":
 		if v.State.Time.Compacted != 0 {
-			return (len(v.State.Input) + 40) / 3
+			return estTokens(string(v.State.Input)) + 10
 		}
-		return (len(v.State.Input)+len(v.State.Output))/3 + pruneImageTokens*len(v.State.Attachments)
+		out := string(v.State.Output)
+		var s string
+		if json.Unmarshal(v.State.Output, &s) == nil {
+			out = s
+		}
+		return estTokens(string(v.State.Input)) + estTokens(out) + pruneImageTokens*len(v.State.Attachments)
 	case "text", "reasoning":
-		return len(v.Text) / 4
+		return estTokens(v.Text)
 	}
 	return 0
+}
+
+// estTokens: los tokens de un texto, por clases de caracteres (medido con Gemini y Claude): cada dígito, casi uno
+// (los tokenizadores parten los números); la puntuación, 0,7; las letras y los espacios, uno cada 3,5.
+func estTokens(s string) int {
+	var dig, pun, otros int
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			dig++
+		case r < 128 && (r == ' ' || r == '\n' || r == '\t' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')):
+			otros++
+		case r < 128:
+			pun++
+		default:
+			otros++ // letras acentuadas y demás
+		}
+	}
+	return int(float64(dig)*0.95 + float64(pun)*0.7 + float64(otros)/3.5)
 }
 
 // pruneExchange: un intercambio (mensaje del usuario y la respuesta del agente, con sus pasos).
@@ -411,6 +437,8 @@ type pruneEdit struct {
 	Clear     bool
 	Output    *string // nueva salida (salidas largas: principio y final)
 	TrimInput bool    // ediciones y escrituras: sin el texto
+	// Keep: se queda como está ahora (lo que pgocode ya retiró no vuelve sin una señal clara; ver stickyOut).
+	Keep bool
 }
 
 // ClearedText: el texto con que OpenCode sustituye lo que retira (y pgocode, en las entradas de las ediciones).
@@ -528,6 +556,24 @@ var pruneYoungPieces = true
 // tocan. De esas piezas solo se vacía la salida (o el texto de una edición): el razonamiento, los textos y la
 // estructura del turno siguen igual (Gemini necesita sus firmas en el turno en curso).
 func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k vigParams) prunePlan {
+	return planPruneCut(win, sims, young, now, k, vigCut)
+}
+
+// pruneBudgetBig: con el contexto por encima del objetivo de la sesión (contextTarget), el corte de vigencia baja
+// (de 3 a 2,5 y a 2) solo para lo más grande y viejo: piezas de al menos estos tokens, y de los intercambios jóvenes
+// solo las que tienen el doble de pasos protegidos encima.
+const pruneBudgetBig = 2000
+
+// budgetCut: el corte de una pieza con el corte del presupuesto (cut): el normal salvo para lo grande y viejo.
+func budgetCut(cut float64, size, steps int, young bool) float64 {
+	if cut >= vigCut || size < pruneBudgetBig || (young && steps < 2*pruneProtectSteps) {
+		return vigCut
+	}
+	return cut
+}
+
+// planPruneCut: planPruneK con otro corte para lo grande y viejo (vigCut: el normal; ver budgetCut).
+func planPruneCut(win []*ocMessage, sims *pruneSims, young int, now time.Time, k vigParams, cut float64) prunePlan {
 	xs := pruneExchanges(win)
 	plan := prunePlan{Edits: map[string]pruneEdit{}, Exchanges: xs, K: k}
 	// Las partes en orden, con su intercambio, mensaje y los pasos del agente (sus llamadas al modelo) hasta ella.
@@ -586,7 +632,7 @@ func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k v
 			since = 0 // como antes: sin pasos; lo joven, entero
 		}
 		if x.Tier == TierL1 {
-			if pv := youngPiece(p, n, x, m, since, young, sims, h, now, k); pv != nil {
+			if pv := youngPiece(p, n, x, m, since, young, sims, h, now, k, cut); pv != nil {
 				plan.Pieces = append(plan.Pieces, pv)
 				if e, ok := pv.edit(p); ok {
 					plan.Edits[p.ID] = e
@@ -606,9 +652,15 @@ func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k v
 		// La pieza: su fecha, sus pasos, su relación propia si es grande (si no, la del intercambio) y si está
 		// superada.
 		f := x.Vig
-		f.Steps = since
+		f.Steps, f.Size = since, estTokens(p.output())
 		if m.Time > 0 {
 			f.At = m.Time
+		}
+		if f.Pinned && x.Tier != TierL1 && f.Size >= vigBigTokens {
+			// El primer intercambio (las instrucciones): su texto es vital, pero sus lecturas enormes (un CSV de 70k)
+			// tienen su vigencia como las demás. Las pequeñas siguen fijas: soltarlas todas hacía releer más (en la
+			// simulación con las sesiones reales, 4 relecturas de más en una sesión de 100 piezas).
+			f.Pinned = false
 		}
 		propia := false
 		if sims != nil && p.isPiece() {
@@ -620,10 +672,11 @@ func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k v
 		f.Superseded = superada
 		pv := &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
 		pv.V = max(k.of(f, now), x.V)
+		pc := budgetCut(cut, f.Size, f.Steps, false)
 		switch {
 		case superada != "":
 			pv.Out = e.Clear || e.TrimInput
-		case x.Tier == TierL3 || (propia && k.of(f, now) >= vigCut) || (!f.Pinned && f.Steps > pruneProtectSteps && k.of(f, now) >= vigCut):
+		case x.Tier == TierL3 || (propia && k.of(f, now) >= pc) || (!f.Pinned && f.Steps > pruneProtectSteps && k.of(f, now) >= pc):
 			// Fuera: la salida, a la marca nativa; las ediciones, sin su texto; lo pequeño se queda (la línea que lo
 			// sustituye ocuparía lo mismo).
 			e = outEdit(p)
@@ -660,11 +713,11 @@ func outEdit(p *ocPart) pruneEdit {
 // haciendo ahora (si tiene embedding), el tiempo y si está superada (solo por lo que no deja dudas: el mismo trozo
 // del fichero leído otra vez, la misma orden, otra lista de tareas o una imagen ya vista; no la lectura de un fichero
 // que se editó después, que el agente puede seguir usando para la edición siguiente).
-func youngPiece(p *ocPart, n int, x *pruneExchange, m *ocMessage, since, young int, sims *pruneSims, h *pruneHistory, now time.Time, k vigParams) *pieceVig {
+func youngPiece(p *ocPart, n int, x *pruneExchange, m *ocMessage, since, young int, sims *pruneSims, h *pruneHistory, now time.Time, k vigParams, cut float64) *pieceVig {
 	if !p.isTool() {
 		return nil
 	}
-	f := vigFactors{Ago: x.Vig.Ago, Young: young, At: m.Time, Steps: since}
+	f := vigFactors{Ago: x.Vig.Ago, Young: young, At: m.Time, Steps: since, Size: estTokens(p.output())}
 	if since < pruneProtectSteps {
 		f = vigFactors{Pinned: true, Steps: since}
 		return &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
@@ -677,7 +730,7 @@ func youngPiece(p *ocPart, n int, x *pruneExchange, m *ocMessage, since, young i
 	_, f.Superseded = pruneSuperseded(p, n, h, true)
 	pv := &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
 	pv.V = k.of(f, now)
-	pv.Out = pv.V >= vigCut
+	pv.Out = pv.V >= budgetCut(cut, f.Size, since, true)
 	return pv
 }
 
@@ -835,7 +888,43 @@ type pruneDiff struct {
 	Update  map[string]string
 	Restore []string
 	Delete  []string
-	Saved   int
+	Saved   int // lo que sale menos lo que vuelve
+	// Out y Back: los tokens que salen y los que vuelven (los dos ≥ 0; Saved = Out − Back).
+	Out, Back int
+}
+
+// add: lo que cambia una parte (positivo: sale; negativo: vuelve).
+func (d *pruneDiff) add(n int) {
+	d.Saved += n
+	if n >= 0 {
+		d.Out += n
+	} else {
+		d.Back -= n
+	}
+}
+
+// pendingString: lo de un barrido que no se aplica aún («12000 por retirar · 3000 por reponer»).
+func (d pruneDiff) pendingString() string {
+	t := fmt.Sprintf("%d por retirar", d.Out)
+	if d.Back > 0 || len(d.Restore) > 0 {
+		t += fmt.Sprintf(" · %d por reponer", d.Back)
+	}
+	return t
+}
+
+// scale: los tokens con la relación entre lo estimado y lo real de la sesión (estimateRatio).
+func (d *pruneDiff) scale(r float64) {
+	d.Out, d.Back = int(float64(d.Out)*r), int(float64(d.Back)*r)
+	d.Saved = d.Out - d.Back
+}
+
+// String: «12k fuera · 3k repuestos» (para el registro: nunca «-N tokens fuera»).
+func (d pruneDiff) String() string {
+	t := fmt.Sprintf("%d fuera", d.Out)
+	if d.Back > 0 || len(d.Restore) > 0 {
+		t += fmt.Sprintf(" · %d repuestos", d.Back)
+	}
+	return t
 }
 
 func pruneChanges(win []*ocMessage, plan prunePlan) pruneDiff {
@@ -848,9 +937,11 @@ func pruneChanges(win []*ocMessage, plan prunePlan) pruneDiff {
 			}
 			e, ok := plan.Edits[p.ID]
 			switch {
+			case ok && e.Keep:
+				continue
 			case ok && e.Delete:
 				d.Delete = append(d.Delete, p.ID)
-				d.Saved += tokensOf(cur)
+				d.add(tokensOf(cur))
 			case ok:
 				nuevo, err := renderPart(p.Data, e)
 				if err != nil || nuevo == cur {
@@ -858,18 +949,117 @@ func pruneChanges(win []*ocMessage, plan prunePlan) pruneDiff {
 				}
 				if nuevo == p.Data { // nada que quitar: si estaba cambiada, vuelve a su original
 					d.Restore = append(d.Restore, p.ID)
-					d.Saved += tokensOf(cur) - tokensOf(p.Data)
+					d.add(tokensOf(cur) - tokensOf(p.Data))
 					continue
 				}
 				d.Update[p.ID] = nuevo
-				d.Saved += tokensOf(cur) - tokensOf(nuevo)
+				d.add(tokensOf(cur) - tokensOf(nuevo))
 			case p.Current != "":
 				d.Restore = append(d.Restore, p.ID)
-				d.Saved += tokensOf(cur) - tokensOf(p.Data)
+				d.add(tokensOf(cur) - tokensOf(p.Data))
 			}
 		}
 	}
 	return d
+}
+
+// pruneReviveMax: lo que puede volver en un barrido (tokens). Reponer de golpe reinfla el contexto (en INTRADEMA,
+// 24 piezas y 49k que lo subieron a 154k y lo hicieron compactar); el agente puede volver a leer lo que necesite, y
+// una relectura cuesta solo esa pieza.
+const pruneReviveMax = 5000
+
+// stickyOut: lo que pgocode ya retiró se queda fuera aunque su vigencia vuelva a bajar (histéresis: sale con 3 o
+// más y no vuelve por la vigencia), salvo con una señal fuerte: lo último del usuario o del agente (recent) cita dos
+// o más identificadores que solo estaban en esa pieza; y aun así, como mucho pruneReviveMax tokens por barrido (las
+// más citadas primero). Cambia el plan (Keep en lo que se queda fuera) y devuelve lo que vuelve.
+func stickyOut(win []*ocMessage, plan *prunePlan, recent string) []string {
+	type cand struct {
+		p          *ocPart
+		score, tok int
+	}
+	var cs []cand
+	for _, m := range win {
+		for _, p := range m.Parts {
+			if p.Current == "" {
+				continue
+			}
+			if e, ok := plan.Edits[p.ID]; ok {
+				if e.Delete || e.Keep {
+					continue
+				}
+				if nuevo, err := renderPart(p.Data, e); err == nil && tokensOf(nuevo) <= tokensOf(p.Current) {
+					continue // sale igual o más
+				}
+			}
+			cs = append(cs, cand{p: p, tok: max(tokensOf(p.Data)-tokensOf(p.Current), 0)})
+		}
+	}
+	if len(cs) == 0 {
+		return nil
+	}
+	citado := map[string]bool{}
+	for _, w := range distinctiveWords(recent) {
+		citado[w] = true
+	}
+	if len(citado) > 0 {
+		// Lo que el agente tiene a la vista ahora (lo que no está retirado): ahí la cita no prueba nada.
+		visto := map[string]bool{}
+		for _, m := range win {
+			for _, p := range m.Parts {
+				if p.Current != "" && appliedOut(p) {
+					continue
+				}
+				var t string
+				switch p.v.Type {
+				case "tool":
+					t = string(p.v.State.Input) + "\n" + p.output()
+				case "text", "reasoning":
+					t = p.v.Text
+				}
+				for _, w := range distinctiveWords(t) {
+					visto[w] = true
+				}
+			}
+		}
+		for i := range cs {
+			uno := map[string]bool{}
+			for _, w := range distinctiveWords(pieceContent(cs[i].p)) {
+				if citado[w] && !visto[w] && !uno[w] {
+					uno[w] = true
+					cs[i].score++
+				}
+			}
+		}
+	}
+	sort.SliceStable(cs, func(i, j int) bool {
+		if cs[i].score != cs[j].score {
+			return cs[i].score > cs[j].score
+		}
+		return cs[i].tok < cs[j].tok
+	})
+	queda := pruneReviveMax
+	var vuelve []string
+	fuera := map[string]bool{}
+	for _, c := range cs {
+		if c.score >= 2 && c.tok <= queda {
+			queda -= c.tok
+			vuelve = append(vuelve, c.p.ID)
+			continue
+		}
+		plan.Edits[c.p.ID] = pruneEdit{Keep: true}
+		fuera[c.p.ID] = appliedOut(c.p)
+	}
+	for _, pv := range plan.Pieces {
+		if o, ok := fuera[pv.PartID]; ok {
+			pv.Out = o
+		}
+	}
+	return vuelve
+}
+
+// recentText: lo último del usuario y del agente (para la señal de stickyOut).
+func recentText(win []*ocMessage, msg string) string {
+	return msg + "\n" + focusText(win)
 }
 
 // worthIt: si se barre ahora: solo si lo que sale (descontado lo que se repone) compensa perder la caché. Reponer
@@ -923,6 +1113,16 @@ type PruneReport struct {
 	CacheWarm    bool `json:"cache_caliente,omitempty"`
 	CacheSuffix  int  `json:"cache_resto,omitempty"`
 	ForcePending bool `json:"forzado_pendiente,omitempty"`
+	// NoPays: con la caché caliente, barrer ahora cuesta más de lo que ahorra (la interfaz pide confirmación).
+	NoPays bool `json:"no_compensa,omitempty"`
+	// Back: tokens que volverían con el próximo barrido (piezas retiradas que el agente ha vuelto a citar).
+	Back int `json:"por_reponer,omitempty"`
+	// Threshold: el umbral al que compacta el agente; Target: el objetivo de contexto de la sesión (por encima, el
+	// hilo retira también lo grande y viejo con menos vigencia); Context: el contexto real de la última llamada
+	// (tras un barrido, lo que queda). Tokens; 0 si no se saben.
+	Threshold int `json:"umbral,omitempty"`
+	Target    int `json:"objetivo,omitempty"`
+	Context   int `json:"contexto,omitempty"`
 	// Calibration: los pesos de la vigencia del proyecto y su calibración.
 	Calibration *CalibrationInfo `json:"calibracion,omitempty"`
 }

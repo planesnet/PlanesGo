@@ -47,9 +47,14 @@ test('un informe nuevo cambia la vigencia; lo que no cambia es el mismo objeto; 
 test('la opacidad: 1 en 0, baja suave hasta 0,4 en 3 o más', () => {
   assert.equal(P.vigOpacity(undefined), 1);
   assert.equal(P.vigOpacity({ vigencia: 0 }), 1);
-  assert.equal(P.vigOpacity({ vigencia: 1.5 }), 0.7);
-  assert.equal(P.vigOpacity({ vigencia: 3 }), 0.4);
-  assert.equal(P.vigOpacity({ vigencia: 7 }), 0.4);
+  assert.equal(P.vigOpacity({ vigencia: 1.5 }), 0.8);
+  assert.equal(P.vigOpacity({ vigencia: 3 }), 0.6, 'con 3+ y aún dentro, no tan apagado como lo de fuera');
+  assert.equal(P.vigOpacity({ vigencia: 7, superada: 'edición antigua' }), 0.6);
+  assert.equal(P.vigOpacity({ vigencia: 3, fuera: true }), 0.4);
+  assert.equal(P.vigOpacity({ vigencia: 2.4, fuera: true }), 0.4, 'lo de fuera, siempre igual de apagado');
+  assert.equal(P.vigTone({ vigencia: 4, superada: 'edición antigua' }), 'superseded');
+  assert.equal(P.vigTone({ vigencia: 4, fuera: true }), 'out');
+  assert.match(P.vigTitle({ vigencia: 2.4, fuera: true }), /no vuelve aunque baje/);
   let prev = 1;
   for (let v = 0.25; v <= 3; v += 0.25) { const o = P.vigOpacity({ vigencia: v }); assert.ok(o < prev); prev = o; }
   // Dentro de un mensaje ya desvanecido, la pieza se ve con su opacidad (se multiplican).
