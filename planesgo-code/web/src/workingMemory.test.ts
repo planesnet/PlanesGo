@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import * as W from './workingMemory.ts';
 import type { Mensaje, Herramienta } from './api.ts';
 
-const h = (nombre: string, resumen: string, estado: Herramienta['estado'] = 'ok'): Mensaje['partes'] extends (infer P)[] | undefined ? P : never =>
-  ({ tipo: 'herramienta', h: { id: Math.random().toString(36), nombre, resumen, estado } });
+const h = (nombre: string, resumen: string, estado: Herramienta['estado'] = 'ok', salida = 'hecho'): Mensaje['partes'] extends (infer P)[] | undefined ? P : never =>
+  ({ tipo: 'herramienta', h: { id: Math.random().toString(36), nombre, resumen, estado, salida } });
 
 const conv: Mensaje[] = [
   { rol: 'user', texto: 'Crea un servidor HTTP en Go con un endpoint /salud. No uses frameworks externos.' },
@@ -34,6 +34,15 @@ test('memoria de trabajo: objetivo, peticiones, ficheros, órdenes, tareas, deci
   assert.equal(w.lastAnswer, 'Pruebas añadidas y en verde.');
   const t = W.buildWorkingMemory(conv);
   for (const s of ['## Objetivo', '## Conversación', 'Agente: Hecho: servidor', '## Ficheros consultados', '## Lista de tareas', '- [ ] Añadir pruebas', 'cmd/servidor/main_test.go', 'ok: `go test ./...`', '## Última respuesta']) assert.ok(t.includes(s), s);
+});
+
+test('memoria de trabajo: una orden acabada sin salida no cuenta como «ok»', () => {
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'Pasa las pruebas' },
+    { rol: 'assistant', texto: '', partes: [h('run_command', 'make test', 'ok', ''), { tipo: 'texto', texto: 'Listo.' }] },
+  ];
+  assert.deepEqual(W.collectWorkingMemory(ms).commands, [{ cmd: 'make test', ok: false, noOutput: true }]);
+  assert.ok(W.buildWorkingMemory(ms).includes('- sin salida: `make test`'));
 });
 
 test('memoria de trabajo: vacía sin conversación y nunca pasa del máximo', () => {

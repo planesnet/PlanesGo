@@ -40,7 +40,7 @@ export interface WorkingMemory {
   turns: { request: string; reply: string }[]; // cada petición con lo último que respondió el agente
   read: string[];          // ficheros consultados (leídos)
   files: string[];         // ficheros creados o editados (rutas tal cual las dio la herramienta)
-  commands: { cmd: string; ok: boolean }[];
+  commands: { cmd: string; ok: boolean; noOutput?: boolean }[]; // noOutput: acabó «bien» pero sin salida (quizá no se ejecutó)
   tasks: { text: string; state: 'pendiente' | 'curso' | 'hecho' }[];
   decisions: string[];
   lastAnswer?: string;
@@ -56,7 +56,7 @@ export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
   const files: string[] = [];
   const read: string[] = [];
   const turns: { request: string; reply: string }[] = [];
-  const commands: { cmd: string; ok: boolean }[] = [];
+  const commands: WorkingMemory['commands'] = [];
   const decisions: string[] = [];
   let tasks: WorkingMemory['tasks'] = [];
   let lastAnswer: string | undefined;
@@ -81,7 +81,9 @@ export function collectWorkingMemory(todos: Mensaje[]): WorkingMemory {
         // Una orden repetida vale por su último resultado.
         const i = commands.findIndex(c => c.cmd === cmd);
         if (i >= 0) commands.splice(i, 1);
-        commands.push({ cmd, ok: h.estado === 'ok' });
+        // Sin salida no consta que se ejecutara (Antigravity da por acabada una orden denegada, sin salida): no es «ok».
+        if (h.estado === 'ok' && !(h.salida || '').trim()) commands.push({ cmd, ok: false, noOutput: true });
+        else commands.push({ cmd, ok: h.estado === 'ok' });
       }
     }
     const lista = m.tareas?.find(t => t.tipo === 'lista');
@@ -144,7 +146,7 @@ export function buildWorkingMemory(ms: Mensaje[], max = MEMORY_MAX): string {
     sec.push(`## Ficheros creados o editados (${w.files.length})\n` + (w.files.length > fs.length ? '- …\n' : '') + fs.map(f => '- ' + f).join('\n'));
   }
   if (w.read.length) sec.push(`## Ficheros consultados (${w.read.length})\n` + w.read.slice(-30).map(f => '- ' + f).join('\n'));
-  if (w.commands.length) sec.push('## Órdenes relevantes (último resultado)\n' + w.commands.slice(-12).map(c => `- ${c.ok ? 'ok' : 'ERROR'}: \`${c.cmd}\``).join('\n'));
+  if (w.commands.length) sec.push('## Órdenes relevantes (último resultado)\n' + w.commands.slice(-12).map(c => `- ${c.ok ? 'ok' : c.noOutput ? 'sin salida' : 'ERROR'}: \`${c.cmd}\``).join('\n'));
   if (w.decisions.length) sec.push('## Decisiones y avisos\n' + w.decisions.slice(-12).map(d => '- ' + d).join('\n'));
   if (w.lastAnswer) sec.push('## Última respuesta del agente (recortada)\n' + cutEnds(w.lastAnswer, 2500));
   let t = sec.join('\n\n');

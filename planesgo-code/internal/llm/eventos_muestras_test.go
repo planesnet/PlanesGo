@@ -371,3 +371,30 @@ func TestClaudeConsumoAlCompactar(t *testing.T) {
 		t.Errorf("sesión nueva que compacta: %+v", u)
 	}
 }
+
+// agy 1.4.6 en accept-edits sin consola (muestra real): la orden se da por acabada sin salida, la respuesta llega
+// vacía y el resultado trae denied_actions «command». La herramienta sale en error y hay aviso.
+func TestAntigravityDenegada(t *testing.T) {
+	var h *Herramienta
+	texto := ""
+	for _, e := range lee(t, "agy-4-denegada.jsonl", func(r *os.File, e func(Evento)) error { return leeAntigravity(r, e) }) {
+		if e.Herramienta != nil {
+			h = e.Herramienta
+		}
+		texto += e.Texto
+	}
+	if h == nil || h.Estado != "error" || !strings.Contains(h.Salida, "no permite órdenes") || h.Nombre != "run_command" {
+		t.Errorf("herramienta: %+v", h)
+	}
+	if !strings.Contains(texto, "sin responder") || !strings.Contains(texto, "RunCommand") {
+		t.Errorf("aviso: %q", texto)
+	}
+	// Con respuesta, sin aviso.
+	texto = ""
+	for _, e := range lee(t, "agy-1.jsonl", func(r *os.File, e func(Evento)) error { return leeAntigravity(r, e) }) {
+		texto += e.Texto
+	}
+	if strings.Contains(texto, "sin responder") {
+		t.Errorf("aviso de más: %q", texto)
+	}
+}

@@ -2,15 +2,18 @@ package llm
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -491,6 +494,8 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	llamadasAgy := map[int]bool{}           // pasos con consumo propio: cada uno, una llamada al modelo
 	contexto := 0                           // tokens de entrada de la última llamada
 	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
+	sinSalida := map[string]string{}        // herramientas acabadas «bien» pero sin salida (id → nombre): quizá denegadas
+	texto := false                          // el agente ha respondido algo
 	for sc.Scan() {
 		var ev struct {
 			Event          string `json:"event"`
@@ -523,7 +528,10 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				Estado   string  `json:"status"`
 				Error    string  `json:"error"`
 				Segundos float64 `json:"duration_seconds"`
-				Usage    struct {
+				// Lo que el modo de la sesión no le ha dejado hacer (sin consola no puede preguntar): agy da la
+				// herramienta por acabada, sin salida, y aquí la acción («command»…).
+				Denegadas []deniedAction `json:"denied_actions"`
+				Usage     struct {
 					Input     int `json:"input_tokens"`
 					CacheRead int `json:"cache_read_tokens"`
 					Output    int `json:"output_tokens"`
@@ -552,6 +560,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 				emite(Evento{Texto: compactionNotice("Antigravity", 0, 0)})
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
+					texto = true
 					emite(Evento{Texto: t})
 				}
 			// Un subagente puede empezar como «tool» y acabar como «subagent» (o al revés): el mismo paso.
@@ -585,11 +594,20 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 					if len(salida) > len(h.Salida) {
 						h.Size = len(salida)
 					}
+					if estado == "ok" && strings.TrimSpace(salida) == "" {
+						sinSalida[id] = p.Has
+					}
 					emite(Evento{Herramienta: h})
 				}
 			}
 		case "result":
 			res := ev.Resultado
+			for _, h := range deniedTools(sinSalida, res.Denegadas) {
+				emite(Evento{Herramienta: h})
+			}
+			if !texto && (res.Estado == "" || res.Estado == "SUCCESS") {
+				emite(Evento{Texto: emptyAntigravityNotice(res.Denegadas)})
+			}
 			// El razonamiento se cobra como salida: va con ella. Llamadas: los pasos con consumo propio.
 			emite(Evento{Uso: &Uso{Entrada: res.Usage.Input + res.Usage.CacheRead, Salida: res.Usage.Output + res.Usage.Thinking,
 				CacheLeida: res.Usage.CacheRead, Llamadas: len(llamadasAgy), Segundos: res.Segundos, Contexto: contexto}})
@@ -602,6 +620,52 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 		}
 	}
 	return sc.Err()
+}
+
+// deniedAction: una acción que agy no ha podido hacer por el modo de la sesión (denied_actions de su resultado).
+type deniedAction struct {
+	Accion string `json:"action"`
+	Nombre string `json:"display_name"`
+}
+
+// deniedTools: las herramientas que el modo de la sesión no dejó usar a Antigravity, en error. agy las da por
+// acabadas sin salida y solo dice al final qué acciones denegó («command» para las órdenes).
+func deniedTools(sinSalida map[string]string, denegadas []deniedAction) []*Herramienta {
+	var l []*Herramienta
+	ids := slices.Sorted(maps.Keys(sinSalida))
+	for _, d := range denegadas {
+		accion := strings.ToLower(d.Accion)
+		for _, id := range ids {
+			n, ok := sinSalida[id]
+			if !ok || accion == "" || !strings.Contains(strings.ToLower(n), accion) {
+				continue
+			}
+			delete(sinSalida, id)
+			motivo := "denegada: el modo de la sesión no permite órdenes (pon la sesión en «Auto»)"
+			if accion != "command" {
+				motivo = "denegada por el modo de la sesión (" + cmp.Or(d.Nombre, d.Accion) + ")"
+			}
+			l = append(l, &Herramienta{ID: id, Nombre: n, Salida: motivo, Estado: "error"})
+		}
+	}
+	return l
+}
+
+// emptyAntigravityNotice: el aviso cuando Antigravity acaba sin decir nada (p. ej. porque le han denegado una orden).
+func emptyAntigravityNotice(denegadas []deniedAction) string {
+	var n []string
+	orden := false
+	for _, d := range denegadas {
+		n = append(n, cmp.Or(d.Nombre, d.Accion))
+		orden = orden || d.Accion == "command"
+	}
+	switch {
+	case orden:
+		return "_(Antigravity ha acabado sin responder: el modo de la sesión no le deja ejecutar órdenes (" + strings.Join(n, ", ") + "). Ponla en «Auto» para que las ejecute.)_"
+	case len(n) > 0:
+		return "_(Antigravity ha acabado sin responder: el modo de la sesión le ha denegado " + strings.Join(n, ", ") + ".)_"
+	}
+	return "_(Antigravity ha acabado sin responder.)_"
 }
 
 // errLimitePasos: OpenCode ha llegado a su límite de pasos de la petición y Gemini ha rechazado el mensaje con el
