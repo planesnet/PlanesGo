@@ -580,7 +580,7 @@ esac`)
 	if len(ps) != 2+ContinuacionesOpenCode || ps[len(ps)-1].Permisos != "ninguna" || !strings.Contains(texto.String(), "falta el Kanban") {
 		t.Fatalf("%d peticiones, la última %+v; texto %q", len(ps), ps[len(ps)-1], texto.String())
 	}
-	if p := permisosOpenCode("ninguna", nil); !strings.Contains(p, `"read":"deny"`) || !strings.Contains(p, `"bash":"deny"`) || !strings.Contains(p, `"edit":"deny"`) {
+	if p := permisosOpenCode("ninguna", nil, ""); !strings.Contains(p, `"read":"deny"`) || !strings.Contains(p, `"bash":"deny"`) || !strings.Contains(p, `"edit":"deny"`) {
 		t.Errorf("sin herramientas: %s", p)
 	}
 }

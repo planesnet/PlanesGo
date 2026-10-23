@@ -45,7 +45,7 @@ func proveedorDeepSeek(limite int) (map[string]any, error) {
 
 // entornoOpenCode: permisos según el modo y, con DeepSeek en Vertex, su proveedor (OPENCODE_CONFIG_CONTENT).
 func entornoOpenCode(p Peticion) []string {
-	e := []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos, p.Autorizadas)}
+	e := []string{"OPENCODE_PERMISSION=" + permisosOpenCode(p.Permisos, p.Autorizadas, p.Carpeta)}
 	// Carpeta de datos propia (sesiones de OpenCode de pgocode): la de OpenCode Desktop tiene otro formato de base
 	// de datos que la versión de terminal no abre.
 	if d := datosOpenCode(); d != "" {
