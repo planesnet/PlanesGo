@@ -56,7 +56,10 @@ func TestForceSweepClaude(t *testing.T) {
 	viejoEmb := pruneEmbed
 	t.Cleanup(func() { drainCollectors(); pruneEmbed = viejoEmb })
 	pruneEmbed = func(context.Context, string, string) ([]float32, error) { return nil, os.ErrNotExist }
-	pruneNow = func() time.Time { return f.t0.Add(40 * time.Minute) } // caché caliente
+	pruneNow = func() time.Time { return f.t0.Add(40 * time.Minute) } // caché caliente (a 1 h)
+	viejoTTL := claudeTTLOverride
+	claudeTTLOverride = time.Hour
+	t.Cleanup(func() { claudeTTLOverride = viejoTTL })
 	claudeBusyFunc = func(string) bool { return true }
 	rep, err := ForceSweep(context.Background(), "claude-code", ses, "/p", "sigue", true)
 	if err != nil || rep.Removed != 0 || !rep.ForcePending {

@@ -690,6 +690,8 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// Podar: poda automática del historial del agente al empezar el turno (ver llm.Peticion.Prune). Sin el
 		// campo, activada.
 		Podar *bool `json:"podar"`
+		// CacheTTL: lo que dura la caché del prompt del agente («5m» o «1h», ver llm.Peticion.CacheTTL).
+		CacheTTL string `json:"cache_ttl"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -817,7 +819,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if p.Aparte != "" {
 		s.aparte(turno, r, p.Aparte, p.Contexto, p.AparteMotor, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
-			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
+			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, CacheTTL: p.CacheTTL, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
 		return
 	}
 	// Registro de tiempos: la petición, lo que hace el agente (herramientas, subagentes, segundo plano) y su fin.
@@ -829,7 +831,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
 		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0",
-		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar),
+		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar), CacheTTL: p.CacheTTL,
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
 		Corte: p.Corte, Traspaso: p.Traspaso}, func(e llm.Evento) {
 		if e.Uso != nil && s.Imputacion != nil {

@@ -68,6 +68,9 @@ type Peticion struct {
 	// ContextTarget: el objetivo de contexto de la sesión (tokens): por encima, la poda retira también lo grande y
 	// viejo con menos vigencia (0: el 40 % del umbral de compactación o PGOCODE_CONTEXT_TARGET; -1: sin objetivo).
 	ContextTarget int
+	// CacheTTL: lo que dura la caché del prompt que escribe el agente («5m» o «1h»; Claude Code, ver cachettl.go).
+	// La decide la interfaz para cada sesión según el ritmo de sus turnos; vacío: 5 min.
+	CacheTTL string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
@@ -188,6 +191,9 @@ type Uso struct {
 	// lo que muestra la ventana del hilo de limpieza (qué parte del contexto cuesta y cuál no).
 	ContextoCache   int `json:"contexto_cache,omitempty"`
 	ContextoEscrita int `json:"contexto_escrita,omitempty"`
+	// CacheTTL: cuántos segundos sigue en la caché lo enviado en la última llamada (0: no se sabe): la interfaz
+	// avisa de cuándo caduca.
+	CacheTTL int `json:"cache_ttl,omitempty"`
 }
 
 // Info describe un proveedor para el selector del chat.

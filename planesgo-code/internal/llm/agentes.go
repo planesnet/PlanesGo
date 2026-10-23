@@ -169,6 +169,18 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			emite(Evento{Texto: "_(pgocode ha sugerido usar subagentes: " + adv.Why + ".)_\n\n", Subagentes: adv.Why})
 		}
 	}
+	// Cuánto dura en la caché lo enviado: con cada consumo (la interfaz avisa de cuándo caduca).
+	if ttl := cacheTTLSeconds(a.Clave, p); ttl > 0 {
+		previo := emite
+		emite = func(e Evento) {
+			if e.Uso != nil {
+				u := *e.Uso
+				u.CacheTTL = ttl
+				e.Uso = &u
+			}
+			previo(e)
+		}
+	}
 	// El mensaje habla de la orden «pgo»: una línea con su uso (el agente no la conoce).
 	if !p.Aparte && len(p.Mensajes) > 0 && hasPgo(p.Entorno) {
 		if h := pgoHintFor(p.Mensajes[len(p.Mensajes)-1].Texto); h != "" {
@@ -696,8 +708,9 @@ func Agentes() []Proveedor {
 			// Con los modelos actuales Claude Code no trae la lista de tareas (TaskCreate/TaskUpdate) si no se pide:
 			// pgocode la pinta en el chat y la usa para el estado de las preguntas aparte.
 			EntornoDefecto: []string{"CLAUDE_CODE_ENABLE_TODO_TOOLS=1"},
-			// Compacta su historial al pasar del umbral de la sesión (compaction.go).
-			EntornoPara: claudeCompactEnv,
+			// Compacta su historial al pasar del umbral de la sesión (compaction.go) y fija el TTL de la caché de
+			// todas sus llamadas (cachettl.go).
+			EntornoPara: claudeEnv,
 			Modelos:     []string{"opus", "sonnet", "haiku"}, Esfuerzos: []string{"low", "medium", "high", "xhigh", "max"},
 			Args: func(msg string, p Peticion) []string {
 				a := []string{"-p", "--output-format", "stream-json", "--verbose"}
@@ -1152,7 +1165,10 @@ func usoDelTurno(conv string, total Uso) Uso {
 	if ok && total.Entrada >= antes.Entrada && total.Salida >= antes.Salida && total.Segundos >= antes.Segundos {
 		turno = Uso{Entrada: total.Entrada - antes.Entrada, Salida: total.Salida - antes.Salida,
 			Coste: max(total.Coste-antes.Coste, 0), Segundos: total.Segundos - antes.Segundos,
-			CacheLeida: max(total.CacheLeida-antes.CacheLeida, 0), Llamadas: total.Llamadas, Contexto: total.Contexto}
+			CacheLeida: max(total.CacheLeida-antes.CacheLeida, 0), Llamadas: total.Llamadas, Contexto: total.Contexto,
+			// Los de la última llamada no son acumulados: tal cual (sin ellos, la ventana del hilo de limpieza veía
+			// sin caché todo el contexto de Antigravity desde el segundo turno).
+			ContextoCache: total.ContextoCache, ContextoEscrita: total.ContextoEscrita}
 	}
 	acumulados[conv] = total
 	if f != "" {

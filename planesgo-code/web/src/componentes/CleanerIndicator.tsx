@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Mensaje } from '../api';
 import type { PruneReport } from '../prune';
 import * as CL from '../cleaner';
+import CacheLine from './CacheLine';
 
 interface Props {
   agent: string;
@@ -96,6 +97,7 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
             <span className="suave"> {CL.nowLabel(last, agentWorking)}</span>
           </div>
           {ctxCost && <ContextCostBar c={ctxCost} agent={agent} />}
+          {!agentWorking && <CacheLine messages={messages} agent={agent} />}
           <div className="suave pequeno">compacta a {fmt(threshold)}{target ? ` · objetivo ${fmt(target)}: por encima, el hilo retira también lo grande y viejo` : ''}</div>
           {series.length > 1 && (
             <figure className="cleaner-spark">

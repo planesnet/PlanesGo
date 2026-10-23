@@ -29,8 +29,8 @@ import (
 //   - se edita en el sitio, entre turnos y sin ningún «claude» de esa sesión en marcha: copia de seguridad en la
 //     carpeta de pgocode (fuera de projects/), temporal en el mismo directorio, fsync y rename. Si el --resume
 //     falla, se restaura la copia y se repite sin podar (agentes.go);
-//   - la caché importa (escribir a 1 h cuesta 2×; leer, 0,1×): con la caché fría podar sale gratis; con la caliente,
-//     solo lotes que se amorticen en pocas llamadas (claudeCacheWorth).
+//   - la caché importa (escribir cuesta 1,25× a 5 min y 2× a 1 h; leer, 0,1×): con la caché fría podar sale
+//     gratis; con la caliente, solo lotes que se amorticen en pocas llamadas (claudeCacheWorth).
 //
 // Los originales de lo vaciado se guardan aparte (<sesión>.orig.json): si un intercambio vuelve a ser relevante, se
 // repone como en OpenCode («fallo de página»).
@@ -40,19 +40,32 @@ const (
 	claudeColdMin = 2000
 	// claudeMaxCalls: con la caché caliente, en cuántas llamadas como mucho se tiene que amortizar la reescritura.
 	claudeMaxCalls = 10
-	// Precios relativos a la entrada: escribir en caché a 1 h y leer de ella.
-	claudeCacheWrite = 2.0
-	claudeCacheRead  = 0.1
+	// Precio de leer de la caché, relativo a la entrada (el de escribir depende del TTL: claudeWriteFactor).
+	claudeCacheRead = 0.1
 )
 
-// claudeCacheTTL: lo que dura la caché que escribe la primera llamada de cada turno (1 h). Se puede cambiar con
 // PGOCODE_CLAUDE_CACHE_TTL (una duración de Go: «1s» para probar la poda con la caché «fría» sin esperar).
-var claudeCacheTTL = time.Hour
-
 func init() {
 	if d, err := time.ParseDuration(os.Getenv("PGOCODE_CLAUDE_CACHE_TTL")); err == nil && d > 0 {
-		claudeCacheTTL = d
+		claudeTTLOverride = d
 	}
+}
+
+// claudeCacheCost: lo que dura la caché que hay ahora (la que escribió el turno anterior) y lo que cuesta escribir
+// en la de este turno.
+type claudeCacheCost struct {
+	TTL   time.Duration
+	Write float64
+}
+
+// claudeCostFor: la caché de la sesión (prev: el TTL con el que escribió el turno anterior; 0, el de p) y el
+// precio de escribir con el de p.
+func claudeCostFor(prev time.Duration, p Peticion) claudeCacheCost {
+	ttl := claudeTTL(p)
+	if prev <= 0 {
+		prev = ttl
+	}
+	return claudeCacheCost{TTL: prev, Write: claudeWriteFactor(ttl)}
 }
 
 var (
@@ -497,13 +510,13 @@ func claudePlan(plan prunePlan, win []*ocMessage) prunePlan {
 // P: hasta dónde se sigue leyendo de la caché: el prompt de sistema (sys), porque Claude Code solo tiene ahí un
 // punto de caché fijo y lo demás va en el último mensaje: un cambio por la mitad hace reescribir todo lo de después
 // del sistema, no solo desde el primer cambio (medido: un aviso de ~7k escribió 46 266). C: hasta dónde llega la
-// caché aprovechable; X₁/X₂: lo que sale antes/después de C; R: lo que se repone. Con la caché fría (más de una
-// hora desde la última llamada), gratis.
-func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, sys int, now time.Time) (bool, string) {
+// caché aprovechable; X₁/X₂: lo que sale antes/después de C; R: lo que se repone. Con la caché fría (pasado su
+// TTL desde la última llamada), gratis.
+func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, sys int, now time.Time, cc claudeCacheCost) (bool, string) {
 	if d.Saved <= 0 && len(d.Restore) == 0 {
 		return false, "nada que retirar"
 	}
-	if s.LastCall.IsZero() || now.Sub(s.LastCall) > claudeCacheTTL {
+	if s.LastCall.IsZero() || now.Sub(s.LastCall) > cc.TTL {
 		if d.Saved >= claudeColdMin {
 			return true, "caché fría"
 		}
@@ -542,7 +555,8 @@ func claudeCacheWorth(s *claudeSession, d pruneDiff, cleared map[string]int, sys
 	}
 	C := max(s.Cache, P)
 	X := X1 + X2
-	E := float64(C-P-X1)*claudeCacheWrite - float64(C-P)*claudeCacheRead - float64(X2)*claudeCacheWrite + float64(R)*claudeCacheWrite
+	w := cc.Write
+	E := float64(C-P-X1)*w - float64(C-P)*claudeCacheRead - float64(X2)*w + float64(R)*w
 	if E <= 0 {
 		return true, "se amortiza desde la primera llamada"
 	}
@@ -747,7 +761,8 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	now := pruneNow()
 	o := decideSweep(sweepInput{Win: win, Sims: sims, Young: pruneYoung, Now: now, K: c.params(), Msg: msg, Target: c.state.Target, Claude: true, Empty: c.emptyNext})
 	plan, d := o.Plan, o.D
-	vale, porque := claudeCacheWorth(s, d, claudeCleared(win, o), o.System, now)
+	cc := claudeCostFor(time.Duration(c.state.CacheTTL)*time.Millisecond, p)
+	vale, porque := claudeCacheWorth(s, d, claudeCleared(win, o), o.System, now, cc)
 	if force {
 		vale, porque = d.changes(), "barrido pedido por el usuario"
 		if !vale {
@@ -762,13 +777,13 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	}
 	c.state.CacheUntil = 0
 	if !s.LastCall.IsZero() {
-		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
+		c.state.CacheUntil = s.LastCall.Add(cc.TTL).UnixMilli()
 	}
 	if !vale {
 		depuracion.Log("claude-code", "poda %s: %s (%s)", c.key, d.pendingString(), porque)
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
 		c.state.Vig.addCompacted(s.Before)
-		c.noteClaudePending(s, o, now)
+		c.noteClaudePending(s, o, now, cc)
 		c.save()
 		return c.reportNow(now), nil, nil
 	}
@@ -826,9 +841,9 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 
 // noteClaudePending: lo pendiente en Claude Code, con lo que costaría ahora en caché (lo de después del sistema, a
 // precio de escritura) y si compensa (claudeCacheWorth).
-func (c *pruneCollector) noteClaudePending(s *claudeSession, o sweepOutcome, now time.Time) {
+func (c *pruneCollector) noteClaudePending(s *claudeSession, o sweepOutcome, now time.Time, cc claudeCacheCost) {
 	c.state.Pending, c.state.Back, c.state.CacheSuffix = max(o.D.Saved, 0), o.D.Back, o.Rewrite
-	vale, _ := claudeCacheWorth(s, o.D, claudeCleared(s.Win, o), o.System, now)
+	vale, _ := claudeCacheWorth(s, o.D, claudeCleared(s.Win, o), o.System, now, cc)
 	c.state.NoPays = !vale
 	if o.Ctx > 0 {
 		c.state.Context = o.Ctx
@@ -845,12 +860,18 @@ func (c *pruneCollector) markClaudeNow(ctx context.Context, embeddings bool) {
 		return
 	}
 	c.state.Prunable = true
+	// La caché que acaba de escribir el turno, y lo que costaría reescribirla en el próximo (con el mismo TTL).
+	ttl := time.Duration(c.state.CacheTTL) * time.Millisecond
+	if ttl <= 0 {
+		ttl = claudeTTL(Peticion{})
+	}
+	cc := claudeCacheCost{TTL: ttl, Write: claudeWriteFactor(ttl)}
 	c.state.CacheUntil = 0
 	if !s.LastCall.IsZero() {
-		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
+		c.state.CacheUntil = s.LastCall.Add(cc.TTL).UnixMilli()
 	}
 	o := c.markWin(ctx, s.Win, s.Before, embeddings, true)
-	c.noteClaudePending(s, o, pruneNow())
+	c.noteClaudePending(s, o, pruneNow(), cc)
 	c.save()
 	c.publish(c.reportNow(pruneNow()))
 }
@@ -916,6 +937,7 @@ func markClaude(p Peticion, ses string) {
 		defer cancela()
 		c.setFolder(p.Carpeta)
 		c.noteLimits(p)
+		c.state.CacheTTL = claudeTTL(p).Milliseconds() // con el que ha escrito este turno
 		c.markClaudeNow(ctx, p.Prune == PruneAuto)
 		noteTurn(c.state.Folder)
 	})

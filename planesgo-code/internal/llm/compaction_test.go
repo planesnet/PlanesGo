@@ -47,12 +47,13 @@ func TestClaudeCompactEnv(t *testing.T) {
 			t.Errorf("umbral %d: Claude compactaría a %d (%v)", want, got, env)
 		}
 	}
-	// Las variables van al proceso de Claude (las de la petición se añaden después del entorno del usuario).
-	if env := a.EntornoPara(Peticion{}); len(env) != 2 {
+	// Las variables van al proceso de Claude (las de la petición se añaden después del entorno del usuario); con
+	// ellas, el TTL de la caché (cachettl.go).
+	if env := a.EntornoPara(Peticion{}); len(env) != 3 {
 		t.Errorf("entorno: %v", env)
 	}
-	// Sin gestión del contexto: la compactación de Claude Code, sin tocar.
-	if env := a.EntornoPara(Peticion{CompactAt: CompactAgentOwn}); len(env) != 0 {
+	// Sin gestión del contexto: la compactación de Claude Code, sin tocar (el TTL sí).
+	if env := a.EntornoPara(Peticion{CompactAt: CompactAgentOwn}); len(env) != 1 || env[0] != "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" {
 		t.Errorf("sin gestión: %v", env)
 	}
 }

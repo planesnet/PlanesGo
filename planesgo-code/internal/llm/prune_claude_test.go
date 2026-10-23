@@ -254,35 +254,38 @@ func TestClaudePlanApply(t *testing.T) {
 	}
 }
 
+// claudeCache1h: la caché a 1 h (con la que se midió la receta).
+var claudeCache1h = claudeCacheCost{TTL: time.Hour, Write: 2.0}
+
 // La fórmula de la caché con los números de la receta (Y = 100k, X₁ = 30k).
 func TestClaudeCacheWorth(t *testing.T) {
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	s := &claudeSession{Pos: map[string]int{"a": 20000}, Cache: 95000, LastCall: now.Add(-10 * time.Minute)}
 	d := pruneDiff{Saved: 30000, Update: map[string]string{"a": ""}}
-	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now); ok {
+	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now, claudeCache1h); ok {
 		t.Errorf("P = 20k con caché caliente: no compensa (%s)", why)
 	}
 	s.Pos["a"] = 60000
-	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now); !ok {
+	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now, claudeCache1h); !ok {
 		t.Errorf("P = 60k: compensa en unas 2 llamadas (%s)", why)
 	}
 	// Con lo fijo del agente conocido (15k), se reescribe todo lo de después del sistema: ya no compensa.
-	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 15000, now); ok {
+	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 15000, now, claudeCache1h); ok {
 		t.Errorf("P = 60k pero sistema 15k: se reescribe desde 15k, no compensa (%s)", why)
 	}
 	// Lo del último turno (después de C): gratis.
 	s.Pos["a"], s.Cache = 96000, 95000
-	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now); !ok || !strings.Contains(why, "primera") {
+	if ok, why := claudeCacheWorth(s, d, map[string]int{"a": 30000}, 0, now, claudeCache1h); !ok || !strings.Contains(why, "primera") {
 		t.Errorf("después de C: %v %s", ok, why)
 	}
 	// Caliente y poco: no. Fría: sí, aunque sea poco.
 	s.Pos["a"] = 20000
 	small := pruneDiff{Saved: 5000, Update: map[string]string{"a": ""}}
-	if ok, _ := claudeCacheWorth(s, small, map[string]int{"a": 5000}, 0, now); ok {
+	if ok, _ := claudeCacheWorth(s, small, map[string]int{"a": 5000}, 0, now, claudeCache1h); ok {
 		t.Error("caliente y 5k: no")
 	}
 	s.LastCall = now.Add(-2 * time.Hour)
-	if ok, _ := claudeCacheWorth(s, small, map[string]int{"a": 5000}, 0, now); !ok {
+	if ok, _ := claudeCacheWorth(s, small, map[string]int{"a": 5000}, 0, now, claudeCache1h); !ok {
 		t.Error("fría: sí")
 	}
 }
