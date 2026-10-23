@@ -59,54 +59,58 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
       {open && (
         <div className="cleaner-pop" role="dialog" aria-label="Hilo de limpieza">
           <div className="cleaner-title">Hilo de limpieza <span className={'cleaner-state' + (working ? ' on' : '')}>{line}</span></div>
+          <p className="cleaner-what suave pequeno">El contexto crece con cada paso del agente; el hilo retira lo que ya no hace falta y lo hace caer. Sin gastar tokens.</p>
+          <div className="cleaner-now">
+            <b>{last ? fmt(last.tokens) : '—'}</b>
+            <span className="suave"> {last ? `de contexto · ${String(last.pct).replace('.', ',')} % de ${fmt(window)}` : 'sin datos aún'}</span>
+          </div>
+          {series.length > 1 && (
+            <figure className="cleaner-spark">
+              <svg width={W} height={H + 4} viewBox={`0 -2 ${W} ${H + 4}`} role="img" aria-label="Evolución del contexto: sube en cada turno y cae en cada limpieza">
+                <path d={CL.sparkPath(series, W, H)} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                {series.map((p, i) => p.drop && (
+                  <circle key={i} cx={pts[i].x} cy={pts[i].y} r="3" className={p.relay ? 'mark-relay' : 'mark-prune'}>
+                    <title>{CL.pruneLabel(series, i)}</title>
+                  </circle>
+                ))}
+              </svg>
+              <figcaption className="suave pequeno">Cada caída <span className="mark-prune-txt">●</span> es una limpieza{series.some(p => p.relay) && <> (<span className="mark-relay-txt">●</span> relevo)</>}
+                {series.map((_, i) => CL.pruneLabel(series, i)).filter(Boolean).slice(-1).map((t, i) => <span key={i}> · la última, {t}</span>)}</figcaption>
+            </figure>
+          )}
           <dl className="cleaner-dl">
-            <dt>Agente</dt><dd>{CL.HOW[agent] || 'sin gestión del contexto'}</dd>
-            <dt>Motor</dt><dd className={rules ? 'aviso-txt' : ''}>{CL.engineLine(st)}</dd>
-            <dt>Contexto</dt><dd>{last ? <>{String(last.pct).replace('.', ',')} % · {fmt(last.tokens)} de {fmt(window)}</> : 'sin datos aún'}</dd>
-            <dt>Piezas</dt><dd>{counts.in} en contexto · {counts.out} fuera</dd>
-            {pending > 0 && last && <><dt>Próximo barrido</dt><dd>−{fmt(pending)} fuera de vigencia → {String(CL.pct(after, window)).replace('.', ',')} %{agent === 'antigravity' ? ' (con el relevo)' : ''}</dd></>}
-            <dt>Retirados</dt><dd>{fmt(st?.retirados_sesion || 0)} en la sesión{st?.ultimos_retirados ? ` · ${fmt(st.ultimos_retirados)} en el último barrido` : ''}</dd>
-            <dt>Último barrido</dt><dd>{CL.ago(st?.ultimo_barrido)}</dd>
+            <dt>Retirado</dt><dd>{fmt(st?.retirados_sesion || 0)} en esta sesión{st?.ultimo_barrido ? ` · última limpieza ${CL.ago(st.ultimo_barrido)}` : ''}</dd>
+            <dt>Ahora</dt><dd>{pending > 0 && last ? <>{fmt(pending)} ya no hacen falta → quedaría en {fmt(after)}</> : 'nada que retirar'}</dd>
           </dl>
           {onSweep && (
             <div className="cleaner-sweep">
               <button type="button" className="boton-secundario" onClick={onSweep} disabled={working || (agent === 'antigravity' && relayForced)}
-                title={warn ? 'Barrer ahora: ' + warn : 'Retira ya lo que está fuera de vigencia (3 o más), sin esperar al próximo turno'}>
+                title={warn ? 'Barrer ahora: ' + warn : 'Retira ya lo que no hace falta, sin esperar al próximo turno'}>
                 {sweeping ? 'Barriendo…' : 'Barrer ahora'}
               </button>
               {warn && <span className="aviso-txt pequeno">{warn}</span>}
-              {(sweepResult || hint) && <span className="suave pequeno">{sweepResult || hint}</span>}
+              {sweepResult && <span className="suave pequeno">{sweepResult}</span>}
             </div>
           )}
-          {cal && (
-            <dl className="cleaner-dl cleaner-cal" aria-label="Calibración de la vigencia del proyecto">
-              <dt>Pesos</dt><dd title="antigüedad en intercambios · en pasos · tiempo · relación (pivote)">{cal.generales ? 'generales' : 'del proyecto'}: {CL.paramsLine(cal)}</dd>
-              <dt>Calibrado</dt><dd>{cal.generales ? 'aún no (poco historial)' : `${CL.ago(cal.fecha)} · ${cal.piezas || 0} piezas de ${cal.sesiones || 0} ${cal.sesiones === 1 ? 'sesión' : 'sesiones'}`}</dd>
-              {!cal.generales && <><dt>Relecturas</dt><dd>{CL.overLine(cal)}</dd>
-                <dt>Ahorro</dt><dd>{CL.savedLine(cal)}</dd></>}
+          <details className="cleaner-more">
+            <summary className="suave pequeno">Detalles</summary>
+            <dl className="cleaner-dl">
+              <dt>Cómo</dt><dd>{CL.HOW[agent] || 'sin gestión del contexto'}{hint && !sweepResult ? ` · ${hint}` : ''}</dd>
+              <dt>Motor</dt><dd className={rules ? 'aviso-txt' : ''}>{CL.engineLine(st)}</dd>
+              <dt>Piezas</dt><dd>{counts.in} en contexto · {counts.out} ya retiradas</dd>
+              {cal && <>
+                <dt>Ajuste</dt><dd title="antigüedad en intercambios · en pasos · tiempo · relación (pivote)">{cal.generales ? 'general (aún poco historial del proyecto)' : `del proyecto, ${CL.ago(cal.fecha)}`}: {CL.paramsLine(cal)}</dd>
+                {!cal.generales && <><dt>Relecturas</dt><dd>{CL.overLine(cal)}</dd><dt>Ahorro</dt><dd>{CL.savedLine(cal)}</dd></>}
+              </>}
             </dl>
-          )}
-          {series.length > 1 && (
-            <figure className="cleaner-spark">
-              <svg width={W} height={H + 4} viewBox={`0 -2 ${W} ${H + 4}`} role="img" aria-label="Evolución del contexto por turno">
-                <path d={CL.sparkPath(series, W, H)} fill="none" stroke="currentColor" strokeWidth="1.4" />
-                {series.map((p, i) => (p.pruned || p.relay) && (
-                  <circle key={i} cx={pts[i].x} cy={pts[i].y} r="3" className={p.pruned ? 'mark-prune' : 'mark-relay'}>
-                    <title>{p.pruned ? CL.pruneLabel(series, i) : 'relevo: conversación nueva del agente'}</title>
-                  </circle>
-                ))}
-              </svg>
-              <figcaption className="suave pequeno">% de contexto por turno · <span className="mark-prune-txt">●</span> poda{series.some(p => p.relay) && <> · <span className="mark-relay-txt">●</span> relevo</>}
-                {series.map((_, i) => CL.pruneLabel(series, i)).filter(Boolean).slice(-2).map((t, i) => <span key={i}> · {t}</span>)}</figcaption>
-            </figure>
-          )}
-          <div className="cleaner-legend suave pequeno" aria-label="Leyenda de la vigencia">
-            <span>Vigencia:</span>
-            <span className="vig-chip" style={{ opacity: 1 }}>0 vital</span>
-            <span className="vig-chip" style={{ opacity: 0.8 }}>1</span>
-            <span className="vig-chip" style={{ opacity: 0.6 }}>2</span>
-            <span className="vig-chip" style={{ opacity: 0.4 }}>3+ fuera</span>
-          </div>
+            <div className="cleaner-legend suave pequeno" aria-label="Leyenda de la vigencia">
+              <span>Vigencia en el chat:</span>
+              <span className="vig-chip" style={{ opacity: 1 }}>0 vital</span>
+              <span className="vig-chip" style={{ opacity: 0.8 }}>1</span>
+              <span className="vig-chip" style={{ opacity: 0.6 }}>2</span>
+              <span className="vig-chip" style={{ opacity: 0.4 }}>3+ se retira</span>
+            </div>
+          </details>
         </div>
       )}
     </span>

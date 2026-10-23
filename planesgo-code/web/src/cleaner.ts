@@ -26,53 +26,67 @@ export function contextWindow(agent: string, model?: string): number {
 
 export const pct = (tokens: number, window: number) => (window > 0 ? Math.round((tokens / window) * 1000) / 10 : 0);
 
-// ContextPoint: el contexto de un turno (la última llamada) y, si al empezarlo se podó, cuánto.
+// ContextPoint: un punto de la evolución del contexto. Cada turno sube hasta su contexto final; una limpieza (la
+// poda al empezar el turno, un «Barrer ahora» o un relevo) es una caída vertical («drop») desde el punto anterior:
+// así la gráfica sale en dientes de sierra.
 export interface ContextPoint {
   tokens: number;
   pct: number;
-  pruned?: number;       // tokens retirados al empezar el turno
-  relay?: boolean;       // el turno fue un relevo (conversación nueva del agente)
+  drop?: boolean;        // caída por una limpieza (mismo instante que el punto anterior)
+  pruned?: number;       // tokens retirados en esa caída
+  relay?: boolean;       // la caída es un relevo (conversación nueva del agente)
 }
 
-// contextSeries: la evolución del contexto, turno a turno (los últimos «max»).
-export function contextSeries(ms: Mensaje[], window: number, max = 40): ContextPoint[] {
+// contextSeries: la evolución del contexto (los últimos «max» puntos): el final de cada turno y, delante, la caída
+// de la limpieza que hubo al empezarlo.
+export function contextSeries(ms: Mensaje[], window: number, max = 60): ContextPoint[] {
   const out: ContextPoint[] = [];
-  let relay = false;
+  let relay: number | null = null;
+  const last = () => out[out.length - 1];
+  const fall = (tokens: number, extra: Partial<ContextPoint>) => {
+    const t = Math.max(Math.round(tokens), 0);
+    out.push({ tokens: t, pct: pct(t, window), drop: true, ...extra });
+  };
   for (const m of ms) {
-    if (m.rol === 'user') { if (m.relevo) relay = true; continue; }
-    // Un barrido pedido a mano entre turnos (sweepNote): el contexto que queda tras él.
+    if (m.rol === 'user') { if (m.relevo) relay = m.relevo.a || 0; continue; }
+    // Un barrido pedido a mano entre turnos (sweepNote): cae desde el último punto.
     if (m.nota && m.pruned?.tokens && !m.uso?.contexto) {
-      const prev = out[out.length - 1];
-      if (prev) { const t = Math.max(prev.tokens - m.pruned.tokens, 0); out.push({ tokens: t, pct: pct(t, window), pruned: m.pruned.tokens }); }
+      if (last()) fall(last()!.tokens - m.pruned.tokens, { pruned: m.pruned.tokens });
       continue;
     }
     const t = m.uso?.contexto;
     if (!t) continue;
-    const p: ContextPoint = { tokens: t, pct: pct(t, window) };
-    if (m.pruned?.tokens) p.pruned = m.pruned.tokens;
-    if (relay) { p.relay = true; relay = false; }
-    out.push(p);
+    if (relay !== null && last()) fall(relay, { relay: true });
+    else if (m.pruned?.tokens && last()) fall(last()!.tokens - m.pruned.tokens, { pruned: m.pruned.tokens });
+    relay = null;
+    out.push({ tokens: t, pct: pct(t, window) });
   }
-  return out.slice(-max);
+  const r = out.slice(-max);
+  while (r.length && r[0].drop) r.shift(); // una caída sin su punto de antes no se puede dibujar
+  return r;
 }
 
 const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)} k` : String(n));
-const coma = (n: number) => String(n).replace('.', ',');
 
-// pruneLabel: la marca de una poda en la evolución («−18 k, 62 % → 41 %»).
+// pruneLabel: la caída de una limpieza («−18 k: 124 k → 106 k»).
 export function pruneLabel(series: ContextPoint[], i: number): string {
   const p = series[i];
-  if (!p?.pruned) return '';
-  const antes = i > 0 ? series[i - 1].pct : undefined;
-  return `−${k(p.pruned)}` + (antes !== undefined ? `, ${coma(antes)} % → ${coma(p.pct)} %` : '');
+  if (!p?.drop || i === 0) return '';
+  const antes = series[i - 1].tokens;
+  return `${p.relay ? 'relevo' : '−' + k(p.pruned || antes - p.tokens)}: ${k(antes)} → ${k(p.tokens)}`;
 }
 
-// sparkPath: la línea (SVG) de la evolución, en un recuadro w×h; y de cada punto, su x e y.
+// sparkPoints: x e y de cada punto en un recuadro w×h. Las caídas van en la misma x que el punto anterior (línea
+// vertical); la escala va de 0 al máximo.
 export function sparkPoints(series: ContextPoint[], w: number, h: number): { x: number; y: number }[] {
   if (!series.length) return [];
-  const top = Math.max(...series.map(p => p.pct), 1);
-  const dx = series.length > 1 ? w / (series.length - 1) : 0;
-  return series.map((p, i) => ({ x: Math.round(i * dx * 10) / 10, y: Math.round((h - (p.pct / top) * (h - 2) - 1) * 10) / 10 }));
+  const top = Math.max(...series.map(p => p.tokens), 1);
+  const cols = Math.max(series.filter(p => !p.drop).length - 1, 1);
+  let col = -1;
+  return series.map(p => {
+    if (!p.drop) col++;
+    return { x: Math.round((Math.max(col, 0) / cols) * w * 10) / 10, y: Math.round((h - (p.tokens / top) * (h - 2) - 1) * 10) / 10 };
+  });
 }
 
 export function sparkPath(series: ContextPoint[], w: number, h: number): string {

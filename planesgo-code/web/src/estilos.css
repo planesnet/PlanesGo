@@ -984,3 +984,7 @@ button.miga-item:hover { background: var(--hover); }
   .pensando::before, .pensando { animation: none; }
   .pensando:not(:has(*)) { color: var(--suave); }
 }
+.cleaner-what { margin: 0; }
+.cleaner-now b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.cleaner-more summary { cursor: pointer; }
+.cleaner-more[open] summary { margin-bottom: 6px; }

@@ -20,18 +20,22 @@ const conv: Mensaje[] = [
   { rol: 'user', texto: 'i' }, { rol: 'assistant', texto: '' },
 ];
 
-test('contextSeries: el % de cada turno, con las podas y los relevos marcados', () => {
+test('contextSeries: dientes de sierra: sube en cada turno y cae en cada limpieza', () => {
   const s = C.contextSeries(conv, 200_000);
-  assert.deepEqual(s.map(p => p.pct), [50, 62, 41, 10]);
+  assert.deepEqual(s.map(p => p.tokens), [100_000, 124_000, 82_000, 82_000, 3000, 20_000]);
+  assert.deepEqual(s.map(p => Boolean(p.drop)), [false, false, true, false, true, false]);
   assert.equal(s[2].pruned, 42_000);
-  assert.equal(s[3].relay, true);
-  assert.equal(C.pruneLabel(s, 2), '−42 k, 62 % → 41 %');
+  assert.equal(s[4].relay, true);
+  assert.equal(C.pruneLabel(s, 2), '−42 k: 124 k → 82 k');
+  assert.equal(C.pruneLabel(s, 4), 'relevo: 82 k → 3 k');
   assert.equal(C.pruneLabel(s, 1), '');
-  assert.equal(C.contextSeries(conv, 200_000, 2).length, 2);
+  assert.equal(C.contextSeries(conv, 200_000, 2).length, 1, 'los 2 últimos empiezan por una caída: se quita');
+  assert.equal(C.contextSeries(conv, 200_000, 4)[0].drop, undefined, 'no empieza por una caída');
   const pts = C.sparkPoints(s, 100, 20);
   assert.equal(pts[0].x, 0);
-  assert.equal(pts[3].x, 100);
-  assert.ok(pts[1].y < pts[0].y, 'más contexto, más arriba');
+  assert.equal(pts[2].x, pts[1].x, 'la caída es vertical');
+  assert.ok(pts[2].y > pts[1].y, 'cae');
+  assert.equal(pts[5].x, 100);
   assert.match(C.sparkPath(s, 100, 20), /^M0,[\d.]+ L/);
 });
 
@@ -106,8 +110,8 @@ test('Barrer ahora: nota en el chat, marca en la evolución, aviso de la caché 
   assert.deepEqual(n, { rol: 'assistant', texto: '', nota: true, fin: 5, pruned: { tokens: 23_000 } });
   const s = C.contextSeries([...ms, n], 200_000);
   assert.equal(s.length, 2);
-  assert.deepEqual(s[1], { tokens: 77_000, pct: 38.5, pruned: 23_000 });
-  assert.equal(C.pruneLabel(s, 1), '−23 k, 50 % → 38,5 %');
+  assert.deepEqual(s[1], { tokens: 77_000, pct: 38.5, drop: true, pruned: 23_000 });
+  assert.equal(C.pruneLabel(s, 1), '−23 k: 100 k → 77 k');
   const r = { retirados: 0, intercambios: [], pendiente: 30_000, cache_caliente: true, cache_resto: 40_000 };
   assert.equal(C.cacheWarning('claude-code', r), 'invalida la caché desde ahí: ~40 k tokens a precio de escritura');
   assert.equal(C.cacheWarning('opencode', r), 'invalida la caché desde ahí: ~40 k tokens a precio de entrada');
