@@ -1,0 +1,38 @@
+# Control de calidad del servidor de PlanesGo (planesgo-server): gofmt, go vet y pruebas con -race, en las ramas de
+# desarrollo y en las pull requests (antes de fusionar). En master no se ejecuta (master despliega); se puede
+# lanzar a mano (workflow_dispatch).
+name: verifica-servidor
+
+on:
+  push:
+    branches-ignore: [master]
+    paths: ["planesgo-server/**", ".github/workflows/verifica-servidor.yml"]
+  pull_request:
+    paths: ["planesgo-server/**", ".github/workflows/verifica-servidor.yml"]
+  workflow_dispatch:
+
+jobs:
+  verifica:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: planesgo-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: planesgo-server/go.mod
+          cache-dependency-path: planesgo-server/go.sum
+
+      - name: gofmt
+        run: |
+          f=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$f" ]; then echo "Ficheros sin gofmt (arréglalo con gofmt -w):"; echo "$f"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test -race
+        run: go test -race -count=1 ./...

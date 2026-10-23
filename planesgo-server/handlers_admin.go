@@ -227,4 +227,3 @@ func (state *AppState) handleAPIAdminGCPInvoiceDetail(w http.ResponseWriter, r *
 
 	json.NewEncoder(w).Encode(detail)
 }
-

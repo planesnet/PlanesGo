@@ -608,4 +608,3 @@ func TestBuildDetailQuerySQL(t *testing.T) {
 		t.Errorf("SQL debe agrupar únicamente por service_description, project_id, project_name, currency, obtenido:\n%s", sql)
 	}
 }
-
