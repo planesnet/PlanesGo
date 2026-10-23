@@ -169,6 +169,15 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			emite(Evento{Texto: "_(pgocode ha sugerido usar subagentes: " + adv.Why + ".)_\n\n", Subagentes: adv.Why})
 		}
 	}
+	// El mensaje habla de la orden «pgo»: una línea con su uso (el agente no la conoce).
+	if !p.Aparte && len(p.Mensajes) > 0 && hasPgo(p.Entorno) {
+		if h := pgoHintFor(p.Mensajes[len(p.Mensajes)-1].Texto); h != "" {
+			ms := append([]Mensaje(nil), p.Mensajes...)
+			ms[len(ms)-1].Texto += "\n\n" + h
+			p.Mensajes = ms
+			depuracion.Log(a.Clave, "se añade el uso de pgo al mensaje")
+		}
+	}
 	// Antigravity da el consumo acumulado de la conversación (tokens y segundos): se emite solo lo de este turno.
 	if a.Clave == "antigravity" {
 		conv := p.SesionAgente

@@ -87,14 +87,17 @@ func pgo(args []string) int {
 			if err != nil {
 				break
 			}
-			var l []struct{ Nombre, Estado, URL string }
+			var l []struct {
+				Nombre, Estado, URL string
+				Codigo              int
+			}
 			json.Unmarshal(raw, &l)
 			for _, x := range l {
 				if x.Nombre == args[1] && (x.URL != "" || x.Estado != "curso") {
 					if x.URL != "" {
 						fmt.Printf("Escucha en %s (abierto en el navegador de pgocode).\n", x.URL)
 					} else {
-						fmt.Printf("Ha terminado (%s). Mira su salida con: pgo salida %s\n", x.Estado, x.Nombre)
+						fmt.Println(finishedLine(x.Nombre, x.Estado, x.Codigo))
 					}
 					return 0
 				}
@@ -150,6 +153,23 @@ func pgo(args []string) int {
 		return 2
 	}
 	return 0
+}
+
+// finishedLine: lo que dice «pgo ejecutar» de un programa que ya ha acabado: cómo (con su código de salida) y
+// cómo ver su salida.
+func finishedLine(nombre, estado string, codigo int) string {
+	var t string
+	switch {
+	case estado == "parado":
+		t = "Se ha parado"
+	case codigo < 0:
+		t = "Ha fallado (sin código de salida: no arrancó o lo ha matado una señal)"
+	case codigo != 0 || estado == "error":
+		t = fmt.Sprintf("Ha fallado (código de salida %d)", codigo)
+	default:
+		t = "Ha terminado (código de salida 0)"
+	}
+	return t + ". Mira su salida con: pgo salida " + nombre
 }
 
 // aleatorio: un secreto de 32 bytes en hexadecimal.
