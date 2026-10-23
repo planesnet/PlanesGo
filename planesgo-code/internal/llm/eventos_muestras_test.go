@@ -398,3 +398,23 @@ func TestAntigravityDenegada(t *testing.T) {
 		t.Errorf("aviso de más: %q", texto)
 	}
 }
+
+// Los bloques de texto de un turno (p. ej. antes y después de los subagentes en segundo plano) van separados por una
+// línea en blanco: sin ella se pegan («…cuando lleguen.El informe…») y «## Informe» no es un encabezado.
+func TestBloquesDeTextoSeparados(t *testing.T) {
+	l := `{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"Lanzo los subagentes; sigo cuando lleguen."}]}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a"}]}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"## Informe\nTodo bien."}]}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"\n` + "`devolucion`" + ` ya existía."}]}}
+`
+	texto := ""
+	leeClaudeCode(strings.NewReader(l), func(e Evento) { texto += e.Texto })
+	if want := "Lanzo los subagentes; sigo cuando lleguen.\n\n## Informe\nTodo bien.\n\n`devolucion` ya existía."; texto != want {
+		t.Errorf("claude: %q", texto)
+	}
+	var b textBlocks
+	if r := b.next("a") + b.next("  ") + b.note("\n\n_(aviso)_\n\n") + b.next("b") + b.next("c"); r != "a\n\n_(aviso)_\n\nb\n\nc" {
+		t.Errorf("bloques: %q", r)
+	}
+}

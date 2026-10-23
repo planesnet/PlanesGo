@@ -201,8 +201,38 @@ func leeClaudeCode(r io.Reader, emite func(Evento)) error { return readClaudeCod
 // de este proceso, también lo que no se ve en la salida (las llamadas de la compactación del historial).
 func leeClaudeCodeNew(r io.Reader, emite func(Evento)) error { return readClaudeCode(r, emite, true) }
 
+// textBlocks une los bloques de texto de un turno que llegan enteros (Claude Code, OpenCode): entre uno y el
+// siguiente, una línea en blanco. Sin ella se pegan («…cuando lleguen.El informe…») y un «## Informe» al principio
+// de un bloque no sería un encabezado.
+type textBlocks struct{ ultimo string }
+
+// next: el bloque, con la separación si hace falta ("" si está vacío).
+func (b *textBlocks) next(t string) string {
+	if strings.TrimSpace(t) == "" {
+		return ""
+	}
+	switch {
+	case b.ultimo == "":
+	case strings.HasSuffix(b.ultimo, "\n\n"):
+		t = strings.TrimLeft(t, "\n")
+	default:
+		t = "\n\n" + strings.TrimLeft(t, "\n")
+	}
+	b.ultimo = t
+	return t
+}
+
+// note: un texto que se emite sin pasar por next (los avisos de pgocode): cuenta para la separación del siguiente.
+func (b *textBlocks) note(t string) string {
+	if t != "" {
+		b.ultimo = t
+	}
+	return t
+}
+
 // readClaudeCode: newSession, si la sesión empieza en este proceso.
 func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
+	var bloques textBlocks // cada bloque de texto llega entero: separados por una línea en blanco
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 32<<20)
 	nombres := map[string]string{}
@@ -323,7 +353,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 		}
 		if ev.Type == "system" && ev.Subtype == "compact_boundary" {
 			depuracion.Log("claude-code", "compacta su historial: %d → %d tokens", ev.Compactado.Pre, ev.Compactado.Post)
-			emite(Evento{Texto: compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post)})
+			emite(Evento{Texto: bloques.note(compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post))})
 			continue
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
@@ -384,7 +414,9 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 			for _, c := range ev.Message.Content {
 				switch c.Type {
 				case "text":
-					emite(Evento{Texto: c.Text})
+					if t := bloques.next(c.Text); t != "" {
+						emite(Evento{Texto: t})
+					}
 				case "thinking":
 					if c.Thinking != "" {
 						emite(Evento{Pensamiento: c.Thinking})
@@ -496,6 +528,8 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 	parametros := map[int]json.RawMessage{} // los de cada paso (solo llegan al empezar)
 	sinSalida := map[string]string{}        // herramientas acabadas «bien» pero sin salida (id → nombre): quizá denegadas
 	texto := false                          // el agente ha respondido algo
+	var bloques textBlocks                  // cada respuesta (paso), separada de la anterior por una línea en blanco
+	pasoTexto := -1                         // el paso del último trozo de texto
 	for sc.Scan() {
 		var ev struct {
 			Event          string `json:"event"`
@@ -557,11 +591,19 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			// «checkpoint»: Antigravity ha resumido la conversación (/compact o su compactación automática).
 			case p.Tipo == "checkpoint" && p.Estado == "DONE":
 				depuracion.Log("antigravity", "compacta su historial (paso %d)", p.Indice)
-				emite(Evento{Texto: compactionNotice("Antigravity", 0, 0)})
+				emite(Evento{Texto: bloques.note(compactionNotice("Antigravity", 0, 0))})
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
-					texto = true
-					emite(Evento{Texto: t})
+					// Llega a trozos: el primero de cada respuesta (otro paso) va separado de la anterior.
+					if p.Indice != pasoTexto {
+						t = bloques.next(t)
+					} else {
+						bloques.note(t)
+					}
+					if t != "" {
+						texto, pasoTexto = true, p.Indice
+						emite(Evento{Texto: t})
+					}
 				}
 			// Un subagente puede empezar como «tool» y acabar como «subagent» (o al revés): el mismo paso.
 			case (p.Tipo == "tool" || p.Tipo == "subagent") && p.Has != "":
@@ -686,8 +728,14 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	// (compaction_continue). El texto y el consumo de cada paso se retienen hasta el paso siguiente (o el final)
 	// para no mostrar el resumen como respuesta; en su lugar, un aviso con el contexto antes y después.
 	var retenidos []Evento
+	var bloques textBlocks // cada «text» es un bloque entero: separados por una línea en blanco
 	suelta := func() {
 		for _, e := range retenidos {
+			if e.Texto != "" {
+				if e.Texto = bloques.next(e.Texto); e.Texto == "" {
+					continue
+				}
+			}
 			emite(e)
 		}
 		retenidos = nil
@@ -697,7 +745,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	avisa := func(post int) {
 		if compactadoDe > 0 {
 			depuracion.Log("opencode", "compacta su historial: %d → %d tokens", compactadoDe, post)
-			emite(Evento{Texto: compactionNotice("OpenCode", compactadoDe, post)})
+			emite(Evento{Texto: bloques.note(compactionNotice("OpenCode", compactadoDe, post))})
 			compactadoDe = 0
 		}
 	}
