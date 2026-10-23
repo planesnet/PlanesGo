@@ -83,6 +83,12 @@ func configOpenCode(modelo string, limite int) map[string]any {
 		"agent":      map[string]any{"build": map[string]any{"steps": PasosOpenCode}},
 		"provider":   map[string]any{},
 	}
+	// Salidas enormes a fichero al llegar (prune_offload.go): lo que pasa del límite lo guarda OpenCode en su carpeta
+	// tool-output y el modelo recibe la cola de las órdenes (el principio de lo demás) con la ruta. Las lecturas
+	// tienen su propio límite (50 KB); las ya recibidas, las recorta el barrido.
+	if offloadOnWrite {
+		cfg["tool_output"] = map[string]int{"max_lines": offloadWriteLines, "max_bytes": offloadWriteBytes}
+	}
 	// Cualquier proveedor del catálogo de OpenCode (models.dev): el límite se mezcla con el suyo. El de DeepSeek en
 	// Vertex AI lo pone pgocode entero (proveedorDeepSeek). La salida no cambia: OpenCode pide como mucho 32k.
 	if prov, id, ok := strings.Cut(modelo, "/"); ok && prov != proveedorDeepSeekVertex && limite > 0 {

@@ -731,6 +731,9 @@ func Agentes() []Proveedor {
 				if p.Idioma != "" {
 					a = append(a, "--append-system-prompt", InstruccionIdioma(p.Idioma))
 				}
+				if s := claudeOffloadSettings(); s != "" {
+					a = append(a, "--settings", s)
+				}
 				if p.SesionAgente != "" {
 					a = append(a, "--resume", p.SesionAgente)
 					// Continuar desde un mensaje anterior: una copia de la sesión hasta ese mensaje (la original no se

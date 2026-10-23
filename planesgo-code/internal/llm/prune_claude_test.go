@@ -186,7 +186,7 @@ func TestClaudePlanApply(t *testing.T) {
 	for id := range d.Update {
 		clear = append(clear, id)
 	}
-	out, orig, err := applyClaude(s, clear, nil)
+	out, orig, err := applyClaude(s, clear, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestClaudePlanApply(t *testing.T) {
 	if len(d2.Restore) != len(clear) || d2.Saved >= 0 {
 		t.Fatalf("reponer: %+v", d2.Restore)
 	}
-	back, _, err := applyClaude(s2, nil, d2.Restore)
+	back, _, err := applyClaude(s2, nil, d2.Restore, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
