@@ -523,12 +523,15 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 		args = append(args, "--", msg)
 	case "antigravity":
 		prog = "agy"
-		// «auto»: --mode auto (accept-edits deniega sin consola las órdenes que no son triviales: agy 1.4.6).
-		modo := "plan"
+		// «auto»: --dangerously-skip-permissions (--mode auto no está en todas las cuentas y cae a request-review,
+		// que sin consola deniega las escrituras y las órdenes; accept-edits deniega las órdenes: agy 1.4.6).
+		args = []string{"--output-format", "stream-json"}
 		if permisos == "auto" {
-			modo = "auto"
+			args = append(args, "--dangerously-skip-permissions")
+		} else {
+			args = append(args, "--mode", "plan")
 		}
-		args = []string{"--output-format", "stream-json", "--mode", modo, "--model", conf.Modelo}
+		args = append(args, "--model", conf.Modelo)
 		if conf.Esfuerzo != "" {
 			args = append(args, "--effort", conf.Esfuerzo)
 		}

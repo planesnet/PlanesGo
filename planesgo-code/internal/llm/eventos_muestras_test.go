@@ -389,6 +389,16 @@ func TestAntigravityDenegada(t *testing.T) {
 	if !strings.Contains(texto, "sin responder") || !strings.Contains(texto, "RunCommand") {
 		t.Errorf("aviso: %q", texto)
 	}
+	// Formato de denied_actions en agy 1.4.6: {"scope":"command","tool_name":"RunCommand"} y {"scope":"file-write","tool_name":"WriteFile"}.
+	sinSalida := map[string]string{"paso-1": "write_file", "paso-2": "run_command"}
+	den := []deniedAction{{Scope: "file-write", Tool: "WriteFile"}, {Scope: "command", Tool: "RunCommand"}}
+	if hs := deniedTools(sinSalida, den); len(hs) != 2 || hs[0].Nombre != "write_file" || !strings.Contains(hs[0].Salida, "WriteFile") ||
+		hs[1].Nombre != "run_command" || !strings.Contains(hs[1].Salida, "no permite órdenes") {
+		t.Errorf("deniedTools scope/tool_name: %+v", hs)
+	}
+	if av := emptyAntigravityNotice([]deniedAction{{Scope: "file-write", Tool: "WriteFile"}}); !strings.Contains(av, "WriteFile") {
+		t.Errorf("aviso file-write: %q", av)
+	}
 	// Con respuesta, sin aviso.
 	texto = ""
 	for _, e := range lee(t, "agy-1.jsonl", func(r *os.File, e func(Evento)) error { return leeAntigravity(r, e) }) {

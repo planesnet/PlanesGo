@@ -690,27 +690,50 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 }
 
 // deniedAction: una acción que agy no ha podido hacer por el modo de la sesión (denied_actions de su resultado).
+// agy 1.4.6 envía {"scope":"command","tool_name":"RunCommand"} (o "file-write" / "WriteFile").
 type deniedAction struct {
 	Accion string `json:"action"`
+	Scope  string `json:"scope"`
 	Nombre string `json:"display_name"`
+	Tool   string `json:"tool_name"`
+}
+
+func (d deniedAction) kind() string  { return strings.ToLower(cmp.Or(d.Accion, d.Scope)) }
+func (d deniedAction) label() string { return cmp.Or(d.Nombre, d.Tool, d.Accion, d.Scope) }
+
+// deniedMatch: si una herramienta acabada sin salida corresponde a una acción denegada por agy.
+func deniedMatch(tool string, d deniedAction) bool {
+	tn := strings.ReplaceAll(strings.ToLower(tool), "_", "")
+	if dn := strings.ReplaceAll(strings.ToLower(cmp.Or(d.Tool, d.Nombre)), "_", ""); dn != "" && tn == dn {
+		return true
+	}
+	k := d.kind()
+	if k == "" {
+		return false
+	}
+	tl := strings.ToLower(tool)
+	if strings.Contains(tl, k) {
+		return true
+	}
+	return k == "file-write" && (strings.Contains(tl, "write") || strings.Contains(tl, "replace") || strings.Contains(tl, "edit"))
 }
 
 // deniedTools: las herramientas que el modo de la sesión no dejó usar a Antigravity, en error. agy las da por
-// acabadas sin salida y solo dice al final qué acciones denegó («command» para las órdenes).
+// acabadas sin salida y solo dice al final qué acciones denegó («command» para las órdenes, «file-write» para editar).
 func deniedTools(sinSalida map[string]string, denegadas []deniedAction) []*Herramienta {
 	var l []*Herramienta
 	ids := slices.Sorted(maps.Keys(sinSalida))
 	for _, d := range denegadas {
-		accion := strings.ToLower(d.Accion)
+		accion := d.kind()
 		for _, id := range ids {
 			n, ok := sinSalida[id]
-			if !ok || accion == "" || !strings.Contains(strings.ToLower(n), accion) {
+			if !ok || !deniedMatch(n, d) {
 				continue
 			}
 			delete(sinSalida, id)
 			motivo := "denegada: el modo de la sesión no permite órdenes (pon la sesión en «Auto»)"
 			if accion != "command" {
-				motivo = "denegada por el modo de la sesión (" + cmp.Or(d.Nombre, d.Accion) + ")"
+				motivo = "denegada por el modo de la sesión (" + d.label() + ")"
 			}
 			l = append(l, &Herramienta{ID: id, Nombre: n, Salida: motivo, Estado: "error"})
 		}
@@ -723,8 +746,10 @@ func emptyAntigravityNotice(denegadas []deniedAction) string {
 	var n []string
 	orden := false
 	for _, d := range denegadas {
-		n = append(n, cmp.Or(d.Nombre, d.Accion))
-		orden = orden || d.Accion == "command"
+		if s := d.label(); s != "" {
+			n = append(n, s)
+		}
+		orden = orden || d.kind() == "command"
 	}
 	switch {
 	case orden:

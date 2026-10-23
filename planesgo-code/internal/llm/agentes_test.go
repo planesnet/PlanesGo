@@ -133,25 +133,18 @@ func TestHerramientasClaudeCode(t *testing.T) {
 	}
 }
 
-// Antigravity: «auto» va como --mode auto (accept-edits deniega las órdenes sin consola), salvo que agy no lo
-// admita; «editar», accept-edits.
+// Antigravity: «auto» va con --dangerously-skip-permissions (--mode auto no está en todas las cuentas y cae al modo por
+// defecto, que sin consola deniega tanto las escrituras como las órdenes); «editar», accept-edits; por defecto, plan.
 func TestModoAutoAntigravity(t *testing.T) {
 	a := Agentes()[1].(*Agente)
-	if j := strings.Join(a.Args("hola", Peticion{Permisos: "auto"}), " "); !strings.Contains(j, "--mode "+antigravityAutoMode()) {
+	if j := strings.Join(a.Args("hola", Peticion{Permisos: "auto"}), " "); !strings.Contains(j, "--dangerously-skip-permissions") || strings.Contains(j, "--mode ") {
 		t.Errorf("auto: %s", j)
 	}
-	if j := strings.Join(a.Args("hola", Peticion{Permisos: "editar"}), " "); !strings.Contains(j, "--mode accept-edits") {
+	if j := strings.Join(a.Args("hola", Peticion{Permisos: "editar"}), " "); !strings.Contains(j, "--mode accept-edits") || strings.Contains(j, "--dangerously-skip-permissions") {
 		t.Errorf("editar: %s", j)
 	}
-	ayuda := "  --model    Model\n  --mode                          Set the agent execution mode for this session (accept-edits, auto, plan)\n"
-	if m := autoModeFromHelp(ayuda); m != "auto" {
-		t.Errorf("con auto: %s", m)
-	}
-	if m := autoModeFromHelp(strings.Replace(ayuda, "auto, ", "", 1)); m != "accept-edits" {
-		t.Errorf("sin auto: %s", m)
-	}
-	if m := autoModeFromHelp(""); m != "auto" {
-		t.Errorf("sin ayuda: %s", m)
+	if j := strings.Join(a.Args("hola", Peticion{}), " "); !strings.Contains(j, "--mode plan") || strings.Contains(j, "--dangerously-skip-permissions") {
+		t.Errorf("lectura: %s", j)
 	}
 }
 

@@ -116,32 +116,3 @@ export function EditorPlan({ proyecto, directorio, ruta, ocupado, alCerrar, alCa
     </Modal>
   );
 }
-
-// Lista de planes guardados del proyecto.
-export function ListaPlanes({ proyecto, directorio, alAbrir, alCerrar }: {
-  proyecto: number; directorio?: string; alAbrir: (ruta: string) => void; alCerrar: () => void;
-}) {
-  const [l, setL] = useState<Plan[] | null>(null);
-  const [error, setError] = useState('');
-  useEffect(() => { listaPlanes(proyecto, directorio).then(setL).catch(e => setError(e.message)); }, [proyecto, directorio]);
-  return (
-    <Modal title="Planes del proyecto" className="lista-planes" onClose={alCerrar}>
-      {error && <p className="error">{error}</p>}
-      {!l && !error && <p className="suave">Cargando…</p>}
-      {l && l.length === 0 && <p className="suave">Aún no hay planes. Elige el modo «Plan» en el chat y pide lo que quieras planificar.</p>}
-      {l && l.length > 0 && (
-        <ul className="planes">
-          {l.map(p => (
-            <li key={p.ruta}>
-              <button onClick={() => alAbrir(p.ruta)} title={p.ruta}>
-                <span className="recorta">{p.numero ? <b className="plan-numero">#{p.numero}</b> : null} {p.titulo}</span>
-                <Estado e={p.estado} />
-                <span className="suave pequeno">{p.modificado ? new Date(p.modificado).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Modal>
-  );
-}

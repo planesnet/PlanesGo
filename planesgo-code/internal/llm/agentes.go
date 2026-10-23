@@ -815,13 +815,14 @@ func Agentes() []Proveedor {
 				a := []string{"--output-format", "stream-json"}
 				// Solo lectura: modo plan (no cambia ficheros); «editar»: accept-edits (edita, pero sin consola deniega
 				// las órdenes que no son triviales: probado con agy 1.4.6, que devuelve la respuesta vacía y
-				// denied_actions «command»); «auto»: --mode auto, que sí las ejecuta. Si este agy no admite «auto»
-				// (su --help no lo lista), accept-edits.
+				// denied_actions «command»); «auto»: --dangerously-skip-permissions (always-proceed: edita y ejecuta
+				// órdenes; «--mode auto» no está en todas las cuentas y, aunque --help lo liste, cae a request-review,
+				// que sin consola deniega tanto las escrituras como las órdenes).
 				switch p.Permisos {
 				case "editar":
 					a = append(a, "--mode", "accept-edits")
 				case "auto":
-					a = append(a, "--mode", antigravityAutoMode())
+					a = append(a, "--dangerously-skip-permissions")
 				default:
 					a = append(a, "--mode", "plan")
 				}
@@ -878,28 +879,6 @@ func Agentes() []Proveedor {
 				return append(a, "--", msg)
 			}},
 	}
-}
-
-// antigravityAutoMode: el modo de agy para «auto»: «auto» si su --help lo lista entre los de --mode (o si no se
-// puede saber), y si no, «accept-edits». Se mira una vez por proceso.
-var antigravityAutoMode = sync.OnceValue(func() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, _ := exec.CommandContext(ctx, "agy", "--help").CombinedOutput()
-	return autoModeFromHelp(string(out))
-})
-
-// autoModeFromHelp: el modo para «auto» según la ayuda de agy (la línea de --mode lista los que admite).
-func autoModeFromHelp(help string) string {
-	for _, l := range strings.Split(help, "\n") {
-		if f := strings.Fields(l); len(f) > 0 && f[0] == "--mode" {
-			if regexp.MustCompile(`\bauto\b`).MatchString(strings.Join(f[1:], " ")) {
-				return "auto"
-			}
-			return "accept-edits"
-		}
-	}
-	return "auto"
 }
 
 // adopta: empareja cada orden en segundo plano con su grupo de procesos (los que siguen vivos con la marca del
@@ -966,6 +945,9 @@ var (
 // sesionOpenCodeEn: si la sesión de OpenCode es de la carpeta (su listado de sesiones, que es por carpeta). Si no
 // se puede comprobar, se da por buena.
 func sesionOpenCodeEn(ctx context.Context, a *Agente, p Peticion) bool {
+	if a.Programa != "" && a.Programa != "opencode" {
+		return true
+	}
 	muSesionesOC.Lock()
 	ya := sesionesOC[p.SesionAgente] == p.Carpeta
 	muSesionesOC.Unlock()

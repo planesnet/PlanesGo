@@ -22,7 +22,7 @@ import * as RP from '../reparto';
 import * as R from '../router';
 import { TarjetaPropuesta, TarjetaReparto } from './TarjetasReparto';
 import { direccionesEn } from '../lanzador';
-import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
+import { borraPlan, EditorPlan, guardaPlan, leePlan, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
@@ -132,9 +132,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // Ficheros adjuntos al mensaje que se está escribiendo (ya subidos a la carpeta de la sesión).
   const [adjuntos, setAdjuntos] = useState<(Adjunto & { subiendo?: boolean; error?: string })[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
-  // Planes (una herramienta del chat, numerados por proyecto): el abierto en el editor y la lista del proyecto.
+  // Planes (una herramienta del chat, numerados por proyecto): el abierto en el editor.
   const [planAbierto, setPlanAbierto] = useState<string | null>(null);
-  const [verPlanes, setVerPlanes] = useState(false);
   // Copiar: el mensaje entero (su texto, sin las herramientas) con su botón, o lo seleccionado con Ctrl+C / el menú,
   // siempre como texto limpio (sin el HTML de las tarjetas de herramientas).
   const [copiado, setCopiado] = useState<number | null>(null);
@@ -1434,7 +1433,6 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         {sesion && mensajes.length > 0 && !enCurso && (
           <button className="icono" onClick={() => alNuevaSesion(sesion.rama)} title="Nueva sesión" aria-label="Nueva sesión"><Icono n="nuevo" /></button>
         )}
-        {proyecto && <button className="icono" onClick={() => setVerPlanes(true)} title="Planes del proyecto" aria-label="Planes del proyecto"><Icono n="plan" /></button>}
         <button className="icono" onClick={alPanel} title={panelAbierto ? 'Ocultar artefactos' : 'Mostrar artefactos'} aria-label="Artefactos" aria-pressed={panelAbierto}><Icono n="panel" /></button>
       </header>
 
@@ -1737,8 +1735,6 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       )}
       {proyecto && planAbierto && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={planAbierto} ocupado={Boolean(enCurso)}
         alCerrar={() => setPlanAbierto(null)} alCambio={p => marcaPlan(p.ruta, p.estado, p.titulo)} alEjecutar={ejecutaPlan} />}
-      {proyecto && verPlanes && <ListaPlanes proyecto={proyecto.id} directorio={directorio}
-        alAbrir={r => { setVerPlanes(false); setPlanAbierto(r); }} alCerrar={() => setVerPlanes(false)} />}
     </main>
   );
 }

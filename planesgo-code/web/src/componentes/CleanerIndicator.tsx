@@ -46,19 +46,16 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
   const agentWorking = Boolean(last0 && last0.rol === 'assistant' && !last0.fin && !last0.error && messages.length > 1);
   const working = Boolean(busy || sweeping || (st && st.fase));
   const rules = st?.motor === 'reglas';
-  const window = CL.contextWindow(agent, model);
   const threshold = CL.compactAt(report);
   const target = report?.objetivo || 0;
   const series = CL.contextSeries(messages, threshold);
   const last = series[series.length - 1];
-  const counts = CL.pieceCounts(report);
   const pending = report?.pendiente || 0;
   const after = last ? CL.projected(last.tokens, pending) : 0;
   const top = CL.sparkTop(series, target, threshold);
   const pts = CL.sparkPoints(series, W, H, top);
   const ticks = CL.turnTicks(series, W, H);
   const line = sweeping ? 'barriendo' : working ? CL.statusLine(st, busy) : agentWorking ? 'el agente trabaja' : CL.statusLine(st, busy);
-  const hint = CL.sweepHint(agent, report, relayForced);
   // Qué parte del contexto de la última llamada cuesta: leído de caché (barato), escrito en ella o sin caché.
   const lastUse = [...messages].reverse().find(m => m.rol === 'assistant' && (m.vivo?.contexto || m.uso?.contexto));
   const ctxCost = CL.contextCost(lastUse?.vivo?.contexto ? lastUse.vivo : lastUse?.uso, agent, model);
@@ -70,8 +67,6 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
   const relays = CL.relayRemoved(messages);
   const removed = (st?.retirados_sesion || 0) + relays.tokens;
   const result = CL.sweepResultVisible(shown, users, report, pending) ? shown!.text : '';
-  const cal = report?.calibracion;
-  const progress = cal ? CL.calibProgress(cal) : '';
   const sweep = () => {
     if (advice && !confirm) { setConfirm(true); return; }
     setConfirm(false);
@@ -135,28 +130,6 @@ export default function CleanerIndicator({ agent, model, report, busy, messages,
               {result && <span className="suave pequeno">{result}</span>}
             </div>
           )}
-          <details className="cleaner-more">
-            <summary className="suave pequeno">Detalles</summary>
-            <dl className="cleaner-dl">
-              <dt>Cómo</dt><dd>{CL.HOW[agent] || 'sin gestión del contexto'}{hint && !result && !note ? ` · ${hint}` : ''}</dd>
-              <dt>Ventana</dt><dd>{fmt(window)} del modelo{last ? ` (${String(CL.pct(last.tokens, window)).replace('.', ',')} %)` : ''}; se compacta antes, a {fmt(threshold)}</dd>
-              <dt>Motor</dt><dd className={rules ? 'aviso-txt' : ''}>{CL.engineLine(st)}</dd>
-              <dt>Piezas</dt><dd>{counts.in} en contexto · {counts.out} ya retiradas</dd>
-              {cal && <>
-                <dt>Ajuste</dt><dd title="antigüedad en intercambios · en pasos · tiempo · relación (pivote)">{cal.generales ? `general${progress ? ` (${progress})` : ' (aún poco historial del proyecto)'}` : `del proyecto, ${CL.ago(cal.fecha)}`}: {CL.paramsLine(cal)}</dd>
-                {(cal.retiradas || cal.retiradas_generales) ? <><dt>Relecturas</dt><dd>{CL.overLine(cal)}</dd><dt>Ahorro</dt><dd>{CL.savedLine(cal)}</dd></> : null}
-              </>}
-            </dl>
-            <div className="cleaner-legend suave pequeno" aria-label="Leyenda de la vigencia">
-              <span>Vigencia en el chat:</span>
-              <span className="vig-chip" style={{ opacity: 1 }}>0 vital</span>
-              <span className="vig-chip" style={{ opacity: 0.87 }}>1</span>
-              <span className="vig-chip" style={{ opacity: 0.73 }}>2</span>
-              <span className="vig-chip" style={{ opacity: 0.6 }}>3+ se retirará</span>
-              <span className="vig-chip" style={{ opacity: 0.4 }}>⤓ fuera</span>
-            </div>
-            <p className="suave pequeno">{CL.HYSTERESIS}</p>
-          </details>
         </div>
       )}
     </span>
