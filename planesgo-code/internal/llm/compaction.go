@@ -71,10 +71,16 @@ func openCodeContextLimit(p Peticion) int {
 // antigravityMessage: con el contexto del turno anterior por encima del umbral, el mensaje va tras «/compact»
 // (Antigravity resume la conversación y después contesta al mensaje, en el mismo turno).
 func antigravityMessage(msg string, p Peticion) string {
-	if agentOwnCompaction(p) || p.SesionAgente == "" || p.Aparte || p.LastContext < compactThreshold(p) || strings.HasPrefix(strings.TrimSpace(msg), "/") {
+	if !AntigravityCompacts(msg, p) {
 		return msg
 	}
 	return "/compact " + msg
+}
+
+// AntigravityCompacts: si el mensaje de Antigravity irá tras «/compact» (antigravityMessage): el servidor le añade
+// entonces la memoria del proyecto, que el resumen podría perder.
+func AntigravityCompacts(msg string, p Peticion) bool {
+	return !agentOwnCompaction(p) && p.SesionAgente != "" && !p.Aparte && p.LastContext >= compactThreshold(p) && !strings.HasPrefix(strings.TrimSpace(msg), "/")
 }
 
 // compactionNotice: el aviso en el chat de que el agente ha compactado su historial (pre y post: tokens de

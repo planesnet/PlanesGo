@@ -16,3 +16,7 @@
 .ajustes-sesion select, .ajustes-sesion input { width: 100%; font-size: 13px; color: var(--texto); }
 .ajustes-sesion .con-icono { display: flex; align-items: center; gap: 8px; }
 .ajustes-sesion p { margin: 0; }
+
+/* Memoria del proyecto (ProjectMemory.tsx) */
+.project-memory-text { resize: vertical; min-height: 160px; }
+.project-memory-actions { display: flex; align-items: center; gap: 8px; }

@@ -654,3 +654,19 @@ func TestContinuationText(t *testing.T) {
 		t.Errorf("%q", c)
 	}
 }
+
+// La memoria del proyecto va al final del mensaje, después de las sugerencias de pgocode, y no cuenta para ellas
+// (tres líneas de memoria no son «tres partes independientes» ni hablar de «pgo»).
+func TestMemoryAtEnd(t *testing.T) {
+	var got string
+	a := &Agente{Clave: "x", Programa: "sh", Args: func(msg string, _ Peticion) []string { got = msg; return []string{"-c", "echo ok"} }}
+	mem := "\n\n[Memoria del proyecto]\n- pgo drive leer documento\n- dos\n- tres\n[Fin de la memoria del proyecto]"
+	err := a.Chat(context.Background(), Peticion{Carpeta: t.TempDir(), Entorno: []string{"PGO_TOKEN=x"}, Memory: mem,
+		Mensajes: []Mensaje{{Rol: "user", Texto: "hola"}}}, func(Evento) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "hola"+mem {
+		t.Fatalf("mensaje: %q", got)
+	}
+}

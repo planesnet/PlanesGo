@@ -27,7 +27,8 @@
 //
 //   MODIFICADORES (cambian cómo llega al agente, no a quién): queue (cola), turn (al turno en curso), plan (solo
 //     lectura), skill-user («/skill …»), attachments, cut («Continuar desde aquí»); y al enviar: skill (elegida
-//     por embeddings), subagents (sugerencia de subagentes, servidor), relay (relevo con memoria de trabajo);
+//     por embeddings), subagents (sugerencia de subagentes, servidor), relay (relevo con memoria de trabajo),
+//     memory (memoria del proyecto al empezar de cero, servidor);
 //     la poda, la compactación, la continuación de OpenCode y el idioma los aplica siempre el servidor.
 //
 //   HERRAMIENTAS (no son destinos): Google Drive/Docs/Sheets y Gmail en solo lectura los usa el agente con
@@ -48,7 +49,7 @@ import type { QueueOrigin } from './cola.ts';
 export type Route = 'command' | 'direct' | 'aside' | 'split' | 'agent';
 export type Executor = 'pgocode' | 'agent' | 'agent-copy' | 'local-ai' | 'cheap-model' | 'subsessions';
 export type Engine = 'user' | 'rules' | 'learned' | 'embeddings' | 'local-ai' | 'cheap-model';
-export type Modifier = 'queue' | 'turn' | 'now' | 'plan' | 'skill-user' | 'attachments' | 'cut' | 'skill' | 'subagents' | 'relay';
+export type Modifier = 'queue' | 'turn' | 'now' | 'plan' | 'skill-user' | 'attachments' | 'cut' | 'skill' | 'subagents' | 'relay' | 'memory';
 export type AsideKind = Exclude<AP.Destino, 'conversacion' | 'turno'>;
 
 export interface RouteDecision {
@@ -305,7 +306,7 @@ export const stamp = (d: RouteDecision): RouteStamp => ({ route: d.route, execut
 export const addModifier = (s: RouteStamp | undefined, m: Modifier): RouteStamp | undefined =>
   !s || s.modifiers.includes(m) ? s : { ...s, modifiers: [...s.modifiers, m] };
 
-const MOD_BADGE: Partial<Record<Modifier, string>> = { now: 'aparte', queue: 'cola', turn: 'al turno', plan: 'plan', 'skill-user': 'skill', skill: 'skill elegida', subagents: 'subagentes sugeridos', relay: 'relevo', cut: 'desde aquí' };
+const MOD_BADGE: Partial<Record<Modifier, string>> = { now: 'aparte', queue: 'cola', turn: 'al turno', plan: 'plan', 'skill-user': 'skill', skill: 'skill elegida', subagents: 'subagentes sugeridos', relay: 'relevo', cut: 'desde aquí', memory: 'memoria del proyecto' };
 
 // badge: el distintivo de un mensaje: la ruta y, detrás, sus modificadores («agente · cola · skill elegida»).
 export function badge(s: RouteStamp): string {
