@@ -15,6 +15,7 @@ import * as CL from '../cleaner';
 import * as CS from '../cacheStatus';
 import CleanerIndicator from './CleanerIndicator';
 import DirectNote from './DirectNote';
+import ProgressSpinner from './ProgressSpinner';
 import * as AP from '../aparte';
 import * as DR from '../direct';
 import * as W from '../workingMemory';
@@ -1400,7 +1401,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
           <button className="icono" onClick={() => quitaAparte(sesion.id, a)} title={a.curso ? 'Parar y quitar' : 'Quitar'} aria-label="Quitar la pregunta aparte"><Icono n="cerrar" t={13} /></button>
         </div>
         <div className="aparte-pregunta">{a.pregunta}</div>
-        {a.texto ? (a.error ? <p className="con-error">{a.texto}</p> : <Texto md={a.texto} />) : a.curso ? <span className="pensando">Pensando…</span> : null}
+        {a.texto ? (a.error ? <p className="con-error">{a.texto}</p> : <Texto md={a.texto} />) : a.curso ? <span className="pensando"><ProgressSpinner /><span className="pensando-texto">Pensando…</span></span> : null}
         {(a.uso || a.acciones > 0) && <div className="uso">{[a.acciones ? `${a.acciones} ${a.acciones === 1 ? 'acción' : 'acciones'} (solo lectura)` : '', a.uso ? usoTexto(a.uso) : ''].filter(Boolean).join(' · ')}</div>}
         <div className="aparte-acciones">
           <button className="enlace" title="Enviar esta pregunta al agente como un mensaje más: la responde él, con todo su contexto (gasta un turno; a la cola si está trabajando). Esta respuesta aparte se quita."
@@ -1510,8 +1511,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 )}
                 {m.partes?.length
                   ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} inicio={i > 0 ? acumulados[i - 1] : 0} vivo={Boolean(enCurso) && i === mensajes.length - 1} error={m.error} /></VigFade.Provider>
-                  : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
-                    : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}</span> : '')}
+                  : m.texto ? (m.directo?.curso ? <span className="pensando"><ProgressSpinner /><span className="pensando-texto">{m.texto}</span></span> : m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
+                    : (enCurso && i === mensajes.length - 1 ? <span className="pensando"><ProgressSpinner /><span className="pensando-texto">Pensando…{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}</span></span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {m.rol === 'user' && m.ruta && <span className={'route-badge route-' + m.ruta.route} title={R.badgeTitle(m.ruta)}>{R.badge(m.ruta)}</span>}
                 {m.directo && <DirectNote d={m.directo} alPasar={t => aConversacion(sesion.id, t, [], true, { engine: 'user', reason: '«Pásaselo al agente»', forced: true, generated: true })} />}
@@ -1519,7 +1520,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}
                     <span className="route-badge route-agent" title={R.badgeTitle(INJECTED_STAMP)}>{R.badge(INJECTED_STAMP)}</span></div>
                 ))}
-                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id], m)}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
+                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando"><ProgressSpinner /><span className="pensando-texto">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id], m)}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span></span> : null}
                 {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en toda la conversación hasta este turno, sumando todos sus turnos (sin las preguntas aparte). No es lo que ocupa el contexto.">{CO.tokens(acumulados[i])} acumulados</span></div>}
                 {m.relevo && (
                   <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>

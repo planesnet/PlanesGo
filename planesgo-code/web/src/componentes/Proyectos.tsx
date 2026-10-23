@@ -7,6 +7,7 @@ import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type De
 import Icono from './Icono';
 import { Hosting } from './Marca';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
+import ProgressSpinner from './ProgressSpinner';
 import './config-sesion.css';
 
 interface Props {
@@ -117,7 +118,7 @@ export default function Proyectos(props: Props) {
                 <button className="grupo-nombre recorta" onClick={() => alElegir(p)} title={(p.cliente?.nombre || 'Sin cliente') + (p.carpetas.length ? '\n' + p.carpetas.join('\n') : '')}>
                   {p.nombre}
                 </button>
-                {actividad[p.id]?.working.length ? <span className="proyecto-trabaja" title="El agente está trabajando en este proyecto" aria-label="Trabajando" />
+                {actividad[p.id]?.working.length ? <ProgressSpinner className="proyecto-trabaja" title="El agente está trabajando en este proyecto" ariaLabel="Trabajando" />
                   : actividad[p.id]?.unread.length ? <span className="proyecto-sin-leer" title="Hay respuestas del agente que aún no has visto" aria-label="Respuestas sin ver" /> : null}
                 <button className="icono grupo-nueva" onClick={() => props.alNuevaSesion(p)} title="Nueva sesión" aria-label={'Nueva sesión en ' + p.nombre}>
                   <Icono n="nuevo" t={14} />

@@ -925,7 +925,9 @@ button.miga-item:hover { background: var(--hover); }
 .cut-notice .enlace { font-size: 12px; white-space: nowrap; }
 
 /* «Trabajando… leyendo X · N tokens»: siempre en una sola línea (lo que no cabe se recorta). */
-.mensaje .pensando { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mensaje .pensando { display: flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; }
+.pensando { color: var(--suave); display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; }
+.pensando-texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .actividad-agente { color: var(--suave); }
 
 /* Hilo de limpieza (CleanerIndicator): el icono junto al pie del redactor y su ventanita. */
@@ -988,11 +990,7 @@ button.miga-item:hover { background: var(--hover); }
 .programa-def .programa-texto { display: grid; flex: 1; min-width: 0; }
 
 /* «Pensando…» / «Trabajando…»: un indicador que gira delante para que se vea que el agente sigue vivo. */
-.pensando::before {
-  content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
-  border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento);
-  border-radius: 50%; will-change: transform; animation: pensando-gira .8s linear infinite;
-}
+.progress-spinner { flex: none; display: inline-block; transform-origin: 50% 50%; will-change: transform; animation: pensando-gira .8s linear infinite; }
 @keyframes pensando-gira { to { transform: rotate(360deg); } }
 .cleaner-what { margin: 0; }
 .cleaner-now b { font-size: 18px; font-variant-numeric: tabular-nums; }
@@ -1074,5 +1072,5 @@ button.miga-item:hover { background: var(--hover); }
 .ctx-fresh-txt { color: var(--error, #d33); }
 
 /* Lista de proyectos: trabajando (gira) o con respuestas sin ver (punto azul). */
-.proyecto-trabaja { width: 9px; height: 9px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acento) 25%, transparent); border-top-color: var(--acento); will-change: transform; animation: pensando-gira .8s linear infinite; }
+.proyecto-trabaja { width: 11px; height: 11px; flex: none; }
 .proyecto-sin-leer { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--acento); }
