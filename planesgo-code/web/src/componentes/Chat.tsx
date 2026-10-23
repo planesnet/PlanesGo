@@ -333,7 +333,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const t = requestAnimationFrame(baja);
     return () => cancelAnimationFrame(t);
   }, [sesion?.id]);
-  useLayoutEffect(() => { if (pegado.current) baja(); }, [mensajes]);
+  // Las preguntas aparte y el estado («?») van en su propia lista, debajo: también la siguen.
+  useLayoutEffect(() => { if (pegado.current) baja(); }, [mensajes, apartesSesion]);
   // También al crecer el contenido sin mensajes nuevos (desplegar una herramienta, imágenes, bloques de código).
   useEffect(() => {
     const l = lista.current;
@@ -341,7 +342,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const ro = new ResizeObserver(() => { if (pegado.current) baja(); });
     Array.from(l.children).forEach(c => ro.observe(c));
     return () => ro.disconnect();
-  }, [mensajes.length, sesion?.id]);
+  }, [mensajes.length, apartesSesion.length, sesion?.id]);
 
   // Envío automático pedido desde fuera, cuando su sesión ya es la abierta y no hay nada en curso.
   useEffect(() => {
@@ -512,6 +513,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   async function pregunta(ses: Sesion, q: string, destino: Exclude<AP.Destino, 'conversacion'>, motivo: string, auto: boolean, sustituye?: string) {
     const idA = Math.random().toString(36).slice(2);
     const pon = (f: (l: Aparte[]) => Aparte[]) => setApartes(x => ({ ...x, [ses.id]: f(x[ses.id] || []) }));
+    if (ses.id === sesion?.id) pegado.current = true; // la ha pedido el usuario: se baja hasta ella
     const cambia = (c: Partial<Aparte>) => pon(l => l.map(a => a.id === idA ? { ...a, ...c } : a));
     const base: Aparte = { id: idA, pregunta: q || '¿Cómo va?', destino, texto: '', acciones: 0, curso: destino !== 'estado', motivo, auto };
     const ms = vivas.current[ses.id] || (idActual.current === ses.id ? mensajes : conversacion(ses.id));
