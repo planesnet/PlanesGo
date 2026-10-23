@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/repo"
@@ -239,6 +240,10 @@ func (s *Servidor) repartoUne(w http.ResponseWriter, r *http.Request, ses *sesio
 
 // uneHija: la unión de una hija, de una en una por repositorio y solo sin agentes trabajando en las dos copias.
 func (s *Servidor) uneHija(ctx context.Context, proyecto int, madre, ramaMadre, hija, rama string, n int) (repo.Union, error) {
+	// La unión acaba aunque la interfaz se cierre o se recargue: un «git merge» cortado a medias dejaría la copia
+	// de la madre a mitad de unión.
+	ctx, cancela := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancela()
 	principal, err := repo.RepoPrincipal(ctx, madre)
 	if err != nil {
 		return repo.Union{}, err
