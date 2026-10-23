@@ -123,5 +123,6 @@ export const proponeReparto = (proyecto: number, carpeta: string, rama: string, 
 export const preparaHija = (proyecto: number, sesion: string, carpeta: string, n: number, hija: string) =>
   post<{ carpeta: string; rama: string; rama_madre: string }>('/api/reparto/prepara', { proyecto, sesion, carpeta, n, hija });
 export interface UnionHija { estado: 'unida' | 'sin_cambios' | 'conflicto' | 'pendiente' | 'error'; motivo?: string; ficheros?: string[]; commit?: boolean; quitada: boolean; rama_borrada: boolean; aviso?: string }
-export const uneHija = (proyecto: number, madre: string, ramaMadre: string, hija: string, rama: string, n: number) =>
-  post<UnionHija>('/api/reparto/une', { proyecto, madre, rama_madre: ramaMadre, hija, rama, n });
+// parte: el texto de la parte (para el mensaje de sus commits: «pgocode: parte 2 — añade el cupón VERANO»).
+export const uneHija = (proyecto: number, madre: string, ramaMadre: string, hija: string, rama: string, n: number, parte = '') =>
+  post<UnionHija>('/api/reparto/une', { proyecto, madre, rama_madre: ramaMadre, hija, rama, n, parte });

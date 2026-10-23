@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
 import { identificador, lista as sesionesDe, ordenaConHijas, titulo, type Repo, type Sesion } from '../sesiones';
@@ -292,11 +292,15 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
   // Sesión con el menú ⋮ abierto y el botón que lo abrió (para colocar el menú flotante a su lado).
   const [menu, setMenu] = useState<{ id: string; ancla: HTMLElement } | null>(null);
   const [renombrando, setRenombrando] = useState<string | null>(null);
+  // Madres con sus partes ya unidas desplegadas (por defecto, plegadas).
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
+  const despliega = (id: string) => setAbiertas(x => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
     <div className="sesiones">
       {lista.length === 0 && <p className="sin-sesiones">Sin sesiones</p>}
-      {ordenaConHijas(lista).map(({ s, hija }) => (
-        <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '') + (hija ? ' hija' : '')}>
+      {ordenaConHijas(lista, abiertas, sesion?.id).map(({ s, hija, unidas, plegadas }) => (
+        <Fragment key={s.id}>
+        <div className={'sesion' + (sesion?.id === s.id ? ' activa' : '') + (hija ? ' hija' : '')}>
           {renombrando === s.id ? (
             <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
           ) : (
@@ -324,6 +328,13 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
             ]} />
           )}
         </div>
+        {unidas ? (
+          <button className="enlace sesiones-unidas suave pequeno" onClick={() => despliega(s.id)} aria-expanded={!plegadas}
+            title="Partes de un reparto que ya se han unido a esta sesión">
+            {plegadas ? '▸' : '▾'} {unidas} {unidas === 1 ? 'parte unida' : 'partes unidas'}
+          </button>
+        ) : null}
+        </Fragment>
       ))}
     </div>
   );

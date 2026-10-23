@@ -45,13 +45,13 @@ func (e Estado) SePuedeQuitar() bool {
 func (e Estado) Pendiente() string {
 	var l []string
 	if e.Cambios > 0 {
-		l = append(l, fmt.Sprintf("%d ficheros con cambios sin commit", e.Cambios))
+		l = append(l, fmt.Sprintf("%d %s con cambios sin commit", e.Cambios, map[bool]string{true: "fichero", false: "ficheros"}[e.Cambios == 1]))
 	}
 	if e.SinSubir > 0 {
-		l = append(l, fmt.Sprintf("%d commits sin subir", e.SinSubir))
+		l = append(l, fmt.Sprintf("%d %s sin subir", e.SinSubir, map[bool]string{true: "commit", false: "commits"}[e.SinSubir == 1]))
 	}
 	if e.Stash > 0 {
-		l = append(l, fmt.Sprintf("%d cambios guardados con stash", e.Stash))
+		l = append(l, fmt.Sprintf("%d %s con stash", e.Stash, map[bool]string{true: "cambio guardado", false: "cambios guardados"}[e.Stash == 1]))
 	}
 	return strings.Join(l, ", ")
 }

@@ -39,6 +39,7 @@ import { esAyuda } from './ayuda.ts';
 import * as DR from './direct.ts';
 import * as PL from './plan.ts';
 import * as RP from './reparto.ts';
+import type { QueueOrigin } from './cola.ts';
 
 export type Route = 'command' | 'direct' | 'aside' | 'split' | 'agent';
 export type Executor = 'pgocode' | 'agent' | 'agent-copy' | 'local-ai' | 'cheap-model' | 'subsessions';
@@ -220,10 +221,35 @@ export function standalone(t: string, directOn = true): boolean {
 }
 
 // fromQueue: lo que sale de la cola. Lo encolado con «>» (el usuario lo mandó al agente a propósito) va al agente
-// aunque parezca una orden directa.
-export function fromQueue(texts: string[]): { text: string; forced: boolean } {
+// aunque parezca una orden directa. origin: por qué se encoló (quién lo decidió y su motivo), para que el registro no
+// lo pierda: lo forzado por el usuario manda; si no, el primero que lo sepa. generated: todo lo ha escrito pgocode.
+export function fromQueue(texts: string[], origins: (QueueOrigin | undefined)[] = []): { text: string; forced: boolean; origin?: QueueOrigin; generated?: boolean } {
   const forced = texts.length > 0 && texts.every(x => x.startsWith('>'));
-  return { text: texts.map(x => (x.startsWith('>') ? x.slice(1).trim() : x)).filter(Boolean).join('\n\n'), forced };
+  const text = texts.map(x => (x.startsWith('>') ? x.slice(1).trim() : x)).filter(Boolean).join('\n\n');
+  let origin = origins.find(o => o?.forced) || origins.find(Boolean);
+  if (forced && !origin?.forced) origin = { engine: 'user', reason: 'lo mandaste a la conversación con «>»', forced: true };
+  const generated = origins.length > 0 && origins.length === texts.length && origins.every(o => o?.generated);
+  return { text, forced, ...(origin ? { origin } : {}), ...(generated ? { generated } : {}) };
+}
+
+// queueOrigin: lo que se guarda en la cola de una decisión (para registrarla igual al salir).
+export const queueOrigin = (d: RouteDecision, generated = false): QueueOrigin =>
+  ({ engine: d.engine, reason: d.reason, ...(d.forced ? { forced: true } : {}), ...(generated ? { generated } : {}) });
+
+// fromOrigin: la decisión al salir de la cola, con quién decidió y por qué al encolarlo (no «el agente está libre»).
+export function fromOrigin(d: RouteDecision, o: QueueOrigin | undefined): RouteDecision {
+  if (!o) return d;
+  return { ...d, engine: (ENGINE_IDS.includes(o.engine as Engine) ? o.engine : d.engine) as Engine, reason: o.reason, ...(o.forced ? { forced: true } : {}) };
+}
+const ENGINE_IDS: Engine[] = ['user', 'rules', 'learned', 'embeddings', 'local-ai', 'cheap-model'];
+
+// manualStillApplies: el destino elegido a mano en la etiqueta sigue valiendo mientras se edita el mismo texto; si se
+// vacía el cuadro o se cambia todo (nada en común al principio ni al final), se olvida.
+export function manualStillApplies(base: string, now: string): boolean {
+  const a = base.trim(), b = now.trim();
+  if (!b) return false;
+  if (!a) return true;
+  return a[0] === b[0] || a[a.length - 1] === b[b.length - 1];
 }
 
 // ——— Lo que se ve ———
@@ -275,7 +301,7 @@ export const stamp = (d: RouteDecision): RouteStamp => ({ route: d.route, execut
 export const addModifier = (s: RouteStamp | undefined, m: Modifier): RouteStamp | undefined =>
   !s || s.modifiers.includes(m) ? s : { ...s, modifiers: [...s.modifiers, m] };
 
-const MOD_BADGE: Partial<Record<Modifier, string>> = { queue: 'cola', turn: 'al turno', plan: 'plan', 'skill-user': 'skill', skill: 'skill elegida', subagents: 'subagentes sugeridos', relay: 'relevo', cut: 'desde aquí' };
+const MOD_BADGE: Partial<Record<Modifier, string>> = { now: 'aparte', queue: 'cola', turn: 'al turno', plan: 'plan', 'skill-user': 'skill', skill: 'skill elegida', subagents: 'subagentes sugeridos', relay: 'relevo', cut: 'desde aquí' };
 
 // badge: el distintivo de un mensaje: la ruta y, detrás, sus modificadores («agente · cola · skill elegida»).
 export function badge(s: RouteStamp): string {

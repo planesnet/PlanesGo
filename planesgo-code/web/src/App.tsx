@@ -291,9 +291,10 @@ export default function App() {
   // Una hija cuya copia se ha quitado tras unirla sigue en la carpeta y la rama de su madre (su historial se conserva).
   useEffect(() => {
     const reubica = (e: Event) => {
-      const d = (e as CustomEvent<{ id: string; proyecto: number; carpeta: string; rama: string }>).detail;
+      const d = (e as CustomEvent<{ id: string; proyecto: number; carpeta: string; rama: string; merged?: boolean }>).detail;
       const s = usuario ? S.lista(usuario.login, d.proyecto).find(x => x.id === d.id) : undefined;
-      if (s) cambiaSesion({ ...s, carpeta: d.carpeta, rama: d.rama });
+      // Unida: se pliega bajo su madre en la lista de sesiones (no una fila por parte terminada).
+      if (s) cambiaSesion({ ...s, carpeta: d.carpeta, rama: d.rama, ...(d.merged ? { merged: true } : {}) });
     };
     window.addEventListener('pgo:reubica-sesion', reubica);
     return () => window.removeEventListener('pgo:reubica-sesion', reubica);

@@ -123,8 +123,8 @@ export default function Skills({ proyecto, carpeta, agente, sesiones }: { proyec
                     {s.plugin && <><dt>Plugin</dt><dd>{s.plugin}</dd></>}
                     <dt>La ven</dt><dd>{s.agentes.map(a => AGENTES.find(x => x.id === a)?.nombre).join(', ')}</dd>
                     {!s.rota && <><dt>Coste fijo</dt><dd>{s.tokens_fijo} tokens en cada conversación</dd>
-                      <dt>Al usarla</dt><dd>{k(s.tokens_uso)} tokens{s.ficheros ? ` · ${s.ficheros} ficheros más, solo si hacen falta` : ''}</dd></>}
-                    <dt>Usada</dt><dd>{usos[s.nombre] ? `${usos[s.nombre]} veces en este proyecto` : 'nunca en este proyecto'}</dd>
+                      <dt>Al usarla</dt><dd>{k(s.tokens_uso)} tokens{s.ficheros ? ` · ${s.ficheros} ${s.ficheros === 1 ? 'fichero más, solo si hace falta' : 'ficheros más, solo si hacen falta'}` : ''}</dd></>}
+                    <dt>Usada</dt><dd>{usos[s.nombre] ? `${usos[s.nombre]} ${usos[s.nombre] === 1 ? 'vez' : 'veces'} en este proyecto` : 'nunca en este proyecto'}</dd>
                   </dl>
                   {!s.rota && <button className="enlace" onClick={() => verTexto(s)}>{texto?.ruta === s.ruta ? 'Ocultar SKILL.md' : 'Ver SKILL.md'}</button>}
                   {texto?.ruta === s.ruta && <div className="sk-texto"><Texto md={texto.md} /></div>}

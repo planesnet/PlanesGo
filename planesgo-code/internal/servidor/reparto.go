@@ -221,6 +221,7 @@ func (s *Servidor) repartoUne(w http.ResponseWriter, r *http.Request, ses *sesio
 		Hija      string `json:"hija"`
 		Rama      string `json:"rama"`
 		N         int    `json:"n"`
+		Parte     string `json:"parte"` // el texto de la parte (para el mensaje de sus commits)
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -239,7 +240,7 @@ func (s *Servidor) repartoUne(w http.ResponseWriter, r *http.Request, ses *sesio
 		jsonError(w, http.StatusForbidden, "esa copia no es de un reparto de pgocode")
 		return
 	}
-	u, err := s.uneHija(r.Context(), p.Proyecto, madre, p.RamaMadre, hija, p.Rama, p.N)
+	u, err := s.uneHija(r.Context(), p.Proyecto, madre, p.RamaMadre, hija, p.Rama, p.N, p.Parte)
 	if err != nil {
 		jsonError(w, http.StatusConflict, err.Error())
 		return
@@ -248,7 +249,7 @@ func (s *Servidor) repartoUne(w http.ResponseWriter, r *http.Request, ses *sesio
 }
 
 // uneHija: la unión de una hija, de una en una por repositorio y solo sin agentes trabajando en las dos copias.
-func (s *Servidor) uneHija(ctx context.Context, proyecto int, madre, ramaMadre, hija, rama string, n int) (repo.Union, error) {
+func (s *Servidor) uneHija(ctx context.Context, proyecto int, madre, ramaMadre, hija, rama string, n int, parte string) (repo.Union, error) {
 	// La unión acaba aunque la interfaz se cierre o se recargue: un «git merge» cortado a medias dejaría la copia
 	// de la madre a mitad de unión.
 	ctx, cancela := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
@@ -266,7 +267,7 @@ func (s *Servidor) uneHija(ctx context.Context, proyecto int, madre, ramaMadre, 
 	if s.carpetaOcupada(madre) {
 		return repo.Union{Estado: "pendiente", Motivo: "hay un agente trabajando en la copia de la sesión madre"}, nil
 	}
-	u, err := repo.UneHija(ctx, madre, hija, rama, ramaMadre, n)
+	u, err := repo.UneHija(ctx, madre, hija, rama, ramaMadre, n, parte)
 	if err != nil {
 		return u, err
 	}

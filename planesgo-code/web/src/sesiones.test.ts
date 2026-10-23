@@ -25,4 +25,11 @@ test('ordenaConHijas: cada hija debajo de su madre, por orden de parte', () => {
   const l = [s('a'), s('h2', { madre: 'm', parte: 2 }), s('m'), s('h1', { madre: 'm', parte: 1 }), s('huerfana', { madre: 'borrada', parte: 1 }), s('z')];
   assert.deepEqual(ordenaConHijas(l).map(x => x.s.id + (x.hija ? '*' : '')), ['a', 'm', 'h1*', 'h2*', 'huerfana', 'z']);
   assert.deepEqual(ordenaConHijas([]), []);
+  // Las hijas ya unidas, plegadas bajo la madre (salvo la activa o con la madre desplegada).
+  const u = [s('m'), s('h1', { madre: 'm', parte: 1, merged: true }), s('h2', { madre: 'm', parte: 2 }), s('h3', { madre: 'm', parte: 3, merged: true })];
+  assert.deepEqual(ordenaConHijas(u).map(x => x.s.id), ['m', 'h2']);
+  assert.equal(ordenaConHijas(u)[0].unidas, 2);
+  assert.equal(ordenaConHijas(u)[0].plegadas, true);
+  assert.deepEqual(ordenaConHijas(u, new Set(), 'h3').map(x => x.s.id), ['m', 'h2', 'h3']);
+  assert.deepEqual(ordenaConHijas(u, new Set(['m'])).map(x => x.s.id), ['m', 'h1', 'h2', 'h3']);
 });

@@ -1,0 +1,26 @@
+ FAIL  src/cupon.test.js
+  cupón
+    ✓ aplica el 10 % (2 ms)
+    ✕ no aplica caducado (3 ms)
+
+  ● cupón › no aplica caducado
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 100
+    Received: 90
+
+      12 |   test('no aplica caducado', () => {
+      13 |     const c = new Cupon('VERANO', 10, '2020-01-01');
+    > 14 |     expect(c.aplica(100)).toBe(100);
+         |                           ^
+      15 |   });
+      16 | });
+
+      at Object.toBe (src/cupon.test.js:14:27)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.412 s
+Ran all test suites.

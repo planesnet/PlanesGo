@@ -174,3 +174,11 @@ test('edita: el mensaje en su sitio (o por su texto si la cola cambió); null si
   assert.deepEqual(C.edita(c, 1, 'dos', '  ')!.mensajes.map(m => m.texto), ['uno'], 'vacío y sin adjuntos: fuera');
   assert.deepEqual(C.edita(c, 0, 'uno', '')!.mensajes[0], { texto: '', adjuntos: ['a.png'] }, 'con adjuntos se queda');
 });
+
+test('la cola guarda por qué se encoló cada mensaje', () => {
+  let c = C.encola(C.vacia<string>(), 'a', [], { engine: 'user', reason: 'etiqueta', forced: true });
+  c = C.encola(c, 'b');
+  const r = C.siguiente(c, false);
+  assert.deepEqual(r.origenes, [{ engine: 'user', reason: 'etiqueta', forced: true }, undefined]);
+  assert.equal('origen' in r.cola.mensajes, false);
+});

@@ -1,0 +1,21 @@
+--- FAIL: TestSuma (0.00s)
+    a_test.go:3: suma: quería 3, tengo 2
+--- FAIL: TestPanic (0.00s)
+panic: assignment to entry in nil map [recovered]
+	panic: assignment to entry in nil map
+
+goroutine 19 [running]:
+testing.tRunner.func1.2({0x51b700, 0x56ea30})
+	/usr/local/go/src/testing/testing.go:1631 +0x24a
+testing.tRunner.func1()
+	/usr/local/go/src/testing/testing.go:1634 +0x377
+panic({0x51b700?, 0x56ea30?})
+	/usr/local/go/src/runtime/panic.go:770 +0x132
+gt.TestPanic(0xc0000e6680?)
+	gt/a_test.go:4 +0x28
+testing.tRunner(0xc0000e6680, 0x5483e8)
+	/usr/local/go/src/testing/testing.go:1689 +0xfb
+created by testing.(*T).Run in goroutine 1
+	/usr/local/go/src/testing/testing.go:1742 +0x390
+FAIL	gt	0.004s
+FAIL

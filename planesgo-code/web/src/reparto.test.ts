@@ -133,3 +133,23 @@ test('una parte cuya copia no se llegó a crear no habla de ramas', () => {
   assert.equal(R.fraseUnion(h), 'no empezó: la carpeta tiene que estar dentro de /home/luis');
   assert.doesNotMatch(R.resumen({ id: 'r', madre: 'm', hijas: [h] } as unknown as R.Reparto, {}), /undefined/);
 });
+
+test('resumen: los bloques de texto de la respuesta de una hija no se pegan', () => {
+  const m: Mensaje = { rol: 'assistant', texto: 'Respeto su estilo.Sigo con el resto.', partes: [
+    { tipo: 'texto', texto: 'Respeto su estilo.' }, { tipo: 'herramienta', h: { id: '1', nombre: 'Edit', estado: 'ok' } }, { tipo: 'texto', texto: 'Sigo con el resto.' }] };
+  assert.equal(R.ultimaRespuesta([m]), 'Respeto su estilo.\n\nSigo con el resto.');
+  const r = R.pon(reparto(3), 1, { estado: 'hecha', union: 'unida' });
+  assert.match(R.resumen(r, { h1: { respuesta: R.ultimaRespuesta([m]), entrada: 1, salida: 1, coste: 0 } }), /estilo\. Sigo/);
+  assert.equal(R.ultimaRespuesta([{ rol: 'assistant', texto: 'solo texto' }]), 'solo texto');
+});
+
+test('conflicto: resolver con el agente de la madre y volver a unir', () => {
+  const r = R.pon(reparto(3), 2, { estado: 'hecha', union: 'conflicto', rama: 'pgo/m-2', carpeta: '/c-2', ficheros: ['a.go'] });
+  const h = r.hijas[1];
+  assert.ok(!R.seUne(h));
+  const msg = R.mensajeResolver(h, 'main');
+  assert.match(msg, /git merge pgo\/m-2/);
+  assert.match(msg, /`a\.go`/);
+  assert.match(msg, /hacer la cosa 2/);
+  assert.ok(R.seUne({ ...h, resolving: true }));
+});

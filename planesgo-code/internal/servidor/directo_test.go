@@ -289,3 +289,39 @@ func TestCommitLocalReal(t *testing.T) {
 		t.Logf("%s (%d ms): %s", via, time.Since(t0).Milliseconds(), m)
 	}
 }
+
+// Salidas reales de unittest, pytest, go test, jest y tsc: «Pásaselo al agente» tiene que llevar el error.
+func TestTrimOutputReal(t *testing.T) {
+	casos := map[string][]string{
+		"unittest.txt": {"ERROR: test_error", "Traceback (most recent call last):", `line 8, in test_error`,
+			`raise ValueError("valor malo: %r" % x)`, "ValueError: valor malo: 5", "FAIL: test_suma",
+			"self.assertEqual(1 + 1, 3)", "AssertionError: 2 != 3", "FAILED (failures=1, errors=1)"},
+		"pytest.txt": {"assert c.aplica(100) == 90", "E       assert 100 == 90", "tests/test_cupon.py:7: AssertionError",
+			"FAILED tests/test_cupon.py::test_descuento - assert 100 == 90"},
+		"gotest.txt": {"--- FAIL: TestSuma", "a_test.go:3: suma: quería 3, tengo 2", "--- FAIL: TestPanic",
+			"panic: assignment to entry in nil map", "FAIL\tgt"},
+		"jest.txt": {"FAIL  src/cupon.test.js", "✕ no aplica caducado", "Expected: 100", "Received: 90",
+			"at Object.toBe (src/cupon.test.js:14:27)"},
+		"tsc.txt": {"error TS2322: Type 'string' is not assignable to type 'number'.", "error TS2339: Property 'foo'"},
+	}
+	for f, quiere := range casos {
+		b, err := os.ReadFile(filepath.Join("testdata", "salidas", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, e := trimOutput(string(b))
+		for _, x := range quiere {
+			if !strings.Contains(e, x) {
+				t.Errorf("%s: errores sin %q:\n%s", f, x, e)
+			}
+		}
+		if strings.Contains(e, "Ran 3 tests") || strings.Contains(e, "Snapshots:") || strings.Contains(e, "test session starts") {
+			t.Errorf("%s: errores con ruido:\n%s", f, e)
+		}
+	}
+	// Tras el Traceback, la primera línea sin sangría (la excepción) entra, pero no lo que la sigue.
+	_, e := trimOutput("Traceback (most recent call last):\n  File \"a.py\", line 1, in <module>\n    f()\nKeyError: 'x'\nresumen final")
+	if !strings.Contains(e, "KeyError: 'x'") || strings.Contains(e, "resumen final") {
+		t.Errorf("traceback: %q", e)
+	}
+}

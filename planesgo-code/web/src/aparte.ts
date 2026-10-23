@@ -127,7 +127,7 @@ export function resumenEstado(m: Mensaje | undefined, o: { trabajando: boolean; 
   if (ordenes.length) l.push(`\n**Última orden:** \`${recorta(ordenes[ordenes.length - 1].resumen!, 120)}\`${ordenes[ordenes.length - 1].estado === 'curso' ? ' (en curso)' : ''}`);
   const ahora = hs.filter(h => h.estado === 'curso');
   if (o.trabajando && ahora.length) l.push(`\n**Ahora mismo:** ${ahora.map(h => h.nombre + (h.resumen ? ' ' + recorta(h.resumen, 80) : '')).join(' · ')}`);
-  else if (hs.length) l.push(`\n${hs.length} acciones en el turno (${hs.filter(h => h.estado === 'error').length} con error).`);
+  else if (hs.length) l.push(`\n${hs.length} ${hs.length === 1 ? 'acción' : 'acciones'} en el turno (${hs.filter(h => h.estado === 'error').length} con error).`);
   const ultimo = ultimoTexto(m);
   if (ultimo) l.push(`\n**Lo último que ha dicho:** «${recorta(ultimo, 300)}»`);
   return l.join('\n');
@@ -268,7 +268,7 @@ export function handoff(ms: Mensaje[], hasta: number, max = MAX_HANDOFF): string
     resto -= entradas[i].length + 2;
   }
   const omitidos = entradas.length - 1 - elegidas.length;
-  const cuerpo = [entradas[0], ...(omitidos > 0 ? [`(… ${omitidos} mensajes intermedios omitidos …)`] : []), ...elegidas].filter(Boolean);
+  const cuerpo = [entradas[0], ...(omitidos > 0 ? [`(… ${omitidos} ${omitidos === 1 ? 'mensaje intermedio omitido' : 'mensajes intermedios omitidos'} …)`] : []), ...elegidas].filter(Boolean);
   const t = [cab, ...cuerpo, ...estado, pie].join('\n\n');
   return t.length > max ? t.slice(0, max - pie.length - 3) + '…\n\n' + pie : t;
 }

@@ -156,7 +156,7 @@ test('la cola: lo que sale solo y lo encolado con «>»', () => {
   assert.ok(R.standalone('compila') && R.standalone('/plan x') && R.standalone('ejecuta el plan 2') && !R.standalone('hola'));
   assert.ok(!R.standalone('compila', false));
   assert.ok(!R.standalone('> compila'));
-  assert.deepEqual(R.fromQueue(['> compila']), { text: 'compila', forced: true });
+  assert.deepEqual(R.fromQueue(['> compila']), { text: 'compila', forced: true, origin: { engine: 'user', reason: 'lo mandaste a la conversación con «>»', forced: true } });
   assert.deepEqual(R.fromQueue(['hola', '> compila']), { text: 'hola\n\ncompila', forced: false });
   // Lo que sale de la cola con «>» va al agente aunque sea una orden directa.
   const q = R.fromQueue(['> compila']);
@@ -190,4 +190,41 @@ test('etiqueta, distintivo, registro y resumen', () => {
   t = R.tally(t, { route: 'aside', executor: 'local-ai', engine: 'rules', reason: '', modifiers: [] });
   assert.equal(R.summary(t), 'Esta sesión: 2 al agente · 1 directa · 1 aparte (1 IA local) · 1 orden de pgocode. 3 de 5 sin tokens de pago.');
   assert.match(R.summary({}), /ningún mensaje/);
+});
+
+test('la cola conserva quién decidió y por qué (forzado, etiqueta, adjuntos)', () => {
+  // Lo elegido en la etiqueta con el agente trabajando: al salir de la cola, el registro dice «tú» y el motivo original.
+  const d = R.route({ ...OCUPADO, text: 'revisa el README', manual: 'conversacion', manualBy: 'tag' });
+  assert.equal(d.engine, 'user');
+  const o = R.queueOrigin(d);
+  assert.deepEqual(o, { engine: 'user', reason: 'elegido por ti en la etiqueta', forced: true });
+  const q = R.fromQueue(['> revisa el README'], [o]);
+  assert.deepEqual(q.origin, o);
+  const salida = R.fromOrigin(R.route({ ...LIBRE, text: q.text, noAside: true, noDirect: true }), q.origin);
+  assert.equal(salida.engine, 'user');
+  assert.equal(salida.reason, 'elegido por ti en la etiqueta');
+  assert.notEqual(salida.reason, 'el agente está libre');
+  // Un adjunto encolado: su motivo, no «el agente está libre».
+  const adj = R.route({ ...OCUPADO, text: 'mira esta captura', attachments: 1 });
+  const qa = R.fromQueue(['mira esta captura'], [R.queueOrigin(adj)]);
+  assert.equal(R.fromOrigin(R.route({ ...LIBRE, text: qa.text, attachments: 1, noAside: true }), qa.origin).reason, adj.reason);
+  // Sin origen, la decisión tal cual; lo redactado por pgocode se marca (no da nombre a la sesión).
+  const dl = R.route({ ...LIBRE, text: 'hola' });
+  assert.equal(R.fromOrigin(dl, undefined), dl);
+  assert.equal(R.fromQueue(['x'], [R.queueOrigin(dl, true)]).generated, true);
+  assert.equal(R.fromQueue(['x', 'y'], [R.queueOrigin(dl, true), undefined]).generated, undefined);
+});
+
+test('destino elegido a mano: se olvida al vaciar o cambiar todo el texto', () => {
+  assert.ok(R.manualStillApplies('revisa', 'revisa el README'));
+  assert.ok(R.manualStillApplies('revisa el README', 'revisa el'));
+  assert.ok(R.manualStillApplies('revisa el README', 'por favor revisa el README'));
+  assert.ok(!R.manualStillApplies('revisa el README', ''));
+  assert.ok(!R.manualStillApplies('revisa el README', 'compila'));
+});
+
+test('distintivos: función directa respondida aparte y mensaje al turno', () => {
+  const d = R.route({ ...OCUPADO, text: '¿qué cambios hay?' });
+  assert.equal(R.badge(R.stamp(d)), 'pgocode · aparte');
+  assert.equal(R.badge({ route: 'agent', executor: 'agent', engine: 'user', reason: '', modifiers: ['turn'] }), 'agente · al turno');
 });
