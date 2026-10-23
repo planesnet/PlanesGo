@@ -24,6 +24,7 @@ export interface SyncView {
   total: number;             // sin las canceladas
   finished: boolean;         // no queda nada pendiente (contando las probables)
   inferred: boolean;         // algo de lo que se ve no lo ha dicho el agente
+  old?: boolean;             // es de un turno anterior (el agente no ha hecho lista en el último): no es la de ahora
 }
 // acabado: el turno ha terminado; parado: lo paró el usuario (o falló); textoFinal: lo que dijo el agente al acabar;
 // turno: todas las acciones del turno (al acabar, también cuentan las de antes de la última actualización de la lista:
@@ -266,10 +267,17 @@ export function turnTodo(m: Mensaje, vivo: boolean): SyncView | undefined {
 }
 
 // sessionTodo: la última lista de la sesión (la de Actividad), con las acciones de después en ese turno y los siguientes.
+// Una lista es de SU turno: si después ha habido otra petición del usuario, es de un turno anterior (old) y se
+// evalúa solo con las acciones de su turno, como acabado (los agentes casi nunca retoman una lista vieja: en una sesión
+// real de OpenCode, 32 peticiones y 595 acciones después de su única lista).
 export function sessionTodo(mensajes: Mensaje[], trabajando: boolean): SyncView | undefined {
   for (let k = mensajes.length - 1; k >= 0; k--) {
     const l = mainList(mensajes[k].tareas);
     if (!l?.elementos?.length) continue;
+    if (mensajes.slice(k + 1).some(m => m.rol === 'user' && !m.nota)) {
+      const v = turnTodo(mensajes[k], false);
+      return v && { ...v, old: true };
+    }
     const despues = mensajes.slice(k + 1).filter(m => m.rol === 'assistant');
     const acc = l.tras === undefined ? undefined : [...actionsOf(mensajes[k]).slice(l.tras), ...despues.flatMap(actionsOf)];
     const ultimo = despues[despues.length - 1] || mensajes[k];

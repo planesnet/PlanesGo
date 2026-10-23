@@ -644,3 +644,13 @@ func TestModelosOpenCodeFlash(t *testing.T) {
 		}
 	}
 }
+
+// Al seguir tras el límite de pasos, se le recuerda actualizar la lista solo si tiene pendientes y no la toca hace rato.
+func TestContinuationText(t *testing.T) {
+	if continuationText(0, 50) != textoContinuacion || continuationText(3, 2) != textoContinuacion {
+		t.Error("sin lista pendiente o recién tocada, solo «sigue»")
+	}
+	if c := continuationText(3, 40); !strings.HasPrefix(c, textoContinuacion) || !strings.Contains(c, "todowrite") {
+		t.Errorf("%q", c)
+	}
+}

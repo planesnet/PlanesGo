@@ -169,3 +169,12 @@ test('turnTodo y sessionTodo: la lista principal (no la de un subagente) y las a
   const viejo = { ...m, tareas: [{ ...m.tareas![0], tras: undefined }] };
   assert.equal(S.turnTodo(viejo, false)!.items[0].vista, 'curso');
 });
+
+test('una lista de un turno anterior no es la de ahora', () => {
+  const lista = { id: 'lista', tipo: 'lista', estado: 'curso', titulo: 'Lista', tras: 0, elementos: [{ texto: 'Editar a.ts', estado: 'curso' }, { texto: 'Editar b.ts', estado: 'pendiente' }] };
+  const ms = [{ rol: 'user', texto: 'haz a y b' }, { rol: 'assistant', texto: 'hecho', tareas: [lista], partes: [] },
+    { rol: 'user', texto: 'ahora otra cosa' }, { rol: 'assistant', texto: 'vale', partes: [] }] as unknown as Parameters<typeof S.sessionTodo>[0];
+  const v = S.sessionTodo(ms, true)!;
+  assert.equal(v.old, true);
+  assert.equal(S.sessionTodo(ms.slice(0, 2), true)!.old, undefined, 'en su propio turno, sí es la de ahora');
+});

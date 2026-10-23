@@ -212,10 +212,21 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 	sesionOC := p.SesionAgente
 	emiteOC := emite
 	pasos := 0
+	// La lista de tareas del agente en este turno: lo que le queda y los pasos desde que la tocó (para recordarle que
+	// la actualice al seguir tras el límite de pasos: los modelos la olvidan).
+	listaPend, pasosLista := 0, 0
 	if a.Clave == "opencode" {
 		emiteOC = func(e Evento) {
 			if e.SesionAgente != "" {
 				sesionOC = e.SesionAgente
+			}
+			if t := e.Tarea; t != nil && t.Tipo == "lista" && t.Padre == "" {
+				listaPend, pasosLista = 0, 0
+				for _, x := range t.Elementos {
+					if x.Estado == "pendiente" || x.Estado == "curso" {
+						listaPend++
+					}
+				}
 			}
 			// Marcado continuo: cada salida grande de una herramienta se embebe en cuanto llega.
 			if h := e.Herramienta; h != nil && h.Estado == "ok" && p.Prune == PruneAuto && !p.Aparte && idSesionOC.MatchString(sesionOC) {
@@ -223,6 +234,7 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			}
 			if e.Uso != nil {
 				pasos++
+				pasosLista++
 				midTurnPrune(a, p, sesionOC, pasos, e.Uso.Contexto)
 			}
 			emite(e)
@@ -275,7 +287,7 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			if rep := pruneOpenCode(ctx, a, q); rep != nil {
 				emite(Evento{Prune: rep})
 			}
-			q.Mensajes = []Mensaje{{Rol: "user", Texto: textoContinuacion}}
+			q.Mensajes = []Mensaje{{Rol: "user", Texto: continuationText(listaPend, pasosLista)}}
 			antes = pasos
 			err = a.chat(ctx, q, emiteOC)
 		}
@@ -1276,3 +1288,16 @@ func withAttachments(msg string, files []string) string {
 	}
 	return msg
 }
+
+// continuationText: lo que se le dice a OpenCode al seguir tras el límite de pasos; si tiene una lista de tareas con
+// cosas pendientes que no toca desde hace un rato, además, que la actualice (una línea, solo entonces: va al final del
+// mensaje nuevo y no rompe la caché).
+func continuationText(pendientes, pasosDesdeLista int) string {
+	if pendientes > 0 && pasosDesdeLista >= todoNudgeSteps {
+		return textoContinuacion + " Antes, actualiza tu lista de tareas (todowrite) con lo que ya has hecho."
+	}
+	return textoContinuacion
+}
+
+// todoNudgeSteps: pasos sin tocar la lista a partir de los que se le recuerda actualizarla.
+const todoNudgeSteps = 10

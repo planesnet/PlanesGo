@@ -132,12 +132,13 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
 // hace según sus acciones y aún no la ha marcado); debajo lo que falta y, plegadas, las hechas; el progreso. Acabada y
 // con el agente libre, plegada en una línea.
 function TodoBoard({ v, trabajando }: { v: TS.SyncView; trabajando: boolean }) {
-  const viva = trabajando || !v.finished;
+  // Una lista de un turno anterior no es la de ahora: plegada y apagada.
+  const viva = !v.old && (trabajando || !v.finished);
   const pct = v.total ? Math.round(((v.done + v.probables) / v.total) * 100) : 100;
   return (
     <details className={'act-todo' + (viva ? ' viva' : '')} open={viva || undefined} title="La lista de tareas que el agente lleva para organizarse (TodoWrite, TaskCreate…)">
       <summary>
-        <b>Tareas del agente</b>
+        <b>{v.old ? 'Lista de un turno anterior' : 'Tareas del agente'}</b>
         <span className="act-todo-barra" aria-hidden><span style={{ width: pct + '%' }} /></span>
         <span className="act-todo-cuenta" title={v.probables ? `${v.done} marcadas por el agente y ${v.probables} probablemente hechas según lo que ha hecho` : undefined}>{todoCount(v)}</span>
       </summary>
