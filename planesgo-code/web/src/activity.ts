@@ -95,3 +95,22 @@ export function silenceLabel(ms: number, m?: Mensaje): string {
   }
   return ` · sin novedades desde hace ${min} min (el modelo está generando o esperando respuesta)`;
 }
+
+// currentAction: lo que hace el agente principal ahora mismo, en pocas palabras (la línea del agente en Actividad):
+// la acción en curso («editando X», «ejecutando make test»), «pensando», «escribiendo la respuesta» o, si lo último
+// ya acabó, «esperando al modelo». Con un minuto o más sin eventos, cuánto (así se ve que sigue vivo).
+export function currentAction(m: Mensaje | undefined, silenceMs = 0): string {
+  const partes = m?.rol === 'assistant' ? m.partes || [] : [];
+  const min = silenceMs >= 60_000 ? ` · ${Math.floor(silenceMs / 60_000)} min sin novedades` : '';
+  const curso = partes.filter(p => p.tipo === 'herramienta' && p.h.estado === 'curso' && !p.h.padre).map(p => (p as { h: Herramienta }).h);
+  if (curso.length) {
+    const h = curso[curso.length - 1];
+    const sub = /^(task|agent|invoke_subagent)$/i.test(h.nombre);
+    const que = sub ? 'esperando al subagente' + (h.resumen ? ` «${cut(h.resumen, 50)}»` : '') : herramientaEnCurso(h);
+    return que + (curso.length > 1 ? ` (y ${curso.length - 1} más)` : '') + min;
+  }
+  const u = partes[partes.length - 1];
+  if (u?.tipo === 'pensamiento' && silenceMs < 30_000) return 'pensando';
+  if (u?.tipo === 'texto' && silenceMs < 30_000) return 'escribiendo la respuesta';
+  return 'esperando al modelo' + min;
+}

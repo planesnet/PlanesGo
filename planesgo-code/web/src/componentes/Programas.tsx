@@ -7,7 +7,7 @@ import { askConfirm } from './Modal';
 // .psf/ejecutar.json de la carpeta de la sesión, los que están en marcha (lanzados aquí o por el agente con «pgo»)
 // y su salida. Cuando un programa dice su URL, pgocode la abre en el navegador integrado. Aquí solo se ejecutan,
 // se paran y se ve su salida: se definen en Propiedades de la sesión → Programas. asSection (Actividad): con su
-// título y solo si hay alguno guardado o en marcha (si no, nada).
+// solo los que están en marcha (los parados, plegados) y nada si no hay ninguno.
 export default function Programas({ proyecto, carpeta, version, alAbrir, asSection }: {
   proyecto: Proyecto; carpeta: string; version: number; alAbrir: (url: string) => void; asSection?: boolean;
 }) {
@@ -57,19 +57,29 @@ export default function Programas({ proyecto, carpeta, version, alAbrir, asSecti
     </div>
   ));
 
-  if (asSection) return <>
-    {(filas.length > 0 || error) && (
-      <section>
-        <h4>Programas del proyecto</h4>
-        <p className="suave pequeno">Fuera del agente y sin tokens: los guardados, los lanzados aquí y los que el agente dejó en marcha.</p>
-        <div className="programas">
-          {error && <p className="error">{error}</p>}
-          {lista}
-        </div>
-      </section>
-    )}
-    <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} asSection />
-  </>;
+  // En Actividad: solo los que están en marcha; los guardados y parados, plegados (para ejecutarlos desde aquí).
+  if (asSection) {
+    const corriendo = lista.filter((_, i) => filas[i].p?.estado === 'curso');
+    const resto = lista.filter((_, i) => filas[i].p?.estado !== 'curso');
+    return <>
+      {(filas.length > 0 || error) && (
+        <section>
+          {corriendo.length > 0 && <h4 title="Fuera del agente y sin tokens: los lanzados aquí y los que el agente dejó en marcha">Programas en marcha <span className="gh-cuenta">{corriendo.length}</span></h4>}
+          <div className="programas">
+            {error && <p className="error">{error}</p>}
+            {corriendo}
+            {resto.length > 0 && (
+              <details className="act-hechas">
+                <summary className="suave pequeno">{resto.length} {resto.length === 1 ? 'programa parado' : 'programas parados'}</summary>
+                {resto}
+              </details>
+            )}
+          </div>
+        </section>
+      )}
+      <Externos proyecto={proyecto} version={version} alAbrir={alAbrir} asSection />
+    </>;
+  }
   return (
     <div className="programas">
       {error && <p className="error">{error}</p>}
@@ -119,13 +129,21 @@ function Externos({ proyecto, version, alAbrir, asSection }: { proyecto: Proyect
       </div>
     </div>
   );
+  // En Actividad, si no hay ninguno de este proyecto: una línea plegada.
+  if (asSection && l.proyecto.length === 0) return (
+    <details className="act-hechas externos" title="Programas escuchando en un puerto que no lanzó pgocode, de tus otras carpetas de trabajo">
+      <summary className="suave pequeno">{l.otros.length} {l.otros.length === 1 ? 'programa' : 'programas'} en marcha en otras carpetas (fuera de pgocode)</summary>
+      {error && <p className="error">{error}</p>}
+      {l.otros.map(fila)}
+    </details>
+  );
   const Caja = asSection ? 'section' : 'div';
   const titulo = <>Otros programas en marcha <span className="suave pequeno">(fuera de pgocode)</span></>;
   return (
     <Caja className="externos">
       {asSection ? <h4>{titulo}</h4> : <h5>{titulo}</h5>}
       {error && <p className="error">{error}</p>}
-      {l.proyecto.length > 0 ? l.proyecto.map(fila) : <p className="suave pequeno">Ninguno de este proyecto.</p>}
+      {l.proyecto.length > 0 ? l.proyecto.map(fila) : asSection ? null : <p className="suave pequeno">Ninguno de este proyecto.</p>}
       {l.otros.length > 0 && (
         <details>
           <summary className="suave pequeno">De otras carpetas de trabajo ({l.otros.length})</summary>
