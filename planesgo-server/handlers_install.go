@@ -31,7 +31,7 @@ import (
 // TestInstallBundleContainsHookAndSource avisa si falta alguno.
 //
 //go:embed scripts/install-claude-hook.sh scripts/install-opencode-plugin.sh scripts/psf-arranque.sh .claude/hooks/planesgo_claude_hook.py .claude/commands/pgo.md .opencode/plugins/planesgo.ts go.mod go.sum
-//go:embed cmd/pgo-mcp/cli.go cmd/pgo-mcp/cliente.go cmd/pgo-mcp/config.go cmd/pgo-mcp/herramientas.go cmd/pgo-mcp/latidos.go cmd/pgo-mcp/mcp.go cmd/pgo-mcp/proceso_unix.go cmd/pgo-mcp/proceso_windows.go cmd/pgo-mcp/tipos.go
+//go:embed cmd/pgo-mcp/cli.go cmd/pgo-mcp/cliente.go cmd/pgo-mcp/config.go cmd/pgo-mcp/herramientas.go cmd/pgo-mcp/latidos.go cmd/pgo-mcp/mcp.go cmd/pgo-mcp/pgocode.go cmd/pgo-mcp/proceso_unix.go cmd/pgo-mcp/proceso_windows.go cmd/pgo-mcp/tipos.go
 var planesgoBundleFS embed.FS
 
 //go:embed all:PSF
