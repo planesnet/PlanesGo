@@ -154,8 +154,8 @@ export default function App() {
           l = S.guarda(usuario.login, { ...s, agente: agentePorDefecto(), modelo: undefined, sesionAgente: undefined });
         }
       }
-      // Sin sesión por defecto: solo la que se pide (o una nueva, si se pide crearla).
-      let s = l.find(x => x.id === quiere) || null;
+      // La que se pide; si no se pide ninguna y el proyecto tiene una sola sesión (sin contar las archivadas), esa.
+      let s = l.find(x => x.id === quiere) || S.onlySession(l, quiere);
       // Nueva sesión pedida desde la lista: se abre su ventana (no se crea hasta confirmar).
       if (quiere === 'nueva' && proveedores.length) {
         setDialogo({ sesion: conDefectos(S.nueva(proyecto.id, '', '', agentePorDefecto()), l), nueva: true });

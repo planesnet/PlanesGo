@@ -132,3 +132,11 @@ export function compacta(m: Mensaje[], recientes: number, max: number): Mensaje[
       : p.tipo === 'pensamiento' ? { ...p, texto: corta(p.texto, max)! } : p),
   });
 }
+
+// onlySession: al entrar en un proyecto sin pedir ninguna sesión, la única que tiene (sin contar las archivadas ni las
+// hijas de un reparto); null si hay varias o ninguna, o si se pide crear una nueva.
+export function onlySession(l: Sesion[], pedida: string): Sesion | null {
+  if (pedida) return null;
+  const vivas = l.filter(s => !s.archivada && !s.madre);
+  return vivas.length === 1 ? vivas[0] : null;
+}

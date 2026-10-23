@@ -1,7 +1,7 @@
 // Pruebas de lo que se guarda de las sesiones: npm test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compacta, ordenaConHijas, sessionOrder, type Sesion } from './sesiones.ts';
+import { compacta, onlySession, ordenaConHijas, sessionOrder, type Sesion } from './sesiones.ts';
 import type { Mensaje } from './api.ts';
 
 test('compacta: recorta las herramientas y el razonamiento de los mensajes antiguos, no los recientes', () => {
@@ -38,4 +38,14 @@ test('sessionOrder: orden estable por creación; recibir título o acabar un tur
   const s = (id: string, creada: number, ultima: number): Sesion => ({ id, nombre: '', proyecto: 1, carpeta: '/c', rama: 'main', agente: 'claude-code', creada, ultima });
   const l = [s('vieja', 1, 99), s('nueva', 2, 3)].sort(sessionOrder);
   assert.deepEqual(l.map(x => x.id), ['nueva', 'vieja']);
+});
+
+test('al entrar en un proyecto con una sola sesión, se elige sola', () => {
+  const a = { id: 'a', proyecto: 1 } as Sesion, b = { id: 'b', proyecto: 1 } as Sesion;
+  assert.equal(onlySession([a], ''), a);
+  assert.equal(onlySession([a, b], ''), null);
+  assert.equal(onlySession([a, { ...b, archivada: true }], ''), a, 'las archivadas no cuentan');
+  assert.equal(onlySession([a, { ...b, madre: 'a' }], ''), a, 'las hijas de un reparto no cuentan');
+  assert.equal(onlySession([a], 'nueva'), null, 'si se pide crear una, no');
+  assert.equal(onlySession([], ''), null);
 });
