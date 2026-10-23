@@ -1,204 +1,126 @@
 package servidor
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
-	"sync"
 	"testing"
+	"time"
 
-	"planesgo-code/internal/gworkspace"
+	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/sesiones"
 )
 
-// El agente busca y lee en Drive con el token de su proyecto («pgo drive …»); sin token, nada. Solo GET.
-func TestPgoDrive(t *testing.T) {
-	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/tokeninfo":
-			json.NewEncoder(w).Encode(map[string]string{"scope": gworkspace.ScopeDriveReadonly, "email": "luis@planesnet.com", "expires_in": "3600"})
-		case r.URL.Path == "/drive/v3/files" && r.Header.Get("Authorization") == "Bearer tok":
-			w.Write([]byte(`{"files":[{"id":"DOC1234567890","name":"Informe","mimeType":"application/vnd.google-apps.document","modifiedTime":"2026-10-01T00:00:00Z"}]}`))
-		default:
-			w.WriteHeader(404)
-		}
-	}))
-	defer g.Close()
+// El agente lee Google con «pgo drive …» y «pgo gmail …»: el backend pasa cada página a Electron por el canal de la
+// app de escritorio (que solo usa Electron, con su secreto) y responde lo que este ha leído.
+func TestGoogleViaDesktop(t *testing.T) {
 	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(),
-		Google: &gworkspace.Manager{Endpoints: gworkspace.Endpoints{TokenInfo: g.URL + "/tokeninfo", Drive: g.URL + "/drive/v3", Sheets: g.URL},
-			HTTP: g.Client(), Fetch: func(context.Context, string) (string, error) { return "tok", nil }}}
+		Google: gbrowser.New(gbrowser.NewBridge())}
 	h := s.Handler()
-	pide := func(metodo, ruta, token string) (int, string) {
-		r := httptest.NewRequest(metodo, "http://127.0.0.1:7801"+ruta, nil)
+	pide := func(metodo, ruta, cuerpo, agente, cookie string) (int, string) {
+		r := httptest.NewRequest(metodo, "http://127.0.0.1:7801"+ruta, strings.NewReader(cuerpo))
 		r.Header.Set("X-PGO", "1")
-		if token != "" {
-			r.Header.Set("X-PGO-Agente", token)
+		if agente != "" {
+			r.Header.Set("X-PGO-Agente", agente)
+		}
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: cookieEscritorio, Value: cookie})
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w.Code, w.Body.String()
 	}
-	if c, _ := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", ""); c != http.StatusForbidden {
-		t.Fatalf("sin token: %d", c)
-	}
-	if c, _ := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", s.tokenProyecto(8)); c != http.StatusForbidden {
-		t.Fatalf("token de otro proyecto: %d", c)
-	}
-	c, b := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", s.tokenProyecto(7))
-	if c != http.StatusOK || !strings.Contains(b, `[doc] Informe · 2026-10-01 · DOC1234567890`) {
+	tok := s.tokenProyecto(7)
+	// Sin app de escritorio (modo -navegador o Electron cerrado): lo dice.
+	if c, b := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", "", tok, ""); c != http.StatusServiceUnavailable || !strings.Contains(b, "aplicación de escritorio") {
 		t.Fatalf("%d %s", c, b)
 	}
-	if c, b := pide("GET", "/api/pgo/drive-leer?ref=NOEXISTE12345&proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound || !strings.Contains(b, "no existe") {
+	// El canal solo es para Electron: ni el agente ni nadie sin el secreto.
+	if c, _ := pide("GET", "/api/escritorio/google/trabajo", "", tok, ""); c != http.StatusForbidden {
+		t.Fatalf("agente: %d", c)
+	}
+	if c, _ := pide("GET", "/api/escritorio/google/trabajo", "", "", "otro"); c != http.StatusForbidden {
+		t.Fatalf("otro secreto: %d", c)
+	}
+	if c, _ := pide("POST", "/api/escritorio/google/resultado", `{"id":"x"}`, "", "otro"); c != http.StatusForbidden {
+		t.Fatalf("otro secreto: %d", c)
+	}
+	// Electron: recoge cada trabajo y responde (una búsqueda de Drive y, luego, Google pide iniciar sesión).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	trabajos := make(chan gbrowser.Job, 4)
+	go func() {
+		for ctx.Err() == nil {
+			c, b := pide("GET", "/api/escritorio/google/trabajo", "", "", "electron")
+			if c == http.StatusNoContent {
+				continue
+			}
+			var j gbrowser.Job
+			if c != http.StatusOK || json.Unmarshal([]byte(b), &j) != nil {
+				t.Errorf("trabajo: %d %s", c, b)
+				return
+			}
+			trabajos <- j
+			res := gbrowser.Result{ID: j.ID, Status: 200, Items: []gbrowser.Item{{ID: "1DocIdXyzw", Lines: []string{"Informe", "12 oct 2026"}, Href: "https://docs.google.com/document/d/1DocIdXyzw/edit"}}}
+			if j.Mode == gbrowser.ModeText {
+				res = gbrowser.Result{ID: j.ID, Login: true, URL: "https://accounts.google.com/ServiceLogin"}
+			}
+			cuerpo, _ := json.Marshal(res)
+			if c, b := pide("POST", "/api/escritorio/google/resultado", string(cuerpo), "", "electron"); c != http.StatusOK || !strings.Contains(b, `"esperado":true`) {
+				t.Errorf("resultado: %d %s", c, b)
+			}
+		}
+	}()
+	for !s.Google.Bridge.Available() {
+		time.Sleep(time.Millisecond)
+	}
+	c, b := pide("GET", "/api/pgo/drive-buscar?q=informe&proyecto=7", "", tok, "")
+	if c != http.StatusOK || !strings.Contains(b, `[doc] Informe · 12 oct 2026 · 1DocIdXyzw`) {
 		t.Fatalf("%d %s", c, b)
 	}
-	if c, _ := pide("GET", "/api/pgo/drive-borrar?proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound {
+	if j := <-trabajos; j.Project != 7 || j.Mode != gbrowser.ModeDrive || j.URL != "https://drive.google.com/drive/search?q=informe" {
+		t.Fatalf("%+v", j)
+	}
+	// Sin sesión de Google: lo dice y abre accounts.google.com en el panel Web del proyecto (una vez).
+	ev := s.Eventos.alta()
+	defer s.Eventos.baja(ev)
+	for i := 0; i < 2; i++ {
+		c, b = pide("GET", "/api/pgo/drive-leer?ref="+"https://docs.google.com/document/d/1DocIdXyzw/edit&proyecto=7", "", tok, "")
+		if c != http.StatusServiceUnavailable || !strings.Contains(b, "inicia sesión en Google") {
+			t.Fatalf("%d %s", c, b)
+		}
+		<-trabajos
+	}
+	select {
+	case e := <-ev:
+		if !strings.Contains(string(e), `"tipo":"abrir"`) || !strings.Contains(string(e), "accounts.google.com") || !strings.Contains(string(e), `"proyecto":7`) {
+			t.Fatalf("%s", e)
+		}
+	default:
+		t.Fatal("no se abre el inicio de sesión")
+	}
+	select {
+	case e := <-ev:
+		t.Fatalf("dos veces seguidas: %s", e)
+	default:
+	}
+	if c, _ := pide("GET", "/api/pgo/gmail-borrar?proyecto=7", "", tok, ""); c != http.StatusNotFound {
 		t.Fatalf("orden desconocida: %d", c)
 	}
-	// La interfaz sin sesión: nada.
-	if c, _ := pide("GET", "/api/google", ""); c == http.StatusOK {
-		t.Fatal("estado sin sesión")
+	if c, _ := pide("GET", "/api/pgo/drive-buscar?q=x&proyecto=7", "", s.tokenProyecto(8), ""); c != http.StatusForbidden {
+		t.Fatalf("token de otro proyecto: %d", c)
 	}
 }
 
-// El agente busca y lee en Gmail con el token de su proyecto («pgo gmail …»); solo GET; el registro dice cuántos
-// correos y cuánto ha tardado, nunca la consulta ni el contenido.
-func TestPgoGmail(t *testing.T) {
-	var mu sync.Mutex
-	scope := gworkspace.ScopeDriveReadonly + " " + gworkspace.ScopeGmailReadonly
-	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.URL.Path != "/tokeninfo" {
-			t.Errorf("petición que no es de lectura: %s %s", r.Method, r.URL.Path)
-		}
-		switch {
-		case r.URL.Path == "/tokeninfo":
-			mu.Lock()
-			sc := scope
-			mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]string{"scope": sc, "email": "luis@planesnet.com", "expires_in": "3600"})
-		case r.URL.Path == "/gmail/v1/users/me/messages" && r.URL.Query().Get("q") == "from:ana":
-			w.Write([]byte(`{"messages":[{"id":"18f0000000000001","threadId":"18f0000000000001"}]}`))
-		case r.URL.Path == "/gmail/v1/users/me/messages/18f0000000000001":
-			w.Write([]byte(`{"id":"18f0000000000001","threadId":"18f0000000000001","snippet":"secreto del correo","internalDate":"1760961780000",` +
-				`"payload":{"mimeType":"text/plain","headers":[{"name":"From","value":"Ana <ana@x.es>"},{"name":"Subject","value":"Asunto confidencial"}],"body":{"data":"Q3VlcnBvIGNvbmZpZGVuY2lhbA=="}}}`))
-		default:
-			w.WriteHeader(404)
-			w.Write([]byte(`{"error":{"code":404,"message":"Not found"}}`))
-		}
-	}))
-	defer g.Close()
-	s := &Servidor{Puerto: "7801", TokenEscritorio: "electron", TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen(),
-		Google: &gworkspace.Manager{Endpoints: gworkspace.Endpoints{TokenInfo: g.URL + "/tokeninfo", Gmail: g.URL + "/gmail/v1"},
-			HTTP: g.Client(), Fetch: func(context.Context, string) (string, error) { return "tok", nil }}}
-	h := s.Handler()
-	var logs bytes.Buffer
-	log.SetOutput(&logs)
-	defer log.SetOutput(os.Stderr)
-	pide := func(ruta, token string) (int, string) {
-		r := httptest.NewRequest("GET", "http://127.0.0.1:7801"+ruta, nil)
-		r.Header.Set("X-PGO", "1")
-		if token != "" {
-			r.Header.Set("X-PGO-Agente", token)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code, w.Body.String()
-	}
-	if c, _ := pide("/api/pgo/gmail-buscar?q=from%3Aana&proyecto=7", ""); c != http.StatusForbidden {
-		t.Fatalf("sin token: %d", c)
-	}
-	c, b := pide("/api/pgo/gmail-buscar?q=from%3Aana&proyecto=7", s.tokenProyecto(7))
-	if c != http.StatusOK || !strings.Contains(b, " · Asunto confidencial · 18f0000000000001") {
-		t.Fatalf("%d %s", c, b)
-	}
-	c, b = pide("/api/pgo/gmail-leer?ref=18f0000000000001&mensaje=1&proyecto=7", s.tokenProyecto(7))
-	if c != http.StatusOK || !strings.Contains(b, "Cuerpo confidencial") {
-		t.Fatalf("%d %s", c, b)
-	}
-	if c, b := pide("/api/pgo/gmail-leer?ref=18f0000000000999&proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound || !strings.Contains(b, "no existe ese correo") {
-		t.Fatalf("%d %s", c, b)
-	}
-	for _, o := range []string{"enviar", "borrar", "marcar"} {
-		if c, _ := pide("/api/pgo/gmail-"+o+"?proyecto=7", s.tokenProyecto(7)); c != http.StatusNotFound {
-			t.Fatalf("%s: %d", o, c)
-		}
-	}
-	l := logs.String()
-	if !strings.Contains(l, "gmail: buscar · 1 correos") || !strings.Contains(l, "gmail: leer · 1 correos") {
-		t.Errorf("registro: %s", l)
-	}
-	for _, secret := range []string{"ana", "confidencial", "secreto", "18f0000000000001", "from"} {
-		if strings.Contains(strings.ToLower(l), secret) {
-			t.Errorf("el registro lleva %q: %s", secret, l)
-		}
-	}
-	// Sin el permiso de Gmail: 503 con qué hacer.
-	mu.Lock()
-	scope = gworkspace.ScopeDriveReadonly
-	mu.Unlock()
-	s.Google.Fetch = func(context.Context, string) (string, error) { return "tok2", nil }
-	if st := s.Google.Status(context.Background(), "luis", true); !st.Connected || st.Gmail || !st.Drive {
-		t.Fatalf("%+v", st)
-	}
-	if c, b := pide("/api/pgo/gmail-listar?proyecto=7", s.tokenProyecto(7)); c != http.StatusServiceUnavailable || !strings.Contains(b, "Gmail no está autorizado") {
-		t.Fatalf("%d %s", c, b)
-	}
-}
-
-// La sección de Propiedades: cargar el fichero del cliente (sin devolverlo), conectar (la URL de Google) y
-// desconectar. Todo con sesión y por usuario.
-func TestGoogleOAuthEndpoints(t *testing.T) {
-	dir := t.TempDir()
-	s := &Servidor{Puerto: "7801", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(),
-		Google: &gworkspace.Manager{Endpoints: gworkspace.Endpoints{Auth: "https://accounts.example/auth"}, Dir: dir}}
-	h := s.Handler()
-	ses, _ := s.Sesiones.Crea(1, "Luis", "luis@planesnet.com", "x")
-	pide := func(metodo, ruta, cuerpo string, conSesion bool) (int, string) {
-		r := httptest.NewRequest(metodo, ruta, strings.NewReader(cuerpo))
-		r.Host = "127.0.0.1:7801"
-		r.Header.Set("X-PGO", "1")
-		if conSesion {
-			r.AddCookie(&http.Cookie{Name: cookie, Value: ses.Token})
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code, w.Body.String()
-	}
-	const fichero = `{"installed":{"client_id":"1-a.apps.googleusercontent.com","client_secret":"GOCSPX-xyz","project_id":"planes-dev"}}`
-	cuerpo, _ := json.Marshal(map[string]string{"contenido": fichero})
-	if c, _ := pide("POST", "/api/google/cliente", string(cuerpo), false); c != http.StatusUnauthorized {
-		t.Fatalf("sin sesión: %d", c)
-	}
-	if c, b := pide("POST", "/api/google/conectar", "{}", true); c != http.StatusConflict || !strings.Contains(b, "falta registrar") {
-		t.Fatalf("sin cliente: %d %s", c, b)
-	}
-	if c, b := pide("POST", "/api/google/cliente", `{"contenido":"{\"web\":{}}"}`, true); c != http.StatusBadRequest || !strings.Contains(b, "escritorio") {
-		t.Fatalf("cliente web: %d %s", c, b)
-	}
-	if c, b := pide("POST", "/api/google/cliente", string(cuerpo), true); c != http.StatusOK || strings.Contains(b, "GOCSPX") || !strings.Contains(b, "planes-dev") {
-		t.Fatalf("%d %s", c, b)
-	}
-	c, b := pide("GET", "/api/google", "", true)
-	if c != http.StatusOK || !strings.Contains(b, `"cliente":true`) || strings.Contains(b, "GOCSPX") || strings.Contains(b, `"conectado":true`) {
-		t.Fatalf("%d %s", c, b)
-	}
-	c, b = pide("POST", "/api/google/conectar", "{}", true)
-	var r struct{ URL string }
-	json.Unmarshal([]byte(b), &r)
-	if c != http.StatusOK || !strings.HasPrefix(r.URL, "https://accounts.example/auth?") || !strings.Contains(r.URL, "login_hint=luis%40planesnet.com") || strings.Contains(r.URL, "GOCSPX") {
-		t.Fatalf("%d %s", c, b)
-	}
-	if c, b := pide("GET", "/api/google", "", true); !strings.Contains(b, `"en_curso":true`) {
-		t.Fatalf("%d %s", c, b)
-	}
-	if c, b := pide("POST", "/api/google/desconectar", "{}", true); c != http.StatusOK || strings.Contains(b, "aviso") {
-		t.Fatalf("%d %s", c, b)
-	}
-	if c, b := pide("GET", "/api/google", "", true); strings.Contains(b, `"en_curso":true`) {
-		t.Fatalf("tras desconectar: %d %s", c, b)
+// Con -navegador (sin Electron), el canal tampoco se abre a quien no traiga el secreto.
+func TestGoogleChannelBrowserMode(t *testing.T) {
+	s := &Servidor{Puerto: "7801", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(), Google: gbrowser.New(gbrowser.NewBridge())}
+	r := httptest.NewRequest("GET", "http://127.0.0.1:7801/api/escritorio/google/trabajo", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("%d", w.Code)
 	}
 }

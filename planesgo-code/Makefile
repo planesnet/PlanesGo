@@ -18,6 +18,7 @@ test:
 	go test -race ./...
 	cd studio-tv && go test -race ./...
 	cd web && npm test
+	node --test electron/*.test.js
 
 # ---- Control de calidad: nada se publica sin pasar «make verifica» ----
 
@@ -33,9 +34,10 @@ GOFMT_DIRS := cmd internal web/embed.go studio-tv
 formato:
 	@f=$$(gofmt -l $(GOFMT_DIRS)); [ -z "$$f" ] || { echo "Ficheros sin gofmt (arréglalo con: gofmt -w $(GOFMT_DIRS)):"; echo "$$f"; exit 1; }
 
-# Tipos (tsc) y pruebas de la interfaz, sin compilarla
+# Tipos (tsc) y pruebas de la interfaz (sin compilarla) y de la parte de Electron que se puede probar sin él
 web-verifica:
 	cd web && npx tsc --noEmit -p . && npm test
+	node --test electron/*.test.js
 
 # Prueba de humo de punta a punta (cmd/e2e): compila y arranca odoo-prueba y pgocode en puertos libres y con
 # datos temporales, recorre la API y lo para todo al acabar. Con más detalle: go run ./cmd/e2e -v
@@ -80,7 +82,7 @@ ELECTRON_VER := $(shell sed -n 's/.*"electron": *"\([0-9.]*\)".*/\1/p' electron/
 paquete: web
 	rm -rf $(DIST)/paquete && mkdir -p $(DIST)/paquete/icono
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o $(DIST)/paquete/pgocode-backend ./cmd/pgocode
-	cp electron/main.js electron/preload.js electron/package.json VERSION $(DIST)/paquete/
+	cp electron/main.js electron/preload.js electron/googleReader.js electron/package.json VERSION $(DIST)/paquete/
 	cp electron/icono/pgocode*.png electron/icono/pgocode*.svg $(DIST)/paquete/icono/
 	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C $(DIST)/paquete -cf - . | gzip -9n > $(DIST)/pgocode-linux-amd64.tar.gz
 	@sha=$$(sha256sum $(DIST)/pgocode-linux-amd64.tar.gz | cut -d' ' -f1); bytes=$$(stat -c %s $(DIST)/pgocode-linux-amd64.tar.gz); \

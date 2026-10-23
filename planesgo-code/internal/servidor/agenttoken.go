@@ -91,7 +91,7 @@ var agentEndpoints = map[string]string{
 	"procesos": http.MethodGet,
 	"salida":   http.MethodGet,
 	"abrir":    http.MethodPost,
-	// Google Workspace en solo lectura (internal/gworkspace).
+	// Google en solo lectura, a través del navegador integrado (internal/gbrowser).
 	"drive-buscar": http.MethodGet,
 	"drive-listar": http.MethodGet,
 	"drive-leer":   http.MethodGet,

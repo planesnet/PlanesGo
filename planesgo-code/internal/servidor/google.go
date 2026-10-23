@@ -1,107 +1,85 @@
 package servidor
 
 import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
+	"sync"
 	"time"
 
-	"planesgo-code/internal/gworkspace"
-	"planesgo-code/internal/sesiones"
+	"planesgo-code/internal/gbrowser"
 )
 
-// Google Workspace (Drive, Docs, Sheets y Gmail), solo lectura, con la cuenta de Google que cada usuario de pgocode conecta
-// («Conectar con Google»: OAuth de escritorio, internal/gworkspace). La interfaz ve el estado, conecta y desconecta;
-// el agente busca, lista y lee con «pgo drive …» y «pgo gmail …» (con la cuenta del usuario que usa la interfaz).
+// Google (Drive, Docs, Sheets, Slides y Gmail), solo lectura, a través del navegador integrado de pgocode: el agente
+// pide con «pgo drive …» y «pgo gmail …»; el backend le pasa cada página a la app de escritorio (Electron), que la
+// carga con la sesión de Google que el usuario haya abierto en el panel Web y devuelve su texto (internal/gbrowser).
 
-// GET /api/google[?probar=1]: el estado del acceso del usuario (cuenta, ámbitos, si falta el cliente…).
-func (s *Servidor) googleEstado(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
-		return
-	}
-	jsonOK(w, s.Google.Status(r.Context(), ses.Login, r.URL.Query().Get("probar") == "1"))
+// esElectron: la petición viene del proceso principal de la app de escritorio (con su secreto). Con -navegador
+// tampoco vale otra cosa: el canal de Google es solo para Electron.
+func (s *Servidor) esElectron(r *http.Request) bool {
+	c, err := r.Cookie(cookieEscritorio)
+	return s.TokenEscritorio != "" && err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.TokenEscritorio)) == 1
 }
 
-// POST /api/google/conectar: empieza la conexión; responde la URL de Google que abre la interfaz.
-func (s *Servidor) googleConecta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
+// GET /api/escritorio/google/trabajo: Electron recoge la siguiente página que cargar (espera hasta 25 s; 204 si no hay).
+func (s *Servidor) googleTrabajo(w http.ResponseWriter, r *http.Request) {
+	if !s.esElectron(r) || s.Google == nil {
+		jsonError(w, http.StatusForbidden, "solo para la app de escritorio")
 		return
 	}
-	u, err := s.Google.StartAuth(r.Context(), ses.Login)
-	if err != nil {
-		jsonError(w, http.StatusConflict, err.Error())
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	j, ok := s.Google.Bridge.Next(ctx)
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	jsonOK(w, map[string]string{"url": u})
+	jsonOK(w, j)
 }
 
-// POST /api/google/desconectar: revoca el permiso en Google y borra la conexión del usuario.
-func (s *Servidor) googleDesconecta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
+// maxResultadoGoogle: lo que puede ocupar un resultado (el texto ya viene recortado).
+const maxResultadoGoogle = 16 << 20
+
+// POST /api/escritorio/google/resultado: Electron entrega lo leído.
+func (s *Servidor) googleResultado(w http.ResponseWriter, r *http.Request) {
+	if !s.esElectron(r) || s.Google == nil {
+		jsonError(w, http.StatusForbidden, "solo para la app de escritorio")
 		return
 	}
-	res := map[string]string{}
-	if err := s.Google.Disconnect(r.Context(), ses.Login); err != nil {
-		res["aviso"] = err.Error()
+	var res gbrowser.Result
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxResultadoGoogle)).Decode(&res); err != nil {
+		jsonError(w, http.StatusBadRequest, "resultado no válido")
+		return
 	}
-	log.Printf("google: %s desconecta su cuenta", ses.Login)
-	jsonOK(w, res)
+	jsonOK(w, map[string]bool{"esperado": s.Google.Bridge.Deliver(res)})
 }
 
-// POST /api/google/cliente {contenido}: guarda el fichero del cliente OAuth (el JSON de la consola de Google). No
-// se devuelve ni se registra nada de su contenido.
-func (s *Servidor) googleCliente(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
-		return
-	}
-	var p struct {
-		Contenido string `json:"contenido"`
-	}
-	if err := lee(r, &p); err != nil {
-		errorLectura(w, err)
-		return
-	}
-	c, err := s.Google.SaveClientFile([]byte(strings.TrimSpace(p.Contenido)))
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	log.Printf("google: %s carga el cliente OAuth (proyecto %q)", ses.Login, c.ProjectID)
-	jsonOK(w, map[string]string{"proyecto": c.ProjectID})
-}
-
-// GET /api/google/{orden}: buscar, listar o leer (desde la interfaz, con la cuenta del usuario).
-func (s *Servidor) googleDrive(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	s.driveOrden(w, r.WithContext(gworkspace.WithUser(r.Context(), ses.Login)), r.PathValue("orden"))
-}
-
-// driveOrden: buscar | listar | leer, con los parámetros de la URL. Responde el texto compacto (el que ve el
-// agente) y, en búsquedas y listados, los ficheros.
+// driveOrden: buscar | listar | leer (pgo drive), con los parámetros de la URL. Responde el texto compacto (el que
+// ve el agente) y, en búsquedas y listados, los ficheros.
 func (s *Servidor) driveOrden(w http.ResponseWriter, r *http.Request, orden string) {
 	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
+		jsonError(w, http.StatusServiceUnavailable, gbrowser.ErrNoDesktop.Error())
 		return
 	}
 	q := r.URL.Query()
+	proyecto, _ := strconv.Atoi(q.Get("proyecto"))
 	max, _ := strconv.Atoi(q.Get("max"))
-	var fs []gworkspace.File
+	var fs []gbrowser.File
 	var err error
 	switch orden {
 	case "buscar":
-		fs, err = s.Google.Search(r.Context(), gworkspace.SearchParams{Text: q.Get("q"), Folder: q.Get("carpeta"), Type: q.Get("tipo"), Max: max})
+		fs, err = s.Google.Search(r.Context(), proyecto, gbrowser.SearchParams{Text: q.Get("q"), Folder: q.Get("carpeta"), Type: q.Get("tipo"), Max: max})
 	case "listar":
-		fs, err = s.Google.List(r.Context(), q.Get("carpeta"), max)
+		fs, err = s.Google.List(r.Context(), proyecto, q.Get("carpeta"), max)
 	case "leer":
-		var c gworkspace.Content
-		c, err = s.Google.Read(r.Context(), gworkspace.ReadParams{Ref: q.Get("ref"), Sheet: q.Get("hoja"), Range: q.Get("rango"), Max: max})
+		var c gbrowser.Content
+		c, err = s.Google.Read(r.Context(), proyecto, gbrowser.ReadParams{Ref: q.Get("ref"), Sheet: q.Get("hoja"), Range: q.Get("rango"), Max: max})
 		if err == nil {
-			jsonOK(w, map[string]any{"texto": gworkspace.FormatContent(c), "recortado": c.Truncated})
+			jsonOK(w, map[string]any{"texto": gbrowser.FormatContent(c), "recortado": c.Truncated})
 			return
 		}
 	default:
@@ -109,26 +87,21 @@ func (s *Servidor) driveOrden(w http.ResponseWriter, r *http.Request, orden stri
 		return
 	}
 	if err != nil {
-		jsonError(w, driveStatus(err), err.Error())
+		s.googleFalla(w, proyecto, err)
 		return
 	}
-	jsonOK(w, map[string]any{"texto": gworkspace.FormatFiles(fs), "ficheros": fs})
+	jsonOK(w, map[string]any{"texto": gbrowser.FormatFiles(fs), "ficheros": fs})
 }
 
-// GET /api/google/gmail/{orden}: buscar, listar o leer correos (desde la interfaz, con la cuenta del usuario).
-func (s *Servidor) googleGmail(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	s.gmailOrden(w, r.WithContext(gworkspace.WithUser(r.Context(), ses.Login)), r.PathValue("orden"))
-}
-
-// gmailOrden: buscar (q) | listar (lo reciente de la bandeja de entrada) | leer (ref; mensaje=1: solo ese mensaje),
-// solo lectura. Responde el texto compacto (el que ve el agente) y los datos. En el registro, solo la orden, cuántos
-// correos y cuánto ha tardado: nunca la consulta, los identificadores ni el contenido.
+// gmailOrden: buscar (q) | listar (lo reciente de la bandeja de entrada) | leer (ref: un hilo), solo lectura. En el
+// registro, solo la orden, cuántos correos y cuánto ha tardado: nunca la consulta, los identificadores ni el contenido.
 func (s *Servidor) gmailOrden(w http.ResponseWriter, r *http.Request, orden string) {
 	if s.Google == nil {
-		jsonError(w, http.StatusServiceUnavailable, "Google Workspace no está disponible")
+		jsonError(w, http.StatusServiceUnavailable, gbrowser.ErrNoDesktop.Error())
 		return
 	}
 	q := r.URL.Query()
+	proyecto, _ := strconv.Atoi(q.Get("proyecto"))
 	max, _ := strconv.Atoi(q.Get("max"))
 	t0 := time.Now()
 	var res map[string]any
@@ -136,40 +109,68 @@ func (s *Servidor) gmailOrden(w http.ResponseWriter, r *http.Request, orden stri
 	var err error
 	switch orden {
 	case "buscar", "listar":
-		var l gworkspace.MailList
+		var l gbrowser.MailList
 		if orden == "buscar" {
-			l, err = s.Google.SearchMail(r.Context(), q.Get("q"), max)
+			l, err = s.Google.SearchMail(r.Context(), proyecto, q.Get("q"), max)
 		} else {
-			l, err = s.Google.RecentMail(r.Context(), max)
+			l, err = s.Google.RecentMail(r.Context(), proyecto, max)
 		}
-		n, res = len(l.Mails), map[string]any{"texto": gworkspace.FormatMails(l), "correos": l.Mails, "hay_mas": l.More}
+		n, res = len(l.Mails), map[string]any{"texto": gbrowser.FormatMails(l), "correos": l.Mails, "hay_mas": l.More}
 	case "leer":
-		var c gworkspace.MailContent
-		c, err = s.Google.ReadMail(r.Context(), gworkspace.MailReadParams{Ref: q.Get("ref"), MessageOnly: q.Get("mensaje") == "1", Max: max})
-		n, res = len(c.Messages), map[string]any{"texto": gworkspace.FormatMailContent(c), "recortado": c.Truncated}
+		var c gbrowser.MailContent
+		c, err = s.Google.ReadMail(r.Context(), proyecto, q.Get("ref"), max)
+		n, res = len(c.Messages), map[string]any{"texto": gbrowser.FormatMailContent(c), "recortado": c.Truncated}
 	default:
 		jsonError(w, http.StatusNotFound, "orden desconocida")
 		return
 	}
 	if err != nil {
 		log.Printf("gmail: %s falla tras %s", orden, time.Since(t0).Round(time.Millisecond))
-		jsonError(w, driveStatus(err), err.Error())
+		s.googleFalla(w, proyecto, err)
 		return
 	}
 	log.Printf("gmail: %s · %d correos · %s", orden, n, time.Since(t0).Round(time.Millisecond))
 	jsonOK(w, res)
 }
 
-// driveStatus: el código HTTP de cada error (Drive y Gmail).
-func driveStatus(err error) int {
-	var ae *gworkspace.APIError
+// googleFalla responde el error; si falta la sesión de Google, abre accounts.google.com en el panel Web del
+// proyecto (como mucho cada 2 minutos) para que el usuario la inicie.
+func (s *Servidor) googleFalla(w http.ResponseWriter, proyecto int, err error) {
+	if errors.Is(err, gbrowser.ErrLogin) && loginGoogle.toca(proyecto) {
+		s.Eventos.Emite(map[string]any{"tipo": "abrir", "url": "https://accounts.google.com/", "proyecto": proyecto})
+	}
+	jsonError(w, googleStatus(err), err.Error())
+}
+
+// loginGoogle: cuándo se abrió la página de inicio de sesión de Google en cada proyecto.
+var loginGoogle = &avisoLogin{ultimo: map[int]time.Time{}}
+
+type avisoLogin struct {
+	mu     sync.Mutex
+	ultimo map[int]time.Time
+}
+
+func (a *avisoLogin) toca(proyecto int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Since(a.ultimo[proyecto]) < 2*time.Minute {
+		return false
+	}
+	a.ultimo[proyecto] = time.Now()
+	return true
+}
+
+// googleStatus: el código HTTP de cada error (Drive y Gmail).
+func googleStatus(err error) int {
 	switch {
-	case errors.Is(err, gworkspace.ErrNoAccess), errors.Is(err, gworkspace.ErrNoClient), errors.Is(err, gworkspace.ErrNoGmail):
+	case errors.Is(err, gbrowser.ErrNoDesktop), errors.Is(err, gbrowser.ErrLogin):
 		return http.StatusServiceUnavailable
-	case errors.Is(err, gworkspace.ErrNotFound), errors.Is(err, gworkspace.ErrMailNotFound):
+	case errors.Is(err, gbrowser.ErrNoAccess):
+		return http.StatusForbidden
+	case errors.Is(err, gbrowser.ErrNotFound), errors.Is(err, gbrowser.ErrMailNotFound):
 		return http.StatusNotFound
-	case errors.As(err, &ae):
-		return http.StatusBadGateway
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout
 	}
 	return http.StatusBadRequest
 }

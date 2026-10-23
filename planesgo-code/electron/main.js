@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const googleReader = require('./googleReader');
 
 const ADDR = process.env.PGO_ADDR || '127.0.0.1:7801';
 const URL_ARNES = 'http://' + ADDR;
@@ -25,6 +26,10 @@ if (process.platform === 'linux') {
   process.env.QT_IM_MODULE = '';
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
 }
+// Agente de usuario sin «Electron/…» ni «pgocode/…» (el de Chrome, que es lo que es): Google no deja iniciar sesión
+// en navegadores que se anuncian como integrados, y el panel Web es donde el usuario abre su sesión de Google (con
+// la que pgocode lee Drive, Docs y Gmail: googleReader.js).
+app.userAgentFallback = app.userAgentFallback.replace(/\s(?:pgocode|Electron)\/\S+/g, '');
 // Secreto de esta app: el backend solo atiende a quien lo traiga (cookie de esta ventana), así que Planes Go Code
 // no se puede usar desde un navegador normal salvo que se arranque con -navegador.
 const TOKEN_ESCRITORIO = crypto.randomBytes(32).toString('hex');
@@ -171,6 +176,8 @@ function ventana() {
   w.on('maximize', guardaVentana);
   w.on('unmaximize', guardaVentana);
   w.on('close', () => { guardaVentana(); console.error('[pgocode] ventana cerrada'); });
+  // Las ventanas ocultas de lectura de Google no mantienen viva la app.
+  w.on('closed', () => app.quit());
   // Menú contextual (clic derecho): copiar lo seleccionado, cortar y pegar en los campos, copiar enlaces.
   w.webContents.on('context-menu', (_, p) => menuContextual(p, w));
   w.webContents.on('did-fail-load', (_, c, d) => console.error('[pgocode] no carga la interfaz:', c, d));
@@ -222,6 +229,11 @@ app.whenReady().then(async () => {
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
     await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: TOKEN_ESCRITORIO, httpOnly: true, sameSite: 'strict' });
     ventana();
+    // Lecturas de Google que pide el backend (pgo drive, pgo gmail), con la sesión del panel Web.
+    const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),
+      testOrigin: process.env.PGO_GOOGLE_PRUEBA || '', log: m => console.error('[pgocode] ' + m) });
+    const paraGoogle = googleReader.startPolling({ base: URL_ARNES, token: TOKEN_ESCRITORIO, reader, log: m => console.error('[pgocode] ' + m) });
+    app.on('before-quit', () => { paraGoogle(); reader.cleanup(); });
   } catch (e) {
     console.error(e.message);
     dialog.showErrorBox('Planes Go Code', e.message);
