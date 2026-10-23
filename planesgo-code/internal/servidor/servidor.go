@@ -39,6 +39,7 @@ import (
 	"planesgo-code/internal/gworkspace"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
+	"planesgo-code/internal/memory"
 	"planesgo-code/internal/odoo"
 	"planesgo-code/internal/proceso"
 	"planesgo-code/internal/procesos"
@@ -130,6 +131,8 @@ type Servidor struct {
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
 	// no se atiende ninguna petición.
 	PermitirNavegador bool
+	// memPending: las sesiones del agente que reciben otra vez la memoria del proyecto (memory.go).
+	memPending memoryPending
 
 	mu      sync.Mutex
 	nombres map[int]string // nombre de cada proyecto comprobado
@@ -189,6 +192,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/chat/vigencia", s.conSesion(s.vigencia))
 	mux.HandleFunc("POST /api/chat/vigencia", s.conSesion(s.vigenciaChat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
+	mux.HandleFunc("GET /api/memoria", s.conSesion(s.memoriaLee))
+	mux.HandleFunc("POST /api/memoria", s.conSesion(s.memoriaGuarda))
 	mux.HandleFunc("GET /api/evidencia", s.conSesion(s.evidencia))
 	mux.HandleFunc("GET /api/evidencias", s.conSesion(s.evidencias))
 	mux.HandleFunc("GET /api/planes", s.conSesion(s.planesLista))
@@ -690,6 +695,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// Podar: poda automática del historial del agente al empezar el turno (ver llm.Peticion.Prune). Sin el
 		// campo, activada.
 		Podar *bool `json:"podar"`
+		// TextoUsuario: lo que ha escrito el usuario, sin lo que añade pgocode (memoria de trabajo, notas): de ahí
+		// salen las frases de la memoria del proyecto. Sin él, el último mensaje.
+		TextoUsuario string `json:"texto_usuario"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -758,6 +766,11 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)
 	autorizadas := carpetasAutorizadas(p.Autorizadas)
+	// La memoria del proyecto, la del repositorio de la carpeta (antes de pasar a la copia de la rama: la comparten).
+	memRoot := ""
+	if info.Tipo == "agente" && p.Carpeta != "" && p.Aparte == "" {
+		memRoot = memory.Root(p.Carpeta)
+	}
 	// La sesión trabaja en su rama: si no es la de la carpeta, en una copia de trabajo propia (git worktree).
 	if info.NecesitaDir && p.Carpeta != "" && p.Rama != "" {
 		c, err := repo.CopiaDeRama(r.Context(), p.Carpeta, p.Rama, s.DirRamas)
@@ -826,12 +839,41 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	if s.Imputacion != nil {
 		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
 	}
-	err := prov.Chat(r.Context(), llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
+	pet := llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
 		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0",
 		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar),
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
-		Corte: p.Corte, Traspaso: p.Traspaso}, func(e llm.Evento) {
+		Corte: p.Corte, Traspaso: p.Traspaso}
+	// Memoria del proyecto: solo cuando el agente empieza de cero (memoryReason), al final de su mensaje.
+	userText := p.TextoUsuario
+	if userText == "" {
+		userText = withoutRelayMemory(p.Mensajes[len(p.Mensajes)-1].Texto)
+	}
+	if memRoot != "" {
+		last := len(pet.Mensajes) - 1
+		if why := s.memoryReason(p.Proveedor, pet.Mensajes[last].Texto, pet); why != "" {
+			if block := memory.ForAgent(memRoot); block != "" {
+				pet.Memory = block
+				envia(map[string]any{"memoria": map[string]any{"tokens": memory.Tokens(block), "motivo": why}})
+				if s.Imputacion != nil {
+					s.Imputacion.AnotaAgente(sesionImp, "ruta-modificador", map[string]any{"turno": turno, "modificador": "memory", "motivo": why, "tokens": memory.Tokens(block)})
+				}
+			}
+		}
+	}
+	turnMem := &memoryTurn{}
+	agentSession, compacted := p.SesionAgente, false
+	err := prov.Chat(r.Context(), pet, func(e llm.Evento) {
+		if e.SesionAgente != "" {
+			agentSession = e.SesionAgente
+		}
+		if e.Compacted {
+			compacted = true
+		}
+		if e.Herramienta != nil && memRoot != "" {
+			turnMem.tool(e.Herramienta)
+		}
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
 		}
@@ -879,6 +921,12 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			fin["error"] = recortaTexto(depuracion.Tapa(err.Error()), 600)
 		}
 		s.Imputacion.AnotaAgente(sesionImp, "agente-fin", fin)
+	}
+	if compacted {
+		s.memPending.mark(agentSession)
+	}
+	if memRoot != "" {
+		go saveMemoryTurn(memRoot, userText, turnMem)
 	}
 	if err != nil && r.Context().Err() == nil {
 		envia(map[string]string{"error": err.Error()})
@@ -964,6 +1012,9 @@ func (s *Servidor) barrer(w http.ResponseWriter, r *http.Request, ses *sesiones.
 			return
 		}
 		rep, err = vaciado(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje)
+		if err == nil {
+			s.memPending.mark(p.SesionAgente) // el agente vuelve a empezar: con la memoria del proyecto
+		}
 	} else {
 		rep, err = barrido(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje, p.EnCurso)
 	}

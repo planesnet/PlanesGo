@@ -11,6 +11,7 @@ import * as CO from '../costes';
 import { autoContextOn } from '../contextPolicy';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 import ProgramSettings, { saveProgramChanges } from './ProgramSettings';
+import ProjectMemory from './ProjectMemory';
 import { MODEL_LABEL_HELP, modelLabel } from '../modelInfo';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
@@ -22,9 +23,10 @@ interface Ramas { repo: string; repositorio?: string; ramas: string[]; actual?: 
 
 const NUEVA = '\u0000nueva';
 // Sections of the window, grouped by topic.
-export type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'spending' | 'programs' | 'ids';
+export type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'memory' | 'spending' | 'programs' | 'ids';
 const SESSION_SECTIONS: readonly PropertiesSection<SessionSection>[] = [{ id: 'general', name: 'General', icon: 'rama' }, { id: 'agent', name: 'Agente', icon: 'terminal' },
   { id: 'access', name: 'Acceso a carpetas', icon: 'carpeta' }, { id: 'conversation', name: 'Conversación', icon: 'comentario' },
+  { id: 'memory', name: 'Memoria del proyecto', icon: 'plan' },
   { id: 'spending', name: 'Gasto e imputación', icon: 'reloj' }, { id: 'programs', name: 'Programas', icon: 'ejecutar' }, { id: 'ids', name: 'Identificador', icon: 'info' }];
 const unir = (dir: string, rama: string) => dir.replace(/\/+$/, '') + '/' + rama.replace(/\//g, '_');
 
@@ -306,6 +308,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           </label>
         </>}
 
+        {section === 'memory' && <ProjectMemory proyecto={s.proyecto} carpeta={sesion.carpeta || s.carpeta} />}
         {section === 'programs' && <ProgramSettings proyecto={s.proyecto} carpeta={sesion.carpeta} value={programs} onChange={setPrograms} />}
         {section === 'ids' && <>
           <h3>Identificador</h3>

@@ -63,12 +63,13 @@ modelo); propuesta de reparto 3 s; skill elegida 1,5 s; pregunta suelta con la I
 | `skill` | skill elegida por embeddings y se la indica al agente | embeddings | `internal/selector`, `/api/skills/elegir` |
 | `subagents` | sugerencia de subagentes a Claude Code (exploración amplia o partes independientes) | reglas + embeddings, en el servidor | `internal/llm/parallel.go` (`ParallelHint`), `agentes.go` (`chatCompleto`) |
 | `relay` | relevo: sesión nueva del agente con la memoria de trabajo en vez de todo el historial | política de contexto | `web/src/workingMemory.ts`, `contextPolicy.ts` |
+| `memory` | memoria del proyecto (`<repositorio>/.pgocode/memoria.md`, fuera de git) al final del mensaje, solo cuando el agente empieza de cero: sesión nueva, relevo, «Vaciar contexto», compactación | reglas, en el servidor | `internal/memory`, `internal/servidor/memory.go` |
 | poda, vigencia, compactación | retirar del historial lo que ya no hace falta; compactar al pasar el umbral | servidor, siempre | `internal/llm/prune*.go`, `vigencia.go`, `compaction.go`, `web/src/contextPolicy.ts` |
 | continuación de OpenCode | al llegar al límite de pasos, sigue con otra petición en la misma sesión | servidor | `internal/llm/agentes.go` (`ContinuacionesOpenCode`) |
 | idioma | el agente responde en el idioma del navegador | servidor | `llm.InstruccionIdioma` |
 
 Los seis primeros los decide el enrutador antes de enviar; `skill` y `relay` se añaden al distintivo al enviar;
-`subagents` lo avisa el servidor durante el turno (evento `subagentes`); los demás los aplica siempre el servidor y
+`subagents` y `memory` los avisa el servidor durante el turno (eventos `subagentes` y `memoria`); los demás los aplica siempre el servidor y
 no se marcan en cada mensaje.
 
 ## Diagrama

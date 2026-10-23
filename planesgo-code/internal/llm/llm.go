@@ -68,6 +68,9 @@ type Peticion struct {
 	// ContextTarget: el objetivo de contexto de la sesión (tokens): por encima, la poda retira también lo grande y
 	// viejo con menos vigencia (0: el 40 % del umbral de compactación o PGOCODE_CONTEXT_TARGET; -1: sin objetivo).
 	ContextTarget int
+	// Memory: la memoria del proyecto (internal/memory) cuando el agente empieza de cero: va al final del mensaje,
+	// después de las sugerencias de pgocode, que se deciden sin ella (no cuenta como parte de la petición).
+	Memory string
 }
 
 // Evento es un trozo de la respuesta, igual para todos los agentes (la interfaz común de pgocode): texto,
@@ -96,6 +99,9 @@ type Evento struct {
 	// Subagentes: pgocode ha sugerido al agente usar subagentes en este mensaje (el porqué). Es un modificador del
 	// enrutador de intenciones (docs/enrutador.md): la interfaz lo muestra en el distintivo del mensaje.
 	Subagentes string `json:"subagentes,omitempty"`
+	// Compacted: el agente ha compactado su historial (va con el aviso del chat): en el próximo turno, pgocode le
+	// vuelve a dar la memoria del proyecto (internal/memory).
+	Compacted bool `json:"-"`
 }
 
 // Adoptado: un programa del agente que sigue en marcha en pgocode.

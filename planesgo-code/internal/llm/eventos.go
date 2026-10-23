@@ -369,7 +369,7 @@ func readClaudeCode(r io.Reader, emite func(Evento), newSession bool) error {
 		}
 		if ev.Type == "system" && ev.Subtype == "compact_boundary" {
 			depuracion.Log("claude-code", "compacta su historial: %d → %d tokens", ev.Compactado.Pre, ev.Compactado.Post)
-			emite(Evento{Texto: bloques.note(compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post))})
+			emite(Evento{Texto: bloques.note(compactionNotice("Claude Code", ev.Compactado.Pre, ev.Compactado.Post)), Compacted: true})
 			continue
 		}
 		if ev.Type == "system" && ev.TaskID != "" {
@@ -616,7 +616,7 @@ func leeAntigravity(r io.Reader, emite func(Evento)) error {
 			// «checkpoint»: Antigravity ha resumido la conversación (/compact o su compactación automática).
 			case p.Tipo == "checkpoint" && p.Estado == "DONE":
 				depuracion.Log("antigravity", "compacta su historial (paso %d)", p.Indice)
-				emite(Evento{Texto: bloques.note(compactionNotice("Antigravity", 0, 0))})
+				emite(Evento{Texto: bloques.note(compactionNotice("Antigravity", 0, 0)), Compacted: true})
 			case p.Tipo == "agent_response" && p.Texto != "":
 				if t := sinSistema.Pasa(p.Texto); t != "" {
 					// Llega a trozos: el primero de cada respuesta (otro paso) va separado de la anterior.
@@ -770,7 +770,7 @@ func leeOpenCode(r io.Reader, emite func(Evento)) error {
 	avisa := func(post int) {
 		if compactadoDe > 0 {
 			depuracion.Log("opencode", "compacta su historial: %d → %d tokens", compactadoDe, post)
-			emite(Evento{Texto: bloques.note(compactionNotice("OpenCode", compactadoDe, post))})
+			emite(Evento{Texto: bloques.note(compactionNotice("OpenCode", compactadoDe, post)), Compacted: true})
 			compactadoDe = 0
 		}
 	}

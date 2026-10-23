@@ -872,6 +872,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         ...(corte ? { corte: corte.punto || '', traspaso: corte.traspaso } : {}),
         sesion: ses.id, titulo: ses.nombre, adjuntos: [...pendiente.attachments, ...listos].map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language, compactar: politica.compactAt, contexto_previo: lastContext(previos), podar: politica.prune,
+        // Lo que ha escrito el usuario (sin memoria de trabajo ni notas de pgocode): de ahí saca la memoria del proyecto.
+        texto_usuario: t,
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
@@ -888,6 +890,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // Sugerencia de subagentes (modificador que aplica el servidor): al distintivo del mensaje del usuario.
         if (e.subagentes) {
           ruta = R.addModifier(ruta, 'subagents');
+          actual = actual.map((m, i) => i === actual.length - 2 && m.rol === 'user' ? { ...m, ruta } : m);
+          pon(actual, true);
+        }
+        // La memoria del proyecto (el agente empieza de cero): también al distintivo.
+        if (e.memoria) {
+          ruta = R.addModifier(ruta, 'memory');
           actual = actual.map((m, i) => i === actual.length - 2 && m.rol === 'user' ? { ...m, ruta } : m);
           pon(actual, true);
         }

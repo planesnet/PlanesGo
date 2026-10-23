@@ -178,6 +178,11 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			depuracion.Log(a.Clave, "se añade el uso de pgo al mensaje")
 		}
 	}
+	if p.Memory != "" && len(p.Mensajes) > 0 {
+		ms := append([]Mensaje(nil), p.Mensajes...)
+		ms[len(ms)-1].Texto += p.Memory
+		p.Mensajes = ms
+	}
 	// Antigravity da el consumo acumulado de la conversación (tokens y segundos): se emite solo lo de este turno.
 	if a.Clave == "antigravity" {
 		conv := p.SesionAgente
