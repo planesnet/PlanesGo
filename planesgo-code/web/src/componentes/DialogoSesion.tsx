@@ -9,6 +9,7 @@ import * as CO from '../costes';
 import { autoContextOn } from '../contextPolicy';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 import ProgramSettings from './ProgramSettings';
+import { MODEL_LABEL_HELP, modelLabel } from '../modelInfo';
 
 // Ventana de la sesión (crear o ajustar), en dos paneles: secciones a la izquierda y sus propiedades a la derecha.
 // Lo primero, la rama del repositorio; después el nombre, el alojamiento
@@ -196,8 +197,8 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           )}
           {modelos.length > 1 && (
             <label>Modelo
-              <select value={s.modelo || prov?.por_defecto} onChange={e => cambia({ modelo: e.target.value })}>
-                {modelos.map(m => <option key={m} value={m}>{m}</option>)}
+              <select value={s.modelo || prov?.por_defecto} onChange={e => cambia({ modelo: e.target.value })} title={MODEL_LABEL_HELP}>
+                {modelos.map(m => <option key={m} value={m}>{modelLabel(m)}</option>)}
               </select>
             </label>
           )}

@@ -634,3 +634,13 @@ esac`)
 		t.Errorf("solo se limpia la copia: %s", todas)
 	}
 }
+
+// OpenCode ofrece Gemini flash (baratos) además de gemini-4-argon.
+func TestModelosOpenCodeFlash(t *testing.T) {
+	l := modelosOpenCode()
+	for _, m := range []string{"google-vertex/gemini-4-argon", "google-vertex/gemini-3.8-flash", "google-vertex/gemini-3.1-flash-lite"} {
+		if !slices.Contains(l, m) {
+			t.Errorf("falta %s: %v", m, l)
+		}
+	}
+}

@@ -92,9 +92,12 @@ func configOpenCode(modelo string, limite int) map[string]any {
 	return cfg
 }
 
-// modelosOpenCode: Gemini y DeepSeek en Vertex AI; y los de la API de DeepSeek si hay clave.
+// modelosOpenCode: Gemini (el bueno y dos flash, baratos) y DeepSeek en Vertex AI; y los de la API de DeepSeek si
+// hay clave. Los flash están en el catálogo de OpenCode (models.dev: su ventana y su precio, con el que OpenCode da
+// el coste) y responden en la región «global» de Vertex (probado en octubre de 2026): gemini-3.8-flash (0,75 $/M de
+// entrada, 3,75 de salida) y gemini-3.1-flash-lite (0,25 y 1,5), los dos con 1 M de ventana.
 func modelosOpenCode() []string {
-	l := []string{"google-vertex/gemini-4-argon", modeloDeepSeekVertex}
+	l := []string{"google-vertex/gemini-4-argon", "google-vertex/gemini-3.8-flash", "google-vertex/gemini-3.1-flash-lite", modeloDeepSeekVertex}
 	if os.Getenv("DEEPSEEK_API_KEY") != "" {
 		l = append(l, "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash")
 	}
