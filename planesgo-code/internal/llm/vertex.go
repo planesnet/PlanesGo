@@ -51,7 +51,7 @@ func entornoOpenCode(p Peticion) []string {
 	if d := datosOpenCode(); d != "" {
 		e = append(e, "XDG_DATA_HOME="+d)
 	}
-	cfg := configOpenCode(p.Modelo, openCodeContextLimit(p))
+	cfg := configOpenCode(p.Modelo, openCodeContextLimit(p), p.Prune == PruneOff)
 	if strings.HasPrefix(p.Modelo, proveedorDeepSeekVertex+"/") {
 		if prov, err := proveedorDeepSeek(openCodeContextLimit(p)); err != nil {
 			depuracion.Log("opencode", "sin token de Google para DeepSeek en Vertex: %v", err)
@@ -64,7 +64,7 @@ func entornoOpenCode(p Peticion) []string {
 }
 
 // Ahorro de tokens en OpenCode (cada paso reenvía todo el historial):
-//   - compactación automática con poda de salidas viejas de herramientas;
+//   - compactación automática (y su poda de salidas viejas de herramientas si pgocode no poda: configOpenCode);
 //   - como mucho PasosOpenCode pasos por petición (luego responde sin más herramientas);
 //   - para el modelo de la sesión, un «contexto» a medida (limite, ver openCodeContextLimit): compacta al pasar
 //     del umbral de la sesión (si no, crecería hasta el millón y cada paso costaría cientos de miles de tokens);
@@ -77,9 +77,15 @@ const ContinuacionesOpenCode = 5
 
 const textoContinuacion = "Sigue con la tarea donde lo dejaste."
 
-func configOpenCode(modelo string, limite int) map[string]any {
+// configOpenCode: la configuración de OpenCode para el modelo, con su límite de contexto (0: el del catálogo).
+// ownPrune: la poda propia de OpenCode (al acabar cada petición vacía las salidas de herramientas viejas, a partir
+// de 20k), solo si no poda pgocode. La de OpenCode no mira la caché: cambia el principio del historial con la caché
+// caliente y la siguiente llamada lo reenvía todo sin ella (en las sesiones de Luis, 16 de los 27 turnos que
+// empezaron tras una poda suya en menos de 5 min perdieron la caché); la de pgocode solo poda cuando compensa
+// (decideSweep, prune_opencode.go).
+func configOpenCode(modelo string, limite int, ownPrune bool) map[string]any {
 	cfg := map[string]any{
-		"compaction": map[string]any{"auto": true, "prune": true},
+		"compaction": map[string]any{"auto": true, "prune": ownPrune},
 		"agent":      map[string]any{"build": map[string]any{"steps": PasosOpenCode}},
 		"provider":   map[string]any{},
 	}

@@ -79,10 +79,11 @@ export const CACHE_MIN = 5;
 
 // avisoContexto: antes de enviar, si la conversación es grande, cuánto se reenviará (y si irá sin caché porque lleva
 // un rato parada). null: nada que avisar.
-export function avisoContexto(contexto: number | undefined, minutosParada: number, agente: string): string | null {
+// cacheMin: lo que dura la caché de la sesión (cacheStatus.ts; por defecto, CACHE_MIN).
+export function avisoContexto(contexto: number | undefined, minutosParada: number, agente: string, cacheMin = CACHE_MIN): string | null {
   if (!contexto || contexto < 100_000) return null;
   const precio = ENTRADA_SIN_CACHE[agente];
-  if (minutosParada >= CACHE_MIN) {
+  if (minutosParada >= cacheMin) {
     const coste = precio ? ` (~${dinero(contexto * precio / 1e6)})` : '';
     return `Este mensaje reenviará ${tokens(contexto)} tokens de historial sin caché${coste}: la conversación lleva ${Math.round(minutosParada)} min parada. Puedes vaciar el contexto: el agente sigue en esta conversación y vuelve a leer lo que necesite.`;
   }

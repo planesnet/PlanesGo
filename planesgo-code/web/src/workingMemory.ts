@@ -189,6 +189,7 @@ export interface RelayInput {
   mode: RelayMode;        // contextPolicy(agente).relay
   context?: number;       // tokens de la última llamada del agente (uso.contexto)
   idleMinutes: number;    // lo que lleva parada la conversación
+  cacheMinutes?: number;  // lo que dura su caché (cacheStatus.ts; por defecto, CACHE_MINUTES)
   hasAgentSession: boolean;
   attachments?: number;
   planOrder?: boolean;    // orden de planes («/plan …») o ejecución de un plan
@@ -215,7 +216,7 @@ export function shouldRelay(i: RelayInput): string | null {
   if (i.mode === 'off' || !i.hasAgentSession || i.attachments || i.planOrder || !i.context || !i.memoryChars) return null;
   if (i.mode === 'vig' && i.forced && (i.outTokens || 0) > 0) return `barrido pedido: ${fmt(i.outTokens!)} de ${fmt(i.context)} están fuera de vigencia`;
   if (i.memoryChars / 4 > i.context / 2) return null;
-  if (i.idleMinutes >= CACHE_MINUTES && i.context >= idleMinimum(i.agent)) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
+  if (i.idleMinutes >= (i.cacheMinutes ?? CACHE_MINUTES) && i.context >= idleMinimum(i.agent)) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
   const limit = i.threshold || RELAY_THRESHOLD;
   if (i.mode === 'on' && i.context >= limit) return `el contexto (${fmt(i.context)}) pasa del umbral (${fmt(limit)})`;
   const outMin = i.outMin || PRUNE_MIN_TOKENS;

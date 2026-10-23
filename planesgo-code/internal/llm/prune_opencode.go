@@ -229,6 +229,8 @@ type pruneState struct {
 	CacheSuffix  int   `json:"cache_resto,omitempty"`
 	CacheUntil   int64 `json:"cache_hasta,omitempty"`
 	ForcePending bool  `json:"forzado_pendiente,omitempty"`
+	// CacheTTL: lo que dura la caché que escribió el último turno (ms; Claude Code: el TTL que pidió pgocode).
+	CacheTTL int64 `json:"cache_ttl,omitempty"`
 	// NoPays: barrer ahora no compensa (la caché caliente cuesta más de lo que se ahorra).
 	NoPays bool `json:"no_compensa,omitempty"`
 	// Back: lo que volvería con el próximo barrido (tokens: piezas que el agente ha vuelto a citar).

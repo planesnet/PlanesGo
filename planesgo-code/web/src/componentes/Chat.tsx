@@ -10,6 +10,7 @@ import TodoSyncList, { todoCount } from './TodoSyncList';
 import * as CO from '../costes';
 import { autoContextOn, contextPolicy, lastContext, relayAsBackup } from '../contextPolicy';
 import * as CL from '../cleaner';
+import * as CS from '../cacheStatus';
 import CleanerIndicator from './CleanerIndicator';
 import DirectNote from './DirectNote';
 import * as AP from '../aparte';
@@ -518,7 +519,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // Lo retirado después (Barrer ahora / Vaciar contexto) ya no se reenvía.
     const retirado = mensajes.slice(i + 1).reduce((n, m) => n + (m.nota && m.pruned ? m.pruned.tokens : 0), 0);
     if (relevoPedido[sesion.id]) return null;
-    return CO.avisoContexto(Math.max((u.uso?.contexto || 0) - retirado, 0), u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente);
+    return CO.avisoContexto(Math.max((u.uso?.contexto || 0) - retirado, 0), u.fin ? (Date.now() - u.fin) / 60000 : 0, sesion.agente, CS.cacheMinutes(mensajes, sesion.agente));
   }, [mensajes, enCurso, sesion?.agente, Boolean(texto.trim()), relevoPedido]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Intro: el ENRUTADOR (router.ts) decide quién hace qué con el mensaje y aquí solo se despacha.
@@ -773,7 +774,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       const limpios = previos.filter(m => !m.error);
       const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
       const mem = W.buildWorkingMemory(modoRelevo === 'vig' ? W.vigentOnly(limpios) : limpios);
-      const motivo = W.shouldRelay({ agent: ses.agente, mode: modoRelevo, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
+      const motivo = W.shouldRelay({ agent: ses.agente, mode: modoRelevo, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0, cacheMinutes: CS.cacheMinutes(limpios, ses.agente),
         hasAgentSession: true, attachments: listos.length, memoryChars: mem.length, outTokens: fueraVig, outMin: umbralVigencia(), forced: relevoForzado.current[ses.id] });
       if (relevoForzado.current[ses.id]) { delete relevoForzado.current[ses.id]; setRelevoPedido(x => ({ ...x, [ses.id]: false })); }
       if (motivo) {
@@ -874,6 +875,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         idioma: navigator.language, compactar: politica.compactAt, contexto_previo: lastContext(previos), podar: politica.prune,
         // Lo que ha escrito el usuario (sin memoria de trabajo ni notas de pgocode): de ahí saca la memoria del proyecto.
         texto_usuario: t,
+        // Claude Code: el TTL de la caché de la sesión según el ritmo de sus turnos (cacheStatus.ts).
+        ...(ses.agente === 'claude-code' ? { cache_ttl: CS.chooseClaudeTTL(previos) } : {}),
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
