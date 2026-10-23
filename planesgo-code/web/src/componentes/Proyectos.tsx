@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { get, type Proveedor, type Proyecto, type Usuario } from '../api';
-import { identificador, lista as sesionesDe, titulo, type Repo, type Sesion } from '../sesiones';
+import { identificador, lista as sesionesDe, ordenaConHijas, titulo, type Repo, type Sesion } from '../sesiones';
 import { guardaAjustes, leeAjustes, TIPOS_HOSTING, type AjustesProyecto, type Detalle, type SeleccionSkills, type TipoHosting } from '../ajustes';
 import Icono from './Icono';
 import { Hosting } from './Marca';
@@ -295,14 +295,15 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
   return (
     <div className="sesiones">
       {lista.length === 0 && <p className="sin-sesiones">Sin sesiones</p>}
-      {lista.map(s => (
-        <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '')}>
+      {ordenaConHijas(lista).map(({ s, hija }) => (
+        <div key={s.id} className={'sesion' + (sesion?.id === s.id ? ' activa' : '') + (hija ? ' hija' : '')}>
           {renombrando === s.id ? (
             <Renombra s={s} alFin={nombre => { setRenombrando(null); if (nombre !== null) alCambiarSesion({ ...s, nombre }); }} />
           ) : (
             <button className="sesion-boton" onClick={() => alElegirSesion(proyecto, s)} title={s.carpeta + (s.rama ? ' · ' + s.rama : '')}>
               <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
               <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
+              {hija && <span className="insignia-parte" title="Sesión hija: una parte de un reparto en paralelo">parte {s.parte}</span>}
               {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
             </button>
           )}

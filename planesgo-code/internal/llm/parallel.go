@@ -82,6 +82,55 @@ func ParallelHintFor(ctx context.Context, text string, embed func(context.Contex
 	return nil
 }
 
+// Request: una petición con una lista de partes: lo que va antes (el encargo común), cada parte y lo que va después.
+type Request struct {
+	Intro string   // texto antes de la lista
+	Items []string // cada elemento (con sus líneas de continuación)
+	Outro string   // texto después de la lista
+}
+
+// SplitRequest separa una petición con lista en su encargo común, sus partes y su cierre. Los elementos son los
+// mismos que cuenta listItems; las líneas sangradas que siguen a un elemento son de él. Lo que sigue a la lista sin
+// sangría ni viñeta, es el cierre.
+func SplitRequest(t string) Request {
+	var r Request
+	var intro, outro []string
+	cur := -1
+	for _, l := range strings.Split(t, "\n") {
+		switch {
+		case listLine.MatchString(l):
+			r.Items = append(r.Items, strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "-*•0123456789.) ")))
+			cur = len(r.Items) - 1
+		case len(r.Items) == 0:
+			intro = append(intro, l)
+		case strings.TrimSpace(l) == "":
+			if cur >= 0 {
+				cur = -2 // una línea en blanco cierra la continuación del elemento
+			}
+		case cur >= 0 && (l[0] == ' ' || l[0] == '\t'):
+			r.Items[cur] += " " + strings.TrimSpace(l)
+		default:
+			outro = append(outro, l)
+			cur = -2
+		}
+	}
+	r.Intro, r.Outro = strings.TrimSpace(strings.Join(intro, "\n")), strings.TrimSpace(strings.Join(outro, "\n"))
+	return r
+}
+
+// ParallelParts: las partes independientes de la petición si es de las que se reparten (Kind «partes»); nil si no.
+func ParallelParts(ctx context.Context, text string) *Request {
+	adv := ParallelHint(ctx, text)
+	if adv == nil || adv.Kind != "partes" {
+		return nil
+	}
+	r := SplitRequest(strings.TrimSpace(text))
+	if len(r.Items) != adv.Parts {
+		return nil
+	}
+	return &r
+}
+
 // ParallelHint: con los embeddings de la IA local (los del hilo de limpieza).
 func ParallelHint(ctx context.Context, text string) *ParallelAdvice {
 	return ParallelHintFor(ctx, text, pruneEmbed)

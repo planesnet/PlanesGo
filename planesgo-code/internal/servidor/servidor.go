@@ -101,6 +101,11 @@ type Servidor struct {
 	// EstudioOcupado dice si el Studio TV local está en uso (directo o grabación).
 	EstudioOcupado func() bool
 	activos        atomic.Int64 // chats y agentes en curso
+	// trabajando: las carpetas con un agente en curso (reparto.go: no se une en una copia en la que se trabaja).
+	trabajando   ocupadas
+	bloqueosRepo sync.Map // candado por repositorio (reparto.go)
+	// Partes: decide si una petición se reparte (por defecto, llm.ParallelParts); sustituible en las pruebas.
+	Partes func(context.Context, string) *llm.Request
 	// actividad: última vez que el usuario usó la app o tenía algo a medio escribir (UnixNano).
 	actividad atomic.Int64
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
@@ -133,6 +138,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	mux.HandleFunc("GET /api/proyecto/copias", s.conSesion(s.proyectoCopias))
 	mux.HandleFunc("POST /api/proyecto/quitar-copia", s.conSesion(s.proyectoQuitarCopia))
+	mux.HandleFunc("POST /api/reparto/propone", s.conSesion(s.repartoPropone))
+	mux.HandleFunc("POST /api/reparto/prepara", s.conSesion(s.repartoPrepara))
+	mux.HandleFunc("POST /api/reparto/une", s.conSesion(s.repartoUne))
 	// Campañas de pruebas del proyecto: casos, vídeos, pruebas que se pueden lanzar y comentarios.
 	mux.HandleFunc("GET /api/qa/campanas", s.conSesion(s.qaCampanas))
 	mux.HandleFunc("GET /api/qa/casos", s.conSesion(s.qaCasos))
@@ -715,6 +723,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		defer fin()
 	}
 
+	// El agente trabaja en esta carpeta mientras dure el turno (reparto.go).
+	if p.Aparte == "" && p.Carpeta != "" && info.NecesitaDir {
+		defer s.trabajando.entra(p.Carpeta)()
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	fl, _ := w.(http.Flusher)
