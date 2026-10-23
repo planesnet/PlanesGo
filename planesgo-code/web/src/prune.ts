@@ -11,6 +11,7 @@ import type { Herramienta, Mensaje, Parte } from './api';
 export interface Vigencia {
   vigencia: number;
   hace?: number;      // intercambios desde entonces
+  pasos?: number;     // pasos del agente desde entonces (piezas)
   relacion?: number;  // relación con lo último (similitud de embeddings)
   horas?: number;     // horas desde entonces
   superada?: string;  // «lectura superada», «orden repetida»…
@@ -27,6 +28,21 @@ export interface PruneReport {
   podable?: boolean;   // el historial del agente se puede podar (Claude Code: si no, el relevo de reserva)
   pendiente?: number;  // tokens fuera de vigencia que siguen en el contexto del agente (saldrían en el próximo barrido)
   estado?: import('./cleaner').CollectorStatus; // el estado del recolector (el indicador del chat)
+  cache_caliente?: boolean;   // barrer ahora rompería la caché caliente…
+  cache_resto?: number;       // …desde el primer cambio: estos tokens dejan de estar en ella
+  forzado_pendiente?: boolean; // un «Barrer ahora» espera al próximo turno (Claude Code con la sesión abierta)
+  calibracion?: Calibration;   // los pesos de la vigencia del proyecto
+}
+
+// Calibration: la calibración de la vigencia del proyecto (llm.CalibrationInfo).
+export interface Calibration {
+  pesos: { antiguedad: number; pasos: number; tiempo: number; relacion: number; pivote: number };
+  generales?: boolean;
+  fecha?: number;
+  piezas?: number;
+  sesiones?: number;
+  retiradas?: number; tokens?: number; tokens_paso?: number; de_mas?: number;
+  retiradas_generales?: number; tokens_generales?: number; tokens_paso_generales?: number; de_mas_generales?: number;
 }
 
 // VIG_CUT: con esta vigencia o más, fuera del contexto del agente. VIG_MIN_OPACITY: lo más desvanecido (legible).
@@ -36,6 +52,7 @@ export const VIG_MIN_OPACITY = 0.4;
 function vigOf(x: Vigencia): Vigencia {
   const v: Vigencia = { vigencia: x.vigencia };
   if (x.hace !== undefined) v.hace = x.hace;
+  if (x.pasos !== undefined) v.pasos = x.pasos;
   if (x.relacion !== undefined) v.relacion = x.relacion;
   if (x.horas !== undefined) v.horas = x.horas;
   if (x.superada) v.superada = x.superada;
@@ -47,8 +64,9 @@ function vigOf(x: Vigencia): Vigencia {
 const sameVig = (a?: Vigencia, b?: Vigencia) => JSON.stringify(a) === JSON.stringify(b);
 
 // applyPruneReport: la vigencia de cada intercambio (en la respuesta del agente, por su punto, y en el mensaje del
-// usuario que la pidió) y de cada herramienta (por su id). Lo que no sale en el informe se queda como estaba (p. ej.
-// lo anterior a una compactación del agente). Lo que no cambia es el mismo objeto.
+// usuario que la pidió) y de cada herramienta (por su id). Lo anterior a la última compactación del agente sale en
+// el informe como fuera («resumido por la compactación del agente»); lo que no sale se queda como estaba. Lo que no
+// cambia es el mismo objeto.
 export function applyPruneReport(ms: Mensaje[], r: PruneReport): Mensaje[] {
   const por = new Map(r.intercambios.map(x => [x.punto, vigOf(x)]));
   const piezas = new Map((r.piezas || []).map(x => [x.id, vigOf(x)]));
@@ -113,6 +131,7 @@ function relation(s: number): string {
 export function vigTitle(v: Vigencia): string {
   const l: string[] = [];
   if (v.hace) l.push(v.hace === 1 ? 'hace 1 intercambio' : `hace ${v.hace} intercambios`);
+  if (v.pasos) l.push(v.pasos === 1 ? 'hace 1 paso' : `hace ${v.pasos} pasos`);
   if (v.relacion !== undefined) l.push(relation(v.relacion));
   if (v.horas) l.push(ago(v.horas));
   if (v.superada) l.push(v.superada);

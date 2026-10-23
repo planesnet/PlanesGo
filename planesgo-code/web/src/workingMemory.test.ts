@@ -111,3 +111,11 @@ test('memoria de trabajo: sin lo que quedó fuera del contexto con «Continuar d
   assert.deepEqual(w.files, ['cmd/servidor/main.go']);
   assert.ok(!W.buildWorkingMemory(cortada).includes('VERDE'));
 });
+
+test('shouldRelay: el relevo pedido («Barrer ahora» en Antigravity) basta con algo fuera de vigencia', () => {
+  const base = { agent: 'antigravity', mode: 'vig' as const, context: 60_000, idleMinutes: 0, hasAgentSession: true, memoryChars: 4000 };
+  assert.equal(W.shouldRelay({ ...base, outTokens: 3000 }), null);
+  assert.match(W.shouldRelay({ ...base, outTokens: 3000, forced: true }) || '', /barrido pedido/);
+  assert.equal(W.shouldRelay({ ...base, outTokens: 0, forced: true }), null);
+  assert.equal(W.shouldRelay({ ...base, outTokens: 3000, forced: true, attachments: 1 }), null);
+});

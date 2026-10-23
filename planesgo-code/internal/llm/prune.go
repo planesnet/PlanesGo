@@ -18,7 +18,10 @@ import (
 // (vigencia.go), un número ≥ 0 que sube con la antigüedad, el tiempo y la falta de relación con lo último, y salta
 // si la pieza está superada. Los niveles de antes quedan como consecuencia:
 //
-//   - L1: el turno en curso y los dos últimos intercambios (vigencia 0). No se tocan nunca.
+//   - L1: el turno en curso y los dos últimos intercambios (vigencia 0 como intercambios: sus textos, razonamiento
+//     y estructura no se tocan). Cada pieza suya tiene su propia vigencia (pasos del agente desde entonces, relación
+//     con lo que se está haciendo ahora, tiempo, superada): las de los últimos pruneProtectSteps pasos no se tocan
+//     nunca; las demás salen (solo su salida) con 3 o más, también a mitad de turno (midTurnPrune).
 //   - L2: vigencia por debajo de 3. Sigue en el contexto, pero sin lo superado (que salta por encima de 3):
 //     lecturas de un fichero que después se releyó o editó, imágenes ya vistas, salidas de órdenes repetidas, el
 //     texto de las ediciones antiguas y el razonamiento; las salidas largas, con sus primeras y últimas líneas. Y
@@ -29,8 +32,9 @@ import (
 //
 // Lo que se quita deja una línea que dice qué era y cómo recuperarlo: equivocarse cuesta una relectura, no un
 // error. El marcado (embeddings y estado de cada intercambio) se hace en segundo plano según llega cada cosa
-// (prune_opencode.go); el barrido (cambiar el historial del agente) solo al empezar el turno, para no romper la
-// caché a mitad de turno, y solo si lo que sale compensa perderla (pruneMinTokens).
+// (prune_opencode.go); el barrido (cambiar el historial del agente) al empezar el turno y, en OpenCode, entre pasos
+// de un turno largo (midTurnPrune), solo si lo que sale compensa perder la caché (pruneMinTokens, midSweep). Lo
+// anterior a la última compactación del agente sale como fuera («resumido por la compactación del agente»).
 
 // Modos de poda de una petición (Peticion.Prune).
 const (
@@ -63,8 +67,10 @@ const (
 	pruneShortWords = 8
 	// pruneYoung: intercambios de L1 (además del turno en curso).
 	pruneYoung = 2
-	// prunePieceTokens: tamaño a partir del que una pieza (lectura, salida) lleva su propio embedding.
-	prunePieceTokens = 1500
+	// prunePieceTokens: tamaño a partir del que una pieza (lectura, salida) lleva su propio embedding. Las lecturas
+	// de un trozo de fichero (100-250 líneas) rondan 1500-5000 caracteres: con 600 tokens (2400 caracteres), casi
+	// todas llevan el suyo y su relación con lo que se está haciendo decide su vigencia dentro del turno.
+	prunePieceTokens = 600
 	// Salidas largas: a partir de cuántas líneas o caracteres se recortan y cuánto queda de cada extremo.
 	pruneLongLines = 60
 	pruneLongChars = 6000
@@ -81,6 +87,7 @@ type ocMessage struct {
 	ID, Role, Parent string
 	Summary          bool
 	Time             int64 // cuándo se creó (ms; 0 si no se sabe)
+	Ctx              int   // del agente: el contexto de su llamada (tokens; 0 si no se sabe)
 	Parts            []*ocPart
 }
 
@@ -195,6 +202,7 @@ type pruneExchange struct {
 	Messages      []*ocMessage
 	Tier          pruneTier
 	Sim           float64 // -1: sin similitud
+	Tail          bool    // los pasos que conservó la compactación del agente (sin su mensaje del usuario)
 	Vig           vigFactors
 	V             float64 // vigencia
 }
@@ -271,6 +279,40 @@ func pieceEmbedText(tool, res, out string) string {
 	return tool + " " + res + "\n" + recorta(out, 1500)
 }
 
+// focusSteps: de cuántos pasos del agente sale «lo que se está haciendo ahora» (focusText).
+const focusSteps = 6
+
+// focusText: lo que el agente está haciendo ahora, para la relación de cada pieza: su último texto o razonamiento
+// y las entradas de las herramientas de sus últimos pasos (ficheros, órdenes, búsquedas). «» si no hay nada.
+func focusText(win []*ocMessage) string {
+	var texto string
+	var ents []string
+	pasos := 0
+	for i := len(win) - 1; i >= 0 && pasos < focusSteps; i-- {
+		m := win[i]
+		if m.Role != "assistant" {
+			if texto != "" || len(ents) > 0 {
+				break // hasta el último mensaje del usuario
+			}
+			continue
+		}
+		pasos++
+		for j := len(m.Parts) - 1; j >= 0; j-- {
+			p := m.Parts[j]
+			switch {
+			case (p.v.Type == "text" || p.v.Type == "reasoning") && texto == "" && strings.TrimSpace(p.v.Text) != "":
+				texto = recorta(strings.TrimSpace(p.v.Text), 1000)
+			case p.v.Type == "tool":
+				ents = append(ents, p.v.Tool+" "+recortaLinea(resumen(p.v.State.Input), 160))
+			}
+		}
+	}
+	if texto == "" && len(ents) == 0 {
+		return ""
+	}
+	return texto + "\nHerramientas: " + strings.Join(ents, "; ")
+}
+
 // isPiece: si la pieza es lo bastante grande para llevar su propio embedding.
 func (p *ocPart) isPiece() bool {
 	return p.isTool() && len(p.v.State.Output)/4 >= prunePieceTokens && p.v.Tool != "edit" && p.v.Tool != "write"
@@ -308,6 +350,35 @@ func pruneWindow(msgs []*ocMessage) []*ocMessage {
 	return w
 }
 
+// compactedBefore: lo que el agente ya no tiene por su compactación: los mensajes que no están en su ventana, sin
+// los de la compactación ni los resúmenes.
+func compactedBefore(msgs, win []*ocMessage) []*ocMessage {
+	if len(win) == len(msgs) {
+		return nil
+	}
+	dentro := make(map[string]bool, len(win))
+	for _, m := range win {
+		dentro[m.ID] = true
+	}
+	var b []*ocMessage
+	for _, m := range msgs {
+		if dentro[m.ID] || m.Summary || isCompactionMsg(m) {
+			continue
+		}
+		b = append(b, m)
+	}
+	return b
+}
+
+func isCompactionMsg(m *ocMessage) bool {
+	for _, p := range m.Parts {
+		if p.v.Type == "compaction" {
+			return true
+		}
+	}
+	return false
+}
+
 // pruneExchanges: los intercambios de la ventana (cada uno empieza en un mensaje del usuario).
 func pruneExchanges(win []*ocMessage) []*pruneExchange {
 	var xs []*pruneExchange
@@ -316,11 +387,15 @@ func pruneExchanges(win []*ocMessage) []*pruneExchange {
 			xs = append(xs, &pruneExchange{UserID: m.ID, Messages: []*ocMessage{m}, Tier: TierL2, Sim: -1})
 			continue
 		}
-		if len(xs) > 0 {
-			x := xs[len(xs)-1]
-			x.Messages = append(x.Messages, m)
-			x.Point = m.ID
+		if len(xs) == 0 {
+			// Los últimos pasos de un intercambio que conservó la compactación del agente: un intercambio sin
+			// mensaje del usuario.
+			u := &ocMessage{ID: m.ID + "~", Role: "user"}
+			xs = append(xs, &pruneExchange{UserID: u.ID, Messages: []*ocMessage{u}, Tier: TierL2, Sim: -1, Tail: true})
 		}
+		x := xs[len(xs)-1]
+		x.Messages = append(x.Messages, m)
+		x.Point = m.ID
 	}
 	return xs
 }
@@ -359,6 +434,7 @@ type prunePlan struct {
 	Edits     map[string]pruneEdit
 	Exchanges []*pruneExchange
 	Pieces    []*pieceVig
+	K         vigParams // los pesos de la vigencia
 }
 
 // pieceVig: la vigencia de una pieza del plan (una herramienta).
@@ -372,38 +448,105 @@ type pieceVig struct {
 }
 
 // planPrune decide qué se quita (sin tocar nada) con la vigencia de cada intercambio y pieza (vigencia.go): con
-// vigCut o más, fuera. young: intercambios jóvenes (los últimos, vigencia 0). now: el momento del barrido.
+// vigCut o más, fuera. young: intercambios jóvenes (los últimos, vigencia 0). now: el momento del barrido. Con los
+// pesos generales; planPruneK, con los del proyecto.
 func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prunePlan {
-	xs := pruneExchanges(win)
-	plan := prunePlan{Edits: map[string]pruneEdit{}, Exchanges: xs}
-	// Lo que pasa después de cada parte: lecturas, ediciones y órdenes posteriores (en cualquier nivel).
-	type pos struct{ x, m, p int }
-	var orden []pos
-	for i, x := range xs {
-		for j, m := range x.Messages {
-			for k := range m.Parts {
-				orden = append(orden, pos{i, j, k})
-			}
+	return planPruneK(win, sims, young, now, defaultVig)
+}
+
+// readRange: las líneas que cubre una lectura (desde, hasta; hasta 0: hasta el final).
+func (p *ocPart) readRange() (int, int) {
+	m := p.input()
+	num := func(k string) int {
+		if f, ok := m[k].(float64); ok {
+			return int(f)
 		}
+		return 0
 	}
-	part := func(q pos) *ocPart { return xs[q.x].Messages[q.m].Parts[q.p] }
-	lastRead, lastWrite, lastCmd, lastTodo := map[string]int{}, map[string]int{}, map[string]int{}, -1
-	for n, q := range orden {
-		p := part(q)
+	desde, n := max(num("offset"), 1), num("limit")
+	if n <= 0 {
+		return desde, 0
+	}
+	return desde, desde + n
+}
+
+// covers: si la lectura a cubre todas las líneas de la b.
+func covers(a, b *ocPart) bool {
+	ad, ah := a.readRange()
+	bd, bh := b.readRange()
+	return ad <= bd && (ah == 0 || (bh != 0 && ah >= bh))
+}
+
+// pruneHistory: lo que pasa después de cada parte (lecturas, ediciones, órdenes, listas de tareas), para saber si
+// está superada.
+type pruneHistory struct {
+	reads     map[string][]int // fichero → posiciones de sus lecturas
+	lastWrite map[string]int
+	lastCmd   map[string]int
+	lastTodo  int
+	parts     []*ocPart // las partes en orden
+}
+
+func newPruneHistory(parts []*ocPart) *pruneHistory {
+	h := &pruneHistory{reads: map[string][]int{}, lastWrite: map[string]int{}, lastCmd: map[string]int{}, lastTodo: -1, parts: parts}
+	for n, p := range parts {
 		if p.v.Type != "tool" {
 			continue
 		}
 		switch p.v.Tool {
 		case "read":
-			lastRead[p.filePath()] = n
+			h.reads[p.filePath()] = append(h.reads[p.filePath()], n)
 		case "edit", "write", "patch", "apply_patch", "multiedit":
-			lastWrite[p.filePath()] = n
+			h.lastWrite[p.filePath()] = n
 		case "bash":
-			lastCmd[strings.TrimSpace(resumen(p.v.State.Input))] = n
+			h.lastCmd[strings.TrimSpace(resumen(p.v.State.Input))] = n
 		case "todowrite":
-			lastTodo = n
+			h.lastTodo = n
 		}
 	}
+	return h
+}
+
+// rereadAfter: si el mismo fichero se vuelve a leer después de n, cubriendo lo que leyó la parte n.
+func (h *pruneHistory) rereadAfter(n int) bool {
+	p := h.parts[n]
+	for _, m := range h.reads[p.filePath()] {
+		if m > n && covers(h.parts[m], p) {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneYoungPieces: la vigencia propia de cada pieza de los intercambios jóvenes y su antigüedad en pasos (false:
+// como antes, para medir la diferencia en las pruebas).
+var pruneYoungPieces = true
+
+// planPruneK: planPrune con los pesos k. Los intercambios jóvenes (el turno en curso y los anteriores) cuentan
+// enteros como vitales, pero cada pieza suya tiene su propia vigencia (pasos desde entonces, relación con lo que se
+// está haciendo ahora, tiempo y si está superada), salvo las de los últimos pruneProtectSteps pasos, que no se
+// tocan. De esas piezas solo se vacía la salida (o el texto de una edición): el razonamiento, los textos y la
+// estructura del turno siguen igual (Gemini necesita sus firmas en el turno en curso).
+func planPruneK(win []*ocMessage, sims *pruneSims, young int, now time.Time, k vigParams) prunePlan {
+	xs := pruneExchanges(win)
+	plan := prunePlan{Edits: map[string]pruneEdit{}, Exchanges: xs, K: k}
+	// Las partes en orden, con su intercambio, mensaje y los pasos del agente (sus llamadas al modelo) hasta ella.
+	type pos struct{ x, m, p, step int }
+	var orden []pos
+	var parts []*ocPart
+	pasos := 0
+	for i, x := range xs {
+		for j, m := range x.Messages {
+			if m.Role == "assistant" {
+				pasos++
+			}
+			for k := range m.Parts {
+				orden = append(orden, pos{i, j, k, pasos})
+				parts = append(parts, m.Parts[k])
+			}
+		}
+	}
+	h := newPruneHistory(parts)
 	// La vigencia de cada intercambio: fuera (L3) con vigCut o más. Lo que ya estaba fuera necesita bajar un poco
 	// más para volver (pruneReviveMargin: que no oscile de un turno a otro y se pierda la caché cada vez); sin su
 	// relación (Ollama no responde), sigue fuera (reponerlo rompería la caché).
@@ -412,7 +555,7 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prun
 		switch {
 		case i >= len(xs)-young:
 			x.Tier, x.Vig.Pinned = TierL1, true
-		case i == 0:
+		case i == 0 && !x.Tail:
 			x.Tier, x.Vig.Pinned = TierL2, true
 		default:
 			corte := vigCut
@@ -422,25 +565,32 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prun
 				}
 				if sims.PrevTier[x.UserID] == TierL3 {
 					if x.Vig.Sim != nil {
-						corte -= vigRelK * pruneReviveMargin
+						corte -= k.RelK * pruneReviveMargin
 					} else {
 						corte = 0
 					}
 				}
 			}
-			if vigencia(x.Vig, now) >= corte {
+			if k.of(x.Vig, now) >= corte {
 				x.Tier = TierL3
 			}
 		}
-		x.V = vigencia(x.Vig, now)
+		x.V = k.of(x.Vig, now)
 	}
 	for n, q := range orden {
 		x := xs[q.x]
 		m := x.Messages[q.m]
-		p := part(q)
+		p := parts[n]
+		since := pasos - q.step
+		if !pruneYoungPieces {
+			since = 0 // como antes: sin pasos; lo joven, entero
+		}
 		if x.Tier == TierL1 {
-			if p.isTool() { // no se tocan: vigencia 0
-				plan.Pieces = append(plan.Pieces, &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: x.Vig})
+			if pv := youngPiece(p, n, x, m, since, young, sims, h, now, k); pv != nil {
+				plan.Pieces = append(plan.Pieces, pv)
+				if e, ok := pv.edit(p); ok {
+					plan.Edits[p.ID] = e
+				}
 			}
 			continue
 		}
@@ -453,8 +603,10 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prun
 		if !p.isTool() {
 			continue
 		}
-		// La pieza: su fecha, su relación propia si es grande (si no, la del intercambio) y si está superada.
+		// La pieza: su fecha, sus pasos, su relación propia si es grande (si no, la del intercambio) y si está
+		// superada.
 		f := x.Vig
+		f.Steps = since
 		if m.Time > 0 {
 			f.At = m.Time
 		}
@@ -464,24 +616,17 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prun
 				f.Sim, f.Pinned, propia = simPtr(s), false, true
 			}
 		}
-		e, superada := pruneSuperseded(p, n, lastRead, lastWrite, lastCmd, lastTodo)
+		e, superada := pruneSuperseded(p, n, h, false)
 		f.Superseded = superada
 		pv := &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
-		pv.V = max(vigencia(f, now), x.V)
+		pv.V = max(k.of(f, now), x.V)
 		switch {
 		case superada != "":
 			pv.Out = e.Clear || e.TrimInput
-		case x.Tier == TierL3 || (propia && vigencia(f, now) >= vigCut):
+		case x.Tier == TierL3 || (propia && k.of(f, now) >= vigCut) || (!f.Pinned && f.Steps > pruneProtectSteps && k.of(f, now) >= vigCut):
 			// Fuera: la salida, a la marca nativa; las ediciones, sin su texto; lo pequeño se queda (la línea que lo
 			// sustituye ocuparía lo mismo).
-			switch {
-			case isEditTool(p.v.Tool):
-				e = pruneEdit{TrimInput: true}
-			case len(p.v.State.Output) < pruneSmall && len(p.v.State.Attachments) == 0:
-				e = pruneEdit{}
-			default:
-				e = pruneEdit{Clear: true}
-			}
+			e = outEdit(p)
 			pv.Out = e.Clear || e.TrimInput
 		case p.v.Tool != "read" && p.v.Tool != "todowrite":
 			// Sigue, pero las salidas largas, con solo sus primeras y últimas líneas.
@@ -496,6 +641,54 @@ func planPrune(win []*ocMessage, sims *pruneSims, young int, now time.Time) prun
 		plan.Pieces = append(plan.Pieces, pv)
 	}
 	return plan
+}
+
+// outEdit: lo que se hace con una pieza fuera: la salida, a la marca nativa; las ediciones, sin su texto; lo
+// pequeño se queda (la línea que lo sustituye ocuparía lo mismo).
+func outEdit(p *ocPart) pruneEdit {
+	switch {
+	case isEditTool(p.v.Tool):
+		return pruneEdit{TrimInput: true}
+	case len(p.v.State.Output) < pruneSmall && len(p.v.State.Attachments) == 0:
+		return pruneEdit{}
+	}
+	return pruneEdit{Clear: true}
+}
+
+// youngPiece: la vigencia de una pieza de un intercambio joven (nil si no es una herramienta). Vital (0) si es de
+// los últimos pruneProtectSteps pasos; si no, la suya: los pasos desde entonces, su relación con lo que se está
+// haciendo ahora (si tiene embedding), el tiempo y si está superada (solo por lo que no deja dudas: el mismo trozo
+// del fichero leído otra vez, la misma orden, otra lista de tareas o una imagen ya vista; no la lectura de un fichero
+// que se editó después, que el agente puede seguir usando para la edición siguiente).
+func youngPiece(p *ocPart, n int, x *pruneExchange, m *ocMessage, since, young int, sims *pruneSims, h *pruneHistory, now time.Time, k vigParams) *pieceVig {
+	if !p.isTool() {
+		return nil
+	}
+	f := vigFactors{Ago: x.Vig.Ago, Young: young, At: m.Time, Steps: since}
+	if since < pruneProtectSteps {
+		f = vigFactors{Pinned: true, Steps: since}
+		return &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
+	}
+	if sims != nil {
+		if s, ok := sims.Piece[p.ID]; ok {
+			f.Sim = simPtr(s)
+		}
+	}
+	_, f.Superseded = pruneSuperseded(p, n, h, true)
+	pv := &pieceVig{PartID: p.ID, CallID: p.v.CallID, X: x, F: f}
+	pv.V = k.of(f, now)
+	pv.Out = pv.V >= vigCut
+	return pv
+}
+
+// edit: lo que se hace con una pieza joven fuera (solo vaciarla).
+func (pv *pieceVig) edit(p *ocPart) (pruneEdit, bool) {
+	if !pv.Out {
+		return pruneEdit{}, false
+	}
+	e := outEdit(p)
+	pv.Out = e.Clear || e.TrimInput
+	return e, pv.Out
 }
 
 func isEditTool(t string) bool {
@@ -513,25 +706,31 @@ func pruneReasoning(m *ocMessage) (pruneEdit, bool) {
 	return pruneEdit{}, false
 }
 
-// pruneSuperseded: si una herramienta (fuera de los jóvenes) está superada, por qué y qué se hace con ella: lecturas
-// de un fichero que después se releyó o editó, imágenes ya vistas, órdenes repetidas, listas de tareas
-// sustituidas y el texto de las ediciones antiguas.
-func pruneSuperseded(p *ocPart, n int, lastRead, lastWrite, lastCmd map[string]int, lastTodo int) (pruneEdit, string) {
+// pruneSuperseded: si una herramienta está superada, por qué y qué se hace con ella: lecturas de un trozo de un
+// fichero que después se volvió a leer (o, fuera de los jóvenes, que se editó), imágenes ya vistas, órdenes
+// repetidas, listas de tareas sustituidas y (fuera de los jóvenes) el texto de las ediciones antiguas. young: la
+// pieza es de un intercambio joven.
+func pruneSuperseded(p *ocPart, n int, h *pruneHistory, young bool) (pruneEdit, string) {
 	if isEditTool(p.v.Tool) {
+		if young {
+			return pruneEdit{}, ""
+		}
 		return pruneEdit{TrimInput: true}, "edición antigua"
 	}
 	switch p.v.Tool {
 	case "read":
-		f := p.filePath()
-		if lastRead[f] > n || lastWrite[f] > n {
+		if h.rereadAfter(n) {
+			return pruneEdit{Clear: true}, "lectura superada"
+		}
+		if !young && h.lastWrite[p.filePath()] > n {
 			return pruneEdit{Clear: true}, "lectura superada"
 		}
 	case "bash":
-		if lastCmd[strings.TrimSpace(resumen(p.v.State.Input))] > n && len(p.v.State.Output) >= pruneSmall {
+		if h.lastCmd[strings.TrimSpace(resumen(p.v.State.Input))] > n && len(p.v.State.Output) >= pruneSmall {
 			return pruneEdit{Clear: true}, "orden repetida"
 		}
 	case "todowrite":
-		if lastTodo > n && len(p.v.State.Output) >= pruneSmall {
+		if h.lastTodo > n && len(p.v.State.Output) >= pruneSmall {
 			return pruneEdit{Clear: true}, "lista de tareas superada"
 		}
 		return pruneEdit{}, ""
@@ -678,6 +877,11 @@ func pruneChanges(win []*ocMessage, plan prunePlan) pruneDiff {
 // cuesta más que la relectura que haría el agente si lo necesita (medido en el banco, prueba 7 con OpenCode: un
 // turno que solo reponía una pieza costó 0,073 $ frente a 0,015 $). Lo que tenga que volver, vuelve con el
 // siguiente barrido que compense.
+// changes: si hay algo que cambiar.
+func (d pruneDiff) changes() bool {
+	return len(d.Update) > 0 || len(d.Delete) > 0 || len(d.Restore) > 0
+}
+
 func (d pruneDiff) worthIt() bool {
 	return d.Saved >= pruneMinTokens && (len(d.Update) > 0 || len(d.Delete) > 0 || len(d.Restore) > 0)
 }
@@ -714,6 +918,13 @@ type PruneReport struct {
 	Pending int `json:"pendiente,omitempty"`
 	// Status: el estado del recolector (el indicador del chat).
 	Status *CollectorStatus `json:"estado,omitempty"`
+	// Barrer a mano: con la caché caliente, lo que dejaría de estar en ella desde el primer cambio (tokens); si el
+	// barrido forzado espera al próximo turno (Claude Code con la sesión abierta).
+	CacheWarm    bool `json:"cache_caliente,omitempty"`
+	CacheSuffix  int  `json:"cache_resto,omitempty"`
+	ForcePending bool `json:"forzado_pendiente,omitempty"`
+	// Calibration: los pesos de la vigencia del proyecto y su calibración.
+	Calibration *CalibrationInfo `json:"calibracion,omitempty"`
 }
 
 // PruneExchange: la vigencia de un intercambio (por su punto: el último mensaje del agente).

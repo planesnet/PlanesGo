@@ -3,7 +3,7 @@
 // contexto de cada llamada) y del propio recolector (que solo usa la IA local, Ollama).
 // Funciones puras: node --test src/cleaner.test.ts
 import type { Mensaje, Parte } from './api';
-import type { PruneReport, Vigencia } from './prune';
+import type { Calibration, PruneReport, Vigencia } from './prune';
 
 // CollectorStatus: el estado del recolector (llm.CollectorStatus).
 export interface CollectorStatus {
@@ -40,6 +40,12 @@ export function contextSeries(ms: Mensaje[], window: number, max = 40): ContextP
   let relay = false;
   for (const m of ms) {
     if (m.rol === 'user') { if (m.relevo) relay = true; continue; }
+    // Un barrido pedido a mano entre turnos (sweepNote): el contexto que queda tras él.
+    if (m.nota && m.pruned?.tokens && !m.uso?.contexto) {
+      const prev = out[out.length - 1];
+      if (prev) { const t = Math.max(prev.tokens - m.pruned.tokens, 0); out.push({ tokens: t, pct: pct(t, window), pruned: m.pruned.tokens }); }
+      continue;
+    }
     const t = m.uso?.contexto;
     if (!t) continue;
     const p: ContextPoint = { tokens: t, pct: pct(t, window) };
@@ -71,6 +77,52 @@ export function sparkPoints(series: ContextPoint[], w: number, h: number): { x: 
 
 export function sparkPath(series: ContextPoint[], w: number, h: number): string {
   return sparkPoints(series, w, h).map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
+}
+
+// ---- «Barrer ahora» (barrido pedido por el usuario) ----
+
+// sweepNote: el barrido pedido a mano entre turnos, como una nota del chat con lo retirado («✂ pgocode ha retirado
+// 23k tokens del historial») y su marca en la evolución del contexto.
+export function sweepNote(tokens: number, restored = 0, now = Date.now()): Mensaje {
+  return { rol: 'assistant', texto: '', nota: true, fin: now, pruned: { tokens, ...(restored ? { repuestos: restored } : {}) } };
+}
+
+// cacheWarning: con la caché caliente, lo que cuesta barrer ahora («invalida la caché desde ahí: ~40 k tokens a
+// precio de escritura»); «» si no hay caché que perder. Claude Code paga la escritura en caché; Gemini no la cobra,
+// pero lo de después del primer cambio se vuelve a mandar a precio de entrada.
+export function cacheWarning(agent: string, r?: PruneReport | null): string {
+  if (!r?.cache_caliente || !r.cache_resto) return '';
+  return `invalida la caché desde ahí: ~${k(r.cache_resto)} tokens a precio de ${agent === 'claude-code' ? 'escritura' : 'entrada'}`;
+}
+
+// sweepHint: qué hará «Barrer ahora» en este agente (o por qué espera).
+export function sweepHint(agent: string, r?: PruneReport | null, relayForced = false): string {
+  if (agent === 'antigravity') return relayForced ? 'relevo pedido: se hará en el próximo envío' : 'no deja tocar su historial: relevará en el próximo envío';
+  if (r?.forzado_pendiente) return 'pendiente: la sesión está abierta; se aplicará al empezar el próximo turno';
+  if (!(r?.pendiente || 0)) return 'nada fuera de vigencia ahora';
+  return '';
+}
+
+// ---- calibración de la vigencia del proyecto ----
+
+const dec = (n: number, d = 2) => String(Math.round(n * 10 ** d) / 10 ** d).replace('.', ',');
+
+// paramsLine: los pesos en una línea («antigüedad 0,12 · pasos 0,8 · tiempo 0,15 · relación 20 (0,5)»).
+export function paramsLine(c: Calibration): string {
+  const p = c.pesos;
+  return `antigüedad ${dec(p.antiguedad)} · pasos ${dec(p.pasos)} · tiempo ${dec(p.tiempo)} · relación ${dec(p.relacion, 1)} (${dec(p.pivote)})`;
+}
+
+const pctTxt = (a: number, b: number) => (b > 0 ? dec((100 * a) / b, 1) : '0') + ' %';
+
+// overLine: las relecturas por poda de más (con los pesos del proyecto y con los generales).
+export function overLine(c: Calibration): string {
+  return `${c.de_mas || 0} de ${c.retiradas || 0} retiradas (${pctTxt(c.de_mas || 0, c.retiradas || 0)}); con los generales, ${c.de_mas_generales || 0} de ${c.retiradas_generales || 0} (${pctTxt(c.de_mas_generales || 0, c.retiradas_generales || 0)})`;
+}
+
+// savedLine: los tokens que se habrían ahorrado con el historial del proyecto.
+export function savedLine(c: Calibration): string {
+  return `${k(c.tokens || 0)} tokens retirados (${k(c.tokens_paso || 0)} tokens·paso); con los generales, ${k(c.tokens_generales || 0)}`;
 }
 
 // projected: el contexto que quedaría tras el próximo barrido (lo que está fuera de vigencia y sigue dentro).
@@ -122,6 +174,20 @@ export interface ChatExchange {
   respuesta: string;
   en?: number;
   herramientas?: { id: string; nombre: string; resumen?: string; salida?: string; imagenes?: number; error?: boolean; tamano?: number }[];
+  compactado?: boolean; // anterior a la última compactación del agente: ya solo tiene su resumen
+}
+
+// COMPACTED_MARK: el aviso del chat de que el agente ha compactado su historial (llm.compactionNotice).
+export const COMPACTED_MARK = 'ha compactado su historial';
+
+// lastCompaction: el último mensaje del agente con el aviso de su compactación (-1 si no hay).
+export function lastCompaction(ms: Mensaje[], from = 0): number {
+  for (let i = ms.length - 1; i >= from; i--) {
+    const m = ms[i];
+    if (m.rol !== 'assistant') continue;
+    if ((m.texto || '').includes(COMPACTED_MARK) || (m.partes || []).some(p => p.tipo === 'texto' && p.texto.includes(COMPACTED_MARK))) return i;
+  }
+  return -1;
 }
 
 // relayStart: dónde empieza la conversación actual del agente (el último relevo; 0 si no hubo).
@@ -141,7 +207,9 @@ function lastText(m: Mensaje): string {
 // repiten de un turno a otro).
 export function chatExchanges(ms: Mensaje[]): ChatExchange[] {
   const out: ChatExchange[] = [];
-  for (let i = relayStart(ms); i < ms.length; i++) {
+  const desde = relayStart(ms);
+  const comp = lastCompaction(ms, desde);
+  for (let i = desde; i < ms.length; i++) {
     const u = ms[i];
     if (u.rol !== 'user' || u.fuera) continue;
     const a = ms[i + 1];
@@ -151,14 +219,15 @@ export function chatExchanges(ms: Mensaje[]): ChatExchange[] {
       ...(p.h.capturas?.length ? { imagenes: p.h.capturas.length } : {}), ...(p.h.estado === 'error' ? { error: true } : {}),
       ...(p.h.tamano ? { tamano: p.h.tamano } : {}),
     }));
-    out.push({ punto: `m${i + 1}`, usuario: u.texto || '', respuesta: lastText(a), ...(a.fin ? { en: a.fin } : {}), ...(hs.length ? { herramientas: hs } : {}) });
+    out.push({ punto: `m${i + 1}`, usuario: u.texto || '', respuesta: lastText(a), ...(a.fin ? { en: a.fin } : {}), ...(hs.length ? { herramientas: hs } : {}),
+      ...(i + 1 < comp ? { compactado: true } : {}) });
   }
   return out;
 }
 
 function vigOf(x: Vigencia): Vigencia {
   const v: Vigencia = { vigencia: x.vigencia };
-  for (const c of ['hace', 'relacion', 'horas', 'superada', 'nota'] as const) if (x[c] !== undefined && x[c] !== '') (v as unknown as Record<string, unknown>)[c] = x[c];
+  for (const c of ['hace', 'pasos', 'relacion', 'horas', 'superada', 'nota'] as const) if (x[c] !== undefined && x[c] !== '') (v as unknown as Record<string, unknown>)[c] = x[c];
   if (x.fuera) v.fuera = true;
   return v;
 }

@@ -27,7 +27,7 @@ func TestChatVigencia(t *testing.T) {
 		{Point: "m7", User: "Gracias", Answer: "De nada.", At: t0.Add(3 * time.Minute).UnixMilli()},
 		{Point: "m9", User: "Adiós", Answer: "Hasta luego.", At: t0.Add(4 * time.Minute).UnixMilli()},
 	}
-	r := ChatVigencia(context.Background(), "chat-prueba1", xs, "otra cosa", false)
+	r := ChatVigencia(context.Background(), "chat-prueba1", "", xs, "otra cosa", false)
 	if r == nil || r.Pending < 20000 {
 		t.Fatalf("pendiente: %+v", r)
 	}
@@ -49,10 +49,10 @@ func TestChatVigencia(t *testing.T) {
 		{Point: "m5", User: "Relee alfa.py", Answer: "x * 19 + 600", Tools: []ChatTool{{ID: "m5:paso-12", Name: "read_file", Summary: "/p/alfa.py", Output: "1401 lines, 61315 bytes"}}},
 		{Point: "m7", User: "Vale", Answer: "Vale"},
 	}
-	if r := ChatVigencia(context.Background(), "chat-prueba2", ys, "¿qué devuelve funcion_45?", false); r == nil || r.Pending < 15000 {
+	if r := ChatVigencia(context.Background(), "chat-prueba2", "", ys, "¿qué devuelve funcion_45?", false); r == nil || r.Pending < 15000 {
 		t.Errorf("Antigravity: pendiente %+v", r)
 	}
-	if ChatVigencia(context.Background(), "../x", xs, "", false) != nil {
+	if ChatVigencia(context.Background(), "../x", "", xs, "", false) != nil {
 		t.Error("clave no válida")
 	}
 }

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +24,8 @@ type ChatExchange struct {
 	Answer string     `json:"respuesta"`
 	At     int64      `json:"en,omitempty"` // cuándo acabó (ms)
 	Tools  []ChatTool `json:"herramientas,omitempty"`
+	// Compacted: anterior a la última compactación del agente («/compact»): ya solo tiene su resumen.
+	Compacted bool `json:"compactado,omitempty"`
 }
 
 // ChatTool: una herramienta del intercambio, como la ve pgocode.
@@ -71,8 +74,10 @@ func chatWindow(xs []ChatExchange) []*ocMessage {
 		u := &ocMessage{ID: "u:" + x.Point, Role: "user", Time: x.At}
 		d, _ := marshalNoEscape(map[string]any{"type": "text", "text": x.User})
 		u.Parts = append(u.Parts, newPart(u.ID+":t", u.ID, string(d), ""))
-		a := &ocMessage{ID: x.Point, Role: "assistant", Time: x.At}
-		for _, t := range x.Tools {
+		win = append(win, u)
+		// Cada herramienta, un paso del agente (su llamada al modelo); la respuesta, el último (con el punto).
+		for k, t := range x.Tools {
+			a := &ocMessage{ID: fmt.Sprintf("%s#%d", x.Point, k), Role: "assistant", Time: x.At}
 			tool := chatToolName(t.Name)
 			clave := "description"
 			switch tool {
@@ -95,12 +100,14 @@ func chatWindow(xs []ChatExchange) []*ocMessage {
 				out += strings.Repeat(" ", t.Size-len(out))
 			}
 			a.Parts = append(a.Parts, newPart(t.ID, a.ID, claudePartData(tool, t.ID, in, status, out, t.Images), ""))
+			win = append(win, a)
 		}
+		a := &ocMessage{ID: x.Point, Role: "assistant", Time: x.At}
 		if x.Answer != "" {
 			d, _ := marshalNoEscape(map[string]any{"type": "text", "text": x.Answer})
 			a.Parts = append(a.Parts, newPart(a.ID+":t", a.ID, string(d), ""))
 		}
-		win = append(win, u, a)
+		win = append(win, a)
 	}
 	return win
 }
@@ -136,7 +143,8 @@ func chatPending(plan prunePlan) int {
 
 // ChatVigencia: la vigencia de una conversación de pgocode (clave: la de su recolector, «chat-<sesión>»), frente al
 // mensaje nuevo (o, sin él, al último). auto: con embeddings (Ollama local); si no, solo reglas.
-func ChatVigencia(ctx context.Context, key string, xs []ChatExchange, msg string, auto bool) *PruneReport {
+// folder: la carpeta del proyecto (sus pesos de la vigencia).
+func ChatVigencia(ctx context.Context, key, folder string, xs []ChatExchange, msg string, auto bool) *PruneReport {
 	if !sesionValida.MatchString(key) || len(xs) == 0 {
 		return nil
 	}
@@ -145,7 +153,17 @@ func ChatVigencia(ctx context.Context, key string, xs []ChatExchange, msg string
 	c.do(ctx, func() {
 		defer c.setPhase("", 0)
 		c.setPhase("marcando", len(xs))
-		win := chatWindow(xs)
+		// Lo anterior a la última compactación del agente: fuera del contexto (solo para la vigencia).
+		var antes, dentro []ChatExchange
+		for _, x := range xs {
+			if x.Compacted {
+				antes = append(antes, x)
+			} else {
+				dentro = append(dentro, x)
+			}
+		}
+		c.setFolder(folder)
+		win := chatWindow(dentro)
 		var s *pruneSims
 		if auto {
 			ce, cancela := context.WithTimeout(ctx, 20*time.Second)
@@ -158,11 +176,12 @@ func ChatVigencia(ctx context.Context, key string, xs []ChatExchange, msg string
 		}
 		c.setRulesOnly(s == nil)
 		now := pruneNow()
-		plan := planPrune(win, s, pruneYoung, now)
+		plan := planPruneK(win, s, pruneYoung, now, c.params())
 		for _, pv := range plan.Pieces {
 			pv.Note, pv.Out = "", false // nada se aplica: lo decide el relevo
 		}
 		c.state.Vig = vigSnapshot(plan, func(*pruneExchange) bool { return false }, func(*pieceVig) bool { return false })
+		c.state.Vig.addCompacted(chatWindow(antes))
 		c.save()
 		rep = &PruneReport{Pending: chatPending(plan)}
 		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)

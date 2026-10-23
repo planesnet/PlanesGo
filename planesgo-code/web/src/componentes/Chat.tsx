@@ -221,7 +221,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       const xs = CL.chatExchanges(ms);
       if (!xs.length) return null;
       ponLimpieza(s.id, { busy: true });
-      try { r = await post<PR.PruneReport>('/api/chat/vigencia', { clave: 'chat-' + s.id, intercambios: xs, mensaje: mensaje || '' }); }
+      try { r = await post<PR.PruneReport>('/api/chat/vigencia', { clave: 'chat-' + s.id, carpeta: s.carpeta, intercambios: xs, mensaje: mensaje || '' }); }
       finally { ponLimpieza(s.id, { busy: false }); }
     } else {
       if (!soloEstado) ponLimpieza(s.id, { busy: true });
@@ -251,6 +251,47 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const t = setInterval(() => refrescaVigencia(sesion), 10 * 60_000);
     return () => clearInterval(t);
   }, [sesion?.id, sesion?.sesionAgente, sesion?.agente, vigOn]);
+  // «Barrer ahora» (ventanita del hilo de limpieza): retira ya lo que está fuera de vigencia, sin el mínimo ni la
+  // cuenta de la caché. OpenCode, también con un turno en marcha (lo retirado se apunta en ese turno al acabar);
+  // Claude Code, si la sesión está abierta, al empezar el próximo turno; Antigravity, con el relevo en el próximo envío.
+  const [barriendo, setBarriendo] = useState<Record<string, boolean>>({});
+  const [barridoTxt, setBarridoTxt] = useState<Record<string, string>>({});
+  const relevoForzado = useRef<Record<string, boolean>>({});
+  const [relevoPedido, setRelevoPedido] = useState<Record<string, boolean>>({});
+  const barridoPend = useRef<Record<string, number>>({});
+  async function barreAhora() {
+    if (!sesion || !proyecto) return;
+    const s = sesion;
+    if (contextPolicy(s.agente, s).vig === 'chat') {
+      relevoForzado.current[s.id] = true;
+      setRelevoPedido(x => ({ ...x, [s.id]: true }));
+      return;
+    }
+    if (!s.sesionAgente || barriendo[s.id]) return;
+    const enMarcha = Boolean(vivas.current[s.id]);
+    const ultimoUsuario = [...conversacion(s.id)].reverse().find(m => m.rol === 'user' && m.texto)?.texto || '';
+    setBarriendo(x => ({ ...x, [s.id]: true }));
+    setBarridoTxt(x => ({ ...x, [s.id]: '' }));
+    try {
+      const r = await post<PR.PruneReport>('/api/chat/vigencia?barrer=1', { proyecto: proyecto.id, agente: s.agente, sesion_agente: s.sesionAgente,
+        carpeta: s.carpeta, mensaje: ultimoUsuario, en_curso: enMarcha });
+      ponLimpieza(s.id, { r });
+      const quitados = r.retirados || 0;
+      setBarridoTxt(x => ({ ...x, [s.id]: quitados > 0 || r.repuestos ? PR.prunedLine({ tokens: quitados, repuestos: r.repuestos }) : r.forzado_pendiente ? '' : 'nada que retirar' }));
+      if (quitados > 0 || r.repuestos) {
+        if (enMarcha) barridoPend.current[s.id] = (barridoPend.current[s.id] || 0) + quitados;
+        else {
+          const n = PR.applyPruneReport([...conversacion(s.id), CL.sweepNote(quitados, r.repuestos)], r);
+          guardaConversacion(s.id, n);
+          if (idActual.current === s.id) setMensajes(n);
+        }
+      }
+    } catch (e) {
+      setBarridoTxt(x => ({ ...x, [s.id]: '⚠ ' + (e as Error).message }));
+    } finally {
+      setBarriendo(x => ({ ...x, [s.id]: false }));
+    }
+  }
   // Mientras el recolector trabaja (marcando o barriendo), su estado cada 1,5 s sin esperarlo; quieto, nada.
   const faseLimpieza = sesion ? limpieza[sesion.id]?.r?.estado?.fase : undefined;
   useEffect(() => {
@@ -566,7 +607,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       const u = [...limpios].reverse().find(m => m.rol === 'assistant' && m.uso?.contexto);
       const mem = W.buildWorkingMemory(modoRelevo === 'vig' ? W.vigentOnly(limpios) : limpios);
       const motivo = W.shouldRelay({ agent: ses.agente, mode: modoRelevo, context: u?.uso?.contexto, idleMinutes: u?.fin ? (Date.now() - u.fin) / 60000 : 0,
-        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length, outTokens: fueraVig, outMin: umbralVigencia() });
+        hasAgentSession: true, attachments: listos.length, memoryChars: mem.length, outTokens: fueraVig, outMin: umbralVigencia(), forced: relevoForzado.current[ses.id] });
+      if (relevoForzado.current[ses.id]) { delete relevoForzado.current[ses.id]; setRelevoPedido(x => ({ ...x, [ses.id]: false })); }
       if (motivo) {
         memoria = mem; relevo = { de: u!.uso!.contexto!, a: W.estimateTokens(mem.length), anterior: sesionPrevia, motivo };
         if (modoRelevo === 'vig') previos = CL.markRelayedOut(previos);
@@ -709,6 +751,12 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         const { [id]: _, ...resto } = inyectadosRef.current;
         inyectadosRef.current = resto;
         setInyectados(resto);
+      }
+      // Un «Barrer ahora» durante el turno: lo retirado, en este turno.
+      const barrido = barridoPend.current[id];
+      if (barrido) {
+        delete barridoPend.current[id];
+        ultimo(m => ({ ...m, pruned: { ...m.pruned, tokens: (m.pruned?.tokens || 0) + barrido } }));
       }
       // Lo que quedó «en curso» ya no lo está: el agente ha terminado (o se ha parado).
       if (actual[actual.length - 1]?.tareas) ultimo(m => ({ ...m, tareas: T.alAcabar(m.tareas, ac.signal.aborted) }));
@@ -1158,7 +1206,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               <span className="hueco" />
               {vigOn && prov?.tipo === 'agente' && contextPolicy(sesion.agente, sesion).vig !== 'none' && (
                 <CleanerIndicator agent={sesion.agente} model={sesion.modelo || prov.por_defecto} report={limpieza[sesion.id]?.r}
-                  busy={limpieza[sesion.id]?.busy} messages={mensajes} />
+                  busy={limpieza[sesion.id]?.busy} messages={mensajes} onSweep={barreAhora} sweeping={barriendo[sesion.id]}
+                  sweepResult={barridoTxt[sesion.id]} relayForced={relevoPedido[sesion.id]} />
               )}
               {gastoSesion.turnos > 0 && (
                 <button className={'gasto gasto-' + nivelGasto} onClick={alAjustes}

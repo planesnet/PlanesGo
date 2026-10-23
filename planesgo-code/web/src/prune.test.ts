@@ -71,3 +71,9 @@ test('la línea del turno', () => {
   assert.equal(P.prunedLine({ tokens: 0, repuestos: 3 }), '↺ pgocode ha repuesto 3 piezas que vuelven a ser relevantes');
   assert.equal(P.prunedLine({ tokens: 0 }), '');
 });
+
+test('vigTitle: pasos y compactación del agente', () => {
+  assert.equal(P.vigTitle({ vigencia: 3.2, pasos: 14, relacion: 0.3 }), 'vigencia 3,2: hace 14 pasos · poca relación (0,30)');
+  assert.equal(P.vigTitle({ vigencia: 3, superada: 'resumido por la compactación del agente', fuera: true }),
+    'vigencia 3,0: resumido por la compactación del agente · fuera del contexto del agente');
+});
