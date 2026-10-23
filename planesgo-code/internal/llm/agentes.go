@@ -203,7 +203,7 @@ func (a *Agente) chatCompleto(ctx context.Context, p Peticion, emite func(Evento
 			}
 			if e.Uso != nil {
 				pasos++
-				midTurnPrune(a, p, sesionOC, pasos)
+				midTurnPrune(a, p, sesionOC, pasos, e.Uso.Contexto)
 			}
 			emite(e)
 		}

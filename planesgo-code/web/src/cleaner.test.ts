@@ -86,3 +86,42 @@ test('applyChatVigencia: cada intercambio y herramienta por su posición; markRe
   assert.equal(f[3].vig?.fuera, true);
   assert.equal(f[5].vig?.fuera, undefined);
 });
+
+test('chatExchanges: lo anterior a la última compactación del agente va marcado', () => {
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'uno' }, { rol: 'assistant', texto: 'r1', uso: { entrada: 1, salida: 1 } },
+    { rol: 'user', texto: 'dos' }, { rol: 'assistant', texto: '_(Antigravity ha compactado su historial.)_ r2', uso: { entrada: 1, salida: 1 } },
+    { rol: 'user', texto: 'tres' }, { rol: 'assistant', texto: 'r3', uso: { entrada: 1, salida: 1 } },
+  ];
+  const xs = C.chatExchanges(ms);
+  assert.equal(C.lastCompaction(ms), 3);
+  assert.deepEqual(xs.map(x => Boolean(x.compactado)), [true, false, false]);
+});
+
+test('Barrer ahora: nota en el chat, marca en la evolución, aviso de la caché y qué hará', () => {
+  const ms: Mensaje[] = [
+    { rol: 'user', texto: 'a' }, { rol: 'assistant', texto: 'b', uso: { entrada: 1, salida: 1, contexto: 100_000 } },
+  ];
+  const n = C.sweepNote(23_000, 0, 5);
+  assert.deepEqual(n, { rol: 'assistant', texto: '', nota: true, fin: 5, pruned: { tokens: 23_000 } });
+  const s = C.contextSeries([...ms, n], 200_000);
+  assert.equal(s.length, 2);
+  assert.deepEqual(s[1], { tokens: 77_000, pct: 38.5, pruned: 23_000 });
+  assert.equal(C.pruneLabel(s, 1), '−23 k, 50 % → 38,5 %');
+  const r = { retirados: 0, intercambios: [], pendiente: 30_000, cache_caliente: true, cache_resto: 40_000 };
+  assert.equal(C.cacheWarning('claude-code', r), 'invalida la caché desde ahí: ~40 k tokens a precio de escritura');
+  assert.equal(C.cacheWarning('opencode', r), 'invalida la caché desde ahí: ~40 k tokens a precio de entrada');
+  assert.equal(C.cacheWarning('opencode', { ...r, cache_caliente: false }), '');
+  assert.match(C.sweepHint('claude-code', { ...r, forzado_pendiente: true }), /próximo turno/);
+  assert.equal(C.sweepHint('opencode', r), '');
+  assert.match(C.sweepHint('opencode', { retirados: 0, intercambios: [] }), /nada fuera de vigencia/);
+  assert.match(C.sweepHint('antigravity', null, true), /próximo envío/);
+});
+
+test('calibración: pesos, relecturas y ahorro en una línea', () => {
+  const c = { pesos: { antiguedad: 0.12, pasos: 0.8, tiempo: 0.15, relacion: 20, pivote: 0.5 }, fecha: 1, piezas: 300, sesiones: 2,
+    retiradas: 100, tokens: 180_000, tokens_paso: 3_000_000, de_mas: 2, retiradas_generales: 99, tokens_generales: 176_000, de_mas_generales: 4 };
+  assert.equal(C.paramsLine(c), 'antigüedad 0,12 · pasos 0,8 · tiempo 0,15 · relación 20 (0,5)');
+  assert.equal(C.overLine(c), '2 de 100 retiradas (2 %); con los generales, 4 de 99 (4 %)');
+  assert.equal(C.savedLine(c), '180 k tokens retirados (3000 k tokens·paso); con los generales, 176 k');
+});

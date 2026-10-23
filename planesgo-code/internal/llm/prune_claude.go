@@ -147,6 +147,7 @@ type claudeSession struct {
 	ID, Path string
 	Lines    [][]byte // el fichero, línea a línea (sin el salto)
 	Win      []*ocMessage
+	Before   []*ocMessage // lo anterior a la última compactación (fuera del contexto del agente)
 	// Dónde está cada bloque que se puede tocar: línea e índice dentro de message.content (por su id de parte).
 	Where map[string][2]int
 	// Pos: lo que llevaba el contexto al llegar cada bloque (tokens; de la llamada que lo pidió). Cache: hasta dónde
@@ -270,6 +271,7 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 	// La cadena, de la hoja hacia atrás.
 	var cadena []int
 	visto := map[int]bool{}
+	frontera := -1
 	for i := hoja; ; {
 		if visto[i] {
 			return nil, errors.New("cadena con un ciclo")
@@ -277,6 +279,7 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 		visto[i] = true
 		l := ls[i]
 		if l.Type == "system" && l.Subtype == "compact_boundary" {
+			frontera = i
 			break
 		}
 		cadena = append(cadena, i)
@@ -292,6 +295,28 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 		}
 		i = j
 	}
+	var err error
+	if s.Win, err = s.convert(ls, cadena); err != nil {
+		return nil, err
+	}
+	// Lo anterior a la última compactación (fuera de la cadena): solo para la vigencia (fuera del contexto).
+	if frontera > 0 {
+		var antes []int
+		for i := frontera - 1; i >= 0; i-- {
+			if l := ls[i]; !visto[i] && !l.IsSidechain && (l.Type == "user" || l.Type == "assistant") {
+				antes = append(antes, i)
+			}
+		}
+		aparte := &claudeSession{Where: map[string][2]int{}, Pos: map[string]int{}, Orig: s.Orig}
+		s.Before, _ = aparte.convert(ls, antes)
+	}
+	return s, nil
+}
+
+// convert: las líneas idx (de la última a la primera) en mensajes y partes de la poda común. Apunta dónde está cada
+// bloque (Where), lo que llevaba el contexto (Pos), la caché del último turno y la última llamada.
+func (s *claudeSession) convert(ls []*cjLine, cadena []int) ([]*ocMessage, error) {
+	var win []*ocMessage
 	// Mensajes y partes, en orden.
 	type pend struct {
 		p     *ocPart
@@ -330,9 +355,12 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 			if cur == nil || curID != l.Message.ID || l.Message.ID == "" {
 				cur = &ocMessage{Role: "assistant"}
 				curID = l.Message.ID
-				s.Win = append(s.Win, cur)
+				win = append(win, cur)
 			}
 			cur.ID, cur.Time = l.UUID, t
+			if u := l.Message.Usage; u != nil {
+				cur.Ctx = max(cur.Ctx, u.Input+u.CacheRead+u.CacheCreation)
+			}
 			for _, b := range bs {
 				switch b.Type {
 				case "text":
@@ -353,7 +381,7 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 				if l.IsMeta {
 					continue
 				}
-				s.Win = append(s.Win, claudeUserMessage(l, t, str))
+				win = append(win, claudeUserMessage(l, t, str))
 				primeraDelTurno = !l.IsCompactSummary
 				continue
 			}
@@ -422,7 +450,7 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 				}
 				m.Parts = append(m.Parts, newPart(id, m.ID, data, cur))
 			}
-			s.Win = append(s.Win, m)
+			win = append(win, m)
 			primeraDelTurno = true
 		}
 	}
@@ -433,7 +461,7 @@ func parseClaudeSession(id, path string, data []byte, orig map[string]claudeOrig
 			json.Unmarshal([]byte(pd.p.Data), &pd.p.v)
 		}
 	}
-	return s, nil
+	return win, nil
 }
 
 func imageID(uuid string, i int) string { return fmt.Sprintf("img:%s:%d", uuid, i) }
@@ -685,7 +713,10 @@ func loadClaude(id string) (*claudeSession, error) {
 
 // sweepClaude: el barrido al empezar el turno de Claude Code (en el hilo del recolector). Si cambia el historial,
 // devuelve la copia de antes.
-func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string) (*PruneReport, *claudeBackup, error) {
+// force: lo pide el usuario («Barrer ahora»): sin el mínimo ni la cuenta de la caché; si la sesión está abierta en
+// otro proceso, queda pendiente para el próximo turno (ForcePending).
+func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string, force bool) (*PruneReport, *claudeBackup, error) {
+	c.setFolder(p.Carpeta)
 	s, err := loadClaude(c.key)
 	if err != nil {
 		c.state.Prunable = false
@@ -705,7 +736,7 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		}
 	}
 	now := pruneNow()
-	plan := claudePlan(planPrune(win, sims, pruneYoung, now), win)
+	plan := claudePlan(planPruneK(win, sims, pruneYoung, now, c.params()), win)
 	d := pruneChanges(win, plan)
 	cleared := map[string]int{}
 	for _, m := range win {
@@ -725,17 +756,29 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 		}
 	}
 	vale, porque := claudeCacheWorth(s, d, cleared, now)
+	if force {
+		vale, porque = d.changes(), "barrido pedido por el usuario"
+		if !vale {
+			c.state.ForcePending = false
+		}
+	}
 	if vale && claudeBusyFunc(c.key) {
 		vale, porque = false, "la sesión está abierta en otro proceso"
+		if force {
+			c.state.ForcePending = true // al empezar el próximo turno
+		}
+	}
+	c.state.CacheUntil = 0
+	if !s.LastCall.IsZero() {
+		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
 	}
 	if !vale {
 		depuracion.Log("claude-code", "poda %s: %d tokens pendientes (%s)", c.key, d.Saved, porque)
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
-		c.state.Pending = max(d.Saved, 0)
+		c.state.Vig.addCompacted(s.Before)
+		c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
 		c.save()
-		rep := &PruneReport{Podable: true, Pending: c.state.Pending}
-		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
-		return rep, nil, nil
+		return c.reportNow(now), nil, nil
 	}
 	c.setPhase("barriendo", len(d.Update)+len(d.Restore))
 	var clear []string
@@ -777,8 +820,9 @@ func (c *pruneCollector) sweepClaude(ctx context.Context, p Peticion, msg string
 	}
 	c.state.Tiers = tiers
 	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
+	c.state.Vig.addCompacted(s.Before)
 	c.noteSweep(max(d.Saved, 0))
-	c.state.Pending = 0
+	c.state.Pending, c.state.CacheSuffix, c.state.ForcePending = 0, 0, false
 	c.save()
 	depuracion.Log("claude-code", "poda %s: %d tokens fuera (%d vaciados, %d repuestos; %s)", c.key, d.Saved, len(clear), len(d.Restore), porque)
 	rep := &PruneReport{Removed: max(d.Saved, 0), Restored: len(d.Restore), Podable: true}
@@ -796,7 +840,11 @@ func (c *pruneCollector) markClaudeNow(ctx context.Context, embeddings bool) {
 		return
 	}
 	c.state.Prunable = true
-	c.markWin(ctx, s.Win, embeddings, true)
+	c.state.CacheUntil = 0
+	if !s.LastCall.IsZero() {
+		c.state.CacheUntil = s.LastCall.Add(claudeCacheTTL).UnixMilli()
+	}
+	c.markWin(ctx, s.Win, s.Before, embeddings, true)
 }
 
 // pruneClaude: el barrido al empezar el turno de Claude Code. Devuelve lo que ve la interfaz y, si ha cambiado el
@@ -813,7 +861,8 @@ func pruneClaude(ctx context.Context, p Peticion) (*PruneReport, *claudeBackup) 
 	err := c.do(ce, func() {
 		defer c.setPhase("", 0)
 		var err error
-		if rep, bak, err = c.sweepClaude(ce, p, p.Mensajes[len(p.Mensajes)-1].Texto); err != nil {
+		// Un «Barrer ahora» que esperaba a que se cerrara la sesión: ahora.
+		if rep, bak, err = c.sweepClaude(ce, p, p.Mensajes[len(p.Mensajes)-1].Texto, c.state.ForcePending); err != nil {
 			depuracion.Log("claude-code", "poda %s: %v", p.SesionAgente, err)
 		}
 		c.publish(rep)
@@ -835,6 +884,7 @@ func markClaude(p Peticion, ses string) {
 		defer c.setPhase("", 0)
 		ctx, cancela := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancela()
+		c.setFolder(p.Carpeta)
 		c.markClaudeNow(ctx, p.Prune == PruneAuto)
 	})
 }

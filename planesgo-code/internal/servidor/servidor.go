@@ -820,9 +820,14 @@ func (s *Servidor) vigencia(w http.ResponseWriter, r *http.Request, _ *sesiones.
 // vigenciaChat: la vigencia de la conversación de pgocode para los agentes que no dejan podar su historial
 // (Antigravity; ver llm.ChatVigencia). La interfaz manda los intercambios desde la última conversación nueva del
 // agente y, si va a enviar, el mensaje nuevo; con «pendiente» decide el relevo.
-func (s *Servidor) vigenciaChat(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
+func (s *Servidor) vigenciaChat(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if r.URL.Query().Get("barrer") == "1" {
+		s.barrer(w, r, ses)
+		return
+	}
 	var p struct {
 		Clave        string             `json:"clave"`
+		Carpeta      string             `json:"carpeta"`
 		Intercambios []llm.ChatExchange `json:"intercambios"`
 		Mensaje      string             `json:"mensaje"`
 		Podar        *bool              `json:"podar"`
@@ -833,12 +838,52 @@ func (s *Servidor) vigenciaChat(w http.ResponseWriter, r *http.Request, _ *sesio
 	}
 	ctx, cancela := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancela()
-	rep := llm.ChatVigencia(ctx, p.Clave, p.Intercambios, p.Mensaje, modoPoda(p.Podar) == llm.PruneAuto)
+	rep := llm.ChatVigencia(ctx, p.Clave, p.Carpeta, p.Intercambios, p.Mensaje, modoPoda(p.Podar) == llm.PruneAuto)
 	if rep == nil {
 		rep = &llm.PruneReport{Exchanges: []llm.PruneExchange{}, Pieces: []llm.PrunePiece{}}
 	}
 	jsonOK(w, rep)
 }
+
+// barrer: «Barrer ahora» desde la ventanita del hilo de limpieza (POST /api/chat/vigencia?barrer=1): retira ya lo
+// que está fuera de vigencia de la sesión del agente, sin el mínimo ni la cuenta de la caché (ver llm.ForceSweep).
+// Antigravity no deja tocar su historial: la interfaz fuerza el relevo en el próximo envío.
+func (s *Servidor) barrer(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto     int    `json:"proyecto"`
+		Agente       string `json:"agente"`
+		SesionAgente string `json:"sesion_agente"`
+		Carpeta      string `json:"carpeta"`
+		Mensaje      string `json:"mensaje"`
+		EnCurso      bool   `json:"en_curso"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if p.Agente != "opencode" && p.Agente != "claude-code" {
+		jsonError(w, http.StatusBadRequest, "este agente no deja podar su historial: se releva en el próximo envío")
+		return
+	}
+	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
+		return
+	}
+	if p.Carpeta == "" || !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
+		jsonError(w, http.StatusForbidden, "la carpeta no es del proyecto")
+		return
+	}
+	ctx, cancela := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancela()
+	rep, err := barrido(ctx, p.Agente, p.SesionAgente, p.Carpeta, p.Mensaje, p.EnCurso)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonOK(w, rep)
+}
+
+// barrido: el barrido forzado (en las pruebas, se sustituye).
+var barrido = llm.ForceSweep
 
 // modoPoda: la poda de la sesión (activada salvo que la sesión la desactive).
 func modoPoda(podar *bool) string {

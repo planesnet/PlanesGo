@@ -46,7 +46,7 @@ var (
 	idParteOC      = regexp.MustCompile(`^prt_[A-Za-z0-9]+$`)
 	pruneArgMax    = 100 << 10 // tamaño máximo de una sentencia (el límite de un argumento es 128 KB)
 	pruneDirFunc   = func() string { return filepath.Join(datosOpenCode(), "poda") }
-	pruneMidSteps  = 0 // barrido entre pasos de un turno largo cada N pasos (0: nunca; ver midTurnWorth)
+	pruneMidSteps  = 4 // barrido entre pasos de un turno largo: se mira cada N pasos (0: nunca; ver midSweep)
 	tablaPreparada sync.Map
 )
 
@@ -102,7 +102,8 @@ func loadOpenCodeSession(ctx context.Context, a *Agente, p Peticion, ses string)
 		return nil, err
 	}
 	q := `SELECT m.id AS mid, json_extract(m.data,'$.role') AS role, CASE WHEN json_type(m.data,'$.summary')='true' THEN 1 ELSE 0 END AS summary, ` +
-		`coalesce(json_extract(m.data,'$.parentID'),'') AS parent, m.time_created AS mt, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
+		`coalesce(json_extract(m.data,'$.parentID'),'') AS parent, m.time_created AS mt, ` +
+		`coalesce(json_extract(m.data,'$.tokens.input'),0)+coalesce(json_extract(m.data,'$.tokens.cache.read'),0) AS ctx, coalesce(p.id,'') AS pid, coalesce(o.data,p.data,'') AS data, ` +
 		`CASE WHEN o.data IS NULL OR o.data=p.data THEN '' ELSE p.data END AS cur ` +
 		`FROM message m LEFT JOIN part p ON p.message_id=m.id LEFT JOIN ` + pruneTable + ` o ON o.id=p.id ` +
 		`WHERE m.session_id='` + ses + `' ORDER BY m.time_created, m.id, p.id`
@@ -117,7 +118,7 @@ func parseSessionRows(out []byte) ([]*ocMessage, error) {
 	var filas []struct {
 		Mid, Role, Parent, Pid, Data, Cur string
 		Summary                           any
-		Mt                                int64
+		Mt, Ctx                           int64
 	}
 	if len(strings.TrimSpace(string(out))) == 0 {
 		return nil, nil
@@ -135,7 +136,7 @@ func parseSessionRows(out []byte) ([]*ocMessage, error) {
 			case bool:
 				s = v
 			}
-			msgs = append(msgs, &ocMessage{ID: f.Mid, Role: f.Role, Parent: f.Parent, Summary: s, Time: f.Mt})
+			msgs = append(msgs, &ocMessage{ID: f.Mid, Role: f.Role, Parent: f.Parent, Summary: s, Time: f.Mt, Ctx: int(f.Ctx)})
 		}
 		if f.Pid != "" {
 			m := msgs[len(msgs)-1]
@@ -221,6 +222,39 @@ type pruneState struct {
 	LastSweep   int64 `json:"barrido,omitempty"`
 	// Pending: lo que saldría con un barrido ahora (tokens estimados).
 	Pending int `json:"pendiente,omitempty"`
+	// Folder: la carpeta del proyecto (sus pesos de la vigencia).
+	Folder string `json:"carpeta,omitempty"`
+	// Para barrer a mano («Barrer ahora»): lo que dejaría de estar en caché desde el primer cambio (tokens), hasta
+	// cuándo está caliente la caché (ms) y si hay un barrido forzado pendiente (Claude Code con la sesión abierta).
+	CacheSuffix  int   `json:"cache_resto,omitempty"`
+	CacheUntil   int64 `json:"cache_hasta,omitempty"`
+	ForcePending bool  `json:"forzado_pendiente,omitempty"`
+}
+
+// reportNow: lo que ve la interfaz del estado (sin lo retirado en este momento).
+func (c *pruneCollector) reportNow(now time.Time) *PruneReport {
+	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending, ForcePending: c.state.ForcePending}
+	if c.state.Pending > 0 && now.UnixMilli() < c.state.CacheUntil {
+		r.CacheWarm, r.CacheSuffix = true, c.state.CacheSuffix
+	}
+	if c.state.Vig != nil {
+		r.Exchanges, r.Pieces = c.state.Vig.report(now)
+	}
+	return r
+}
+
+// openCodeCacheTTL: lo que se supone que dura la caché implícita de Gemini (no la cobra al escribir; caduca en
+// minutos).
+const openCodeCacheTTL = 5 * time.Minute
+
+// lastCallUntil: hasta cuándo sigue caliente la caché tras el último mensaje de la sesión.
+func lastCallUntil(msgs []*ocMessage, ttl time.Duration) int64 {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Time > 0 {
+			return msgs[i].Time + ttl.Milliseconds()
+		}
+	}
+	return 0
 }
 
 type pruneCollector struct {
@@ -356,6 +390,13 @@ func (c *pruneCollector) later(f func()) {
 	}
 }
 
+// setFolder: la carpeta del proyecto de la sesión (en el hilo del recolector).
+func (c *pruneCollector) setFolder(f string) {
+	if f != "" {
+		c.state.Folder = f
+	}
+}
+
 func (c *pruneCollector) file() string { return filepath.Join(pruneDirFunc(), c.key+".json") }
 
 func (c *pruneCollector) load() {
@@ -375,8 +416,7 @@ func (c *pruneCollector) load() {
 func (c *pruneCollector) publishSaved() {
 	var r *PruneReport
 	if c.state.Vig != nil {
-		r = &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
-		r.Exchanges, r.Pieces = c.state.Vig.report(pruneNow())
+		r = c.reportNow(pruneNow())
 	}
 	c.publish(r)
 }
@@ -454,6 +494,7 @@ func (c *pruneCollector) notePiece(callID, tool, res, out string) {
 // mark: al acabar un turno, lee la sesión y embebe lo que falte (intercambios y piezas grandes). Así el barrido del
 // turno siguiente solo tiene que embeber el mensaje nuevo.
 func (c *pruneCollector) mark(ctx context.Context, a *Agente, p Peticion, embeddings bool) {
+	c.setFolder(p.Carpeta)
 	msgs, err := loadOpenCodeSession(ctx, a, p, c.key)
 	if err != nil {
 		depuracion.Log(a.Clave, "poda: leer la sesión %s: %v", c.key, err)
@@ -461,12 +502,15 @@ func (c *pruneCollector) mark(ctx context.Context, a *Agente, p Peticion, embedd
 		return
 	}
 	c.snapshot = msgs
-	c.markWin(ctx, pruneWindow(msgs), embeddings, false)
+	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
+	win := pruneWindow(msgs)
+	c.markWin(ctx, win, compactedBefore(msgs, win), embeddings, false)
 }
 
 // markWin: la vigencia de la ventana del agente con lo último (y los vectores de lo que falte), sin barrer.
-// claude: solo lo que se aplica en Claude Code (claudePlan).
-func (c *pruneCollector) markWin(ctx context.Context, win []*ocMessage, embeddings, claude bool) {
+// before: lo anterior a la última compactación del agente (fuera). claude: solo lo que se aplica en Claude Code
+// (claudePlan).
+func (c *pruneCollector) markWin(ctx context.Context, win, before []*ocMessage, embeddings, claude bool) {
 	var s *pruneSims
 	xs := pruneExchanges(win)
 	c.setPhase("marcando", len(xs))
@@ -478,16 +522,16 @@ func (c *pruneCollector) markWin(ctx context.Context, win []*ocMessage, embeddin
 		}
 	}
 	c.setRulesOnly(s == nil)
-	plan := planPrune(win, s, pruneYoung, pruneNow())
+	plan := planPruneK(win, s, pruneYoung, pruneNow(), c.params())
 	if claude {
 		plan = claudePlan(plan, win)
 	}
 	c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
-	c.state.Pending = max(pruneChanges(win, plan).Saved, 0)
+	c.state.Vig.addCompacted(before)
+	d := pruneChanges(win, plan)
+	c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
 	c.save()
-	r := &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
-	r.Exchanges, r.Pieces = c.state.Vig.report(pruneNow())
-	c.publish(r)
+	c.publish(c.reportNow(pruneNow()))
 }
 
 // pruneNow: el momento de los cálculos (en las pruebas, una fecha forzada).
@@ -525,38 +569,58 @@ func (c *pruneCollector) embedAll(ctx context.Context, win []*ocMessage) {
 // sims: las similitudes de cada intercambio y pieza frente al mensaje nuevo (si es corto, también frente al
 // anterior del usuario: se queda la mayor). Nil si no hay embeddings.
 func (c *pruneCollector) sims(ctx context.Context, win []*ocMessage, msg string) *pruneSims {
+	r := computeSims(win, msg, func(clave, texto, tarea string) []float32 { return c.vector(ctx, clave, texto, tarea) })
+	if r != nil {
+		r.PrevTier = c.state.Tiers
+	}
+	return r
+}
+
+// vecFunc: el vector de una clave (de la caché o calculándolo; nil si no hay).
+type vecFunc func(clave, texto, tarea string) []float32
+
+// computeSims: las similitudes de cada intercambio frente al mensaje (y al anterior del usuario si es corto) y de
+// cada pieza frente a eso y a lo que se está haciendo ahora (focusText). Nil sin embeddings.
+func computeSims(win []*ocMessage, msg string, vec vecFunc) *pruneSims {
 	xs := pruneExchanges(win)
 	msg = strings.TrimSpace(quitaIdioma(msg))
-	q := c.vector(ctx, hashKey("q:", msg), msg, "RETRIEVAL_QUERY")
+	q := vec(hashKey("q:", msg), msg, "RETRIEVAL_QUERY")
 	if q == nil {
 		return nil
 	}
 	qs := [][]float32{q}
 	if shortMessage(msg) && len(xs) > 0 {
 		prev := strings.TrimSpace(xs[len(xs)-1].userText())
-		if v := c.vector(ctx, hashKey("q:", prev), prev, "RETRIEVAL_QUERY"); v != nil {
+		if v := vec(hashKey("q:", prev), prev, "RETRIEVAL_QUERY"); v != nil {
 			qs = append(qs, v)
 		}
 	}
-	mejor := func(v []float32) float64 {
+	mejor := func(v []float32, qs [][]float32) float64 {
 		s := -1.0
 		for _, q := range qs {
 			s = max(s, cosine(q, v))
 		}
 		return s
 	}
-	r := &pruneSims{Exchange: map[string]float64{}, Piece: map[string]float64{}, PrevTier: c.state.Tiers}
+	// Las piezas, también frente a lo que se está haciendo ahora (lo último del agente).
+	pqs := qs
+	if f := focusText(win); f != "" {
+		if v := vec(hashKey("f:", f), f, "RETRIEVAL_QUERY"); v != nil {
+			pqs = append(append([][]float32(nil), qs...), v)
+		}
+	}
+	r := &pruneSims{Exchange: map[string]float64{}, Piece: map[string]float64{}}
 	for _, x := range xs {
-		v := c.vector(ctx, hashKey("x:", x.embedText()), x.embedText(), "RETRIEVAL_DOCUMENT")
+		v := vec(hashKey("x:", x.embedText()), x.embedText(), "RETRIEVAL_DOCUMENT")
 		if v == nil {
 			return nil
 		}
-		r.Exchange[x.UserID] = mejor(v)
+		r.Exchange[x.UserID] = mejor(v, qs)
 		for _, m := range x.Messages {
 			for _, pt := range m.Parts {
 				if pt.isPiece() && pt.v.CallID != "" {
-					if v := c.vector(ctx, "p:"+pt.v.CallID, pt.pieceText(), "RETRIEVAL_DOCUMENT"); v != nil {
-						r.Piece[pt.ID] = mejor(v)
+					if v := vec("p:"+pt.v.CallID, pt.pieceText(), "RETRIEVAL_DOCUMENT"); v != nil {
+						r.Piece[pt.ID] = mejor(v, pqs)
 					}
 				}
 			}
@@ -567,7 +631,11 @@ func (c *pruneCollector) sims(ctx context.Context, win []*ocMessage, msg string)
 
 // sweep: el barrido al empezar el turno. Decide con lo marcado y, si compensa, cambia el historial del agente.
 // young: intercambios de L1 (2 al empezar el turno; 3 entre pasos, para no tocar el turno en curso).
-func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg string, young int) (*PruneReport, error) {
+// mid: el barrido entre pasos de un turno (nil al empezarlo): solo si además compensa perder la caché a mitad de
+// turno (midSweep.worth).
+// force: lo pide el usuario («Barrer ahora»): sin el mínimo ni la cuenta de la caché.
+func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg string, young int, mid *midSweep, force bool) (*PruneReport, error) {
+	c.setFolder(p.Carpeta)
 	msgs := c.snapshot
 	c.snapshot = nil // tras el barrido (o el turno) ya no vale
 	if msgs == nil {
@@ -591,17 +659,18 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 		c.setRulesOnly(true)
 	}
 	now := pruneNow()
-	plan := planPrune(win, s, young, now)
+	plan := planPruneK(win, s, young, now, c.params())
 	d := pruneChanges(win, plan)
-	if !d.worthIt() {
+	before := compactedBefore(msgs, win)
+	c.state.CacheUntil = lastCallUntil(msgs, openCodeCacheTTL)
+	if (!force && (!d.worthIt() || (mid != nil && !mid.worth(d, win)))) || !d.changes() {
 		depuracion.Log(a.Clave, "poda %s: %d tokens pendientes (no compensa aún)", c.key, d.Saved)
 		// La vigencia, la de ahora; lo que está fuera, lo que ya estaba.
 		c.state.Vig = vigSnapshot(plan, c.outNow, func(p *pieceVig) bool { return appliedOut(partByID(win, p.PartID)) })
-		c.state.Pending = max(d.Saved, 0)
+		c.state.Vig.addCompacted(before)
+		c.state.Pending, c.state.CacheSuffix = max(d.Saved, 0), changedSuffix(win, d)
 		c.save()
-		rep := &PruneReport{Pending: c.state.Pending}
-		rep.Exchanges, rep.Pieces = c.state.Vig.report(now)
-		return rep, nil
+		return c.reportNow(now), nil
 	}
 	qs, err := pruneStatements(d)
 	if err != nil {
@@ -621,8 +690,9 @@ func (c *pruneCollector) sweep(ctx context.Context, a *Agente, p Peticion, msg s
 	}
 	c.state.Tiers = tiers
 	c.state.Vig = vigSnapshot(plan, func(x *pruneExchange) bool { return x.Tier == TierL3 }, func(p *pieceVig) bool { return p.Out })
+	c.state.Vig.addCompacted(before)
 	c.noteSweep(max(d.Saved, 0))
-	c.state.Pending = 0
+	c.state.Pending, c.state.CacheSuffix = 0, 0
 	c.save()
 	depuracion.Log(a.Clave, "poda %s: %d tokens fuera (%d partes cambiadas, %d repuestas, %d quitadas)", c.key, d.Saved,
 		len(d.Update), len(d.Restore), len(d.Delete))
@@ -669,8 +739,7 @@ func VigenciaReport(ctx context.Context, ses string, wait bool) *PruneReport {
 		if c.state.Vig == nil {
 			return
 		}
-		rep = &PruneReport{Podable: c.state.Prunable, Pending: c.state.Pending}
-		rep.Exchanges, rep.Pieces = c.state.Vig.report(pruneNow())
+		rep = c.reportNow(pruneNow())
 	})
 	if rep != nil {
 		st := c.status()
@@ -691,7 +760,7 @@ func pruneOpenCode(ctx context.Context, a *Agente, p Peticion) *PruneReport {
 	err := c.do(ce, func() {
 		defer c.setPhase("", 0)
 		var err error
-		if rep, err = c.sweep(ce, a, p, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung); err != nil {
+		if rep, err = c.sweep(ce, a, p, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung, nil, false); err != nil {
 			depuracion.Log(a.Clave, "poda %s: %v", p.SesionAgente, err)
 		}
 		c.publish(rep)
@@ -727,37 +796,96 @@ func forgetSnapshot(ses string) {
 	}
 }
 
-// midTurnWorth: si compensa barrer entre pasos de un turno largo (preparado, desactivado: pruneMidSteps = 0).
-// OpenCode relee el historial de la base de datos en cada paso, así que un barrido entre pasos surte efecto en el
-// siguiente. Con Gemini, escribir en caché no se cobra, pero desde el primer cambio el historial deja de estar en
-// caché una vez: se paga ese resto a precio de entrada (1) en vez de caché (cacheRatio, 0,1 en Gemini) en un
-// paso, y a cambio cada paso siguiente manda «removed» tokens menos (a precio de caché). Compensa si
-// removed·cacheRatio·pasosRestantes > resto·(1−cacheRatio).
+// midTurnWorth: si compensa barrer entre pasos de un turno largo por la caché. OpenCode relee el historial de la
+// base de datos en cada paso, así que un barrido entre pasos surte efecto en el siguiente. Con Gemini, escribir en
+// caché no se cobra, pero desde el primer cambio el historial deja de estar en caché una vez: se paga ese resto a
+// precio de entrada (1) en vez de caché (cacheRatio, 0,1 en Gemini) en un paso, y a cambio cada paso siguiente
+// manda «removed» tokens menos (a precio de caché). Compensa si removed·cacheRatio·pasosRestantes > resto·(1−cacheRatio).
 func midTurnWorth(removed, suffix, stepsLeft int, cacheRatio float64) bool {
 	return float64(removed)*cacheRatio*float64(stepsLeft) > float64(suffix)*(1-cacheRatio)
 }
 
+// midSweep: lo que sabe el barrido entre pasos del turno en curso: el contexto de la última llamada y el umbral al
+// que el agente compacta.
+type midSweep struct {
+	Context, Threshold int
+}
+
+// Barrido entre pasos: cada cuántos pasos se mira, los pasos que se suponen por delante (PasosOpenCode es 40) y el
+// precio relativo de la caché de Gemini.
+const (
+	midStepsLeft  = 10
+	midCacheRatio = 0.1
+)
+
+// worth: si compensa barrer ahora a mitad de turno: si por la caché se amortiza (midTurnWorth) o si el contexto va
+// ya por la mitad del umbral de compactación. Compactar cuesta más que perder la caché una vez: una llamada con todo
+// el historial para resumirlo, el resumen (salida) y, después, releer lo que hacía falta; en INTRADEMA, OpenCode
+// compactó 4 veces en 45 minutos con 40-68k tokens de lecturas viejas que nadie usaba.
+func (m *midSweep) worth(d pruneDiff, win []*ocMessage) bool {
+	if m.Threshold > 0 && m.Context >= m.Threshold/2 {
+		return true
+	}
+	return midTurnWorth(d.Saved, changedSuffix(win, d), midStepsLeft, midCacheRatio)
+}
+
+// changedSuffix: los tokens del historial a partir de la primera parte que cambia (lo que deja de estar en caché).
+func changedSuffix(win []*ocMessage, d pruneDiff) int {
+	cambia := map[string]bool{}
+	for id := range d.Update {
+		cambia[id] = true
+	}
+	for _, id := range append(append([]string(nil), d.Restore...), d.Delete...) {
+		cambia[id] = true
+	}
+	n, desde := 0, false
+	for _, m := range win {
+		for _, p := range m.Parts {
+			desde = desde || cambia[p.ID]
+			if desde {
+				cur := p.Data
+				if p.Current != "" {
+					cur = p.Current
+				}
+				if nuevo, ok := d.Update[p.ID]; ok {
+					cur = nuevo
+				}
+				n += tokensOf(cur)
+			}
+		}
+	}
+	return n
+}
+
 func init() {
-	if n, err := strconv.Atoi(os.Getenv("PGOCODE_PRUNE_STEPS")); err == nil && n > 0 {
+	if n, err := strconv.Atoi(os.Getenv("PGOCODE_PRUNE_STEPS")); err == nil && n >= 0 {
 		pruneMidSteps = n
 	}
 }
 
-// midTurnPrune: el barrido entre pasos de un turno muy largo, cada pruneMidSteps pasos (desactivado por defecto:
-// PGOCODE_PRUNE_STEPS=N lo activa). No espera: lo hace el hilo del recolector mientras el agente sigue; el turno en
-// curso y los dos intercambios anteriores (L1) no se tocan.
-func midTurnPrune(a *Agente, p Peticion, ses string, pasos int) {
+// midTurnPrune: el barrido entre pasos de un turno largo, cada pruneMidSteps pasos (PGOCODE_PRUNE_STEPS=0 lo
+// desactiva). No espera: lo hace el hilo del recolector mientras el agente sigue. Del turno en curso y los dos
+// intercambios anteriores solo pueden salir piezas con su propia vigencia de 3 o más, nunca las de los últimos
+// pruneProtectSteps pasos. contexto: el de la última llamada.
+func midTurnPrune(a *Agente, p Peticion, ses string, pasos, contexto int) {
 	if pruneMidSteps <= 0 || pasos%pruneMidSteps != 0 || p.Prune == PruneOff || p.Aparte || !idSesionOC.MatchString(ses) || len(p.Mensajes) == 0 {
 		return
 	}
 	c := collectorFor(ses)
 	q := p
 	q.SesionAgente = ses
+	mid := &midSweep{Context: contexto}
+	if !agentOwnCompaction(p) {
+		mid.Threshold = compactThreshold(p)
+	}
 	c.later(func() {
 		ctx, cancela := context.WithTimeout(context.Background(), time.Minute)
 		defer cancela()
-		if _, err := c.sweep(ctx, a, q, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung+1); err != nil {
+		rep, err := c.sweep(ctx, a, q, p.Mensajes[len(p.Mensajes)-1].Texto, pruneYoung+1, mid, false)
+		if err != nil {
 			depuracion.Log(a.Clave, "poda entre pasos %s: %v", ses, err)
+			return
 		}
+		c.publish(rep)
 	})
 }

@@ -192,6 +192,7 @@ export interface RelayInput {
   threshold?: number;     // con el modo «on», otro umbral (el banco de consumo, estrategia «relevo:N»)
   outTokens?: number;     // con el modo «vig», lo que está fuera de vigencia (tokens estimados)
   outMin?: number;        // con el modo «vig», otro mínimo (para probarlo)
+  forced?: boolean;       // con el modo «vig», el usuario lo ha pedido («Barrer ahora»): con algo fuera de vigencia basta
 }
 
 // idleMinimum: con la caché caducada, el contexto a partir del cual el relevo sale a cuenta. Seguir la sesión
@@ -208,6 +209,7 @@ export function idleMinimum(agent: string): number {
 // memoria no ahorra al menos la mitad.
 export function shouldRelay(i: RelayInput): string | null {
   if (i.mode === 'off' || !i.hasAgentSession || i.attachments || i.planOrder || !i.context || !i.memoryChars) return null;
+  if (i.mode === 'vig' && i.forced && (i.outTokens || 0) > 0) return `barrido pedido: ${fmt(i.outTokens!)} de ${fmt(i.context)} están fuera de vigencia`;
   if (i.memoryChars / 4 > i.context / 2) return null;
   if (i.idleMinutes >= CACHE_MINUTES && i.context >= idleMinimum(i.agent)) return `la conversación lleva ${Math.round(i.idleMinutes)} min parada (sin caché) con ${fmt(i.context)} de contexto`;
   const limit = i.threshold || RELAY_THRESHOLD;

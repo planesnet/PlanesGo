@@ -13,11 +13,15 @@ interface Props {
   report?: PruneReport | null;
   busy?: boolean;         // una consulta al recolector en curso (marcando)
   messages: Mensaje[];
+  onSweep?: () => void;   // «Barrer ahora»
+  sweeping?: boolean;     // el barrido pedido está en marcha
+  sweepResult?: string;   // lo que salió del último barrido pedido
+  relayForced?: boolean;  // Antigravity: relevo pedido para el próximo envío
 }
 
 const W = 220, H = 40;
 
-export default function CleanerIndicator({ agent, model, report, busy, messages }: Props) {
+export default function CleanerIndicator({ agent, model, report, busy, messages, onSweep, sweeping, sweepResult, relayForced }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -29,7 +33,7 @@ export default function CleanerIndicator({ agent, model, report, busy, messages 
     return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', esc); };
   }, [open]);
   const st = report?.estado;
-  const working = Boolean(busy || (st && st.fase));
+  const working = Boolean(busy || sweeping || (st && st.fase));
   const rules = st?.motor === 'reglas';
   const window = CL.contextWindow(agent, model);
   const series = CL.contextSeries(messages, window);
@@ -38,7 +42,10 @@ export default function CleanerIndicator({ agent, model, report, busy, messages 
   const pending = report?.pendiente || 0;
   const after = last ? CL.projected(last.tokens, pending) : 0;
   const pts = CL.sparkPoints(series, W, H);
-  const line = CL.statusLine(st, busy);
+  const line = sweeping ? 'barriendo' : CL.statusLine(st, busy);
+  const hint = CL.sweepHint(agent, report, relayForced);
+  const warn = CL.cacheWarning(agent, report);
+  const cal = report?.calibracion;
   return (
     <span className="cleaner" ref={box}>
       <button className={'cleaner-btn' + (working ? ' working' : '') + (rules ? ' rules' : '')} onClick={() => setOpen(o => !o)}
@@ -61,6 +68,24 @@ export default function CleanerIndicator({ agent, model, report, busy, messages 
             <dt>Retirados</dt><dd>{fmt(st?.retirados_sesion || 0)} en la sesión{st?.ultimos_retirados ? ` · ${fmt(st.ultimos_retirados)} en el último barrido` : ''}</dd>
             <dt>Último barrido</dt><dd>{CL.ago(st?.ultimo_barrido)}</dd>
           </dl>
+          {onSweep && (
+            <div className="cleaner-sweep">
+              <button type="button" className="boton-secundario" onClick={onSweep} disabled={working || (agent === 'antigravity' && relayForced)}
+                title={warn ? 'Barrer ahora: ' + warn : 'Retira ya lo que está fuera de vigencia (3 o más), sin esperar al próximo turno'}>
+                {sweeping ? 'Barriendo…' : 'Barrer ahora'}
+              </button>
+              {warn && <span className="aviso-txt pequeno">{warn}</span>}
+              {(sweepResult || hint) && <span className="suave pequeno">{sweepResult || hint}</span>}
+            </div>
+          )}
+          {cal && (
+            <dl className="cleaner-dl cleaner-cal" aria-label="Calibración de la vigencia del proyecto">
+              <dt>Pesos</dt><dd title="antigüedad en intercambios · en pasos · tiempo · relación (pivote)">{cal.generales ? 'generales' : 'del proyecto'}: {CL.paramsLine(cal)}</dd>
+              <dt>Calibrado</dt><dd>{cal.generales ? 'aún no (poco historial)' : `${CL.ago(cal.fecha)} · ${cal.piezas || 0} piezas de ${cal.sesiones || 0} ${cal.sesiones === 1 ? 'sesión' : 'sesiones'}`}</dd>
+              {!cal.generales && <><dt>Relecturas</dt><dd>{CL.overLine(cal)}</dd>
+                <dt>Ahorro</dt><dd>{CL.savedLine(cal)}</dd></>}
+            </dl>
+          )}
           {series.length > 1 && (
             <figure className="cleaner-spark">
               <svg width={W} height={H + 4} viewBox={`0 -2 ${W} ${H + 4}`} role="img" aria-label="Evolución del contexto por turno">
