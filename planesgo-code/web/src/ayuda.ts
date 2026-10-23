@@ -60,6 +60,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Archivar', que: 'Menú ⋮ de la sesión: sale de la lista (queda en «Archivadas», con su conversación)' },
       { clave: 'Programas', que: 'Los programas del proyecto (un Odoo, un servicio…) se definen en Propiedades de la sesión → Programas y se ejecutan o paran desde Actividad o el lanzador, sin tokens' },
       { clave: 'pgo ejecutar', que: 'El agente arranca un programa con «pgo ejecutar <nombre> <orden>» (lo para con «pgo parar <nombre>»): sale en Actividad con su salida' },
+      { clave: 'pgo drive', que: 'El agente busca, lista y lee en Google Drive, Docs y Sheets (solo lectura): «pgo drive buscar <texto>», «pgo drive listar [carpeta]», «pgo drive leer <id|url> [--hoja X] [--rango A1:D20]». Basta con mencionar Drive, un documento de Google o pegar su URL. Acceso: Propiedades → Google Workspace' },
       { clave: 'Copias de trabajo', que: 'Cada rama de una sesión vive en su copia (git worktree). Actividad las lista y deja quitar las que no pierden nada; las sesiones que la usaban se archivan' },
     ] },
     { titulo: 'En la interfaz', entradas: [

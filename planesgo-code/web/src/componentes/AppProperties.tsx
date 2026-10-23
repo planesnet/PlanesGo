@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react';
 import type { Usuario } from '../api';
 import Icono from './Icono';
+import GoogleSettings from './GoogleSettings';
 import LocalAISettings from './LocalAISettings';
 import { PropertiesModal, type PropertiesSection } from './Modal';
 
-// Application properties (logo menu): account, updates, local AI and about.
+// Application properties (logo menu): account, updates, local AI, Google Workspace and about.
 
 export interface UpdateStatus { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; trabajando?: string; pausada?: boolean } // trabajando: qué hay en marcha (entonces no se actualiza)
 
-export type AppSection = 'account' | 'updates' | 'localai' | 'about';
+export type AppSection = 'account' | 'updates' | 'localai' | 'google' | 'about';
 const APP_SECTIONS: readonly PropertiesSection<AppSection>[] = [{ id: 'account', name: 'Cuenta', icon: 'equipo' },
   { id: 'updates', name: 'Actualizaciones', icon: 'recargar' }, { id: 'localai', name: 'IA local', icon: 'ordenador' },
+  { id: 'google', name: 'Google Workspace', icon: 'carpeta' },
   { id: 'about', name: 'Acerca de', icon: 'info' }];
 
 // Update state as shown to the user.
@@ -76,6 +78,8 @@ export default function AppProperties({ user, avatar, status, initial, checkResu
         </>}
 
         {section === 'localai' && <LocalAISettings />}
+
+        {section === 'google' && <GoogleSettings />}
 
         {section === 'about' && <>
           <h3>Acerca de</h3>

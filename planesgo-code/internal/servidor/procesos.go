@@ -384,7 +384,7 @@ func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
 	return ok && p.Proyecto == proyecto
 }
 
-// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida y abrir.
+// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir y drive-buscar|listar|leer.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	var p struct {
 		Proyecto int    `json:"proyecto"`
@@ -408,6 +408,11 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	// El token es el del proyecto: el agente solo actúa en su proyecto, sus carpetas y sus programas.
 	if !s.esAgente(r, p.Proyecto) {
 		jsonError(w, http.StatusForbidden, "token de agente no válido para este proyecto")
+		return
+	}
+	// Google Drive (solo lectura): pgo drive buscar|listar|leer.
+	if o, ok := strings.CutPrefix(r.PathValue("orden"), "drive-"); ok && r.Method == http.MethodGet {
+		s.driveOrden(w, r, o)
 		return
 	}
 	switch r.PathValue("orden") {

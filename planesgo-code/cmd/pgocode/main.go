@@ -28,6 +28,8 @@ import (
 
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/depuracion"
+	"planesgo-code/internal/google"
+	"planesgo-code/internal/gworkspace"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
@@ -335,6 +337,8 @@ func main() {
 			log.Printf("adjuntos: %d carpetas de más de 30 días borradas", n)
 		}
 	}()
+	// Google Workspace en solo lectura, con las credenciales de gcloud del usuario (proyecto de cuota: el de Vertex).
+	s.Google = gworkspace.New(google.Proyecto())
 	s.Procesos = procesos.Nuevo()
 	s.AvisaProcesos()
 	s.TokenAgente = aleatorio()

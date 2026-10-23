@@ -22,6 +22,12 @@ const ayudaPgo = `pgo: programas del proyecto en local, desde el agente (el proy
   pgo procesos                     lista los programas del proyecto
   pgo salida <nombre> [n]          últimas n líneas de su salida (100 por defecto)
   pgo abrir <url>                  abre la URL en el navegador integrado de pgocode
+
+Google Drive, Docs y Sheets (solo lectura, con la cuenta de Google del usuario):
+  pgo drive buscar <texto> [--tipo doc|hoja|presentacion|pdf|carpeta|imagen] [--carpeta <id|url>] [--max N]
+  pgo drive listar [<carpeta id|url>]       sin carpeta: «Mi unidad»
+  pgo drive leer <id|url> [--hoja <nombre|n>] [--rango A1:D20] [--max N]
+                                   Docs en Markdown, Sheets en CSV; recorta a 40000 caracteres (--max)
 `
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
@@ -52,7 +58,7 @@ func pgo(args []string) int {
 		req.Header.Set("X-PGO-Agente", token)
 		req.Header.Set("X-PGO", "1")
 		req.Header.Set("Content-Type", "application/json")
-		res, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+		res, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -148,11 +154,77 @@ func pgo(args []string) int {
 			return falla(err)
 		}
 		fmt.Println("abierto en el navegador de pgocode")
+	case "drive":
+		orden, q, err := driveQuery(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "pgo drive:", err)
+			fmt.Fprint(os.Stderr, ayudaPgo)
+			return 2
+		}
+		raw, err := llama("GET", "drive-"+orden, nil, q)
+		if err != nil {
+			return falla(err)
+		}
+		var r struct{ Texto string }
+		json.Unmarshal(raw, &r)
+		fmt.Print(r.Texto)
 	default:
 		fmt.Fprint(os.Stderr, ayudaPgo)
 		return 2
 	}
 	return 0
+}
+
+// driveQuery: la orden (buscar | listar | leer) y los parámetros de «pgo drive …».
+func driveQuery(args []string) (string, url.Values, error) {
+	if len(args) == 0 {
+		return "", nil, fmt.Errorf("falta la orden (buscar, listar o leer)")
+	}
+	orden, rest := args[0], args[1:]
+	opts := map[string]string{"--tipo": "tipo", "--carpeta": "carpeta", "--max": "max", "--hoja": "hoja", "--rango": "rango"}
+	q := url.Values{}
+	var pos []string
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		name, val, hasVal := strings.Cut(a, "=")
+		if k, ok := opts[name]; ok {
+			if !hasVal {
+				if i+1 >= len(rest) {
+					return "", nil, fmt.Errorf("falta el valor de %s", name)
+				}
+				i++
+				val = rest[i]
+			}
+			q.Set(k, val)
+			continue
+		}
+		if strings.HasPrefix(a, "--") {
+			return "", nil, fmt.Errorf("opción desconocida %s", a)
+		}
+		pos = append(pos, a)
+	}
+	switch orden {
+	case "buscar":
+		if len(pos) == 0 && q.Get("tipo") == "" && q.Get("carpeta") == "" {
+			return "", nil, fmt.Errorf("di qué buscar")
+		}
+		q.Set("q", strings.Join(pos, " "))
+	case "listar":
+		if len(pos) > 1 {
+			return "", nil, fmt.Errorf("una sola carpeta")
+		}
+		if len(pos) == 1 {
+			q.Set("carpeta", pos[0])
+		}
+	case "leer":
+		if len(pos) != 1 {
+			return "", nil, fmt.Errorf("di qué leer: un ID o una URL")
+		}
+		q.Set("ref", pos[0])
+	default:
+		return "", nil, fmt.Errorf("orden desconocida %q", orden)
+	}
+	return orden, q, nil
 }
 
 // finishedLine: lo que dice «pgo ejecutar» de un programa que ya ha acabado: cómo (con su código de salida) y

@@ -30,6 +30,9 @@
 //     por embeddings), subagents (sugerencia de subagentes, servidor), relay (relevo con memoria de trabajo);
 //     la poda, la compactación, la continuación de OpenCode y el idioma los aplica siempre el servidor.
 //
+//   HERRAMIENTAS (no son destinos): Google Drive/Docs/Sheets en solo lectura lo usa el agente con «pgo drive …»;
+//     un mensaje sobre Drive va al agente (sin función directa: ver docs/enrutador.md).
+//
 // route() es síncrona y pura (para la etiqueta mientras se escribe y para el envío). Lo que necesita al servidor
 // queda en needsServer y se resuelve al enviar con resolveClassify/resolveSplit (con tiempo máximo: withTimeout).
 // Chat.tsx despacha según la decisión y la registra (logPayload → POST /api/ruta → registro de tiempos «ruta»).
