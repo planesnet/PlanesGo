@@ -160,7 +160,10 @@ func (s *Servidor) directo(w http.ResponseWriter, r *http.Request, ses *sesiones
 		}
 		mu := directLock(dir)
 		mu.Lock()
-		directCommit(r.Context(), dir, &res)
+		// El commit acaba aunque se cierre la interfaz: un git cortado a medias dejaría index.lock.
+		cc, cancela := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
+		directCommit(cc, dir, &res)
+		cancela()
 		mu.Unlock()
 	}
 	if res.Segundos == 0 {
