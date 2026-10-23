@@ -1,5 +1,5 @@
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { chat, get, post, subeAdjunto, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
+import { chat, get, post, preparaHija, proponeReparto, subeAdjunto, uneHija, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { Detalle, SeleccionSkills } from '../ajustes';
 import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
@@ -12,6 +12,8 @@ import CleanerIndicator from './CleanerIndicator';
 import * as AP from '../aparte';
 import * as W from '../workingMemory';
 import * as PR from '../prune';
+import * as RP from '../reparto';
+import { TarjetaPropuesta, TarjetaReparto } from './TarjetasReparto';
 import { direccionesEn } from '../lanzador';
 import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, TarjetaPlan, type EstadoPlan, type Plan } from './Planes';
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
@@ -76,6 +78,19 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   const enCursosRef = useRef(enCursos);
   enCursosRef.current = enCursos;
   const inicioTurno = useRef<Record<string, number>>({});
+  // Reparto en sesiones paralelas (reparto.ts): la propuesta con su cuenta atrás (por sesión madre), los repartos en
+  // marcha o acabados (se guardan), las sesiones madre de cada uno, las hijas que el usuario ha parado y los avisos
+  // para el chat de una madre que está trabajando (se añaden al acabar su turno).
+  const [propuestas, setPropuestas] = useState<Record<string, { ses: Sesion; texto: string; prop: RP.Propuesta; hasta: number }>>({});
+  const propuestasRef = useRef(propuestas);
+  propuestasRef.current = propuestas;
+  const temporizadores = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [repartos, setRepartos] = useState<RP.Reparto[]>(() => { const l = RP.alCargar(RP.lee(), () => false); RP.guarda(l); return l; });
+  const repartosRef = useRef(repartos);
+  repartosRef.current = repartos;
+  const madres = useRef<Record<string, Sesion>>({});
+  const paradas = useRef<Set<string>>(new Set());
+  const notasMadre = useRef<Record<string, string[]>>({});
   // Preguntas aparte por sesión, y las que el usuario quiere que el agente conozca (van con su próximo mensaje).
   const [apartes, setApartes] = useState<Record<string, Aparte[]>>({});
   const apartesSesion = (sesion && apartes[sesion.id]) || [];
@@ -177,7 +192,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     a.style.overflowY = a.scrollHeight > ALTO_MAX ? 'auto' : 'hidden';
   }, [texto, sesion?.id]);
 
-  const prov = proveedores.find(p => p.id === sesion?.agente);
+  const provAbierto = proveedores.find(p => p.id === sesion?.agente);
+  const prov = provAbierto;
   // Skills usadas en la sesión (en orden) y la que se está usando ahora (la última del turno en curso).
   const skillsSesion = useMemo(() => {
     const l: string[] = [];
@@ -540,16 +556,20 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       setAdjuntos(d.adjuntos);
       ponCola(sesion.id, c => ({ ...c, mensajes: [] }));
     }
+    if (sesion.madre) paradas.current.add(sesion.id);
     enCurso.abort();
   }
 
   // opc.crudo: el texto va tal cual (sin interpretar órdenes de planes); opc.permisos: los de este turno (no se
   // guardan en la sesión), p. ej. para ejecutar un plan en una sesión de solo lectura.
-  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string } = {}) {
+  async function envia(forzado?: string, adjCola?: Adjunto[], opc: { crudo?: boolean; permisos?: string; visible?: string; aCola?: boolean; sinRelevo?: boolean; sesionAgente?: string; sesion?: Sesion; sinReparto?: boolean } = {}) {
     const t = (forzado ?? texto).trim();
     const listos = adjCola ?? (forzado === undefined ? adjuntos.filter(a => !a.subiendo && !a.error) : []);
-    if ((!t && !listos.length) || !proyecto || !sesion || !sesion.hosting || !prov || enCurso || (forzado === undefined && subiendo)) return;
-    const ses: Sesion = sesion;
+    // opc.sesion: el envío es para otra sesión que la abierta (las hijas de un reparto, o la madre tras la cuenta atrás).
+    const ses: Sesion | null = opc.sesion ?? sesion;
+    const prov = opc.sesion ? proveedores.find(p => p.id === opc.sesion!.agente) : provAbierto;
+    if ((!t && !listos.length) || !proyecto || !ses || !ses.hosting || !prov || (opc.sesion ? enCursosRef.current[ses.id] : enCurso) || (forzado === undefined && subiendo)) return;
+    if (!opc.sinReparto && propuestasRef.current[ses.id]) return; // hay un reparto propuesto a la espera: primero eso
     // Órdenes de planes: las de estado se hacen aquí (sin agente ni tokens); crear y revisar van al agente.
     const orden = opc.crudo ? null : PL.interpreta(t);
     if (orden && orden.tipo !== 'nuevo' && orden.tipo !== 'revisar') {
@@ -566,8 +586,21 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         return;
       }
     }
+    // Reparto en sesiones paralelas (reparto.ts): una petición con tres o más partes independientes, en una sesión que
+    // edita dentro de un repositorio git. Decide el servidor (reglas e IA local, sin tokens de pago); aquí, la
+    // tarjeta con la cuenta atrás: si no se pulsa nada, se reparte.
+    if (!opc.sinReparto && !orden && !opc.crudo && prov.tipo === 'agente' && !listos.length && !ses.madre && ses.corte === undefined && RP.candidata(t, modoDe(ses))) {
+      const prop = await Promise.race([proponeReparto(proyecto.id, ses.carpeta, ses.rama, t, modoDe(ses)).catch(() => null), new Promise<null>(res => setTimeout(() => res(null), 3000))]);
+      if (prop?.partes && prop.partes.length >= 3 && !propuestasRef.current[ses.id]) {
+        if (forzado === undefined) { setTexto(''); setAdjuntos([]); }
+        propuestasRef.current = { ...propuestasRef.current, [ses.id]: { ses, texto: t, prop, hasta: Date.now() + prop.espera_s * 1000 } };
+        setPropuestas(propuestasRef.current);
+        temporizadores.current[ses.id] = setTimeout(() => lanzaReparto(ses.id), prop.espera_s * 1000);
+        return;
+      }
+    }
     // Gasto antes del turno, para anotar los avisos que salte (sin interrumpir).
-    const gAntes = CO.gasto(forzado !== undefined ? conversacion(sesion.id) : mensajes);
+    const gAntes = CO.gasto(forzado !== undefined || opc.sesion ? conversacion(ses.id) : mensajes);
     const aSes = CO.efectivos(ses.agente, ses.avisos);
     const modoPlan = orden !== null; // crear o revisar un plan
     const id = ses.id;
@@ -579,7 +612,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if (final) guardaConversacion(id, m);
     };
     // Envío automático: la sesión acaba de abrirse y el estado aún puede ser el de la anterior; se lee la guardada.
-    let previos = forzado !== undefined ? conversacion(id) : mensajes;
+    let previos = forzado !== undefined || opc.sesion ? conversacion(id) : mensajes;
     // «Continuar desde aquí» pendiente: se aplica con este mensaje. Lo de después queda en la vista, fuera del
     // contexto del agente; al agente va el punto (o, si no puede cortar su sesión, el traspaso).
     let corte: AP.CutRequest | undefined;
@@ -765,12 +798,154 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       const ctxNuevo = actual[actual.length - 1].uso?.contexto;
       if (relevo && ctxNuevo) actual = actual.map((m, k) => k === actual.length - 2 && m.relevo ? { ...m, relevo: { ...m.relevo, a: ctxNuevo } } : m);
       pon(actual, true);
+      // Avisos del reparto que llegaron mientras esta sesión (madre) trabajaba, y uniones que esperaban a que acabara.
+      const notas = notasMadre.current[id];
+      if (notas?.length) {
+        delete notasMadre.current[id];
+        actual = [...actual, ...notas.map(texto => ({ rol: 'assistant' as const, texto, nota: true, reparto: true }))];
+        pon(actual, true);
+      }
+      if (!fallo && !ac.signal.aborted) reintentaUniones(id);
       if (fallo) ponCola(id, C.falla);
       delete vivas.current[id];
       setEnCursos(x => { if (x[id] !== ac) return x; const n = { ...x }; delete n[id]; return n; });
       alCambiarSesion({ ...ses, nombre: ses.nombre || nombreDe(t || listos.map(a => a.nombre).join(", ")), sesionAgente, ultima: Date.now(), corte: undefined });
       if (!ac.signal.aborted && sesionAgente) refrescaVigencia(ses, sesionAgente);
     }
+  }
+
+  // ---- Reparto en sesiones paralelas ----
+  const repartoDe = (id: string) => repartosRef.current.find(r => r.id === id);
+  function ponReparto(id: string, f: (r: RP.Reparto) => RP.Reparto) {
+    const l = repartosRef.current.map(r => (r.id === id ? f(r) : r));
+    repartosRef.current = l;
+    setRepartos(l);
+    RP.guarda(l);
+  }
+
+  // Una nota en el chat de la sesión madre (si está trabajando, al acabar su turno: no se pisa su conversación).
+  function anotaMadre(id: string, texto: string, usuario?: string) {
+    if (vivas.current[id] && !usuario) { (notasMadre.current[id] ||= []).push(texto); return; }
+    const m: Mensaje[] = [...conversacion(id), ...(usuario ? [{ rol: 'user' as const, texto: usuario }] : []), { rol: 'assistant', texto, nota: true, reparto: true }];
+    guardaConversacion(id, m);
+    if (idActual.current === id) setMensajes(m);
+  }
+
+  // «Hacerlo en esta sesión»: se cancela el reparto y la petición sigue como siempre.
+  function enEstaSesion(id: string) {
+    const p = propuestasRef.current[id];
+    if (!p) return;
+    clearTimeout(temporizadores.current[id]);
+    delete temporizadores.current[id];
+    const { [id]: _, ...resto } = propuestasRef.current;
+    propuestasRef.current = resto;
+    setPropuestas(resto);
+    envia(p.texto, [], { sesion: p.ses, sinReparto: true });
+  }
+
+  // «Repartir» (o la cuenta atrás a cero): las partes pasan a sesiones hijas, de cuatro en cuatro.
+  function lanzaReparto(id: string) {
+    const p = propuestasRef.current[id];
+    if (!p) return;
+    clearTimeout(temporizadores.current[id]);
+    delete temporizadores.current[id];
+    const { [id]: _, ...resto } = propuestasRef.current;
+    propuestasRef.current = resto;
+    setPropuestas(resto);
+    const rep = RP.nuevo(Date.now().toString(36) + Math.random().toString(36).slice(2, 5), { id: p.ses.id, proyecto: p.ses.proyecto, carpeta: p.ses.carpeta }, p.prop, Date.now(), i => `${p.ses.id}-p${i}`, RP.hijasDe(repartosRef.current, p.ses.id));
+    madres.current[rep.id] = p.ses;
+    repartosRef.current = [rep, ...repartosRef.current];
+    setRepartos(repartosRef.current);
+    RP.guarda(repartosRef.current);
+    const n = rep.hijas.length;
+    anotaMadre(p.ses.id, `Repartida en ${n} sesiones paralelas${n > RP.MAX_HIJAS ? ` (${RP.MAX_HIJAS} a la vez, el resto en cola)` : ''}, cada una en su copia del repositorio. Al acabar se unen sus cambios a esta sesión.`, p.texto);
+    arrancaHijas(rep.id);
+  }
+
+  function arrancaHijas(idR: string) {
+    const r = repartoDe(idR);
+    if (!r) return;
+    for (const h of RP.aLanzar(r)) {
+      ponReparto(idR, x => RP.pon(x, h.n, { estado: 'trabajando' }));
+      lanzaHija(idR, h.n);
+    }
+  }
+
+  // Una hija: su copia de trabajo, su sesión (con los ajustes de la madre) y su turno; al acabar, su unión.
+  async function lanzaHija(idR: string, n: number) {
+    const r = repartoDe(idR);
+    const madre = madres.current[idR];
+    const h = r?.hijas.find(x => x.n === n);
+    if (!r || !h || !madre) { if (r) ponReparto(idR, x => RP.pon(x, n, { estado: 'parada' })); return; }
+    try {
+      const c = await preparaHija(r.proyecto, r.madre, r.carpeta, h.idx || h.n, h.sesion);
+      const base = nuevaSesionHija(madre, c.carpeta, c.rama, n, h.parte, h.sesion);
+      ponReparto(idR, x => RP.pon({ ...x, ramaMadre: x.ramaMadre || c.rama_madre }, n, { carpeta: c.carpeta, rama: c.rama }));
+      alCambiarSesion(base);
+      await envia(RP.mensajeHija({ intro: r.intro, outro: r.outro, partes: r.hijas.map(x => x.parte) }, n), [], { sesion: base, sinReparto: true });
+      const ms = conversacion(h.sesion);
+      const estado = RP.estadoAlAcabar(paradas.current.delete(h.sesion), ms[ms.length - 1]);
+      ponReparto(idR, x => RP.pon(x, n, { estado }));
+      if (estado === 'hecha') await uneParte(idR, n, false);
+    } catch (e) {
+      ponReparto(idR, x => RP.pon(x, n, { estado: 'error', motivo: (e as Error).message }));
+    }
+    arrancaHijas(idR);
+    revisaResumen(idR);
+  }
+
+  // La sesión de una hija: la de la madre en la carpeta y la rama de su copia.
+  function nuevaSesionHija(madre: Sesion, carpeta: string, rama: string, n: number, parte: string, id: string): Sesion {
+    const { corte: _c, plan: _p, modoPrevio: _m, sesionAgente: _a, tareaId, tarea, ...ajustes } = madre;
+    return { ...ajustes, id, nombre: RP.nombreHija(n, parte), carpeta, rama, permisos: modoDe(madre), tareaId, tarea, madre: madre.id, parte: n, creada: Date.now(), ultima: Date.now() };
+  }
+
+  // Unir la rama de una hija a la de la madre (el servidor lo hace solo si la madre está limpia y sin agente trabajando).
+  async function uneParte(idR: string, n: number, manual: boolean) {
+    const r = repartoDe(idR);
+    const h = r?.hijas.find(x => x.n === n);
+    if (!r || !h?.carpeta || !h.rama || h.quitada) return;
+    try {
+      const u = await uneHija(r.proyecto, r.carpeta, r.ramaMadre, h.carpeta, h.rama, n);
+      ponReparto(idR, x => RP.pon(x, n, { union: u.estado, motivo: u.motivo, ficheros: u.ficheros, aviso: u.aviso, quitada: u.quitada }));
+      const nueva = { ...h, union: u.estado, ficheros: u.ficheros, motivo: u.motivo };
+      if (u.quitada) window.dispatchEvent(new CustomEvent('pgo:reubica-sesion', { detail: { id: h.sesion, proyecto: r.proyecto, carpeta: r.carpeta, rama: r.ramaMadre } }));
+      if (u.estado === 'conflicto') anotaMadre(r.madre, RP.avisoConflicto(nueva));
+      else if (manual) anotaMadre(r.madre, RP.fraseManual(nueva));
+    } catch (e) {
+      ponReparto(idR, x => RP.pon(x, n, { union: 'error', motivo: (e as Error).message }));
+    }
+    revisaResumen(idR);
+  }
+
+  // Al acabar todas (y resuelta cada unión), el resumen en el chat de la madre.
+  function revisaResumen(idR: string) {
+    const r = repartoDe(idR);
+    if (!r || r.resumido || !RP.acabado(r) || r.hijas.some(h => h.estado === 'hecha' && h.union === 'sin')) return;
+    ponReparto(idR, x => ({ ...x, resumido: true }));
+    const datos: Record<string, RP.DatosHija> = {};
+    for (const h of r.hijas) {
+      const ms = conversacion(h.sesion);
+      const g = CO.gasto(ms);
+      datos[h.sesion] = { respuesta: RP.ultimaRespuesta(ms), entrada: g.entrada, salida: g.salida, coste: g.coste };
+    }
+    anotaMadre(r.madre, RP.resumen(r, datos));
+  }
+
+  // La madre ha dejado de trabajar: las uniones que esperaban se reintentan.
+  function reintentaUniones(madreId: string) {
+    for (const r of repartosRef.current) {
+      if (r.madre !== madreId) continue;
+      for (const h of r.hijas) if (h.estado === 'hecha' && h.union === 'pendiente') uneParte(r.id, h.n, true);
+    }
+  }
+
+  function paraHija(idR: string, n: number) {
+    const h = repartoDe(idR)?.hijas.find(x => x.n === n);
+    if (!h) return;
+    if (h.estado === 'espera') { ponReparto(idR, x => RP.pon(x, n, { estado: 'parada' })); revisaResumen(idR); return; }
+    paradas.current.add(h.sesion);
+    enCursosRef.current[h.sesion]?.abort();
   }
 
   // Deshacer el relevo: el mismo mensaje, a la sesión anterior del agente (con todo su historial). Solo con el último
@@ -965,7 +1140,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                   {m.fuera ? 'Fuera del contexto del agente: lo de aquí abajo ya no lo ve' : 'Fuera del contexto del agente al enviar el siguiente mensaje'}
                 </div>
               )}
-              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (fuera ? ' outside-context' : '') + (sesion.corte === i ? ' cut-point' : '')}
+              <div data-indice={i} className={'mensaje ' + m.rol + (m.error ? ' con-error' : '') + (m.nota ? ' nota' : '') + (m.reparto ? ' reparto' : '') + (fuera ? ' outside-context' : '') + (sesion.corte === i ? ' cut-point' : '')}
                 style={!fuera && vigOn && PR.vigOpacity(m.vig) < 1 ? { opacity: PR.vigOpacity(m.vig) } : undefined}
                 title={fuera ? 'Fuera del contexto del agente (no lo verá)' : vigOn && m.vig ? PR.vigTitle(m.vig) : undefined}>
                 {!fuera && vigOn && m.vig?.fuera && <span className="vig-out" aria-label="Fuera del contexto del agente">⤓</span>}
@@ -1040,6 +1215,16 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                       }}>Incorporar</button>)}
                 </div>
               </div>
+            ))}
+            {sesion && propuestas[sesion.id] && (
+              <TarjetaPropuesta prop={propuestas[sesion.id].prop} hasta={propuestas[sesion.id].hasta}
+                alRepartir={() => lanzaReparto(sesion.id)} alEnEstaSesion={() => enEstaSesion(sesion.id)} />
+            )}
+            {sesion && repartos.filter(r => r.madre === sesion.id).map(r => (
+              <TarjetaReparto key={r.id} reparto={r} trabajando={h => Boolean(enCursos[h.sesion])}
+                alAbrir={h => window.dispatchEvent(new CustomEvent('pgo:abre-sesion', { detail: h.sesion }))}
+                alParar={h => paraHija(r.id, h.n)} alUnir={h => uneParte(r.id, h.n, true)}
+                alQuitar={() => { const l = repartosRef.current.filter(x => x.id !== r.id); repartosRef.current = l; setRepartos(l); RP.guarda(l); }} />
             ))}
             <div ref={fin} />
           </div>

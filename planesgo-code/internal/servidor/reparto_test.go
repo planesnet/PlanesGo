@@ -139,6 +139,13 @@ func TestRepartoPropone(t *testing.T) {
 	if p := req("auto"); len(p.Partes) != 3 || !p.MadreSucia {
 		t.Fatalf("sucia: %+v", p)
 	}
+	// Una sesión cuya rama no es la de la carpeta (trabaja en otra copia) no reparte desde esta.
+	if code, body := b.pide("/api/reparto/propone", map[string]any{"proyecto": 1, "carpeta": b.madre, "rama": "otra", "texto": "x", "permisos": "editar"}); code != 200 || strings.Contains(string(body), `"partes"`) {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, body := b.pide("/api/reparto/propone", map[string]any{"proyecto": 1, "carpeta": b.madre, "rama": "main", "texto": "x", "permisos": "editar"}); code != 200 || !strings.Contains(string(body), `"partes"`) {
+		t.Fatalf("%d %s", code, body)
+	}
 	// Una carpeta que no es del proyecto o no es un repositorio no reparte.
 	if code, body := b.pide("/api/reparto/propone", map[string]any{"proyecto": 1, "carpeta": t.TempDir(), "texto": "x", "permisos": "editar"}); code != 200 || strings.Contains(string(body), `"partes"`) {
 		t.Fatalf("%d %s", code, body)
@@ -163,6 +170,10 @@ func TestRepartoPreparaYUne(t *testing.T) {
 		if c, ok := b.s.RegistroCopias.Busca(h["carpeta"]); !ok || c.Sesion != "hija"+strconv.Itoa(n) || c.Proyecto != 1 {
 			t.Fatalf("registro: %+v", c)
 		}
+	}
+	// Otra sesión hija con el mismo número no se queda con la copia de otra.
+	if code, _ := b.pide("/api/reparto/prepara", map[string]any{"proyecto": 1, "sesion": "mad1", "carpeta": b.madre, "n": 1, "hija": "otra"}); code == 200 {
+		t.Fatal("reutilizó la copia de otra hija")
 	}
 	// Repetir el prepara no duplica.
 	if h := b.prepara(2); h["carpeta"] != b.hijas[2]["carpeta"] {

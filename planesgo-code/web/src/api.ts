@@ -1,5 +1,6 @@
 import type { Tarea } from './tareas';
 import type { Copia } from './copias';
+import type { Propuesta } from './reparto';
 import type { PruneReport, Vigencia } from './prune';
 // Cliente de la API del backend Go. Toda escritura lleva X-PGO (defensa CSRF) y la cookie de sesión.
 
@@ -17,7 +18,7 @@ export interface Uso { entrada: number; salida: number; coste?: number; segundos
 export type Parte = { tipo: 'texto'; texto: string } | { tipo: 'pensamiento'; texto: string } | { tipo: 'herramienta'; h: Herramienta };
 export interface SkillPgo { nombre: string; puntuacion: number; modo: 'sugerida' | 'elegida' }
 export interface Adjunto { nombre: string; ruta: string; tamano: number; tipo?: string }
-export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; vig?: Vigencia; pruned?: { tokens: number; repuestos?: number } } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; vig: la vigencia del intercambio en el contexto del agente (prune.ts); pruned: lo que retiró al empezar este turno
+export interface Mensaje { rol: 'user' | 'assistant'; texto: string; error?: boolean; partes?: Parte[]; uso?: Uso; skill?: SkillPgo; adjuntos?: Adjunto[]; tareas?: Tarea[]; plan?: { ruta: string; titulo: string; estado?: 'borrador' | 'ejecutado' | 'descartado' | 'borrado'; numero?: number }; nota?: boolean; reparto?: boolean; inyectados?: string[]; fin?: number; vivo?: Uso; relevo?: Relevo; punto?: { sesion: string; id: string }; fuera?: boolean; vig?: Vigencia; pruned?: { tokens: number; repuestos?: number } } // fin: cuándo acabó el turno (ms); vivo: lo consumido en el turno mientras trabaja; punto: el último mensaje del agente en su sesión (para «Continuar desde aquí»); fuera: el agente ya no lo tiene en su contexto; vig: la vigencia del intercambio en el contexto del agente (prune.ts); pruned: lo que retiró al empezar este turno
 // Relevo: el mensaje fue a una sesión nueva del agente con la memoria de trabajo (de: tokens de contexto que tenía la
 // sesión anterior; a: los de la memoria, estimados, y al acabar el turno los del contexto real de la sesión nueva);
 // anterior: la sesión del agente de antes (para deshacerlo).
@@ -113,3 +114,12 @@ export const enEscritorio = () => Boolean(window.psf?.escritorio);
 export const listaCopias = (proyecto: number) => get<{ copias: Copia[] }>(`/api/proyecto/copias?proyecto=${proyecto}`).then(r => r.copias);
 export const quitaCopia = (proyecto: number, carpeta: string, borrarRama: boolean) =>
   post<{ ok: boolean; rama_borrada: boolean; aviso?: string }>('/api/proyecto/quitar-copia', { proyecto, carpeta, borrar_rama: borrarRama });
+
+// Reparto en sesiones paralelas (reparto.ts): proponerlo, crear la copia de una hija y unir su rama a la de la madre.
+export const proponeReparto = (proyecto: number, carpeta: string, rama: string, texto: string, permisos: string) =>
+  post<Propuesta>('/api/reparto/propone', { proyecto, carpeta, rama, texto, permisos });
+export const preparaHija = (proyecto: number, sesion: string, carpeta: string, n: number, hija: string) =>
+  post<{ carpeta: string; rama: string; rama_madre: string }>('/api/reparto/prepara', { proyecto, sesion, carpeta, n, hija });
+export interface UnionHija { estado: 'unida' | 'sin_cambios' | 'conflicto' | 'pendiente' | 'error'; motivo?: string; ficheros?: string[]; commit?: boolean; quitada: boolean; rama_borrada: boolean; aviso?: string }
+export const uneHija = (proyecto: number, madre: string, ramaMadre: string, hija: string, rama: string, n: number) =>
+  post<UnionHija>('/api/reparto/une', { proyecto, madre, rama_madre: ramaMadre, hija, rama, n });

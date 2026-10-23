@@ -933,3 +933,22 @@ button.miga-item:hover { background: var(--hover); }
 .mark-relay-txt { color: var(--suave); }
 .cleaner-legend { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .vig-chip { padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--texto); }
+
+/* Reparto en sesiones paralelas: la propuesta con su cuenta atrás, el reparto en curso y las hijas en el listado */
+.sesion.hija { margin-left: 14px; }
+.insignia-parte { flex: none; font-size: 10px; padding: 0 6px; border-radius: 999px; background: var(--hover); color: var(--suave); }
+.mensaje.assistant.nota.reparto { font-style: normal; font-size: inherit; color: inherit; }
+.tarjeta-reparto { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--linea); border-left: 3px solid var(--acento); border-radius: 10px; background: var(--superficie); min-width: 0; }
+.tarjeta-reparto p { margin: 0; }
+.reparto-partes { margin: 0; padding-left: 20px; display: grid; gap: 2px; font-size: 13px; }
+.reparto-partes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reparto-hijas { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.reparto-hija { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; min-width: 0; }
+.reparto-texto { flex: 1; min-width: 120px; }
+.reparto-acciones { display: flex; gap: 8px; flex: none; }
+.reparto-detalle { flex-basis: 100%; padding-left: 4px; }
+.reparto-estado.curso { background: color-mix(in srgb, #0969da 16%, transparent); color: #0969da; }
+.reparto-estado.ok { background: color-mix(in srgb, #2e9d57 18%, transparent); color: #24804a; }
+.reparto-estado.aviso { background: color-mix(in srgb, #d4a017 18%, transparent); color: #9a7200; }
+.reparto-estado.error { background: color-mix(in srgb, #d1242f 16%, transparent); color: #d1242f; }
+@media (prefers-color-scheme: dark) { .reparto-estado.curso { color: #79c0ff; } .reparto-estado.ok { color: #56d364; } .reparto-estado.aviso { color: #e3b341; } .reparto-estado.error { color: #ff7b72; } }

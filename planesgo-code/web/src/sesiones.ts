@@ -26,6 +26,8 @@ export interface Sesion {
   autoContext?: boolean; // gestión automática del contexto del agente: poda, relevo, compactación (por defecto, sí; contextPolicy.ts)
   tareaId?: number;      // tarea de Odoo a la que se imputa (sin elegir: «pgocode - Sesión IA»)
   tarea?: string;
+  madre?: string;        // sesión madre de la que es hija (reparto en sesiones paralelas: reparto.ts)
+  parte?: number;        // número de la parte que hace (desde 1)
   corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;
@@ -61,6 +63,20 @@ export function borra(login: string, s: Sesion): Sesion[] {
 export function nueva(proyecto: number, carpeta: string, rama: string, agente: string, nombre = ''): Sesion {
   const ahora = Date.now();
   return { id: ahora.toString(36) + Math.random().toString(36).slice(2, 6), nombre, proyecto, carpeta, rama, agente, creada: ahora, ultima: ahora };
+}
+
+// ordenaConHijas: la lista con cada hija justo debajo de su madre (si la madre está en la lista), en el orden de
+// sus partes; el resto, como venía. «hija»: cuelga de una madre de la lista.
+export function ordenaConHijas(l: Sesion[]): { s: Sesion; hija: boolean }[] {
+  const ids = new Set(l.map(s => s.id));
+  const hijasDe = (m: string) => l.filter(s => s.madre === m).sort((a, b) => (a.parte || 0) - (b.parte || 0));
+  const out: { s: Sesion; hija: boolean }[] = [];
+  for (const s of l) {
+    if (s.madre && ids.has(s.madre)) continue; // va con su madre
+    out.push({ s, hija: false });
+    for (const h of hijasDe(s.id)) out.push({ s: h, hija: true });
+  }
+  return out;
 }
 
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';

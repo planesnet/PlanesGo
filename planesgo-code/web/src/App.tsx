@@ -270,6 +270,28 @@ export default function App() {
     elige(p);
   }, [proyecto, elige]);
 
+  // Abrir una sesión hija desde la tarjeta del reparto (Chat.tsx), por su id.
+  useEffect(() => {
+    const abre = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      const s = usuario && proyecto ? S.lista(usuario.login, proyecto.id).find(x => x.id === id) : undefined;
+      if (s) setSesion(s);
+    };
+    window.addEventListener('pgo:abre-sesion', abre);
+    return () => window.removeEventListener('pgo:abre-sesion', abre);
+  }, [usuario, proyecto?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Una hija cuya copia se ha quitado tras unirla sigue en la carpeta y la rama de su madre (su historial se conserva).
+  useEffect(() => {
+    const reubica = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; proyecto: number; carpeta: string; rama: string }>).detail;
+      const s = usuario ? S.lista(usuario.login, d.proyecto).find(x => x.id === d.id) : undefined;
+      if (s) cambiaSesion({ ...s, carpeta: d.carpeta, rama: d.rama });
+    };
+    window.addEventListener('pgo:reubica-sesion', reubica);
+    return () => window.removeEventListener('pgo:reubica-sesion', reubica);
+  }, [usuario, cambiaSesion]);
+
   // «Duplicar sin historial»: la copia se guarda y se abre (si es de otro proyecto, al abrir ese proyecto).
   const duplicateSession = useCallback((p: Proyecto, s: S.Sesion) => {
     if (!usuario) return;

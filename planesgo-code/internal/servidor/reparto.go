@@ -92,6 +92,7 @@ func (s *Servidor) repartoPropone(w http.ResponseWriter, r *http.Request, ses *s
 	var p struct {
 		Proyecto int    `json:"proyecto"`
 		Carpeta  string `json:"carpeta"`
+		Rama     string `json:"rama"` // la de la sesión (si no es la de la carpeta, la sesión trabaja en otra copia)
 		Texto    string `json:"texto"`
 		Permisos string `json:"permisos"`
 	}
@@ -123,6 +124,10 @@ func (s *Servidor) repartoPropone(w http.ResponseWriter, r *http.Request, ses *s
 	rama := repo.RamaActual(r.Context(), p.Carpeta)
 	if rama == "" {
 		no("sin rama")
+		return
+	}
+	if p.Rama != "" && p.Rama != rama {
+		no("la sesión trabaja en otra copia")
 		return
 	}
 	partes := s.partesDe(r.Context(), p.Texto)
@@ -157,7 +162,7 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 		return
 	}
 	rama, err := repo.RamaHija(p.Sesion, p.N)
-	if err != nil || p.N > 99 {
+	if err != nil || p.N > 9999 {
 		jsonError(w, http.StatusBadRequest, "sesión o número de parte no válidos")
 		return
 	}
@@ -177,6 +182,10 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 	var c repo.CopiaCreada
 	ramaMadre := repo.RamaActual(r.Context(), p.Carpeta)
 	if e, err := repo.EstadoCopia(r.Context(), dest); err == nil && e.Worktree && e.Rama == rama { // ya estaba
+		if reg, ok := s.RegistroCopias.Busca(dest); !ok || reg.Sesion != p.Hija {
+			jsonError(w, http.StatusConflict, "esa copia es de otra sesión")
+			return
+		}
 		c = repo.CopiaCreada{Carpeta: dest, Rama: rama, Repo: principal, RamaNueva: true}
 	} else if c, ramaMadre, err = repo.CopiaHija(r.Context(), p.Carpeta, rama, dest); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
