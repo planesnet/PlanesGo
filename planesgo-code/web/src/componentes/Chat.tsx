@@ -22,7 +22,7 @@ import { borraPlan, EditorPlan, guardaPlan, leePlan, ListaPlanes, listaPlanes, T
 import { Miniaturas, ProyectoCapturas, urlCaptura, Visor, VisorConversacion, type FotoVisor } from './Capturas';
 import { fotosDe } from '../fotos';
 import { withUnanswered } from '../unanswered';
-import { actividad, consumoPorAccion, toolStatusTitle } from '../activity';
+import { actividad, consumoPorAccion, silenceLabel, toolStatusTitle } from '../activity';
 import Icono from './Icono';
 import { Ayuda } from './Ayuda';
 import * as IH from '../inputHistory';
@@ -82,6 +82,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // volver se ve su progreso). «enCurso» es el de la sesión abierta.
   const [enCursos, setEnCursos] = useState<Record<string, AbortController>>({});
   const enCurso: AbortController | null = (sesion && enCursos[sesion.id]) || null;
+  // Último evento del agente en cada sesión, y un pulso cada 15 s mientras trabaja: «sin novedades desde hace N min».
+  const ultimoEvento = useRef<Record<string, number>>({});
+  const [, setPulso] = useState(0);
+  useEffect(() => {
+    if (!enCurso) return;
+    const t = setInterval(() => setPulso(x => x + 1), 15_000);
+    return () => clearInterval(t);
+  }, [enCurso]);
   const enCursosRef = useRef(enCursos);
   enCursosRef.current = enCursos;
   const inicioTurno = useRef<Record<string, number>>({});
@@ -782,6 +790,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       } else ps.push(p);
       return { ...m, partes: ps, texto: p.tipo === 'texto' ? m.texto + p.texto : m.texto };
     });
+    ultimoEvento.current[ses.id] = Date.now();
     try {
       await chat({
         proyecto: proyecto.id, proveedor: prov.id, modelo: ses.modelo || prov.por_defecto, carpeta: ses.carpeta, rama: ses.rama,
@@ -793,6 +802,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
         mensajes: prov.tipo === 'agente' ? [{ rol: 'user', texto: aEnviar }] : base,
       }, e => {
+        ultimoEvento.current[ses.id] = Date.now();
         // Poda del historial del agente al empezar el turno: lo que queda fuera, en los intercambios anteriores; lo
         // retirado, en este turno.
         if (e.poda) {
@@ -1304,14 +1314,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
                 {m.partes?.length
                   ? <VigFade.Provider value={!fuera && vigOn ? PR.vigOpacity(m.vig) : 0}><Partes partes={m.partes} tareas={m.tareas} detalle={detalle} inicio={i > 0 ? acumulados[i - 1] : 0} /></VigFade.Provider>
                   : m.texto ? (m.rol === 'assistant' && !m.error ? <Texto md={m.texto} /> : m.texto)
-                    : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…</span> : '')}
+                    : (enCurso && i === mensajes.length - 1 ? <span className="pensando">Pensando…{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}</span> : '')}
                 {m.partes?.length && m.error ? <p className="con-error">{m.texto.split('⚠').slice(1).map(x => '⚠' + x).join('')}</p> : null}
                 {m.rol === 'user' && m.ruta && <span className={'route-badge route-' + m.ruta.route} title={R.badgeTitle(m.ruta)}>{R.badge(m.ruta)}</span>}
                 {m.directo && <DirectNote d={m.directo} alPasar={t => aConversacion(sesion.id, t, [], true)} />}
                 {(m.inyectados || (enCurso && i === mensajes.length - 1 ? inyectados[sesion.id] : undefined))?.map((x, j) => (
                   <div key={'iny' + j} className="inyectado" title="Lo mandaste mientras el agente trabajaba: lo leyó durante el turno">↳ Tú, durante el turno: {x}</div>
                 ))}
-                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
+                {enCurso && i === mensajes.length - 1 && m.partes?.length ? <span className="pensando">Trabajando…{actividad(m) ? <span className="actividad-agente"> {actividad(m)}</span> : null}{sesion && ultimoEvento.current[sesion.id] ? <span className="actividad-agente">{silenceLabel(Date.now() - ultimoEvento.current[sesion.id])}</span> : null}{m.vivo ? <span title="Tokens consumidos en la conversación hasta ahora (sin las preguntas aparte); al acabar coinciden con los de la conversación"> · {CO.tokens(tokensConversacion)} tokens</span> : null}</span> : null}
                 {m.uso && detalle !== 'conciso' && !(enCurso && i === mensajes.length - 1) && <div className="uso">{usoTexto(m.uso)} · <span title="Tokens consumidos en la conversación hasta este turno (sin las preguntas aparte)">{CO.tokens(acumulados[i])} en la conversación</span></div>}
                 {m.relevo && (
                   <div className="relay-line suave pequeno" title={`Este mensaje fue a una sesión nueva del agente con la memoria de trabajo de la conversación (${m.relevo.motivo}), en vez de reenviar todo el historial.`}>

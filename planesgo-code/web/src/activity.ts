@@ -78,3 +78,11 @@ export function toolStatusTitle(h: Pick<Herramienta, 'estado' | 'salida'>): stri
   const motivo = (h.salida || '').split('\n').map(l => l.trim()).find(l => l) || '';
   return 'Ha fallado' + (motivo ? ': ' + (motivo.length > 200 ? motivo.slice(0, 199) + '…' : motivo) : ' (el agente no dio el motivo)') + '. El agente suele reintentarlo.';
 }
+
+// silenceLabel: si el agente lleva un rato sin mandar nada (un minuto o más), cuánto: así se ve que sigue vivo y que
+// la espera es del modelo (OpenCode solo avisa de una acción cuando ha terminado; un fichero grande tarda minutos).
+export function silenceLabel(ms: number): string {
+  if (!(ms >= 60_000)) return '';
+  const min = Math.floor(ms / 60_000);
+  return ` · sin novedades desde hace ${min} min (el modelo está generando o esperando respuesta)`;
+}

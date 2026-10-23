@@ -34,3 +34,9 @@ test('bolita de cada acción: hecha, en curso o el motivo del fallo', () => {
   assert.equal(A.toolStatusTitle({ estado: 'error', salida: '\n  Error: oldString not found in content\nmás' }), 'Ha fallado: Error: oldString not found in content. El agente suele reintentarlo.');
   assert.match(A.toolStatusTitle({ estado: 'error' }), /no dio el motivo/);
 });
+
+test('silencio del agente: nada antes de un minuto; luego, cuánto', () => {
+  assert.equal(A.silenceLabel(59_000), '');
+  assert.equal(A.silenceLabel(NaN), '');
+  assert.match(A.silenceLabel(3 * 60_000 + 5000), /hace 3 min/);
+});
