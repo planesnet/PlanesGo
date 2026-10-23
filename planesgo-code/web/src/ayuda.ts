@@ -42,6 +42,12 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: '¿en qué rama estamos? · ¿qué has hecho?', que: 'Rama y carpeta; las acciones del agente en su último turno' },
       { clave: 'Para que lo haga el agente', que: 'Dilo con más palabras («compila tú y revisa los avisos»), pon «>» delante o pulsa la etiqueta antes de enviar. Se desactiva en los ajustes de la sesión' },
     ] },
+    { titulo: 'Quién hace qué (enrutador)', entradas: [
+      { clave: 'Orden', que: 'Cada mensaje va a un solo sitio, el primero que encaja: órdenes de pgocode → funciones directas (0 tokens) → pregunta aparte → reparto en subtareas → el agente. En la duda, al agente' },
+      { clave: 'Aparte', que: 'Estado: pgocode (0 tokens) · con contexto: una copia de la sesión del agente · suelta: la IA local del equipo (si no está, un modelo barato)' },
+      { clave: 'Etiqueta y distintivo', que: 'La etiqueta encima del cuadro dice adónde irá; al pasar el ratón, quién lo hace, quién lo ha decidido y por qué. Cada mensaje enviado lleva su ruta' },
+      { clave: 'Actividad', que: 'Cuántos mensajes de la sesión han ido a cada sitio y cuántos sin tokens de pago. Todo, en docs/enrutador.md' },
+    ] },
     { titulo: 'En la interfaz', entradas: [
       { clave: 'Etiqueta de destino', que: 'Clic para cambiar adónde va el mensaje antes de enviarlo' },
       { clave: 'Siempre al turno', que: 'Lo escrito con el agente trabajando le llega ya, en vez de esperar en la cola' },

@@ -166,6 +166,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/chat/clasifica", s.conSesion(s.clasifica))
 	mux.HandleFunc("POST /api/chat/inyecta", s.conSesion(s.inyecta))
 	mux.HandleFunc("POST /api/directo", s.conSesion(s.directo))
+	mux.HandleFunc("POST /api/ruta", s.conSesion(s.rutaAnota))
 	mux.HandleFunc("GET /api/chat/vigencia", s.conSesion(s.vigencia))
 	mux.HandleFunc("POST /api/chat/vigencia", s.conSesion(s.vigenciaChat))
 	mux.HandleFunc("POST /api/adjunto", s.conSesion(s.adjunto))
@@ -617,7 +618,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// (sobre una copia de la sesión del agente; si el agente no las permite, con el resumen de Contexto).
 		Aparte   string `json:"aparte"`
 		Contexto string `json:"contexto"`
-		Idioma   string `json:"idioma"` // del navegador (es-ES, en-GB…): el agente responde en él
+		// AparteMotor «pago»: la pregunta suelta con el modelo de pago aunque haya IA local (aparte.go).
+		AparteMotor string `json:"aparte_motor"`
+		Idioma      string `json:"idioma"` // del navegador (es-ES, en-GB…): el agente responde en él
 		// «Continuar desde aquí»: el mensaje del agente desde el que sigue (lo posterior lo olvida) y el traspaso
 		// de pgocode por si el agente no puede cortar su sesión (ver llm.Peticion).
 		Corte    string `json:"corte"`
@@ -754,7 +757,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	// Id del turno: enlaza en el registro de tiempos la petición, sus herramientas, sus tareas y su fin.
 	turno := idTurno()
 	if p.Aparte != "" {
-		s.aparte(turno, r, p.Aparte, p.Contexto, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
+		s.aparte(turno, r, p.Aparte, p.Contexto, p.AparteMotor, prov, info, llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes[len(p.Mensajes)-1:],
 			Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: "lectura", Esfuerzo: p.Esfuerzo, Entorno: s.entornoAgente(p.Proyecto),
 			Autorizadas: autorizadas, MCP: p.MCP, Aparte: true, Idioma: idioma, CompactAt: p.Compactar, Traza: "sesión " + sesionImp + " · aparte " + turno}, sesionImp, p.Proveedor, envia)
 		return
@@ -778,6 +781,10 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		if e.Vivos != nil {
 			vivosTurno = *e.Vivos
 			return
+		}
+		// Modificador del enrutador de intenciones que aplica el servidor: la sugerencia de subagentes.
+		if e.Subagentes != "" && s.Imputacion != nil {
+			s.Imputacion.AnotaAgente(sesionImp, "ruta-modificador", map[string]any{"turno": turno, "modificador": "subagents", "motivo": e.Subagentes})
 		}
 		if h := e.Herramienta; h != nil && len(h.Imagenes) > 0 {
 			guardaCapturas(p.Carpeta, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)

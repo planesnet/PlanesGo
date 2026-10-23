@@ -90,6 +90,9 @@ type Evento struct {
 	Prune *PruneReport `json:"poda,omitempty"`
 	// Vivos: al acabar el turno, los grupos de procesos de este agente que siguen en marcha (solo los suyos).
 	Vivos *int `json:"-"`
+	// Subagentes: pgocode ha sugerido al agente usar subagentes en este mensaje (el porqué). Es un modificador del
+	// enrutador de intenciones (docs/enrutador.md): la interfaz lo muestra en el distintivo del mensaje.
+	Subagentes string `json:"subagentes,omitempty"`
 }
 
 // Adoptado: un programa del agente que sigue en marcha en pgocode.
