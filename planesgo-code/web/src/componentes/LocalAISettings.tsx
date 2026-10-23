@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { get, post } from '../api';
 import Icono from './Icono';
-import { LOCAL_AI_DEFAULT_URL, localAIStatusText, type LocalAIView } from '../localAI';
+import { LOCAL_AI_DEFAULT_URL, localAIStatusText, localAITestText, type LocalAIView } from '../localAI';
 
 // «IA local» (Propiedades): dónde está la IA que usa pgocode sin gastar tokens de pago (embeddings del hilo de
 // limpieza y del selector de skills). Por defecto el Ollama del equipo; puede ser un servidor de la red (Ollama o
@@ -44,11 +44,14 @@ export default function LocalAISettings() {
     </label>
     <dl className="session-ids">
       <div><dt>Estado</dt><dd className={v?.estado.listo ? '' : 'aviso-txt'}>{localAIStatusText(v?.estado, v?.modelo_embeddings)}</dd></div>
+      {(v?.pruebas || []).map(p => (
+        <div key={p.tipo}><dt>{p.tipo === 'texto' ? 'Modelo de texto' : 'Embeddings'}</dt><dd className={p.ok ? '' : 'aviso-txt'}>{localAITestText(p)}</dd></div>
+      ))}
     </dl>
     {error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
     <div className="fila-config app-actions">
       <button type="button" className="primario" disabled={busy} onClick={() => save()}>Guardar</button>
-      <button type="button" className="boton-secundario" disabled={busy} onClick={() => act(() => get<LocalAIView>('/api/ia-local?probar=1'))}><Icono n="recargar" t={13} /> Probar</button>
+      <button type="button" className="boton-secundario" disabled={busy} onClick={() => act(() => get<LocalAIView>('/api/ia-local?probar=1'))}><Icono n="recargar" t={13} /> {busy ? 'Probando…' : 'Probar los dos modelos'}</button>
       {v?.con_token && <button type="button" className="boton-secundario" disabled={busy} onClick={() => save({ quitar_token: true })}>Quitar token</button>}
       {url !== LOCAL_AI_DEFAULT_URL && <button type="button" className="boton-secundario" disabled={busy}
         onClick={() => act(() => post<LocalAIView>('/api/ia-local', { url: LOCAL_AI_DEFAULT_URL, modelo_embeddings: embed, modelo_texto: chat, quitar_token: true }))}>Usar la de este equipo</button>}

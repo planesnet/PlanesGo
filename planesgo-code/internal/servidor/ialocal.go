@@ -1,8 +1,12 @@
 package servidor
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"planesgo-code/internal/selector"
 	"planesgo-code/internal/sesiones"
@@ -15,6 +19,46 @@ type iaLocalVista struct {
 	EmbedModel string                `json:"modelo_embeddings"`
 	ChatModel  string                `json:"modelo_texto,omitempty"`
 	Estado     selector.LocalAIState `json:"estado"`
+	// Al probar: una llamada de verdad a cada modelo (embeddings y texto), con lo que tarda.
+	Pruebas []pruebaIALocal `json:"pruebas,omitempty"`
+}
+
+// pruebaIALocal: el resultado de probar un modelo de la IA local.
+type pruebaIALocal struct {
+	Tipo    string `json:"tipo"` // «embeddings» o «texto»
+	Modelo  string `json:"modelo,omitempty"`
+	OK      bool   `json:"ok"`
+	Ms      int64  `json:"ms"`
+	Detalle string `json:"detalle,omitempty"` // dimensiones del vector o la respuesta
+	Error   string `json:"error,omitempty"`
+}
+
+// pruebaModelos: una llamada a cada modelo (la primera vez carga el modelo: puede tardar).
+func pruebaModelos(ctx context.Context) []pruebaIALocal {
+	ctx, cancela := context.WithTimeout(ctx, 60*time.Second)
+	defer cancela()
+	var out []pruebaIALocal
+	t0 := time.Now()
+	v, err := selector.Ollama(ctx, nil, "prueba de pgocode", "RETRIEVAL_QUERY")
+	e := pruebaIALocal{Tipo: "embeddings", Modelo: selector.LocalAIConfig().EmbedModel, Ms: time.Since(t0).Milliseconds()}
+	if err != nil {
+		e.Error = err.Error()
+	} else {
+		e.OK, e.Detalle = true, fmt.Sprintf("vector de %d dimensiones", len(v))
+	}
+	out = append(out, e)
+	t0 = time.Now()
+	resp, modelo, err := selector.LocalChat(ctx, "Responde solo con la palabra: listo", "¿Funcionas?", 5)
+	x := pruebaIALocal{Tipo: "texto", Modelo: modelo, Ms: time.Since(t0).Milliseconds()}
+	if err != nil {
+		x.Error = err.Error()
+	} else {
+		x.OK, x.Detalle = strings.TrimSpace(resp) != "", strings.TrimSpace(resp)
+		if !x.OK {
+			x.Error = "respuesta vacía"
+		}
+	}
+	return append(out, x)
 }
 
 func vistaIALocal(r *http.Request, fresco bool) iaLocalVista {
@@ -25,7 +69,12 @@ func vistaIALocal(r *http.Request, fresco bool) iaLocalVista {
 
 // GET /api/ia-local[?probar=1]: la configuración y el estado (probar: sin esperar a los 30 s del último sondeo).
 func (s *Servidor) iaLocal(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
-	jsonOK(w, vistaIALocal(r, r.URL.Query().Get("probar") == "1"))
+	probar := r.URL.Query().Get("probar") == "1"
+	v := vistaIALocal(r, probar)
+	if probar {
+		v.Pruebas = pruebaModelos(r.Context())
+	}
+	jsonOK(w, v)
 }
 
 // POST /api/ia-local: guarda la configuración. El token: vacío lo deja como estaba; quitar_token lo borra.

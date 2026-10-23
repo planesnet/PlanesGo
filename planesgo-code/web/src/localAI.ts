@@ -1,7 +1,15 @@
 // IA local (Propiedades → IA local): tipos de /api/ia-local y su estado en una línea. Funciones puras: node --test src/localAI.test.ts
 
 export interface LocalAIState { url: string; api?: 'ollama' | 'openai'; listo: boolean; modelos?: string[]; error?: string; reserva?: boolean }
-export interface LocalAIView { url: string; con_token: boolean; modelo_embeddings: string; modelo_texto?: string; estado: LocalAIState }
+export interface LocalAITest { tipo: 'embeddings' | 'texto'; modelo?: string; ok: boolean; ms: number; detalle?: string; error?: string }
+export interface LocalAIView { url: string; con_token: boolean; modelo_embeddings: string; modelo_texto?: string; estado: LocalAIState; pruebas?: LocalAITest[] }
+
+// localAITestText: el resultado de probar un modelo, en una línea («✓ embeddinggemma · vector de 768 dimensiones · 45 ms»).
+export function localAITestText(p: LocalAITest): string {
+  const ms = p.ms >= 1000 ? `${(p.ms / 1000).toFixed(1).replace('.', ',')} s` : `${p.ms} ms`;
+  if (!p.ok) return `✗ ${p.modelo || 'sin modelo'} · ${p.error || 'no responde'}`;
+  return `✓ ${p.modelo || ''}${p.detalle ? ` · ${p.tipo === 'texto' ? '«' + p.detalle.slice(0, 40) + '»' : p.detalle}` : ''} · ${ms}`;
+}
 
 export const LOCAL_AI_DEFAULT_URL = 'http://127.0.0.1:11434';
 
