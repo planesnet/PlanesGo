@@ -134,7 +134,16 @@ async function guardaToken(t, id) {
 // se le manda ni el token ni el secreto. 404: el servidor no conoce a este cliente (revocado, o datos de otro servidor).
 async function compruebaServidor(clave, consulta) {
   const nonce = crypto.randomBytes(32).toString('hex');
-  const r = await pide('GET', '/api/clientes/prueba?' + consulta + '&nonce=' + nonce);
+  let r;
+  try {
+    r = await pide('GET', '/api/clientes/prueba?' + consulta + '&nonce=' + nonce);
+  } catch (e) {
+    // 403: a server that does not know this check, an older version left running (an update of the files does not
+    // stop it). It cannot be trusted with the token either: the person closes it and opens the app again.
+    if (e.status === 403) throw new Error('El servidor de pgocode que está en marcha en ' + ADDR + ' es de una versión anterior a esta app y no puede demostrar que es el suyo. ' +
+      'Ciérralo (en la app antigua, Propiedades → Servidor → «Parar el servidor», o terminando el proceso pgocode-backend) y vuelve a abrir Planes Go Code.');
+    throw e;
+  }
   const esperado = crypto.createHmac('sha256', clave).update(nonce).digest('hex');
   if (typeof r.proof !== 'string' || r.proof.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(r.proof), Buffer.from(esperado))) {
     throw new Error('El programa que escucha en ' + ADDR + ' no ha demostrado ser el servidor de pgocode de este usuario: no se le manda nada.');
