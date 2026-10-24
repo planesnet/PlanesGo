@@ -63,7 +63,7 @@ func TestRdpConnect(t *testing.T) {
 	t.Setenv("HOME", dir)
 	out := filepath.Join(dir, "salida")
 	fake := filepath.Join(dir, "sdl-freerdp")
-	os.WriteFile(fake, []byte("#!/bin/sh\nread pw\nread titulo\necho \"$pw|$titulo|$PGO_TITULO_ENTRADA|$*\" > "+out+"\n"), 0o755)
+	os.WriteFile(fake, []byte("#!/bin/sh\nread pw\nread titulo <&3\nread otra || otra=EOF\necho \"$pw|$titulo|$PGO_TITULO_FD:$otra|$*\" > "+out+"\n"), 0o755)
 	t.Setenv("PGO_FREERDP", fake)
 
 	s := &Servidor{Puerto: "7801", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(), Indice: proyectos.NuevoIndice(nil)}
@@ -96,9 +96,9 @@ func TestRdpConnect(t *testing.T) {
 				t.Fatalf("FreeRDP recibió %q", got)
 			}
 			pw, title, env, args := f[0], f[1], f[2], f[3]
-			// The title (logged time) comes after the password, through the same input; never the password
-			if !strings.HasPrefix(title, "Sage") || strings.Contains(title, "S3cr3t!") || env != "1" {
-				t.Fatalf("título %q (PGO_TITULO_ENTRADA=%q)", title, env)
+			// The title (logged time) goes through descriptor 3, never the password; the input ends after it
+			if !strings.HasPrefix(title, "Sage") || strings.Contains(title, "S3cr3t!") || env != "3:EOF" {
+				t.Fatalf("título %q (PGO_TITULO_FD y entrada tras la contraseña: %q)", title, env)
 			}
 			if pw != "S3cr3t!" || strings.Contains(args, "S3cr3t!") || !strings.Contains(args, "/v:192.168.125.229") ||
 				!strings.Contains(args, "/u:luis ") || !strings.Contains(args, "/d:MAZANA") {

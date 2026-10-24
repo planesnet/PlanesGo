@@ -44,7 +44,7 @@ type rdpConn struct {
 	State    string         `json:"estado"` // conectando, conectado, terminado
 	Error    string         `json:"error,omitempty"`
 	closed   bool           // the person disconnected it from pgocode: not an error
-	title    io.WriteCloser // FreeRDP's input after the password: one line per window title (connectors/freerdp)
+	title    io.WriteCloser // descriptor 3 of FreeRDP: one line per window title (connectors/freerdp); nil on Windows
 	cancel   context.CancelFunc
 	finished chan struct{}
 }
@@ -252,9 +252,22 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	c.cancel = cancel
 	cmd := exec.CommandContext(ctx, bin, rdpArgs(p.Name, p.Host, p.User)...)
 	proceso.GrupoPropio(cmd)
-	// Nothing of pgocode's (tokens, desktop secret) reaches FreeRDP; PGO_TITULO_ENTRADA: its title is updated
-	// through its input (the patch in connectors/freerdp) with the logged time.
-	cmd.Env = append(proceso.CleanEnviron(), "PGO_TITULO_ENTRADA=1")
+	// Nothing of pgocode's (tokens, desktop secret) reaches FreeRDP. Its title (the logged time) goes through its
+	// descriptor 3 (PGO_TITULO_FD, the patch in connectors/freerdp), not its input: a new credentials prompt would
+	// read a title as the password. ExtraFiles does not exist on Windows.
+	cmd.Env = proceso.CleanEnviron()
+	if runtime.GOOS != "windows" {
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			cancel()
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer pr.Close() // the child has its own copy once started
+		cmd.ExtraFiles = []*os.File{pr}
+		cmd.Env = append(cmd.Env, "PGO_TITULO_FD=3")
+		c.title = pw
+	}
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	stdin, err := cmd.StdinPipe()
@@ -267,8 +280,8 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		return
 	}
 	stdin.Write([]byte(p.Password + "\n"))
+	stdin.Close()
 	p.Password = ""
-	c.title = stdin
 	s.escritorios.mu.Lock()
 	if s.escritorios.conns == nil {
 		s.escritorios.conns = map[string]*rdpConn{}
@@ -294,7 +307,9 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		}
 		s.escritorios.mu.Unlock()
 		close(c.finished)
-		c.title.Close()
+		if c.title != nil {
+			c.title.Close()
+		}
 		cancel()
 		if s.Imputacion != nil {
 			s.Imputacion.Cierra(work.Sesion, "escritorio remoto cerrado")
@@ -339,7 +354,12 @@ func (s *Servidor) rdpTitle(c *rdpConn, work imputacion.Trabajo) string {
 func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 	t := time.NewTicker(rdpBeat)
 	defer t.Stop()
-	fmt.Fprintln(c.title, s.rdpTitle(c, work))
+	show := func() {
+		if c.title != nil {
+			fmt.Fprintln(c.title, s.rdpTitle(c, work))
+		}
+	}
+	show()
 	for {
 		select {
 		case <-c.finished:
@@ -360,7 +380,7 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 		if s.Imputacion != nil {
 			s.Imputacion.Actividad(work)
 		}
-		fmt.Fprintln(c.title, s.rdpTitle(c, work))
+		show()
 	}
 }
 

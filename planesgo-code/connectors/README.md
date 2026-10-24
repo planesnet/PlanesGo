@@ -58,8 +58,9 @@ ventana), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo 
    Siempre: portapapeles y carpeta compartida «Intercambio». Pantalla completa: Ctrl+Alt+Intro.
 
 El tiempo imputado se ve en el **título de la ventana de Windows** (`nombre · proyecto · sesión 0:12 · proyecto hoy
-2:35 · total hoy 4:10`), actualizado cada 20 s: el backend se lo manda a FreeRDP por su entrada, después de la
-contraseña, gracias al parche `freerdp/titulo-por-entrada.patch` (solo actúa con `PGO_TITULO_ENTRADA=1`).
+2:35 · total hoy 4:10`), actualizado cada 20 s: el backend se lo manda a FreeRDP por su descriptor 3 gracias al
+parche `freerdp/titulo-por-descriptor.patch` (solo actúa con `PGO_TITULO_FD`). No por la entrada estándar, que se
+cierra tras la contraseña: una nueva petición de credenciales leería un título como contraseña.
 
 La ventana de Windows es la nativa de FreeRDP (SDL3), con solo seguridad moderna: NLA, nivel 2 de OpenSSL,
 certificado aceptado la primera vez y aviso si cambia, y gráficos H.264 4:4:4. Mientras haya un escritorio abierto,
