@@ -102,6 +102,35 @@ func TestAgentDesktopSession(t *testing.T) {
 		t.Errorf("sin orden: %d", w.Code)
 	}
 
+	// The person's view: the screen as it is, their clicks in its own coordinates; meanwhile the agent waits.
+	if w := ui("GET", "/api/agent-desktop/frame?project=7&session=s1", ""); w.Code != 200 || w.Header().Get("X-Width") != "1600" || w.Body.Len() == 0 {
+		t.Fatalf("imagen: %d %v", w.Code, w.Header())
+	}
+	if w := ui("GET", "/api/agent-desktop/frame?project=8&session=s1", ""); w.Code == 200 {
+		t.Error("imagen de un proyecto ajeno")
+	}
+	if w := sqlCall(t, h, "POST", "/api/agent-desktop/input", `{"project":7,"session":"s1","desktop":{"action":"click","x":5,"y":5}}`, "", "", mine); w.Code == 200 {
+		t.Error("un agente usando la vista de la persona")
+	}
+	if w := ui("POST", "/api/agent-desktop/input", `{"project":7,"session":"s1","desktop":{"action":"capture"}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("la persona no captura: %d", w.Code)
+	}
+	if w := ui("POST", "/api/agent-desktop/input", `{"project":7,"session":"s1","desktop":{"action":"key","keys":["Return"]}}`); w.Code != 200 {
+		t.Fatalf("la persona pulsa: %d %s", w.Code, w.Body)
+	}
+	if w := agent(mine, map[string]any{"action": "click", "x": 400, "y": 225}, dir); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "persona") {
+		t.Errorf("el agente espera: %d %s", w.Code, w.Body)
+	}
+	if w := ui("GET", "/api/agent-desktop?project=7&session=s1", ""); !strings.Contains(w.Body.String(), `"held":true`) {
+		t.Errorf("estado con la persona: %s", w.Body)
+	}
+	if w := ui("POST", "/api/agent-desktop/hold", `{"project":7,"session":"s1","hold":false}`); w.Code != 200 || strings.Contains(w.Body.String(), `"held"`) {
+		t.Errorf("devolver: %d %s", w.Code, w.Body)
+	}
+	if w := agent(mine, map[string]any{"action": "status"}, dir); w.Code != 200 {
+		t.Errorf("el agente sigue: %d", w.Code)
+	}
+
 	if w := ui("POST", "/api/agent-desktop/stop", `{"project":7,"session":"s1"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"running":false`) {
 		t.Errorf("parar: %d %s", w.Code, w.Body)
 	}
@@ -109,7 +138,7 @@ func TestAgentDesktopSession(t *testing.T) {
 		t.Errorf("parado: %d", w.Code)
 	}
 	audit, _ := os.ReadFile(s.AgentDesktopAudit)
-	if strings.Contains(string(audit), pw) || !strings.Contains(string(audit), `"characters":15`) || !strings.Contains(string(audit), `"action":"stop"`) {
+	if strings.Contains(string(audit), pw) || !strings.Contains(string(audit), `"characters":15`) || !strings.Contains(string(audit), `"origin":"persona"`) || !strings.Contains(string(audit), `"action":"stop"`) {
 		t.Errorf("auditoría: %s", audit)
 	}
 }

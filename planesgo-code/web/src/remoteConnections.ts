@@ -37,3 +37,17 @@ export function normalizePeer(s: string): string {
 // message), with only what the person has to read.
 export const ipcError = (e: unknown): Error =>
   new Error(String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, ''));
+
+// The kind of connection the remote desktop window shows (it remembers the last one).
+export type RemoteKind = 'rdp' | 'anydesk';
+export const REMOTE_KIND_KEY = 'pgo:escritorio:tipo';
+export const readRemoteKind = (): RemoteKind => { try { return localStorage.getItem(REMOTE_KIND_KEY) === 'anydesk' ? 'anydesk' : 'rdp'; } catch { return 'rdp'; } };
+
+// openRemoteDesktop: the remote desktop window (RDP and AnyDesk), the same as «pgocode --rdp»: in the desktop app,
+// in this same instance; in a browser, as a window of its own. With a kind, it shows that one (an open window
+// hears it through the storage event).
+export function openRemoteDesktop(kind?: RemoteKind) {
+  if (kind) try { localStorage.setItem(REMOTE_KIND_KEY, kind); } catch { /* no storage */ }
+  if (window.psf?.escritorioRemoto) window.psf.escritorioRemoto().catch(() => { /* the window could not open: nothing to undo */ });
+  else window.open('/?modo=rdp', 'pgo-escritorio-remoto', 'width=560,height=680');
+}

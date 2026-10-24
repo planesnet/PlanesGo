@@ -207,3 +207,42 @@ func TestMissingTools(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// The person's view: their actions go in the screen's own coordinates and take the screen, and the agent waits
+// (ErrHeld) until it is given back; the frame is the screen as it is.
+func TestPerson(t *testing.T) {
+	d, dir, _ := startFake(t, "", "")
+	writePNG(t, agentdesktoptest.Screenshot(dir), 1600, 900)
+	if b, w, h, err := d.Frame(t.Context()); err != nil || len(b) == 0 || w != 1600 || h != 900 {
+		t.Fatalf("imagen: %d %dx%d %v", len(b), w, h, err)
+	}
+	if imp := agentdesktoptest.Args(dir, "import"); !strings.Contains(imp[0], "-crop 1600x900+0+0 +repage -quality 70 jpg:-") {
+		t.Errorf("import: %v", imp)
+	}
+	if _, err := d.Person(agentdesktop.Action{Name: "capture"}); err == nil {
+		t.Error("la persona no captura desde aquí")
+	}
+	if _, err := d.Person(agentdesktop.Action{Name: "click", X: 1600, Y: 10}); err == nil {
+		t.Error("fuera de la pantalla")
+	}
+	if _, err := d.Person(agentdesktop.Action{Name: "click", X: 800, Y: 450}); err != nil {
+		t.Fatal(err)
+	}
+	x := agentdesktoptest.Args(dir, "xdotool")
+	if x[len(x)-1] != "mousemove --sync 800 450 click 1" {
+		t.Errorf("xdotool: %v", x)
+	}
+	if !d.Held() {
+		t.Error("la persona tiene la pantalla")
+	}
+	if _, err := d.Do(agentdesktop.Action{Name: "click", X: 10, Y: 10}, ""); err != agentdesktop.ErrHeld {
+		t.Errorf("el agente espera: %v", err)
+	}
+	if _, err := d.Do(agentdesktop.Action{Name: "status"}, ""); err != nil {
+		t.Errorf("el estado sí: %v", err)
+	}
+	d.Hold(false)
+	if _, err := d.Do(agentdesktop.Action{Name: "click", X: 10, Y: 10}, ""); err != nil {
+		t.Errorf("devuelta: %v", err)
+	}
+}

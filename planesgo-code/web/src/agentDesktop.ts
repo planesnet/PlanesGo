@@ -25,6 +25,7 @@ export interface AgentDesktopView {
   running: boolean;
   status?: AgentDesktopStatus;
   actions?: number;
+  held?: boolean;    // the person has the screen (Pantalla del agente): the agent waits
 }
 
 export const EMPTY_DESKTOP: AgentDesktopConfig = { host: '', user: '', keyboard: 'unicode', size: '1600x900' };

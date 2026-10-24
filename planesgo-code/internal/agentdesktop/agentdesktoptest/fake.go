@@ -33,7 +33,7 @@ func Tools(t testing.TB, dir, clientExit string) agentdesktop.Tools {
 		"Xvfb":     log("Xvfb") + "echo 99 >&3\nexec sleep 60\n",
 		"xfreerdp": client,
 		"xdotool":  log("xdotool") + "[ \"$1\" = search ] && echo 4242\nexit 0\n",
-		"import":   log("import") + "for a; do out=$a; done\ncp " + q(Screenshot(dir)) + " \"${out#png:}\"\n",
+		"import":   log("import") + "for a; do out=$a; done\ncase $out in *:-) cat " + q(Screenshot(dir)) + ";; *) cp " + q(Screenshot(dir)) + " \"${out#png:}\";; esac\n",
 		"ffmpeg":   log("ffmpeg") + "for a; do out=$a; done\nread q\necho video > \"$out\"\n",
 	}
 	paths := map[string]string{}

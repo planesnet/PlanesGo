@@ -28,6 +28,7 @@ type agentDesktopView struct {
 	Running   bool                 `json:"running"`
 	Status    *agentdesktop.Status `json:"status,omitempty"`
 	Actions   int                  `json:"actions,omitempty"`
+	Held      bool                 `json:"held,omitempty"` // the person has the screen: the agent waits
 }
 
 // agentDesktopRequest: the body of the /api/agent-desktop requests.
@@ -72,6 +73,7 @@ func (s *Servidor) agentDesktopView(project int, session string) agentDesktopVie
 		st := x.conn.Status()
 		v.Running, v.Status, v.Exchange = x.conn.Running(), &st, st.Exchange
 		v.Actions = s.agentDesktops.counted(x)
+		v.Held = x.conn.Held()
 	}
 	return v
 }
@@ -175,6 +177,10 @@ func (s *Servidor) agentDesktopRunAs(w http.ResponseWriter, who string, project 
 	s.agentDesktops.used(x)
 	st := x.conn.Status()
 	s.desktopAudit(who, who, project, session, st.User+"@"+st.Host, actionAudit(*a, res), err)
+	if errors.Is(err, agentdesktop.ErrHeld) {
+		jsonError(w, http.StatusConflict, err.Error()) // not the agent's mistake: it waits and tries again
+		return
+	}
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -216,4 +222,73 @@ func (s *Servidor) desktopAudit(login, origin string, project int, session, conn
 		e["error"] = err.Error()
 	}
 	appendAudit(s.AgentDesktopAudit, "escritorio del agente", e)
+}
+
+// The person's view of the session's agent desktop (person.go of internal/agentdesktop): they see its screen and use
+// it with their own mouse and keyboard (to type a password, accept a notice…), while the agent waits.
+
+// agentDesktopPersonRequest: the body of the person's requests.
+type agentDesktopPersonRequest struct {
+	sessionRef
+	Desktop *agentdesktop.Action `json:"desktop"`
+	Hold    bool                 `json:"hold"`
+}
+
+// GET /api/agent-desktop/frame?project=&session=: the screen now (JPEG; its size in X-Width and X-Height).
+func (s *Servidor) agentDesktopFrame(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p agentDesktopPersonRequest
+	if !s.readSessionRequest(w, r, ses, &p, &p.sessionRef) {
+		return
+	}
+	x := s.agentDesktops.get(p.Project, p.Session)
+	if x == nil {
+		jsonError(w, http.StatusConflict, "esta sesión no tiene escritorio del agente iniciado")
+		return
+	}
+	img, width, height, err := x.conn.Frame(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "image/jpeg")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Width", strconv.Itoa(width))
+	h.Set("X-Height", strconv.Itoa(height))
+	w.Write(img)
+}
+
+// POST /api/agent-desktop/input {project, session, desktop}: an action of the person (click, move, drag, wheel, type,
+// key) in the screen's coordinates. It takes the screen for a while: the agent waits.
+func (s *Servidor) agentDesktopInput(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p agentDesktopPersonRequest
+	if !s.readSessionRequest(w, r, ses, &p, &p.sessionRef) {
+		return
+	}
+	x := s.agentDesktops.get(p.Project, p.Session)
+	if x == nil || p.Desktop == nil {
+		jsonError(w, http.StatusConflict, "esta sesión no tiene escritorio del agente iniciado")
+		return
+	}
+	res, err := x.conn.Person(*p.Desktop)
+	st := x.conn.Status()
+	// What the person types is never kept (it may be a password): only how many characters (actionAudit).
+	s.desktopAudit(ses.Login, "persona", p.Project, p.Session, st.User+"@"+st.Host, actionAudit(*p.Desktop, res), err)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonOK(w, map[string]bool{"ok": true})
+}
+
+// POST /api/agent-desktop/hold {project, session, hold}: the person takes the screen, or gives it back to the agent.
+func (s *Servidor) agentDesktopHold(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p agentDesktopPersonRequest
+	if !s.readSessionRequest(w, r, ses, &p, &p.sessionRef) {
+		return
+	}
+	if x := s.agentDesktops.get(p.Project, p.Session); x != nil {
+		x.conn.Hold(p.Hold)
+	}
+	jsonOK(w, s.agentDesktopView(p.Project, p.Session))
 }

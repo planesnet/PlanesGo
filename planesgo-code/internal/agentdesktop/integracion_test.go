@@ -166,6 +166,19 @@ func TestAgentDesktopReal(t *testing.T) {
 	if w, h := size(do(agentdesktop.Action{Name: "capture"}).Path); w != 1280 || h != 720 {
 		t.Errorf("captura tras el cambio de tamaño: %dx%d", w, h)
 	}
+	// The person's view: the screen as a JPEG, and their pointer in its own coordinates (the server's screen is 1600x900,
+	// the agent's desktop 1280x720 now: FreeRDP scales it).
+	img, fw, fh, err := d.Frame(t.Context())
+	if err != nil || fw != 1280 || fh != 720 || len(img) < 3 || img[0] != 0xFF || img[1] != 0xD8 {
+		t.Errorf("imagen de la persona: %d bytes %dx%d %v", len(img), fw, fh, err)
+	}
+	if _, err := d.Person(agentdesktop.Action{Name: "move", X: 640, Y: 360}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Do(agentdesktop.Action{Name: "click", X: 1, Y: 1}, out); err != agentdesktop.ErrHeld {
+		t.Errorf("el agente espera: %v", err)
+	}
+	d.Hold(false)
 	v := do(agentdesktop.Action{Name: "record", Record: "start"})
 	time.Sleep(2 * time.Second)
 	do(agentdesktop.Action{Name: "record", Record: "stop"})

@@ -15,13 +15,10 @@ import Acceso, { CampoClave } from './Acceso';
 import { AnyDeskForm, AnyDeskUnassigned, useAnyDesk } from './AnyDesk';
 import { Dialogs, showMessage } from './Modal';
 import ProjectField from './ProjectField';
-import { readSaved, remember, writeSaved } from '../remoteConnections';
+import { readRemoteKind, readSaved, remember, REMOTE_KIND_KEY, writeSaved, type RemoteKind } from '../remoteConnections';
 
 interface Conexion { equipo: string; usuario: string; proyecto: number }
-type Kind = 'rdp' | 'anydesk';
-
-const KIND_KEY = 'pgo:escritorio:tipo';
-const readKind = (): Kind => { try { return localStorage.getItem(KIND_KEY) === 'anydesk' ? 'anydesk' : 'rdp'; } catch { return 'rdp'; } };
+type Kind = RemoteKind;
 
 export default function EscritorioRemoto() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
@@ -34,7 +31,13 @@ export default function EscritorioRemoto() {
 function Ventana({ usuario }: { usuario: Usuario }) {
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [versionApp, setVersionApp] = useState('');
-  const [kind, setKind] = useState<Kind>(readKind);
+  const [kind, setKind] = useState<Kind>(readRemoteKind);
+  // Chosen from the main window (the test bar's list) while this one is open.
+  useEffect(() => {
+    const f = (e: StorageEvent) => { if (e.key === REMOTE_KIND_KEY) setKind(readRemoteKind()); };
+    window.addEventListener('storage', f);
+    return () => window.removeEventListener('storage', f);
+  }, []);
   const [anydesk, reloadAnyDesk] = useAnyDesk();
 
   // Es pgocode: su versión, en el título de la ventana (como la principal) y en la tarjeta.
@@ -42,7 +45,7 @@ function Ventana({ usuario }: { usuario: Usuario }) {
     get<{ version: string }>('/api/version').then(v => { setVersionApp(v.version); document.title = 'Escritorio remoto · Planes Go Code ' + v.version; }).catch(() => {});
   }, []);
   useEffect(() => { get<Proyecto[]>('/api/proyectos').then(setProyectos).catch(() => {}); }, []);
-  const choose = (k: Kind) => { setKind(k); try { localStorage.setItem(KIND_KEY, k); } catch { /* sin almacenamiento */ } };
+  const choose = (k: Kind) => { setKind(k); try { localStorage.setItem(REMOTE_KIND_KEY, k); } catch { /* sin almacenamiento */ } };
 
   return (
     <main className="acceso rdp">

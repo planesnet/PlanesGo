@@ -305,7 +305,8 @@ type Desktop struct {
 	mu         sync.Mutex
 	width      int
 	height     int
-	capW, capH int // size of the last screenshot: the agent's coordinates
+	capW, capH int       // size of the last screenshot: the agent's coordinates
+	heldUntil  time.Time // the person has the screen until then (person.go)
 	state      string
 	errText    string
 	closing    bool
@@ -566,7 +567,8 @@ func (d *Desktop) point(x, y int) (string, string, error) {
 	return strconv.Itoa(rx), strconv.Itoa(ry), err
 }
 
-// Do runs an action of the agent. captureDir: where screenshots go (the session's .pgocode/salidas).
+// Do runs an action of the agent. captureDir: where screenshots go (the session's .pgocode/salidas). While the person
+// has the screen (Hold), the agent waits: its orders are refused, except asking how it is.
 func (d *Desktop) Do(a Action, captureDir string) (Result, error) {
 	if err := a.Validate(); err != nil {
 		return Result{}, err
@@ -574,6 +576,15 @@ func (d *Desktop) Do(a Action, captureDir string) (Result, error) {
 	if a.Name == "status" {
 		return Result{Text: statusText(d.Status())}, nil
 	}
+	if d.Held() {
+		return Result{}, ErrHeld
+	}
+	return d.do(a, captureDir, d.point)
+}
+
+// do runs an action; pt puts its points on the screen (the agent's, from its last screenshot; the person's, as they
+// are).
+func (d *Desktop) do(a Action, captureDir string, pt func(x, y int) (string, string, error)) (Result, error) {
 	d.act.Lock()
 	defer d.act.Unlock()
 	if !d.Running() {
@@ -583,7 +594,7 @@ func (d *Desktop) Do(a Action, captureDir string) (Result, error) {
 	case "capture":
 		return d.capture(a.Scale, captureDir)
 	case "click", "move":
-		x, y, err := d.point(a.X, a.Y)
+		x, y, err := pt(a.X, a.Y)
 		if err != nil {
 			return Result{}, err
 		}
@@ -593,11 +604,11 @@ func (d *Desktop) Do(a Action, captureDir string) (Result, error) {
 		}
 		return Result{Text: "hecho"}, d.xdotool(args...)
 	case "drag":
-		x1, y1, err := d.point(a.X, a.Y)
+		x1, y1, err := pt(a.X, a.Y)
 		if err != nil {
 			return Result{}, err
 		}
-		x2, y2, err := d.point(a.X2, a.Y2)
+		x2, y2, err := pt(a.X2, a.Y2)
 		if err != nil {
 			return Result{}, err
 		}

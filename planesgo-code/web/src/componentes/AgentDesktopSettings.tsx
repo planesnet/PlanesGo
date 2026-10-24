@@ -4,6 +4,7 @@ import { desktopFormError, desktopStatusText, parseSize, readLastDesktop, saveLa
 import { CampoClave } from './Acceso';
 import Icono from './Icono';
 import Switch from './Switch';
+import AgentScreen from './AgentScreen';
 
 // «Escritorio del agente» (session properties): a Windows desktop over RDP on a virtual screen of this computer,
 // which the session's agents drive with «pgo escritorio». The password goes to FreeRDP and nowhere else.
@@ -16,6 +17,7 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [screen, setScreen] = useState(false);
   const url = `/api/agent-desktop?project=${project}&session=${encodeURIComponent(session)}`;
 
   // Only the latest request's answer counts: a poll that left before «Parar» must not bring the desktop back.
@@ -57,7 +59,10 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
       {s.video && <div><dt>Vídeo</dt><dd><code className="recorta" title={s.video}>{s.video}</code></dd></div>}
     </dl>}
     {s?.error && <div className="aviso-txt pequeno" role="alert">{s.error}</div>}
+    {screen && <AgentScreen project={project} session={session} onClose={() => setScreen(false)} />}
+    {v?.running && v.held && <p className="suave pequeno">La pantalla la tienes tú: el agente espera.</p>}
     {v?.running ? <div className="fila-config app-actions">
+      <button type="button" className="primario" onClick={() => setScreen(true)}>Ver y usar la pantalla</button>
       <button type="button" className="boton-secundario" disabled={busy} onClick={() => get<AgentDesktopView>(url).then(setV).catch(e => setError(String(e.message || e)))}><Icono n="recargar" t={13} /> Actualizar</button>
       <button type="button" className="boton-secundario peligro" disabled={busy}
         onClick={() => act(() => post<AgentDesktopView>('/api/agent-desktop/stop', { project, session }))}>Parar</button>

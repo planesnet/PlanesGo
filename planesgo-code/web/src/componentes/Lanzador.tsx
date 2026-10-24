@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { get, openOutside, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
 import * as L from '../lanzador';
 import Icono from './Icono';
+import AgentScreen from './AgentScreen';
+import { openRemoteDesktop } from '../remoteConnections';
+import type { AgentDesktopView } from '../agentDesktop';
 
 // Barra de prueba encima del cuadro del chat: lanza lo que se está desarrollando en la rama de la sesión.
-// A la izquierda, dónde (navegador interno, navegador del sistema o un programa del proyecto); después la
+// A la izquierda, dónde (navegador interno, navegador del sistema o un programa del proyecto; en la misma lista, las
+// pantallas que no son una web: el escritorio remoto por RDP o AnyDesk y la del escritorio del agente); después la
 // dirección, como un enlace, y el botón de abrir. En el navegador interno, además, el formato de la página
 // (ordenador, tablet, móvil) y su orientación. La elección se recuerda por proyecto.
 
@@ -94,6 +98,13 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
 
   const [menu, setMenu] = useState(false);
   const caja = useRef<HTMLDivElement>(null);
+  // The session's agent desktop, if it is running: its screen is offered in the list (looked at when it opens).
+  const [agentScreen, setAgentScreen] = useState<'no' | 'si' | 'abierta'>('no');
+  useEffect(() => {
+    if (!menu || !sesion) return;
+    get<AgentDesktopView>(`/api/agent-desktop?project=${proyecto.id}&session=${encodeURIComponent(sesion)}`)
+      .then(v => setAgentScreen(a => a === 'abierta' ? a : v.running ? 'si' : 'no')).catch(() => {});
+  }, [menu, sesion, proyecto.id]);
 
 
   const enMarcha = procs.filter(x => x.estado === 'curso');
@@ -193,8 +204,19 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
                 <Icono n={DESTINOS[d].icono} t={15} /> {DESTINOS[d].nombre}{destino === d && <Icono n="hecho" t={13} />}
               </button></li>
             ))}
+            <li className="menu-sep" role="separator" />
+            <li><button onClick={() => { openRemoteDesktop('rdp'); setMenu(false); }} title="La ventana del escritorio remoto, en Windows (RDP)">
+              <Icono n="equipo" t={15} /> Escritorio remoto (RDP)
+            </button></li>
+            <li><button onClick={() => { openRemoteDesktop('anydesk'); setMenu(false); }} title="La ventana del escritorio remoto, en AnyDesk">
+              <Icono n="conectar" t={15} /> AnyDesk
+            </button></li>
+            {agentScreen !== 'no' && sesion && <li><button onClick={() => { setAgentScreen('abierta'); setMenu(false); }} title="Ver y usar la pantalla del escritorio del agente de esta sesión">
+              <Icono n="ordenador" t={15} /> Pantalla del agente
+            </button></li>}
           </ul>
         )}
+        {agentScreen === 'abierta' && sesion && <AgentScreen project={proyecto.id} session={sesion} onClose={() => setAgentScreen('si')} />}
       </div>
       <form className={'lanzador-url' + (detectada ? ' detectada' : '')} title={detectada ? 'Dirección que acaba de dar el agente: pulsa abrir' : undefined} onSubmit={e => { e.preventDefault(); abre(); }}>
         {/* Sugerencias solo si hay otra dirección que elegir (si no, sin la flecha del desplegable). */}
