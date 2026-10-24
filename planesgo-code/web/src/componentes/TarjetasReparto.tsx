@@ -38,7 +38,7 @@ export function TarjetaReparto({ reparto, trabajando, alAbrir, alParar, alUnir, 
         <b>Reparto en {reparto.hijas.length} sesiones paralelas</b>
         <span className="suave pequeno recorta">desde «{reparto.ramaMadre || 'la rama de esta sesión'}»</span>
         <span className="hueco" />
-        {acabado && <button className="icono" onClick={alQuitar} title="Quitar esta tarjeta (las ramas y copias pendientes se conservan)" aria-label="Quitar la tarjeta del reparto">×</button>}
+        {acabado && <button className="icono" onClick={alQuitar} title="Quitar esta tarjeta (las ramas y subcarpetas pendientes se conservan)" aria-label="Quitar la tarjeta del reparto">×</button>}
       </div>
       <ul className="reparto-hijas">
         {reparto.hijas.map(h => (
@@ -52,7 +52,7 @@ export function TarjetaReparto({ reparto, trabajando, alAbrir, alParar, alUnir, 
               {h.carpeta && !h.quitada && <button className="enlace" onClick={() => alAbrir(h)} title={`Abrir la sesión de la parte ${h.n}`}>Abrir</button>}
               {h.union === 'conflicto' && !h.resolving && h.rama && <button className="enlace" onClick={() => alResolver(h)}
                 title="Pedir al agente de esta sesión que una la rama de esta parte y resuelva el conflicto (a la cola si está trabajando)">Resolver con el agente</button>}
-              {h.union === 'conflicto' && h.resolving && <span className="suave pequeno" title="Cuando el agente acabe, pgocode comprueba la unión y quita la copia de la parte">pedido al agente</span>}
+              {h.union === 'conflicto' && h.resolving && <span className="suave pequeno" title="Cuando el agente acabe, pgocode comprueba la unión y quita la subcarpeta de la parte">pedido al agente</span>}
               {RP.seUne(h) && (h.union !== 'sin' || h.estado === 'parada') && <button className="enlace" onClick={() => alUnir(h)} title="Unir la rama de esta parte a la de esta sesión (si está limpia y sin agente trabajando)">Unir cambios</button>}
             </span>
             {(h.union === 'conflicto' || h.union === 'pendiente' || h.union === 'error' || h.aviso || h.estado === 'error') && (

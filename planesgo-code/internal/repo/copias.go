@@ -60,7 +60,7 @@ func (e Estado) Pendiente() string {
 }
 
 // ErrNoEsCopia: la carpeta no es una copia de trabajo (git worktree) de un repositorio.
-var ErrNoEsCopia = errors.New("esa carpeta no es una copia de trabajo (git worktree): no se quita")
+var ErrNoEsCopia = errors.New("esa carpeta no es una subcarpeta de rama (git worktree): no se quita")
 
 // Principal devuelve la carpeta principal del repositorio de dir y si dir es la raíz de una copia de trabajo
 // (y no la principal). Error si dir no es la raíz de un repositorio o copia.
@@ -130,7 +130,7 @@ func EstadoCopia(ctx context.Context, dir string) (Estado, error) {
 	e.Rama, _ = git(ctx, dir, "branch", "--show-current")
 	st, err := git(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return e, errors.New("no se ha podido leer el estado de la copia")
+		return e, errors.New("no se ha podido leer el estado de la subcarpeta")
 	}
 	if st != "" {
 		e.Cambios = len(strings.Split(st, "\n"))
@@ -204,17 +204,17 @@ func QuitaCopia(ctx context.Context, dir string, borrarRama bool) (bool, error) 
 		return false, ErrNoEsCopia
 	}
 	if !e.SePuedeQuitar() {
-		return false, fmt.Errorf("la copia tiene trabajo sin guardar (%s): no se quita", e.Pendiente())
+		return false, fmt.Errorf("la subcarpeta tiene trabajo sin guardar (%s): no se quita", e.Pendiente())
 	}
 	Prune(ctx, e.Principal)
 	if out, err := gitSalida(ctx, e.Principal, "worktree", "remove", "--", e.Carpeta); err != nil {
-		return false, fmt.Errorf("git no ha quitado la copia: %s", out)
+		return false, fmt.Errorf("git no ha quitado la subcarpeta: %s", out)
 	}
 	if !borrarRama || !e.Fusionada || e.Rama == "" || e.Rama == e.Defecto || !ramaValida.MatchString(e.Rama) || strings.HasPrefix(e.Rama, "-") {
 		return false, nil
 	}
 	if out, err := gitSalida(ctx, e.Principal, "branch", "-d", e.Rama); err != nil {
-		return false, fmt.Errorf("copia quitada, pero la rama «%s» se conserva: %s", e.Rama, out)
+		return false, fmt.Errorf("subcarpeta quitada, pero la rama «%s» se conserva: %s", e.Rama, out)
 	}
 	return true, nil
 }

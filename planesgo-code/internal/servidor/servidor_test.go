@@ -125,7 +125,7 @@ func TestCookieConPuerto(t *testing.T) {
 
 // Una carpeta de sesión que ya no existe (copia de trabajo quitada) no se explica como «no es del proyecto».
 func TestCarpetaAjena(t *testing.T) {
-	if m := carpetaAjena(t.TempDir()+"/quitada", "P"); !strings.Contains(m, "copia de trabajo se quitó") {
+	if m := carpetaAjena(t.TempDir()+"/quitada", "P"); !strings.Contains(m, "subcarpeta se quitó") {
 		t.Errorf("carpeta quitada: %q", m)
 	}
 	if m := carpetaAjena(t.TempDir(), "P"); !strings.Contains(m, "no es del proyecto «P»") {

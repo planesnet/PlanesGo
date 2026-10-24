@@ -112,8 +112,8 @@ test('resumen: qué hizo cada parte, tokens y coste de cada una y total, qué se
     h3: { respuesta: '', entrada: 0, salida: 0, coste: 0 },
   });
   assert.match(t, /Reparto en 3 sesiones paralelas/);
-  assert.match(t, /- \*\*Parte 1\*\* \(hacer la cosa 1\) · hecha {2}\n {2}Respondió: «Corregido el IVA\. Y más» {2}\n {2}2 k tokens · 0,50 \$ {2}\n {2}Unión: unida \(copia quitada\)/);
-  assert.match(t, /Unión: NO unida: choca en a\.py, b\.py\. Se conserva la rama «pgo\/m-2» \(copia en \/ramas\/x\)/);
+  assert.match(t, /- \*\*Parte 1\*\* \(hacer la cosa 1\) · hecha {2}\n {2}Respondió: «Corregido el IVA\. Y más» {2}\n {2}2 k tokens · 0,50 \$ {2}\n {2}Unión: unida \(subcarpeta quitada\)/);
+  assert.match(t, /Unión: NO unida: choca en a\.py, b\.py\. Se conserva la rama «pgo\/m-2» \(subcarpeta en \/ramas\/x\)/);
   assert.match(t, /Parte 3\*\* .* · parada[\s\S]*Unión: parada: sin unir\. Se conserva la rama «pgo\/m-3»/);
   assert.match(t, /\*\*Total:\*\* 4 k tokens · 0,75 \$/);
   assert.match(t, /\*\*Unidas:\*\* 1 de 3 · sin unir: 2, 3/);
@@ -125,7 +125,7 @@ test('frases de unión pendiente y con error', () => {
   const h = (x: Partial<R.Hija>): R.Hija => ({ n: 1, parte: 'p', sesion: 's', estado: 'hecha', union: 'sin', ...x });
   assert.match(R.fraseUnion(h({ union: 'pendiente', motivo: 'la madre tiene cambios' })), /pendiente de unir \(la madre tiene cambios\).*Unir cambios/);
   assert.match(R.fraseUnion(h({ union: 'error', motivo: 'boom', rama: 'pgo/x-1' })), /NO unida: boom/);
-  assert.equal(R.fraseUnion(h({ union: 'sin_cambios', quitada: true })), 'sin cambios que unir (copia quitada)');
+  assert.equal(R.fraseUnion(h({ union: 'sin_cambios', quitada: true })), 'sin cambios que unir (subcarpeta quitada)');
 });
 
 test('una parte cuya copia no se llegó a crear no habla de ramas', () => {

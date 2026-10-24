@@ -142,7 +142,7 @@ func SyncPSF(ctx context.Context, dir, branch, base, message string, maxDiff int
 	}
 	status, err := git(ctx, dir, "status", "--porcelain")
 	if err != nil {
-		return r, errors.New("no se ha podido leer el estado de la copia")
+		return r, errors.New("no se ha podido leer el estado de la subcarpeta")
 	}
 	if status != "" {
 		if _, err := git(ctx, dir, "add", "-A"); err != nil {
@@ -217,11 +217,11 @@ func RemovePSFWorktree(ctx context.Context, folder string, issue int) (string, e
 		return "", ErrNoEsCopia
 	}
 	if e.Cambios > 0 || e.Stash > 0 {
-		return "", fmt.Errorf("la copia tiene trabajo sin guardar (%s): no se quita", e.Pendiente())
+		return "", fmt.Errorf("la subcarpeta tiene trabajo sin guardar (%s): no se quita", e.Pendiente())
 	}
 	Prune(ctx, e.Principal)
 	if out, err := gitSalida(ctx, e.Principal, "worktree", "remove", "--", e.Carpeta); err != nil {
-		return "", fmt.Errorf("git no ha quitado la copia: %s", out)
+		return "", fmt.Errorf("git no ha quitado la subcarpeta: %s", out)
 	}
 	return e.Carpeta, nil
 }

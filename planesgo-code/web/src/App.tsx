@@ -43,14 +43,14 @@ async function ofreceQuitarCopia(s: S.Sesion, otras: S.Sesion[]) {
   try { c = C.copiaDeSesion(await listaCopias(s.proyecto), s, otras); } catch { return; }
   if (!c) return;
   if (!c.se_puede_quitar) {
-    await showMessage(`La sesión trabajaba en una copia de trabajo creada por pgocode:\n${c.carpeta}\n\nTiene trabajo sin guardar (${c.pendiente || c.error || 'no se ha podido comprobar'}): no se quita.`, { level: 'warning' });
+    await showMessage(`La sesión trabajaba en una subcarpeta creada por pgocode:\n${c.carpeta}\n\nTiene trabajo sin guardar (${c.pendiente || c.error || 'no se ha podido comprobar'}): no se quita.`, { level: 'warning' });
     return;
   }
-  if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Quitar la copia de trabajo de la sesión borrada?', { okText: 'Quitar', danger: true }))) return;
+  if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Quitar la subcarpeta de la sesión borrada?', { okText: 'Quitar', danger: true }))) return;
   try {
     const r = await quitaCopia(s.proyecto, c.carpeta, true);
     if (r.aviso) await showMessage(r.aviso, { level: 'warning' });
-  } catch (e) { await showMessage('No se ha quitado la copia: ' + (e as Error).message, { level: 'error' }); }
+  } catch (e) { await showMessage('No se ha quitado la subcarpeta: ' + (e as Error).message, { level: 'error' }); }
 }
 
 export default function App() {
@@ -397,6 +397,13 @@ export default function App() {
     window.addEventListener(SHOW_EVIDENCE, abre);
     return () => window.removeEventListener(SHOW_EVIDENCE, abre);
   }, []);
+
+  // A new session on a branch, from elsewhere (the ⋮ menu of a subfolder in Actividad).
+  useEffect(() => {
+    const nueva = (e: Event) => nuevaSesion((e as CustomEvent<string>).detail);
+    window.addEventListener(S.NEW_SESSION_ON_BRANCH, nueva);
+    return () => window.removeEventListener(S.NEW_SESSION_ON_BRANCH, nueva);
+  }, [nuevaSesion]);
 
   // Open a session of the open project from elsewhere (e.g. the running issues in Actividad).
   useEffect(() => {

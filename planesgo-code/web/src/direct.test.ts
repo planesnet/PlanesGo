@@ -67,7 +67,7 @@ test('nota de un resultado: bien, mal y commit', () => {
   assert.match(D.resultNote({ accion: 'commit', ok: true }).texto, /no hay cambios/);
   assert.match(D.resultNote({ accion: 'status', ok: true, rama: 'main', ficheros: ['a.go'] }).texto, /Cambios sin commitear\*\* en `main` \(1\)/);
   assert.match(D.resultNote({ accion: 'status', ok: true, rama: 'main', ficheros: [] }).texto, /Sin cambios/);
-  assert.match(D.resultNote({ accion: 'where', ok: true, rama: 'dev', carpeta: '/x/y', copia: true }).texto, /`\/x\/y` \(copia de trabajo/);
+  assert.match(D.resultNote({ accion: 'where', ok: true, rama: 'dev', carpeta: '/x/y', copia: true }).texto, /`\/x\/y` \(subcarpeta de la rama/);
 });
 
 test('mensaje para el agente: la orden y solo los errores', () => {

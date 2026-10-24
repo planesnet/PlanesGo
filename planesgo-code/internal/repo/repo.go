@@ -139,7 +139,7 @@ func CopiaDeRama(ctx context.Context, carpeta, rama, base string) (CopiaCreada, 
 	}
 	creada, nueva, err := PreparaCopia(ctx, raiz, rama, dir)
 	if err != nil {
-		return CopiaCreada{}, fmt.Errorf("no se pudo preparar la copia de la rama %s: %v", rama, err)
+		return CopiaCreada{}, fmt.Errorf("no se pudo preparar la subcarpeta de la rama %s: %v", rama, err)
 	}
 	c := CopiaCreada{Carpeta: dir, Rama: rama, RamaNueva: nueva}
 	if creada {

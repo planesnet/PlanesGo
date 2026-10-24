@@ -128,7 +128,7 @@ func (s *Servidor) repartoPropone(w http.ResponseWriter, r *http.Request, ses *s
 		return
 	}
 	if p.Rama != "" && p.Rama != rama {
-		no("la sesión trabaja en otra copia")
+		no("la sesión trabaja en otra subcarpeta")
 		return
 	}
 	partes := s.partesDe(r.Context(), p.Texto)
@@ -173,7 +173,7 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 		return
 	}
 	if s.DirRamas == "" {
-		jsonError(w, http.StatusInternalServerError, "no hay carpeta para las copias de trabajo")
+		jsonError(w, http.StatusInternalServerError, "no hay carpeta para las subcarpetas de rama")
 		return
 	}
 	dest := filepath.Join(s.DirRamas, filepath.Base(principal), strings.ReplaceAll(rama, "/", "_"))
@@ -185,7 +185,7 @@ func (s *Servidor) repartoPrepara(w http.ResponseWriter, r *http.Request, ses *s
 	ramaMadre := repo.RamaActual(r.Context(), p.Carpeta)
 	if e, err := repo.EstadoCopia(r.Context(), dest); err == nil && e.Worktree && e.Rama == rama { // ya estaba
 		if reg, ok := s.RegistroCopias.Busca(dest); !ok || reg.Sesion != p.Hija {
-			jsonError(w, http.StatusConflict, "esa copia es de otra sesión")
+			jsonError(w, http.StatusConflict, "esa subcarpeta es de otra sesión")
 			return
 		}
 		c = repo.CopiaCreada{Carpeta: dest, Rama: rama, Repo: principal, RamaNueva: true}
@@ -237,7 +237,7 @@ func (s *Servidor) repartoUne(w http.ResponseWriter, r *http.Request, ses *sesio
 	}
 	// Solo copias de reparto que pgocode ha creado para este proyecto.
 	if c, ok := s.RegistroCopias.Busca(hija); !ok || c.Rama != p.Rama || c.Proyecto != p.Proyecto {
-		jsonError(w, http.StatusForbidden, "esa copia no es de un reparto de pgocode")
+		jsonError(w, http.StatusForbidden, "esa subcarpeta no es de un reparto de pgocode")
 		return
 	}
 	u, err := s.uneHija(r.Context(), p.Proyecto, madre, p.RamaMadre, hija, p.Rama, p.N, p.Parte)

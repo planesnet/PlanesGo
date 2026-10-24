@@ -33,9 +33,9 @@ test('la ayuda resume el enrutador', () => {
   assert.match(e.find(x => x.clave === 'Orden')!.que, /funciones directas .* aparte .* reparto .* agente/);
 });
 
-test('la ayuda no remite a ficheros que el usuario no tiene y explica contexto, programas y copias', () => {
+test('la ayuda no remite a ficheros que el usuario no tiene y explica contexto, programas y subcarpetas', () => {
   const todo = A.secciones({ alTurno: true, inyecta: true }).flatMap(s => s.entradas);
   assert.ok(!todo.some(e => /docs\//.test(e.que)));
-  for (const c of ['Continuar desde aquí', 'Barrer ahora', 'Hilo de limpieza', 'Relevo', 'Duplicar sin historial', 'Programas', 'pgo ejecutar', 'Copias de trabajo', 'Alt+Intro'])
+  for (const c of ['Continuar desde aquí', 'Barrer ahora', 'Hilo de limpieza', 'Relevo', 'Duplicar sin historial', 'Programas', 'pgo ejecutar', 'Subcarpetas', 'Alt+Intro'])
     assert.ok(todo.some(e => e.clave === c), c);
 });

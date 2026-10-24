@@ -100,6 +100,10 @@ export const ARCHIVE_SESSIONS = 'pgo:archiva-sesiones';
 // OPEN_SESSION: event to open a session of the open project ({detail: id}); App.tsx handles it.
 export const OPEN_SESSION = 'pgo:abre-sesion';
 
+// NEW_SESSION_ON_BRANCH: event to start a new session on a branch of the open project ({detail: branch}); App.tsx
+// opens the new session window with it (its folder, the branch subfolder if there is one).
+export const NEW_SESSION_ON_BRANCH = 'pgo:nueva-sesion-en-rama';
+
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
 
 // identificador: lo que hace falta para encontrar una sesión en los registros (tiempos/*.jsonl y depuracion.log,

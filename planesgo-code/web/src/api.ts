@@ -122,6 +122,10 @@ export const proponeReparto = (proyecto: number, carpeta: string, rama: string, 
   post<Propuesta>('/api/reparto/propone', { proyecto, carpeta, rama, texto, permisos });
 // COPIES_CHANGED: aviso de que han cambiado las copias de trabajo (Actividad → Copias de trabajo se recarga).
 export const COPIES_CHANGED = 'pgo:copias';
+
+// subfolderAction: an action of the ⋮ menu of a subfolder (git worktree): cambios, abrir, subir, pr, descartar, olvidar.
+export const subfolderAction = <T = { ok: boolean },>(proyecto: number, carpeta: string, accion: string) =>
+  post<T>('/api/proyecto/subcarpeta', { proyecto, carpeta, accion });
 const avisaCopias = <T,>(r: T) => { window.dispatchEvent(new Event(COPIES_CHANGED)); return r; };
 export const preparaHija = (proyecto: number, sesion: string, carpeta: string, n: number, hija: string) =>
   post<{ carpeta: string; rama: string; rama_madre: string }>('/api/reparto/prepara', { proyecto, sesion, carpeta, n, hija }).then(avisaCopias);

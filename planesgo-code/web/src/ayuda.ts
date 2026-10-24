@@ -47,7 +47,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Orden', que: 'Cada mensaje va a un solo sitio, el primero que encaja: órdenes de pgocode → funciones directas (0 tokens) → pregunta aparte → reparto en subtareas → el agente. En la duda, al agente' },
       { clave: 'Aparte', que: 'Estado: pgocode (0 tokens) · con contexto: una copia de la sesión del agente · suelta: la IA local del equipo (si no está, un modelo barato)' },
       { clave: 'Etiqueta y distintivo', que: 'La etiqueta encima del cuadro dice adónde irá; al pasar el ratón, quién lo hace, quién lo ha decidido y por qué. Cada mensaje enviado lleva su ruta' },
-      { clave: 'Reparto', que: 'Una petición con varias partes independientes (una lista de 3 o más) se puede repartir en subtareas en paralelo: cada una en su sesión y su copia de trabajo; al acabar se unen a tu rama' },
+      { clave: 'Reparto', que: 'Una petición con varias partes independientes (una lista de 3 o más) se puede repartir en subtareas en paralelo: cada una en su sesión y su subcarpeta; al acabar se unen a tu rama' },
     ] },
     { titulo: 'Contexto del agente', entradas: [
       { clave: 'Hilo de limpieza', que: 'El indicador del contexto: cuánto ocupa la conversación del agente y lo que ya no hace falta. Antes de cada turno pgocode retira lo que no está vigente (lecturas superadas, salidas largas…) y lo repone si vuelve a hacer falta' },
@@ -55,14 +55,14 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Relevo', que: 'Si el agente no deja tocar su historial (o la caché ha caducado), sigue en una conversación nueva con una memoria de trabajo de lo vigente' },
       { clave: 'Continuar desde aquí', que: 'En una respuesta: el agente sigue desde ese punto, olvidando lo de después (sigue en la vista)' },
     ] },
-    { titulo: 'Sesiones, programas y copias', entradas: [
+    { titulo: 'Sesiones, programas y subcarpetas', entradas: [
       { clave: 'Duplicar sin historial', que: 'Menú ⋮ de la sesión: otra con los mismos ajustes y la conversación vacía (el agente empieza de cero)' },
       { clave: 'Archivar', que: 'Menú ⋮ de la sesión: sale de la lista (queda en «Archivadas», con su conversación)' },
       { clave: 'Programas', que: 'Los programas del proyecto (un Odoo, un servicio…) se definen en Propiedades de la sesión → Programas y se ejecutan o paran desde Actividad o el lanzador, sin tokens' },
       { clave: 'pgo ejecutar', que: 'El agente arranca un programa con «pgo ejecutar <nombre> <orden>» (lo para con «pgo parar <nombre>»): sale en Actividad con su salida' },
       { clave: 'pgo drive', que: 'El agente lee Google Drive, Docs, Sheets y Slides por su enlace (solo lectura): «pgo drive leer <enlace o id> [--hoja X] [--rango A1:D20]» descarga el fichero como «Archivo → Descargar» (Docs en Markdown, Sheets en CSV; PDF y demás quedan en .pgocode/salidas). No busca ni lista: pégale el enlace. Acceso: con tu sesión de Google en el navegador de pgocode (panel Web): inicia sesión una vez, como en cualquier navegador; sin ajustes' },
       { clave: 'pgo gmail', que: 'El agente lee un correo de Gmail por su enlace, en solo lectura (no busca, envía, borra ni archiva nada): «pgo gmail leer <enlace>» descarga el mensaje original (.eml) y da su texto sin lo citado y los adjuntos (nombre, tipo, tamaño). Pégale el enlace del correo (el de la barra de direcciones). Usa la misma sesión de Google del navegador de pgocode' },
-      { clave: 'Copias de trabajo', que: 'Cada rama de una sesión vive en su copia (git worktree). Actividad las lista y deja quitar las que no pierden nada; las sesiones que la usaban se archivan' },
+      { clave: 'Subcarpetas', que: 'Cada rama de una sesión vive en su subcarpeta (git worktree). Actividad las lista; su menú ⋮ deja abrir una sesión, ver los cambios, subir la rama, quitarla… Las sesiones que la usaban se archivan' },
     ] },
     { titulo: 'En la interfaz', entradas: [
       { clave: 'Etiqueta de destino', que: 'Clic para cambiar adónde va el mensaje antes de enviarlo' },

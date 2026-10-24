@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"planesgo-code/internal/github"
 	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
 )
@@ -29,6 +30,7 @@ type copiaVista struct {
 	Quitable  bool   `json:"se_puede_quitar"`
 	Pendiente string `json:"pendiente,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Orphan    bool   `json:"huerfana,omitempty"` // git still knows it but its folder no longer exists
 }
 
 // reposDelProyecto: las carpetas principales de los repositorios de las carpetas del proyecto.
@@ -75,6 +77,11 @@ func (s *Servidor) proyectoCopias(w http.ResponseWriter, r *http.Request, ses *s
 			s.origenCopia(&v)
 			copias = append(copias, v)
 		}
+		for _, o := range repo.OrphanWorktrees(r.Context(), p) {
+			v := copiaVista{Estado: repo.Estado{Carpeta: o.Dir, Principal: p, Rama: o.Branch, Worktree: true}, Orphan: true, Error: "la carpeta ya no existe"}
+			s.origenCopia(&v)
+			copias = append(copias, v)
+		}
 	}
 	sort.Slice(copias, func(i, j int) bool { return copias[i].Carpeta < copias[j].Carpeta })
 	jsonOK(w, map[string]any{"copias": copias})
@@ -92,31 +99,14 @@ func (s *Servidor) proyectoQuitarCopia(w http.ResponseWriter, r *http.Request, s
 		errorLectura(w, err)
 		return
 	}
-	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
-		return
-	}
-	c := filepath.Clean(p.Carpeta)
-	if p.Carpeta == "" || !filepath.IsAbs(c) {
-		jsonError(w, http.StatusBadRequest, "la carpeta tiene que ser una ruta completa")
-		return
-	}
-	e, err := repo.EstadoCopia(r.Context(), c)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !s.Indice.Pertenece(p.Proyecto, c) && !slices.Contains(s.reposDelProyecto(r.Context(), p.Proyecto), e.Principal) {
-		jsonError(w, http.StatusForbidden, "esa copia no es de un repositorio del proyecto")
-		return
-	}
-	if !e.Worktree {
-		jsonError(w, http.StatusBadRequest, repo.ErrNoEsCopia.Error())
+	c, e, ok := s.subfolder(w, r, ses, p.Proyecto, p.Carpeta)
+	if !ok {
 		return
 	}
 	if !e.SePuedeQuitar() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "la copia tiene trabajo sin guardar (" + e.Pendiente() + "): no se quita", "estado": e})
+		json.NewEncoder(w).Encode(map[string]any{"error": "la subcarpeta tiene trabajo sin guardar (" + e.Pendiente() + "): no se quita", "estado": e})
 		return
 	}
 	borrada, err := repo.QuitaCopia(r.Context(), c, p.BorrarRama)
@@ -132,6 +122,125 @@ func (s *Servidor) proyectoQuitarCopia(w http.ResponseWriter, r *http.Request, s
 	}
 	log.Printf("copia de trabajo quitada: %s (rama %s, borrada: %v)", c, e.Rama, borrada)
 	jsonOK(w, res)
+}
+
+// subfolder checks the project and that the folder is a subfolder (git worktree) of one of its repositories.
+func (s *Servidor) subfolder(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion, proyecto int, carpeta string) (string, repo.Estado, bool) {
+	if _, ok := s.proyecto(w, r, ses, proyecto); !ok {
+		return "", repo.Estado{}, false
+	}
+	c := filepath.Clean(carpeta)
+	if carpeta == "" || !filepath.IsAbs(c) {
+		jsonError(w, http.StatusBadRequest, "la carpeta tiene que ser una ruta completa")
+		return "", repo.Estado{}, false
+	}
+	e, err := repo.EstadoCopia(r.Context(), c)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return "", repo.Estado{}, false
+	}
+	if !s.Indice.Pertenece(proyecto, c) && !slices.Contains(s.reposDelProyecto(r.Context(), proyecto), e.Principal) {
+		jsonError(w, http.StatusForbidden, "esa subcarpeta no es de un repositorio del proyecto")
+		return "", repo.Estado{}, false
+	}
+	if !e.Worktree {
+		jsonError(w, http.StatusBadRequest, repo.ErrNoEsCopia.Error())
+		return "", repo.Estado{}, false
+	}
+	return c, e, true
+}
+
+// proyectoSubcarpeta: POST /api/proyecto/subcarpeta {proyecto, carpeta, accion}: the ⋮ menu of a subfolder.
+// cambios (what it has), abrir (in the file manager), subir (push its branch), pr (its pull request), descartar
+// (remove it even with work; the branch stays) and olvidar (a subfolder whose folder no longer exists).
+func (s *Servidor) proyectoSubcarpeta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	var p struct {
+		Proyecto int    `json:"proyecto"`
+		Carpeta  string `json:"carpeta"`
+		Accion   string `json:"accion"`
+	}
+	if err := lee(r, &p); err != nil {
+		errorLectura(w, err)
+		return
+	}
+	if p.Accion == "olvidar" {
+		s.forgetOrphan(w, r, ses, p.Proyecto, p.Carpeta)
+		return
+	}
+	c, e, ok := s.subfolder(w, r, ses, p.Proyecto, p.Carpeta)
+	if !ok {
+		return
+	}
+	switch p.Accion {
+	case "cambios":
+		txt, err := repo.WorktreeChanges(r.Context(), c)
+		if err != nil {
+			jsonError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		jsonOK(w, map[string]string{"texto": txt})
+	case "abrir":
+		if err := openWithSystem(c); err != nil {
+			jsonError(w, http.StatusInternalServerError, "no se pudo abrir la carpeta: "+err.Error())
+			return
+		}
+		jsonOK(w, map[string]bool{"ok": true})
+	case "subir":
+		if err := repo.PushWorktree(r.Context(), c); err != nil {
+			jsonError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		log.Printf("subcarpeta: rama %s subida (%s, %s)", e.Rama, c, ses.Login)
+		jsonOK(w, map[string]bool{"ok": true})
+	case "pr":
+		name := github.DeRemoto(repo.Lee(r.Context(), e.Principal).Remoto)
+		if name == "" || e.Rama == "" {
+			jsonError(w, http.StatusBadRequest, "la rama no está en un repositorio de GitHub")
+			return
+		}
+		pr, err := s.GitHub.OpenPRFor(r.Context(), name, e.Rama)
+		if err != nil {
+			jsonError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if pr == nil {
+			jsonError(w, http.StatusNotFound, "la rama «"+e.Rama+"» no tiene ningún PR abierto")
+			return
+		}
+		jsonOK(w, pr)
+	case "descartar":
+		if err := repo.DiscardWorktree(r.Context(), c); err != nil {
+			jsonError(w, http.StatusConflict, err.Error())
+			return
+		}
+		s.RegistroCopias.Quita(c)
+		s.Indice.Olvida(p.Proyecto, c)
+		log.Printf("subcarpeta descartada (con su trabajo pendiente: %s): %s, rama %s conservada (%s)", e.Pendiente(), c, e.Rama, ses.Login)
+		jsonOK(w, map[string]bool{"ok": true})
+	default:
+		jsonError(w, http.StatusBadRequest, "acción no válida")
+	}
+}
+
+// forgetOrphan: «olvidar» a subfolder whose folder no longer exists (git worktree prune in its repository).
+func (s *Servidor) forgetOrphan(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion, proyecto int, carpeta string) {
+	if _, ok := s.proyecto(w, r, ses, proyecto); !ok {
+		return
+	}
+	c := filepath.Clean(carpeta)
+	for _, p := range s.reposDelProyecto(r.Context(), proyecto) {
+		if slices.ContainsFunc(repo.OrphanWorktrees(r.Context(), p), func(o repo.Orphan) bool { return o.Dir == c }) {
+			if err := repo.Prune(r.Context(), p); err != nil {
+				jsonError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			s.RegistroCopias.Quita(c)
+			s.Indice.Olvida(proyecto, c)
+			jsonOK(w, map[string]bool{"ok": true})
+			return
+		}
+	}
+	jsonError(w, http.StatusNotFound, "no hay ninguna subcarpeta huérfana con esa ruta en el proyecto")
 }
 
 // PodaCopias: git worktree prune en los repositorios de las copias registradas (al arrancar, en segundo plano).

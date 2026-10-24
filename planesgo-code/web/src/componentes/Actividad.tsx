@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { COPIES_CHANGED, listaCopias, quitaCopia, type Proyecto } from '../api';
+import { COPIES_CHANGED, listaCopias, quitaCopia, subfolderAction, type Proyecto } from '../api';
 import * as AP from '../activityPanel';
 import * as RP from '../reparto';
 import * as C from '../copias';
-import { ARCHIVE_SESSIONS, conversacion, OPEN_SESSION, titulo, type Sesion } from '../sesiones';
+import { ARCHIVE_SESSIONS, conversacion, NEW_SESSION_ON_BRANCH, OPEN_SESSION, titulo, type Sesion } from '../sesiones';
 import * as PSF from '../psf';
 import * as LA from '../liveActivity';
 import * as TS from '../todoSync';
@@ -11,7 +11,8 @@ import TodoSyncList, { todoCount } from './TodoSyncList';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, PLANS_CHANGED, type Plan } from './Planes';
 import Programas from './Programas';
-import { askConfirm } from './Modal';
+import { askConfirm, showMessage } from './Modal';
+import { MenuSesion, type Opcion } from './Proyectos';
 
 // Actividad: todo lo que corre a la vez en el proyecto, en un sitio y en vivo, como un monitor de procesos: arriba la
 // lista de tareas del agente (con la que hace ahora); después una línea por cosa en marcha (el agente y lo que hace,
@@ -191,18 +192,22 @@ function ConceptGuide() {
   );
 }
 
-// Copias de trabajo (git worktree) de los repositorios del proyecto: de pgocode, de subagentes o del usuario.
-// «Quitar» solo aparece si no se pierde nada; si la rama está fusionada, se borra también (git branch -d).
+// Subfolders (git worktree) of the project repositories: pgocode's, subagents' or the user's (also the ones whose
+// folder was deleted by hand). Each one has its ⋮ menu (copias.ts: subfolderActions); removing only when nothing is
+// lost, discarding (losing the uncommitted work) after a confirmation that lists it.
 function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Sesion[] }) {
   const [copias, setCopias] = useState<C.Copia[] | null>(null);
   const [error, setError] = useState('');
-  const [quitando, setQuitando] = useState('');
-  const carga = () => { setError(''); listaCopias(proyecto).then(setCopias).catch(e => { setCopias([]); setError((e as Error).message); }); };
+  const [ocupada, setOcupada] = useState('');
+  const [menu, setMenu] = useState<{ c: C.Copia; ancla: HTMLElement } | null>(null);
+  // Reloading keeps the message of the last action (it is cleared when another action starts or by hand).
+  const carga = () => { listaCopias(proyecto).then(setCopias).catch(e => { setCopias([]); setError((e as Error).message); }); };
+  const recarga = () => { setError(''); carga(); };
   useEffect(() => {
     setCopias(null);
-    carga();
-    // Se recarga sola al acabar un turno de la sesión (puede haber creado o quitado copias) y cuando un reparto crea
-    // o une las de sus hijas. Varios avisos seguidos, una sola carga.
+    recarga();
+    // Se recarga sola al acabar un turno de la sesión (puede haber creado o quitado subcarpetas) y cuando un reparto
+    // crea o une las de sus hijas. Varios avisos seguidos, una sola carga.
     let t: ReturnType<typeof setTimeout> | undefined;
     const pronto = () => { clearTimeout(t); t = setTimeout(carga, 800); };
     let trabajando = false;
@@ -215,23 +220,63 @@ function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Ses
     window.addEventListener('pgo:actividad', actividad);
     return () => { clearTimeout(t); window.removeEventListener(COPIES_CHANGED, pronto); window.removeEventListener('pgo:actividad', actividad); };
   }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
-  const quita = async (c: C.Copia) => {
-    // Las sesiones que trabajan en esa carpeta se quedarían sin ella: se dice cuáles y se archivan.
-    const usuarios = C.copyUsers(c, sesiones);
-    if (!(await askConfirm(C.explicaQuitar(c, true, usuarios) + '\n\n¿Continuar?', { danger: true, okText: usuarios.length ? 'Quitar y archivar' : 'Quitar' }))) return;
-    setQuitando(c.carpeta);
+
+  // Runs an action with the subfolder marked as busy; errors go to the list.
+  const conCopia = async (c: C.Copia, f: () => Promise<void>) => {
+    setOcupada(c.carpeta);
     setError('');
-    try {
-      const r = await quitaCopia(proyecto, c.carpeta, true);
-      if (r.aviso) setError(r.aviso);
-      if (usuarios.length) window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto, ids: usuarios.map(s => s.id) } }));
-    } catch (e) { setError((e as Error).message); } finally { setQuitando(''); carga(); }
+    try { await f(); } catch (e) { setError((e as Error).message); } finally { setOcupada(''); carga(); }
   };
+  const archiva = (usuarios: Sesion[]) => {
+    if (usuarios.length) window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto, ids: usuarios.map(s => s.id) } }));
+  };
+  const haz = async (c: C.Copia, a: C.SubfolderAction) => {
+    const usuarios = C.copyUsers(c, sesiones);
+    switch (a) {
+      case 'sesion':
+        // The session already working there, if any; otherwise a new one on its branch.
+        if (usuarios.length) window.dispatchEvent(new CustomEvent(OPEN_SESSION, { detail: usuarios[0].id }));
+        else window.dispatchEvent(new CustomEvent(NEW_SESSION_ON_BRANCH, { detail: c.rama }));
+        return;
+      case 'abrir':
+        return conCopia(c, async () => { await subfolderAction(proyecto, c.carpeta, 'abrir'); });
+      case 'cambios':
+        return conCopia(c, async () => {
+          const r = await subfolderAction<{ texto: string }>(proyecto, c.carpeta, 'cambios');
+          await showMessage(<pre className="texto-git">{r.texto}</pre>, { title: 'Cambios de la subcarpeta' });
+        });
+      case 'subir':
+        if (!(await askConfirm(`¿Subir la rama «${c.rama}» a origin (git push)? Tiene ${c.sin_subir} ${c.sin_subir === 1 ? 'commit' : 'commits'} sin subir.`, { okText: 'Subir' }))) return;
+        return conCopia(c, async () => { await subfolderAction(proyecto, c.carpeta, 'subir'); });
+      case 'pr':
+        return conCopia(c, async () => {
+          const r = await subfolderAction<{ url: string }>(proyecto, c.carpeta, 'pr');
+          if (window.psf) await window.psf.abrirFuera(r.url); else window.open(r.url, '_blank', 'noopener');
+        });
+      case 'quitar':
+        if (!(await askConfirm(C.explicaQuitar(c, true, usuarios) + '\n\n¿Continuar?', { danger: true, okText: usuarios.length ? 'Quitar y archivar' : 'Quitar' }))) return;
+        return conCopia(c, async () => {
+          const r = await quitaCopia(proyecto, c.carpeta, true);
+          if (r.aviso) setError(r.aviso);
+          archiva(usuarios);
+        });
+      case 'descartar':
+        if (!(await askConfirm(C.explicaDescartar(c, usuarios) + '\n\n¿Descartar?', { danger: true, okText: 'Descartar y quitar' }))) return;
+        return conCopia(c, async () => { await subfolderAction(proyecto, c.carpeta, 'descartar'); archiva(usuarios); });
+      case 'olvidar':
+        return conCopia(c, async () => { await subfolderAction(proyecto, c.carpeta, 'olvidar'); });
+    }
+  };
+  const opciones = (c: C.Copia): Opcion[] => C.subfolderActions(c).map(a => {
+    const o = C.SUBFOLDER_ACTION[a];
+    return { icono: o.icono, texto: o.texto, peligro: o.peligro, accion: () => { setMenu(null); haz(c, a); } };
+  });
+
   if (!error && !copias?.length) return null;
   return (
     <section>
-      <h4>Copias de trabajo <span className="gh-cuenta">{copias?.length ?? 0}</span>
-        <button className="icono" onClick={carga} title="Volver a cargar" aria-label="Volver a cargar las copias de trabajo"><Icono n="recargar" t={13} /></button></h4>
+      <h4>Subcarpetas <span className="gh-cuenta">{copias?.length ?? 0}</span>
+        <button className="icono" onClick={recarga} title="Volver a cargar" aria-label="Volver a cargar las subcarpetas"><Icono n="recargar" t={13} /></button></h4>
       {error && <p className="error pequeno">{error}</p>}
       {(copias || []).map(c => {
         const e = C.estado(c);
@@ -244,11 +289,15 @@ function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Ses
               </span>
             </span>
             <span className={'copia-estado ' + e}>{C.NOMBRE_ESTADO[e]}</span>
-            {c.se_puede_quitar && <button className="copia-quitar" onClick={() => quita(c)} disabled={quitando === c.carpeta}
-              title={'Quitar la copia de trabajo ' + c.carpeta}>{quitando === c.carpeta ? '…' : 'Quitar'}</button>}
+            <button className="icono puntos" disabled={ocupada === c.carpeta} aria-haspopup="menu" aria-expanded={menu?.c.carpeta === c.carpeta}
+              onClick={ev => { const ancla = ev.currentTarget; setMenu(m => (m?.c.carpeta === c.carpeta ? null : { c, ancla })); }}
+              title="Opciones de la subcarpeta" aria-label={'Opciones de la subcarpeta ' + c.carpeta}>
+              {ocupada === c.carpeta ? '…' : <Icono n="puntos" t={15} />}
+            </button>
           </div>
         );
       })}
+      {menu && <MenuSesion ancla={menu.ancla} opciones={opciones(menu.c)} alCerrar={() => setMenu(null)} />}
     </section>
   );
 }

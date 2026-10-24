@@ -164,6 +164,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/proyecto/preparar", s.conSesion(s.proyectoPreparar))
 	mux.HandleFunc("GET /api/proyecto/copias", s.conSesion(s.proyectoCopias))
 	mux.HandleFunc("POST /api/proyecto/quitar-copia", s.conSesion(s.proyectoQuitarCopia))
+	mux.HandleFunc("POST /api/proyecto/subcarpeta", s.conSesion(s.proyectoSubcarpeta))
 	mux.HandleFunc("POST /api/reparto/propone", s.conSesion(s.repartoPropone))
 	mux.HandleFunc("POST /api/reparto/prepara", s.conSesion(s.repartoPrepara))
 	mux.HandleFunc("POST /api/reparto/une", s.conSesion(s.repartoUne))
@@ -627,7 +628,7 @@ func (s *Servidor) avatar(w http.ResponseWriter, r *http.Request, ses *sesiones.
 // se quitó (Actividad → Copias de trabajo): decirlo así, no «no es del proyecto».
 func carpetaAjena(carpeta, proyecto string) string {
 	if _, err := os.Stat(carpeta); errors.Is(err, os.ErrNotExist) {
-		return fmt.Sprintf("la carpeta %s ya no existe (la copia de trabajo se quitó): vuelve a crearla eligiendo la rama en las propiedades de la sesión, o elige otra carpeta", carpeta)
+		return fmt.Sprintf("la carpeta %s ya no existe (la subcarpeta se quitó): vuelve a crearla eligiendo la rama en las propiedades de la sesión, o elige otra carpeta", carpeta)
 	}
 	return fmt.Sprintf("la carpeta %s no es del proyecto «%s»: elígela en las propiedades de la sesión (la carpeta de la sesión es la que decide el repositorio)", carpeta, proyecto)
 }
@@ -1099,21 +1100,29 @@ func (s *Servidor) abrir(w http.ResponseWriter, r *http.Request, ses *sesiones.S
 		jsonError(w, http.StatusBadRequest, "solo se abren direcciones http o https")
 		return
 	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", u.String())
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", u.String())
-	default:
-		cmd = exec.Command("xdg-open", u.String())
-	}
-	if err := cmd.Start(); err != nil {
+	if err := openWithSystem(u.String()); err != nil {
 		jsonError(w, http.StatusInternalServerError, "no se pudo abrir el navegador: "+err.Error())
 		return
 	}
-	go cmd.Wait()
 	jsonOK(w, map[string]bool{"ok": true})
+}
+
+// openWithSystem opens an already validated web address or local folder with the system's default program.
+func openWithSystem(target string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", target)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		cmd = exec.Command("xdg-open", target)
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
 }
 
 // studioConexion devuelve la conexión de Studio TV del proyecto y los datos del estudio local.

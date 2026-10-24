@@ -102,8 +102,8 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
       if (!(await askConfirm(`Se clonará ${remoto.trim()} en:\n${s.carpeta}\n\ncon la rama «${rama}» (la del repositorio si existe; si no, nueva). ¿Continuar?`))) return;
     } else if (!conRepo && info?.copias[rama] !== s.carpeta) {
       const aviso = s.rama === NUEVA
-        ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y una copia de trabajo (git worktree) suya en:\n${s.carpeta}\n\n¿Continuar?`
-        : `La rama «${rama}» no tiene copia en local. Se creará una copia de trabajo (git worktree) en:\n${s.carpeta}\n\n¿Continuar?`;
+        ? `Se creará la rama «${rama}» a partir de «${info?.actual || 'la rama actual'}» y una subcarpeta (git worktree) suya en:\n${s.carpeta}\n\n¿Continuar?`
+        : `La rama «${rama}» no tiene subcarpeta en local. Se creará una subcarpeta (git worktree) en:\n${s.carpeta}\n\n¿Continuar?`;
       if (!(await askConfirm(aviso))) return;
     }
     setGuardando(true);
@@ -184,11 +184,11 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
             {pideRemoto && (
               <label className="campo-remoto">Repositorio (SSH) para clonar en esta carpeta
                 <input value={remoto} onChange={e => setRemoto(e.target.value)} placeholder="git@github.com:organizacion/repositorio.git" spellCheck={false} />
-                <span className="suave pequeno">{info?.repo ? 'La carpeta no tiene repositorio. Vacío: copia de trabajo del repositorio del proyecto.' : 'La carpeta no tiene repositorio: se clona en ella (tiene que estar vacía o no existir).'}</span>
+                <span className="suave pequeno">{info?.repo ? 'La carpeta no tiene repositorio. Vacío: subcarpeta del repositorio del proyecto.' : 'La carpeta no tiene repositorio: se clona en ella (tiene que estar vacía o no existir).'}</span>
               </label>
             )}
             <span className="suave pequeno">
-              {!conRepo && !pideRemoto && info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como copia de trabajo del repositorio en esa rama.
+              {!conRepo && !pideRemoto && info?.copias[rama] !== s.carpeta && <>Si no existe, se crea como subcarpeta del repositorio en esa rama.
                 {!ajustes.directorio && info?.principal && <> Por defecto: directorio principal del proyecto ({info.principal}) + rama.</>}</>}
             </span>
           </div>

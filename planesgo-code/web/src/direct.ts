@@ -122,7 +122,7 @@ export function resultNote(r: DirectResult): { texto: string; directo: DirectNot
       if (r.ficheros?.length) directo.salida = r.salida;
       break;
     case 'where':
-      l.push(`**Carpeta:** ${code(r.carpeta || '')}${r.copia ? ' (copia de trabajo de la rama)' : ''}`);
+      l.push(`**Carpeta:** ${code(r.carpeta || '')}${r.copia ? ' (subcarpeta de la rama)' : ''}`);
       l.push(r.rama ? `**Rama:** ${code(r.rama)}` : 'Sin rama (no es un repositorio git o HEAD suelto).');
       break;
     default:

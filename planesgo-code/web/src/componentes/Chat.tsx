@@ -1706,7 +1706,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // is gone too; the conversation stays).
   function psfMerged(id: string, note: string, worktreeRemoved: boolean) {
     const s = psfUpdate(id, { phase: 'merged', endedAt: Date.now() });
-    psfNote(id, note + (worktreeRemoved ? ' Copia de trabajo quitada y sesión archivada.' : ' Sesión archivada.'));
+    psfNote(id, note + (worktreeRemoved ? ' Subcarpeta quitada y sesión archivada.' : ' Sesión archivada.'));
     window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto: s.proyecto, ids: [id] } }));
   }
 
@@ -1757,7 +1757,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     try {
       const r = await post<{ worktree_removed?: string }>('/api/psf/discard', psfBody(id, { text: why.trim() }));
       psfUpdate(id, { phase: 'discarded', endedAt: Date.now() });
-      psfNote(id, `**PSF · Issue descartada.**${why.trim() ? ' Motivo: ' + why.trim() : ''} PR #${st.pr} cerrado sin fusionar${r.worktree_removed ? ', copia quitada' : ''} y sesión archivada.`);
+      psfNote(id, `**PSF · Issue descartada.**${why.trim() ? ' Motivo: ' + why.trim() : ''} PR #${st.pr} cerrado sin fusionar${r.worktree_removed ? ', subcarpeta quitada' : ''} y sesión archivada.`);
       window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto: s.proyecto, ids: [id] } }));
     } catch (e) {
       psfNote(id, '⚠ **PSF · Descartar:** ' + (e as Error).message);

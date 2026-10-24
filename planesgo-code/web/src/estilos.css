@@ -242,7 +242,7 @@ textarea { resize: none; }
 .sesion.activa .sesion-boton { font-weight: 600; }
 .rama-sesion { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--tenue); margin-left: auto; max-width: 45%; }
 .icono.puntos { flex: none; min-width: 22px; height: 22px; padding: 0; opacity: 0; }
-.sesion:hover .icono.puntos, .sesion.activa .icono.puntos, .icono.puntos[aria-expanded="true"] { opacity: 1; }
+.sesion:hover .icono.puntos, .sesion.activa .icono.puntos, .copia:hover .icono.puntos, .icono.puntos:focus-visible, .icono.puntos[aria-expanded="true"] { opacity: 1; }
 .sesion-nueva { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--suave); padding: 4px 6px; }
 .config-sesion { position: absolute; left: 8px; right: 0; top: 100%; z-index: 15; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 10px; display: grid; gap: 8px; }
 .config-sesion label { display: grid; gap: 3px; font-size: 11.5px; color: var(--suave); }
@@ -828,16 +828,14 @@ button.miga-item:hover { background: var(--hover); }
 .actividad h4 { margin: 0 0 2px; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
 .act-hechas summary { cursor: pointer; }
 /* Copias de trabajo (git worktree) en Actividad */
-.copia { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; font-size: 12.5px; }
+.copia { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; min-width: 0; max-width: 100%; box-sizing: border-box; font-size: 12.5px; }
 .copia:hover { background: var(--hover); }
 .copia-texto { flex: 1; min-width: 0; display: grid; }
 .copia-estado { flex: none; font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--linea); white-space: nowrap; }
 .copia-estado.limpia { color: #1a7f37; border-color: #1a7f37; }
 .copia-estado.fusionada { color: #8250df; border-color: #8250df; }
 .copia-estado.cambios { color: #9a6700; border-color: #9a6700; }
-.copia-quitar, .gh-limpiar { flex: none; font-size: 11.5px; font-weight: 600; border: 1px solid var(--linea); border-radius: 6px; padding: 2px 8px; }
-.copia-quitar:hover:not(:disabled), .gh-limpiar:hover:not(:disabled) { background: var(--hover); border-color: var(--suave); }
-.gh-limpiar { margin: 5px 4px 0 0; color: #8250df; border-color: #8250df; }
+.copia-estado.huerfana { color: var(--error); border-color: var(--error); }
 
 /* Selector único de formato (ordenador, tablet, móvil; vertical u horizontal) */
 .selector-formato { position: relative; flex: none; }
@@ -1124,6 +1122,8 @@ button.miga-item:hover { background: var(--hover); }
 .psf-merge-field select { justify-self: start; min-width: 240px; }
 /* Studio TV views, inside the TV (always visible). */
 .subpestanas.tv-vistas { display: flex; width: max-content; height: max-content; margin: 8px 10px 0; align-self: start; justify-self: start; }
+/* «Ver cambios» of a subfolder: git output as it is. */
+.texto-git { margin: 0; max-height: 60vh; overflow: auto; white-space: pre-wrap; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
 /* Running issues in Actividad. */
 .psf-running { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .psf-running button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 4px 6px; font-size: 12.5px; }

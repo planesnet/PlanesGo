@@ -39,3 +39,17 @@ test('explicaQuitar: dice qué sesiones usan la copia y que se archivan; copia s
   assert.equal(C.estado(copia({ fusionada: true, sin_commits: true })), 'sin_cambios');
   assert.equal(C.copyUsers(copia({}), [s('A'), { ...s('B'), carpeta: '/otra' }, { ...s('C'), archivada: true }]).map(x => x.id).join(), 'A');
 });
+
+test('menú ⋮ de una subcarpeta', () => {
+  const c = (x: Partial<C.Copia> = {}): C.Copia => ({ carpeta: '/r/x', principal: '/r', rama: 'feature', worktree: true, defecto: 'master', fusionada: false,
+    cambios: 0, stash: 0, sin_subir: 0, origen: 'usuario', se_puede_quitar: true, ...x });
+  assert.deepEqual(C.subfolderActions(c()), ['sesion', 'abrir', 'cambios', 'pr', 'quitar']);
+  assert.deepEqual(C.subfolderActions(c({ sin_subir: 2, se_puede_quitar: false })), ['sesion', 'abrir', 'cambios', 'subir', 'pr', 'descartar']);
+  assert.deepEqual(C.subfolderActions(c({ rama: 'master', sin_subir: 1 })), ['sesion', 'abrir', 'cambios', 'quitar']); // never push the default branch
+  assert.deepEqual(C.subfolderActions(c({ huerfana: true })), ['olvidar']);
+  assert.equal(C.estado(c({ huerfana: true })), 'huerfana');
+  const t = C.explicaDescartar(c({ cambios: 3, sin_subir: 1, stash: 1, se_puede_quitar: false }));
+  assert.match(t, /SE PIERDEN 3 ficheros/);
+  assert.match(t, /1 commit sin subir se conserva/);
+  assert.match(t, /stash.*se conservan/);
+});

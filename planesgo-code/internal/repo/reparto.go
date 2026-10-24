@@ -41,7 +41,7 @@ func RamaActual(ctx context.Context, dir string) string {
 func Limpia(ctx context.Context, dir string) (bool, error) {
 	st, err := git(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return false, errors.New("no se ha podido leer el estado de la copia")
+		return false, errors.New("no se ha podido leer el estado de la subcarpeta")
 	}
 	if st != "" {
 		return false, nil
@@ -87,7 +87,7 @@ func CopiaHija(ctx context.Context, madreDir, rama, carpeta string) (CopiaCreada
 		return CopiaCreada{}, "", errors.New("la copia de la sesión no está en ninguna rama (commit suelto): no se puede repartir")
 	}
 	if _, err := os.Stat(carpeta); err == nil {
-		return CopiaCreada{}, "", errors.New("la carpeta de la copia ya existe")
+		return CopiaCreada{}, "", errors.New("la subcarpeta ya existe")
 	}
 	if err := os.MkdirAll(filepath.Dir(carpeta), 0o755); err != nil {
 		return CopiaCreada{}, "", err
@@ -97,7 +97,7 @@ func CopiaHija(ctx context.Context, madreDir, rama, carpeta string) (CopiaCreada
 		return CopiaCreada{}, "", fmt.Errorf("la rama «%s» ya existe", rama)
 	}
 	if out, err := gitSalida(ctx, madreDir, "worktree", "add", "-b", rama, "--", carpeta); err != nil {
-		return CopiaCreada{}, "", fmt.Errorf("no se ha podido crear la copia: %s", out)
+		return CopiaCreada{}, "", fmt.Errorf("no se ha podido crear la subcarpeta: %s", out)
 	}
 	return CopiaCreada{Carpeta: carpeta, Rama: rama, Repo: principal, RamaNueva: true}, ramaMadre, nil
 }
@@ -132,11 +132,11 @@ func UneHija(ctx context.Context, madreDir, hijaDir, rama, ramaMadre string, n i
 		return Union{}, ErrNoEsCopia
 	}
 	if h.Rama != rama {
-		return Union{}, fmt.Errorf("la copia está en la rama «%s», no en «%s»", h.Rama, rama)
+		return Union{}, fmt.Errorf("la subcarpeta está en la rama «%s», no en «%s»", h.Rama, rama)
 	}
 	pm, err := RepoPrincipal(ctx, madreDir)
 	if err != nil || !mismaCarpeta(pm, h.Principal) {
-		return Union{}, errors.New("la copia de la hija no es del repositorio de la madre")
+		return Union{}, errors.New("la subcarpeta de la hija no es del repositorio de la madre")
 	}
 	var u Union
 	// Lo que dejó la hija sin commitear va a su rama (así no se pierde, ni se une a medias).
@@ -218,20 +218,20 @@ func QuitaUnida(ctx context.Context, hijaDir, madreDir string) (quitada, ramaBor
 		return false, false, ErrNoEsCopia
 	}
 	if h.Cambios > 0 || h.Stash > 0 {
-		return false, false, fmt.Errorf("la copia se conserva: tiene trabajo sin guardar (%s)", h.Pendiente())
+		return false, false, fmt.Errorf("la subcarpeta se conserva: tiene trabajo sin guardar (%s)", h.Pendiente())
 	}
 	if h.Rama == "" || !ramaDeHijaValida(h.Rama) {
-		return false, false, errors.New("la copia se conserva: no es una rama de reparto")
+		return false, false, errors.New("la subcarpeta se conserva: no es una rama de reparto")
 	}
 	if _, err := git(ctx, madreDir, "merge-base", "--is-ancestor", h.Rama, "HEAD"); err != nil {
-		return false, false, fmt.Errorf("la copia se conserva: su rama «%s» no está unida a la de la madre", h.Rama)
+		return false, false, fmt.Errorf("la subcarpeta se conserva: su rama «%s» no está unida a la de la madre", h.Rama)
 	}
 	Prune(ctx, h.Principal)
 	if out, err := gitSalida(ctx, madreDir, "worktree", "remove", "--", h.Carpeta); err != nil {
-		return false, false, fmt.Errorf("la copia se conserva: git no la ha quitado: %s", out)
+		return false, false, fmt.Errorf("la subcarpeta se conserva: git no la ha quitado: %s", out)
 	}
 	if out, err := gitSalida(ctx, madreDir, "branch", "-d", h.Rama); err != nil {
-		return true, false, fmt.Errorf("copia quitada, pero la rama «%s» se conserva: %s", h.Rama, out)
+		return true, false, fmt.Errorf("subcarpeta quitada, pero la rama «%s» se conserva: %s", h.Rama, out)
 	}
 	return true, true, nil
 }
