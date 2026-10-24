@@ -32,8 +32,8 @@ Gasta tokens de verdad: no entra en `make test`.
   fallan antes del cambio y pasan después.
 - `calibracion.json`: las medianas sin pgocode de la última ronda completa (la escribe `cmd/consumo`).
 
-**Calibración pendiente.** Los proyectos estaban en Python hasta el 24-10-2026; al pasarlos a Go se borraron la
-calibración y los resultados (siguen en el historial de git, antes del paso a Go), porque medían otras tareas.
+**Calibración pendiente.** El 24-10-2026 se rehicieron los proyectos de prueba y se borraron la calibración y los
+resultados anteriores (siguen en el historial de git), porque medían otras tareas.
 Antes de comparar con pgocode hay que repetir la calibración con una ronda completa sin pgocode
 (`make consumo ARGS="-modo directo"`); sin ella, `-modo pgocode` sale sin referencia.
 
