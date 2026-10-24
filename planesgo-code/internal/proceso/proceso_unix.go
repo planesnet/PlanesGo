@@ -7,7 +7,8 @@ import (
 	"syscall"
 )
 
-// GrupoPropio lanza el proceso en un grupo nuevo y, al cancelar, mata al grupo entero.
+// GrupoPropio lanza el proceso en un grupo nuevo y, al cancelar, mata al grupo entero. La orden ha de crearse con
+// exec.CommandContext: con exec.Command, Start falla porque tiene Cancel.
 func GrupoPropio(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

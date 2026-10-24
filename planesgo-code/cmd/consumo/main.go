@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/llm"
+	"planesgo-code/internal/proceso"
 )
 
 var (
@@ -559,8 +560,7 @@ func directo(ctx context.Context, agente string, conf ConfAgente, carpeta, permi
 	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Dir = carpeta
 	cmd.Env = append(append(os.Environ(), "PWD="+carpeta), extra...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	proceso.GrupoPropio(cmd)
 	var errOut bytes.Buffer
 	cmd.Stderr = &errOut
 	out, err := cmd.StdoutPipe()

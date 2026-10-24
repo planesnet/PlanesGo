@@ -4,7 +4,8 @@
 // temporales (HOME incluido) y una raíz con un repositorio git del proyecto de prueba (999), y recorre la API:
 // sesión, proyectos, lanzar y parar un programa, actividad humana, imputación y validación de tiempos.
 // Al acabar (también si falla o se interrumpe) mata todo lo que ha arrancado. Sale con 1 ante cualquier fallo.
-// Es para Linux (grupos de procesos y /proc), como el paquete de la app.
+// Pensada para Linux (grupos de procesos y /proc), como el paquete de la app; compila en todos los sistemas
+// (internal/proceso tiene la versión de cada uno) y en los demás mata los procesos uno a uno.
 //
 //	go run ./cmd/e2e            # o: make e2e
 //	go run ./cmd/e2e -v         # con el registro del backend y del Odoo simulado
@@ -13,6 +14,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -31,6 +33,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"planesgo-code/internal/proceso"
 )
 
 const (
@@ -125,9 +129,9 @@ func (e *entorno) compila(modulo, salida, paquete string, ldflags string) {
 	if ldflags != "" {
 		args = append(args, "-ldflags", ldflags)
 	}
-	cmd := exec.Command("go", append(args, paquete)...)
+	cmd := exec.CommandContext(context.Background(), "go", append(args, paquete)...) // GrupoPropio pide contexto
 	cmd.Dir = modulo
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	proceso.GrupoPropio(cmd)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	e.mu.Lock()
@@ -185,10 +189,10 @@ func arranca(nombre, registro string, entorno []string, bin string, args ...stri
 	if err != nil {
 		falla("%v", err)
 	}
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(context.Background(), bin, args...)
 	cmd.Stdout, cmd.Stderr = f, f
 	cmd.Env = entorno
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // grupo propio: se mata entero al acabar
+	proceso.GrupoPropio(cmd) // grupo propio: se mata entero al acabar
 	if err := cmd.Start(); err != nil {
 		falla("arrancando %s: %v", nombre, err)
 	}
@@ -451,13 +455,14 @@ func (e *entorno) paraBackend(max time.Duration) bool {
 	if e.backend == nil || e.backend.Process == nil {
 		return true
 	}
-	syscall.Kill(e.backend.Process.Pid, syscall.SIGTERM)
+	e.backend.Process.Signal(syscall.SIGTERM)
 	return espera(max, func() bool { return !vivo(e.backend.Process.Pid) })
 }
 
 func vivo(pid int) bool {
-	// Kill(pid, 0) también da bien con un zombi: se mira el estado en /proc si se puede.
-	if err := syscall.Kill(pid, 0); err != nil {
+	// La señal 0 también da bien con un zombi: se mira el estado en /proc si se puede.
+	p, err := os.FindProcess(pid)
+	if err != nil || p.Signal(syscall.Signal(0)) != nil {
 		return false
 	}
 	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
@@ -473,22 +478,26 @@ func (e *entorno) limpia() {
 	e.limpieza.Do(func() {
 		e.mu.Lock()
 		if g := e.compilando; g != 0 {
-			syscall.Kill(-g, syscall.SIGKILL)
-			espera(5*time.Second, func() bool { return syscall.Kill(-g, 0) != nil })
+			proceso.SenalGrupo(g, true)
+			espera(5*time.Second, func() bool { return !proceso.GrupoVivo(g) })
 		}
 		e.mu.Unlock()
 		if e.backend != nil && e.backend.Process != nil {
 			if !e.paraBackend(10 * time.Second) {
 				log.Print("el backend no se cierra: SIGKILL")
 			}
-			syscall.Kill(-e.backend.Process.Pid, syscall.SIGKILL)
+			proceso.SenalGrupo(e.backend.Process.Pid, true)
+			e.backend.Process.Kill()
 		}
 		for _, pid := range e.programas() { // por si el backend murió sin parar sus programas
-			syscall.Kill(-pid, syscall.SIGKILL)
-			syscall.Kill(pid, syscall.SIGKILL)
+			proceso.SenalGrupo(pid, true)
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill()
+			}
 		}
 		if e.odoo != nil && e.odoo.Process != nil {
-			syscall.Kill(-e.odoo.Process.Pid, syscall.SIGKILL)
+			proceso.SenalGrupo(e.odoo.Process.Pid, true)
+			e.odoo.Process.Kill()
 		}
 		if !*conservar {
 			if err := os.RemoveAll(e.tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
