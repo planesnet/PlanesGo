@@ -6,7 +6,6 @@ export default function Acceso({ aviso, alEntrar }: { aviso: string; alEntrar: (
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const [verClave, setVerClave] = useState(false);
 
   async function entrar(e: FormEvent) {
     e.preventDefault();
@@ -31,9 +30,22 @@ export default function Acceso({ aviso, alEntrar }: { aviso: string; alEntrar: (
         {aviso && !error && <p className="aviso">{aviso}</p>}
         <label>Usuario<input autoFocus autoComplete="username" value={login} onChange={e => setLogin(e.target.value)} required /></label>
         <label>Contraseña
+          <CampoClave value={password} onChange={setPassword} autoComplete="current-password" />
+        </label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button className="primario" disabled={enviando}>{enviando ? 'Entrando…' : 'Entrar'}</button>
+      </form>
+    </main>
+  );
+}
+
+// CampoClave: contraseña con el ojo que la muestra solo mientras se mantiene pulsado (ratón, dedo o Espacio/Intro);
+// al soltar se oculta. El del acceso y el del escritorio remoto.
+export function CampoClave({ value, onChange, autoComplete }: { value: string; onChange: (v: string) => void; autoComplete: string }) {
+  const [verClave, setVerClave] = useState(false);
+  return (
           <span className="clave">
-            <input type={verClave ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
-            {/* Solo se ve mientras se mantiene pulsado (ratón, dedo o Espacio/Intro); al soltar se oculta. */}
+            <input type={verClave ? 'text' : 'password'} autoComplete={autoComplete} value={value} onChange={e => onChange(e.target.value)} required />
             <button type="button" className="ojo" aria-label="Mantén pulsado para ver la contraseña" title="Mantén pulsado para ver la contraseña"
               onPointerDown={e => { e.preventDefault(); setVerClave(true); }}
               onPointerUp={() => setVerClave(false)} onPointerLeave={() => setVerClave(false)} onPointerCancel={() => setVerClave(false)}
@@ -44,10 +56,5 @@ export default function Acceso({ aviso, alEntrar }: { aviso: string; alEntrar: (
                 : <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="2"/></svg>}
             </button>
           </span>
-        </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="primario" disabled={enviando}>{enviando ? 'Entrando…' : 'Entrar'}</button>
-      </form>
-    </main>
   );
 }

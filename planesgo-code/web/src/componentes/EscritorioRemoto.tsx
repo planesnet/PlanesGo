@@ -1,26 +1,22 @@
-// Escritorio remoto (pgocode --rdp): la ventana de pgocode para abrir el escritorio remoto de Windows de una conexión.
-// Usa la sesión de pgocode (la misma app y el mismo backend); si no hay, el acceso de siempre. El proyecto es
-// obligatorio (el buscador de la barra de proyectos): el tiempo se imputa en él con el servicio de pgocode. La
-// ventana de Windows la abre el backend (FreeRDP); la contraseña va a FreeRDP y no se guarda. Siempre van el
-// portapapeles y la carpeta compartida; la pantalla completa, cuando se quiera (Ctrl+Alt+Intro). Las conexiones
-// (sin contraseña), en este navegador.
-import { useEffect, useState, type FormEvent } from 'react';
+// Escritorio remoto (pgocode --rdp): la ventana de pgocode para entrar por escritorio remoto en cualquier equipo
+// Windows. Usa la sesión de pgocode (la misma app y el mismo backend); si no hay, el acceso de siempre. El proyecto
+// es obligatorio: si la conexión ya lo tiene, se muestra; si no, el buscador de la barra de proyectos. El tiempo se
+// imputa en él con el servicio de pgocode y se ve en el título de la ventana de Windows, que abre el backend
+// (FreeRDP) con todo permitido (portapapeles, carpeta «Intercambio», sonido, micrófono e impresoras) y se cierra
+// desde ella misma. La contraseña va a FreeRDP y no se guarda; las conexiones, sin
+// contraseña, en este navegador.
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { escuchaAvisos, get, post, type Proyecto, type Usuario } from '../api';
-import Acceso from './Acceso';
+import Acceso, { CampoClave } from './Acceso';
+import { Dialogs, showMessage } from './Modal';
 import { BuscaProyecto } from './Proyectos';
 
-interface Opciones { sonido: boolean; impresoras: boolean }
-interface Conexion { nombre: string; equipo: string; usuario: string; proyecto: number; opciones: Opciones }
-interface Abierta { id: string; proyecto: number; nombre: string; equipo: string; usuario: string; estado: 'conectando' | 'conectado' | 'terminado'; error?: string }
-
-const OPCIONES: [keyof Opciones, string][] = [['sonido', 'Sonido y micrófono'], ['impresoras', 'Impresoras de este equipo']];
-const nueva = (): Conexion => ({ nombre: '', equipo: '', usuario: '', proyecto: 0, opciones: { sonido: true, impresoras: false } });
+interface Conexion { equipo: string; usuario: string; proyecto: number }
+interface Abierta { id: string; proyecto: number; estado: 'conectando' | 'conectado' | 'terminado'; error?: string }
 
 const clave = (login: string) => `pgo:rdp:${login.toLowerCase()}`;
 const leeConexiones = (login: string): Conexion[] => { try { return JSON.parse(localStorage.getItem(clave(login)) || '[]'); } catch { return []; } };
 const guardaConexiones = (login: string, l: Conexion[]) => { try { localStorage.setItem(clave(login), JSON.stringify(l)); } catch { /* sin almacenamiento */ } };
-// Las impresoras no se recuerdan: ninguna hasta que se piden para esa conexión.
-const deGuardada = (c?: Conexion): Conexion => c ? { ...c, opciones: { sonido: c.opciones?.sonido ?? true, impresoras: false } } : nueva();
 
 export default function EscritorioRemoto() {
   const [usuario, setUsuario] = useState<Usuario | null | undefined>(undefined);
@@ -33,99 +29,82 @@ export default function EscritorioRemoto() {
 function Formulario({ usuario }: { usuario: Usuario }) {
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [conexiones, setConexiones] = useState<Conexion[]>(() => leeConexiones(usuario.login));
-  const [elegida, setElegida] = useState(0); // índice en conexiones; conexiones.length = nueva
-  const [c, setC] = useState<Conexion>(() => deGuardada(leeConexiones(usuario.login)[0]));
+  const [c, setC] = useState<Conexion>(() => leeConexiones(usuario.login)[0] || { equipo: '', usuario: '', proyecto: 0 });
+  const [cambiaProyecto, setCambiaProyecto] = useState(false);
   const [contrasena, setContrasena] = useState('');
-  const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const [abiertas, setAbiertas] = useState<Abierta[]>([]);
-  const [disponible, setDisponible] = useState(true);
+  const mias = useRef(new Set<string>()); // las conexiones abiertas desde esta ventana (para avisar de sus errores)
+  const [versionApp, setVersionApp] = useState('');
 
-  useEffect(() => { get<Proyecto[]>('/api/proyectos').then(setProyectos).catch(e => setError((e as Error).message)); }, []);
+  // Es pgocode: su versión, en el título de la ventana (como la principal) y en la tarjeta.
   useEffect(() => {
-    const carga = () => get<{ disponible: boolean; conexiones: Abierta[] }>('/api/rdp')
-      .then(r => { setDisponible(r.disponible); setAbiertas(r.conexiones); }).catch(() => {});
-    carga();
-    const t = setInterval(carga, 5000); // también llega el aviso «rdp»; esto cubre una conexión del backend perdida
+    get<{ version: string }>('/api/version').then(v => { setVersionApp(v.version); document.title = 'Escritorio remoto · Planes Go Code ' + v.version; }).catch(() => {});
+  }, []);
+
+  useEffect(() => { get<Proyecto[]>('/api/proyectos').then(setProyectos).catch(() => {}); }, []);
+  useEffect(() => {
+    const carga = () => get<{ conexiones: Abierta[] }>('/api/rdp').then(r => {
+      for (const a of r.conexiones) {
+        if (a.estado === 'terminado' && mias.current.delete(a.id) && a.error) showMessage(a.error, { level: 'error', title: 'Escritorio remoto' });
+      }
+    }).catch(() => {});
     const fuera = escuchaAvisos(a => { if (a.tipo === 'rdp') carga(); });
+    const t = setInterval(carga, 5000); // por si se pierde un aviso
     return () => { clearInterval(t); fuera(); };
   }, []);
 
-  const elige = (i: number) => { setElegida(i); setC(deGuardada(conexiones[i])); setError(''); };
-  const cambia = (cambio: Partial<Conexion>) => setC(x => ({ ...x, ...cambio }));
-  const opcion = (k: keyof Opciones, v: boolean) => setC(x => ({ ...x, opciones: { ...x.opciones, [k]: v } }));
+  const proyecto = proyectos.find(p => p.id === c.proyecto);
+  const conoceProyecto = Boolean(proyecto) && !cambiaProyecto;
+  const cambiaEquipo = (equipo: string) => {
+    const g = conexiones.find(x => x.equipo === equipo); // una conexión guardada: su usuario y su proyecto
+    setC(g ? { ...g } : x => ({ ...x, equipo }));
+  };
 
   async function conectar(e: FormEvent) {
     e.preventDefault();
-    if (!c.proyecto) { setError('Elige el proyecto al que se imputa el tiempo.'); return; }
+    if (!c.proyecto) return;
     setEnviando(true);
-    setError('');
-    const guardar = { ...c, nombre: c.nombre.trim() || c.equipo.trim() };
     try {
-      await post('/api/rdp/conectar', { ...guardar, contrasena });
-      const l = [guardar, ...conexiones.filter(x => x.nombre !== guardar.nombre)];
+      const r = await post<{ id: string }>('/api/rdp/conectar', { proyecto: c.proyecto, nombre: c.equipo, equipo: c.equipo, usuario: c.usuario, contrasena });
+      mias.current.add(r.id);
+      const l = [c, ...conexiones.filter(x => x.equipo !== c.equipo)];
       setConexiones(l);
       guardaConexiones(usuario.login, l);
-      setElegida(0);
-      setC(deGuardada(guardar));
+      setCambiaProyecto(false);
     } catch (err) {
-      setError((err as Error).message);
+      showMessage((err as Error).message, { level: 'error', title: 'Escritorio remoto' });
     } finally {
       setEnviando(false);
       setContrasena('');
     }
   }
 
-  const proyecto = proyectos.find(p => p.id === c.proyecto);
-  const nombreProyecto = (id: number) => proyectos.find(p => p.id === id)?.nombre || `Proyecto ${id}`;
   return (
     <main className="acceso rdp">
       <form onSubmit={conectar} className="tarjeta-acceso">
-        <img className="logo" src="/logo.svg" alt="" width="56" height="56" />
-        <h1>Escritorio <span>remoto</span></h1>
-        <p className="suave">{usuario.nombre} · el tiempo se imputa en el proyecto que elijas.</p>
-        {!disponible && <p className="aviso">Falta FreeRDP en este equipo: ejecuta <code>connectors/instala.sh</code>.</p>}
+        <header className="rdp-cabecera">
+          <img className="logo" src="/logo.svg" alt="" width="40" height="40" />
+          <h1>Escritorio <span>remoto</span>{versionApp && <small className="rdp-version">Planes Go Code {versionApp}</small>}</h1>
+        </header>
         <div className="rdp-proyecto">
-          <span className="rdp-etiqueta">Proyecto{proyecto && <b> · {proyecto.nombre}</b>}</span>
-          <BuscaProyecto login={usuario.login} lista={proyectos} elegido={c.proyecto} alElegir={p => cambia({ proyecto: p.id })} />
+          <span className="rdp-etiqueta">Proyecto</span>
+          {conoceProyecto
+            ? <p className="rdp-elegido"><b>{proyecto!.nombre}</b><button type="button" className="enlace" onClick={() => setCambiaProyecto(true)}>Cambiar</button></p>
+            : <BuscaProyecto login={usuario.login} lista={proyectos} elegido={c.proyecto} alElegir={p => { setC(x => ({ ...x, proyecto: p.id })); setCambiaProyecto(false); }} />}
         </div>
-        <label>Conexión
-          <select value={elegida} onChange={e => elige(Number(e.target.value))}>
-            {conexiones.map((x, i) => <option key={x.nombre} value={i}>{x.nombre} · {x.equipo}</option>)}
-            <option value={conexiones.length}>Nueva conexión…</option>
-          </select>
+        <label>Equipo
+          <input list="rdp-equipos" value={c.equipo} onChange={e => cambiaEquipo(e.target.value)} placeholder="nombre o IP[:puerto]" required />
+          <datalist id="rdp-equipos">{conexiones.map(x => <option key={x.equipo} value={x.equipo}>{x.usuario}</option>)}</datalist>
         </label>
-        <div className="rdp-campos">
-          <label>Nombre<input value={c.nombre} onChange={e => cambia({ nombre: e.target.value })} placeholder="Sage pruebas" /></label>
-          <label>Equipo<input value={c.equipo} onChange={e => cambia({ equipo: e.target.value })} placeholder="nombre o IP[:puerto]" required /></label>
-        </div>
-        <label>Usuario de Windows
-          <input autoComplete="off" value={c.usuario} onChange={e => cambia({ usuario: e.target.value })} placeholder="DOMINIO\usuario o usuario" required />
+        <label>Usuario
+          <input autoComplete="off" value={c.usuario} onChange={e => setC(x => ({ ...x, usuario: e.target.value }))} placeholder="DOMINIO\usuario o usuario" required />
         </label>
-        <label>Contraseña de Windows
-          <input type="password" autoComplete="new-password" value={contrasena} onChange={e => setContrasena(e.target.value)} required />
+        <label>Contraseña
+          <CampoClave value={contrasena} onChange={setContrasena} autoComplete="new-password" />
         </label>
-        <fieldset className="rdp-opciones">
-          {OPCIONES.map(([k, texto]) => (
-            <label key={k}><input type="checkbox" checked={c.opciones[k]} onChange={e => opcion(k, e.target.checked)} />{texto}</label>
-          ))}
-        </fieldset>
-        <p className="suave rdp-nota">Siempre: portapapeles y carpeta compartida «Intercambio». Pantalla completa: Ctrl+Alt+Intro.</p>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="primario" disabled={enviando || !disponible}>{enviando ? 'Conectando…' : 'Conectar'}</button>
-        {abiertas.length > 0 && (
-          <ul className="rdp-abiertas">
-            {abiertas.map(a => (
-              <li key={a.id}>
-                <span className={`rdp-estado ${a.estado}`} aria-hidden="true" />
-                <span><b>{a.nombre}</b> <span className="suave">{a.usuario}@{a.equipo} · {nombreProyecto(a.proyecto)}</span>
-                  {a.error && <span className="error"> · {a.error}</span>}</span>
-                {a.estado !== 'terminado' && <button type="button" className="boton-secundario peligro" onClick={() => post('/api/rdp/desconectar', { id: a.id }).catch(() => {})}>Desconectar</button>}
-              </li>
-            ))}
-          </ul>
-        )}
+        <button className="primario" disabled={enviando || !c.proyecto}>{enviando ? 'Conectando…' : 'Conectar'}</button>
       </form>
+      <Dialogs />
     </main>
   );
 }

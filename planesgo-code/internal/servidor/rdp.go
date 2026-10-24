@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -32,24 +33,18 @@ const (
 	rdpIdleLimit = 10 * time.Minute // without keyboard or mouse: no more time
 )
 
-// rdpOptions: what the person chooses. Always on: clipboard and the shared folder (the exchange system); full
-// screen whenever wanted (Ctrl+Alt+Intro in the window).
-type rdpOptions struct {
-	Sound    bool `json:"sonido"`     // sound and microphone (on unless the person turns them off)
-	Printers bool `json:"impresoras"` // this computer's printers: none unless the person asks for them
-}
-
 // rdpConn: an open remote desktop.
 type rdpConn struct {
-	ID       string    `json:"id"`
-	Project  int       `json:"proyecto"`
-	Name     string    `json:"nombre"`
-	Host     string    `json:"equipo"`
-	User     string    `json:"usuario"`
-	Started  time.Time `json:"inicio"`
-	State    string    `json:"estado"` // conectando, conectado, terminado
-	Error    string    `json:"error,omitempty"`
-	closed   bool      // the person disconnected it from pgocode: not an error
+	ID       string         `json:"id"`
+	Project  int            `json:"proyecto"`
+	Name     string         `json:"nombre"`
+	Host     string         `json:"equipo"`
+	User     string         `json:"usuario"`
+	Started  time.Time      `json:"inicio"`
+	State    string         `json:"estado"` // conectando, conectado, terminado
+	Error    string         `json:"error,omitempty"`
+	closed   bool           // the person disconnected it from pgocode: not an error
+	title    io.WriteCloser // FreeRDP's input after the password: one line per window title (connectors/freerdp)
 	cancel   context.CancelFunc
 	finished chan struct{}
 }
@@ -98,27 +93,26 @@ func rdpUser(s string) (user, domain string) {
 	return strings.TrimSpace(s), ""
 }
 
-// rdpArgs: modern settings only, no fallbacks for old servers (a development tool, not a product).
-func rdpArgs(name, host, login string, o rdpOptions) []string {
+// rdpArgs: modern settings only, no fallbacks for old servers (a development tool, not a product). Everything is
+// allowed (clipboard, the shared folder «Intercambio», sound, microphone and this computer's printers) and the
+// person decides what to use; full screen whenever wanted (Ctrl+Alt+Intro in the window).
+func rdpArgs(name, host, login string) []string {
 	user, domain := rdpUser(login)
 	a := []string{"/v:" + host, "/u:" + user, "/from-stdin:force", "/title:" + name,
 		"/sec:nla",        // network level authentication only
 		"/tls:seclevel:2", // no old TLS versions or weak keys
 		"/cert:tofu",      // trust on first use; warn if the certificate changes
 		"/gfx:AVC444",     // RDP 8+ graphics with H.264 4:4:4
-		"/network:auto", "+auto-reconnect", "/auto-reconnect-max-retries:20", "+dynamic-resolution", "/log-level:ERROR"}
+		"/network:auto", "+auto-reconnect", "/auto-reconnect-max-retries:20", "+dynamic-resolution", "/log-level:ERROR",
+		// Without grabbing the keyboard: GNOME asks every time for permission to inhibit its shortcuts. Alt+Tab and
+		// the Windows key stay on this desktop.
+		"-grab-keyboard"}
 	if domain != "" {
 		a = append(a, "/d:"+domain)
 	}
-	a = append(a, "/size:85%", "+clipboard")
+	a = append(a, "/size:85%", "+clipboard", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer")
 	if os.MkdirAll(rdpExchange(), 0o755) == nil {
 		a = append(a, "/drive:Intercambio,"+rdpExchange())
-	}
-	if o.Sound {
-		a = append(a, "/sound:sys:pulse", "/microphone:sys:pulse")
-	}
-	if o.Printers {
-		a = append(a, "/printer")
 	}
 	return a
 }
@@ -139,11 +133,28 @@ var rdpMessages = []struct {
 	{[]string{"KDC_UNREACHABLE"}, "No se llega al controlador de dominio (Kerberos)."},
 }
 
+// rdpEnded: why Windows ended the session (FreeRDP's ERRINFO_*): "" when the person closed or signed out.
+var rdpEnded = []struct {
+	code, text string
+}{
+	{"RPC_INITIATED_DISCONNECT", ""}, {"RPC_INITIATED_LOGOFF", ""}, {"LOGOFF_BY_USER", ""}, // also *_BY_USER
+	{"DISCONNECTED_BY_OTHER_CONNECTION", "Se ha abierto esta misma sesión de Windows desde otra conexión."},
+	{"IDLE_TIMEOUT", "Windows ha cerrado la sesión por inactividad."},
+	{"LOGON_TIMEOUT", "Windows ha cerrado la sesión porque no se completó el inicio de sesión a tiempo."},
+	{"SERVER_DENIED_CONNECTION", "El servidor ha rechazado la conexión."},
+	{"SERVER_INSUFFICIENT_PRIVILEGES", "Este usuario no tiene permiso para entrar por escritorio remoto en ese equipo."},
+}
+
 // rdpExplain: why the session ended ("" if it ended normally: closed by the person or by Windows).
 func rdpExplain(log string, code int) string {
 	t := strings.ToUpper(log)
 	if strings.Contains(t, "ERRCONNECT_CONNECT_CANCELLED") {
 		return ""
+	}
+	for _, e := range rdpEnded {
+		if strings.Contains(t, "ERRINFO_"+e.code) {
+			return e.text
+		}
 	}
 	if strings.Contains(t, "CERTIFICATE") && (strings.Contains(t, "CHANGED") || strings.Contains(t, "MISMATCH")) {
 		return "El certificado del servidor ha cambiado desde la última conexión. Puede ser normal (se renovó) o un intento de suplantación: compruébalo con quien administra el servidor."
@@ -162,7 +173,8 @@ func rdpExplain(log string, code int) string {
 	var lines []string
 	for _, l := range strings.Split(strings.TrimSpace(log), "\n") {
 		// Kerberos is tried first and, without a reachable KDC for the domain, NTLM follows: not the error
-		if l != "" && !strings.Contains(l, "sspi.Kerberos") && !strings.Contains(l, "default realm") {
+		// fusermount3: copying files through the clipboard needs FUSE (text works without it)
+		if l != "" && !strings.Contains(l, "sspi.Kerberos") && !strings.Contains(l, "default realm") && !strings.Contains(l, "fusermount") {
 			lines = append(lines, l)
 		}
 	}
@@ -205,12 +217,11 @@ func (s *Servidor) rdpState(w http.ResponseWriter, r *http.Request, ses *sesione
 // goes there). The password goes to FreeRDP's input and is not kept.
 func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	var p struct {
-		Project  int        `json:"proyecto"`
-		Name     string     `json:"nombre"`
-		Host     string     `json:"equipo"`
-		User     string     `json:"usuario"` // «DOMINIO\usuario» or «usuario»
-		Password string     `json:"contrasena"`
-		Options  rdpOptions `json:"opciones"`
+		Project  int    `json:"proyecto"`
+		Name     string `json:"nombre"`
+		Host     string `json:"equipo"`
+		User     string `json:"usuario"` // «DOMINIO\usuario» or «usuario»
+		Password string `json:"contrasena"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
@@ -239,9 +250,11 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		Started: time.Now(), State: "conectando", finished: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
-	cmd := exec.CommandContext(ctx, bin, rdpArgs(p.Name, p.Host, p.User, p.Options)...)
+	cmd := exec.CommandContext(ctx, bin, rdpArgs(p.Name, p.Host, p.User)...)
 	proceso.GrupoPropio(cmd)
-	cmd.Env = proceso.CleanEnviron() // nothing of pgocode's (tokens, desktop secret) reaches FreeRDP
+	// Nothing of pgocode's (tokens, desktop secret) reaches FreeRDP; PGO_TITULO_ENTRADA: its title is updated
+	// through its input (the patch in connectors/freerdp) with the logged time.
+	cmd.Env = append(proceso.CleanEnviron(), "PGO_TITULO_ENTRADA=1")
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	stdin, err := cmd.StdinPipe()
@@ -254,8 +267,8 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		return
 	}
 	stdin.Write([]byte(p.Password + "\n"))
-	stdin.Close()
 	p.Password = ""
+	c.title = stdin
 	s.escritorios.mu.Lock()
 	if s.escritorios.conns == nil {
 		s.escritorios.conns = map[string]*rdpConn{}
@@ -281,6 +294,7 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		}
 		s.escritorios.mu.Unlock()
 		close(c.finished)
+		c.title.Close()
 		cancel()
 		if s.Imputacion != nil {
 			s.Imputacion.Cierra(work.Sesion, "escritorio remoto cerrado")
@@ -293,10 +307,39 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	jsonOK(w, snap)
 }
 
-// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use.
+// rdpTitle: the window title with the logged time, as pgocode's bar shows it: this session, the project today and
+// everything today.
+func (s *Servidor) rdpTitle(c *rdpConn, work imputacion.Trabajo) string {
+	title := c.Name
+	if work.NombreProy != "" {
+		title += " · " + work.NombreProy
+	}
+	if s.Imputacion == nil {
+		return title
+	}
+	hoy, abiertos := s.Imputacion.Estado()
+	var session, project, total float64
+	for _, a := range abiertos {
+		if a.Sesion == work.Sesion {
+			session = a.Horas
+		}
+	}
+	for _, l := range hoy {
+		total += l.Horas
+		if l.Proyecto == c.Project {
+			project += l.Horas
+		}
+	}
+	hm := func(h float64) string { m := int(h*60 + 0.5); return fmt.Sprintf("%d:%02d", m/60, m%60) }
+	return fmt.Sprintf("%s · sesión %s · proyecto hoy %s · total hoy %s", title, hm(session), hm(project), hm(total))
+}
+
+// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use, and
+// shows the logged time in the window title.
 func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 	t := time.NewTicker(rdpBeat)
 	defer t.Stop()
+	fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	for {
 		select {
 		case <-c.finished:
@@ -317,6 +360,7 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 		if s.Imputacion != nil {
 			s.Imputacion.Actividad(work)
 		}
+		fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	}
 }
 
