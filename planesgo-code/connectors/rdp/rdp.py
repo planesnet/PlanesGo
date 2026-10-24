@@ -4,8 +4,8 @@ y ratón y teclado con xdotool. La contraseña la escribe la persona en el termi
 (FreeRDP la pide); este programa nunca la recibe ni la guarda.
 
   rdp.py inicia --host 192.168.125.229 --usuario USUARIO [--dominio DOM] [--tamaño auto|1920x1080]
-                                                auto: la resolución del servidor (si el puente WinRM está
-                                                arrancado); si no, 1600x900
+                                                auto: la resolución del servidor (si la sesión tiene
+                                                conexión WinRM: pgo ps); si no, 1600x900
                                                 [--teclado unicode|teclas] unicode (por defecto) para Windows
   rdp.py tamaño 1920x1080                       cambia el tamaño en caliente (el servidor ajusta su sesión)
   rdp.py captura [fichero.png] [--escala 0.6]   captura de la pantalla remota (coordenadas: las de esa captura)
@@ -133,15 +133,14 @@ def parse_size(s):
 
 
 def server_size():
-    """La resolución de pantalla del servidor, preguntada por el puente WinRM (None si no está arrancado)."""
-    sys.path.insert(0, os.path.join(HERE, "..", "winrm"))
+    """La resolución de pantalla del servidor, preguntada con «pgo ps» (la conexión WinRM de la sesión de pgocode);
+    None si no hay conexión o no responde."""
+    ps = ("$v = Get-CimInstance Win32_VideoController | Where-Object CurrentHorizontalResolution | "
+          "Select-Object -First 1; \"$($v.CurrentHorizontalResolution)x$($v.CurrentVerticalResolution)\"")
     try:
-        import ps
-        r = ps.call("$v = Get-CimInstance Win32_VideoController | Where-Object CurrentHorizontalResolution | "
-                    "Select-Object -First 1; \"$($v.CurrentHorizontalResolution)x$($v.CurrentVerticalResolution)\"",
-                    "resolución de pantalla")
-        return parse_size(r["out"].strip()) if r.get("code") == 0 else None
-    except (SystemExit, ValueError, OSError):
+        r = subprocess.run(["pgo", "ps", ps], capture_output=True, text=True, timeout=90)
+        return parse_size(r.stdout.strip()) if r.returncode == 0 else None
+    except (SystemExit, ValueError, OSError, subprocess.TimeoutExpired):
         return None
 
 
@@ -159,7 +158,7 @@ def cmd_inicia(a):
     if a.tamaño == "auto":
         size = server_size()
         print(f"Resolución del servidor: {size[0]}x{size[1]}" if size else
-              f"Sin puente WinRM: no sé la resolución del servidor; uso {DEFAULT_SIZE}")
+              f"Sin conexión WinRM en la sesión (pgo ps): no sé la resolución del servidor; uso {DEFAULT_SIZE}")
         w, h = size or parse_size(DEFAULT_SIZE)
     else:
         w, h = parse_size(a.tamaño)
