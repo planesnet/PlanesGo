@@ -1,0 +1,82 @@
+pgocode: el título de la ventana del cliente SDL3 se cambia por el descriptor PGO_TITULO_FD (una línea por
+título); pgocode muestra ahí el tiempo imputado. No por la entrada estándar: una nueva petición de credenciales
+leería un título como contraseña. Se aplica con: patch -p1 -d freerdp-<versión>
+
+--- a/client/SDL/SDL3/sdl_freerdp.cpp
++++ b/client/SDL/SDL3/sdl_freerdp.cpp
+@@ -20,6 +20,8 @@
+ #include <iostream>
+ #include <memory>
+ #include <mutex>
++#include <string>
++#include <thread>
+ 
+ #include <freerdp/config.h>
+ 
+@@ -158,6 +160,55 @@
+ 	std::ignore = sdl_push_quit();
+ }
+ 
++/* pgocode: with PGO_TITULO_FD=<descriptor> the window title can be changed through that descriptor, one line per
++ * title (pgocode shows the logged time there). Not through standard input: a new credentials prompt would read a
++ * title as the password. The title is applied from this (the SDL video) thread. */
++static std::mutex pgoTitleLock;
++static std::string pgoTitle;
++static bool pgoTitleNew = false;
++
++static void pgo_title_reader(FILE* f)
++{
++	char line[512] = {};
++	while (fgets(line, sizeof(line), f))
++	{
++		line[strcspn(line, "\r\n")] = '\0';
++		std::scoped_lock lock(pgoTitleLock);
++		pgoTitle = line;
++		pgoTitleNew = true;
++	}
++	fclose(f);
++}
++
++static void pgo_title_apply()
++{
++	static const bool started = [] {
++		const char* v = getenv("PGO_TITULO_FD");
++		char* end = nullptr;
++		const long fd = v ? strtol(v, &end, 10) : -1;
++		FILE* f = (v && *v && end && *end == '\0' && fd > 2) ? fdopen(static_cast<int>(fd), "r") : nullptr;
++		if (f)
++			std::thread(pgo_title_reader, f).detach();
++		return f != nullptr;
++	}();
++	if (!started)
++		return;
++	std::string title;
++	{
++		std::scoped_lock lock(pgoTitleLock);
++		if (pgoTitleNew)
++			title = pgoTitle;
++		pgoTitleNew = false;
++	}
++	if (title.empty())
++		return;
++	int count = 0;
++	SDL_Window** windows = SDL_GetWindows(&count);
++	for (int i = 0; windows && i < count; i++)
++		SDL_SetWindowTitle(windows[i], title.c_str());
++	SDL_free(static_cast<void*>(windows));
++}
++
+ [[nodiscard]] static int sdl_run(SdlContext* sdl)
+ {
+ 	int rc = -1;
+@@ -168,8 +219,10 @@
+ 		while (!sdl->shallAbort())
+ 		{
+ 			SDL_Event windowEvent = {};
++			pgo_title_apply();
+ 			while (!sdl->shallAbort() && SDL_WaitEventTimeout(nullptr, 1000))
+ 			{
++				pgo_title_apply();
+ 				/* Only poll standard SDL events and SDL_EVENT_USERS meant to create
+ 				 * dialogs. do not process the dialog return value events here.
+ 				 */
