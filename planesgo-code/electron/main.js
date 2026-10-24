@@ -131,13 +131,21 @@ async function emparejado() {
   guardaToken(tokenCliente);
 }
 
-// vigilaServidor: si el servidor se actualiza (otra versión), esta app se vuelve a abrir con la nueva (sus ficheros
-// también han cambiado); si se ha caído, se vuelve a arrancar.
+// La versión de los ficheros de esta app (VERSION del paquete; "" en desarrollo).
+const versionPropia = () => { try { return fs.readFileSync(path.join(__dirname, 'VERSION'), 'utf8').trim(); } catch { return ''; } };
+
+// vigilaServidor: si el servidor se actualiza (otra versión) y con él los ficheros de esta app (la misma instalación),
+// la app se vuelve a abrir con la nueva; si sus ficheros no han cambiado (otra instalación, desarrollo), sigue como
+// está: volver a abrirla no cambiaría nada. Si el servidor se ha caído, se vuelve a arrancar.
 function vigilaServidor(version) {
   setInterval(async () => {
     try {
       const v = await pide('GET', '/api/version');
-      if (v.version && v.version !== version) { app.relaunch(); app.exit(0); }
+      if (v.version && v.version !== version) {
+        version = v.version;
+        if (versionPropia() === v.version) { app.relaunch(); app.exit(0); }
+        else console.error('[pgocode] el servidor está en la versión ' + v.version + '; esta app sigue con la suya');
+      }
     } catch {
       if (saliendo) return;
       if (!(await vivo())) servidor().catch(e => console.error('[pgocode] ' + e.message));
@@ -147,8 +155,9 @@ function vigilaServidor(version) {
 
 // El ayudante de escritorio (el mismo binario, «pgocode-backend cliente»; internal/desktop): abre los visores (RDP con
 // FreeRDP y AnyDesk) en este equipo y le cuenta al servidor sus sesiones, que solo lleva el tiempo. Es hijo de esta app
-// (muere con ella: al cerrarse su entrada cierra sus ventanas de RDP). Recibe la dirección del servidor y el token del
-// cliente por entorno (nunca como argumentos) y habla en líneas JSON: órdenes por su entrada y eventos por su salida.
+// (muere con ella: al cerrarse su entrada cierra sus ventanas de RDP). Recibe la dirección del servidor por entorno y el
+// token del cliente como primera línea de su entrada (nunca en el entorno ni como argumentos: cualquier proceso del
+// usuario los puede leer) y habla en líneas JSON: después, órdenes por su entrada y eventos por su salida.
 let ayudante = null;
 let saliendo = false;
 let ordenes = 0;
@@ -163,8 +172,9 @@ function lanzaAyudante() {
   const bin = binario();
   if (!bin) return;
   const p = spawn(bin, ['cliente'], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true,
-    env: { ...process.env, PGO_SERVIDOR: URL_ARNES, PGO_TOKEN_CLIENTE: tokenCliente, PGO_DESACOPLADO: '1' } });
+    env: { ...process.env, PGO_SERVIDOR: URL_ARNES, PGO_DESACOPLADO: '1' } });
   ayudante = p;
+  p.stdin.write(tokenCliente + '\n'); // el token, por la entrada: en el entorno lo leería cualquier proceso del usuario
   p.stdin.on('error', () => { /* se ha cerrado: lo dice «exit» */ });
   readline.createInterface({ input: p.stdout }).on('line', linea => {
     let ev;
@@ -321,6 +331,8 @@ app.on('web-contents-created', (_, wc) => {
     delete prefs.preload;
     prefs.nodeIntegration = false;
     prefs.contextIsolation = true;
+    prefs.sandbox = true; // webs de Internet: el renderer, aislado del sistema aunque cambie el valor por defecto
+    prefs.webSecurity = true;
     if (!esWeb(params.src)) e.preventDefault();
   });
   wc.setWindowOpenHandler(({ url }) => { if (esWeb(url)) shell.openExternal(url); return { action: 'deny' }; });

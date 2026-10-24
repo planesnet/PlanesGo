@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"planesgo-code/internal/clients"
 )
 
 // conGuard fija el blindaje de una prueba (y lo deja como estaba).
@@ -28,6 +30,14 @@ func TestDefaultAgentGuard(t *testing.T) {
 	}
 	if !slices.Contains(g.ReadDeny, "/d/pgocode/*.json") || slices.ContainsFunc(g.ReadDeny, func(s string) bool { return strings.Contains(s, "ramas") }) {
 		t.Errorf("lecturas denegadas: %v", g.ReadDeny)
+	}
+	// The desktop app's data: its client token and the integrated browser's sessions.
+	if !slices.ContainsFunc(g.ReadDeny, func(s string) bool { return strings.HasSuffix(s, filepath.Join(DesktopAppName, "**")) }) {
+		t.Errorf("desktop app data not guarded: %v", g.ReadDeny)
+	}
+	// The pairing secret: an agent must not pair itself as a client app.
+	if !slices.Contains(g.ReadDeny, "/d/pgocode/emparejar") || !slices.Contains(g.CommandWords, clients.PairPath) {
+		t.Errorf("pairing secret not guarded: %v %v", g.ReadDeny, g.CommandWords)
 	}
 }
 

@@ -42,22 +42,25 @@ type PRCorta struct {
 }
 
 type Issue struct {
-	Numero      int        `json:"numero"`
-	Titulo      string     `json:"titulo"`
-	URL         string     `json:"url"`
-	Estado      string     `json:"estado"` // OPEN | CLOSED
-	Tipo        string     `json:"tipo"`   // Feature | Bug | Task | ""
-	Clase       string     `json:"clase"`  // peticion | mantenimiento | sin-clasificar
-	Fase        string     `json:"fase"`   // por-empezar | desarrollo | revision | test | cerrada
-	Etiquetas   []Etiqueta `json:"etiquetas"`
-	Autor       string     `json:"autor"`
-	Asignados   []string   `json:"asignados"`
-	Comentarios int        `json:"comentarios"`
-	Hito        string     `json:"hito,omitempty"`
-	PRs         []PRCorta  `json:"prs"`
-	Creada      time.Time  `json:"creada"`
-	Actualizada time.Time  `json:"actualizada"`
-	Cerrada     time.Time  `json:"cerrada,omitzero"`
+	Numero    int        `json:"numero"`
+	Titulo    string     `json:"titulo"`
+	URL       string     `json:"url"`
+	Estado    string     `json:"estado"` // OPEN | CLOSED
+	Tipo      string     `json:"tipo"`   // Feature | Bug | Task | ""
+	Clase     string     `json:"clase"`  // peticion | mantenimiento | sin-clasificar
+	Fase      string     `json:"fase"`   // por-empezar | desarrollo | revision | test | cerrada
+	Etiquetas []Etiqueta `json:"etiquetas"`
+	Autor     string     `json:"autor"`
+	// Trusted: the author has a role in the repository (owner, member or collaborator). Only their issues can start
+	// an automatic session: in a public repository anyone can open one, and its text goes to an agent.
+	Trusted     bool      `json:"autor_confiable"`
+	Asignados   []string  `json:"asignados"`
+	Comentarios int       `json:"comentarios"`
+	Hito        string    `json:"hito,omitempty"`
+	PRs         []PRCorta `json:"prs"`
+	Creada      time.Time `json:"creada"`
+	Actualizada time.Time `json:"actualizada"`
+	Cerrada     time.Time `json:"cerrada,omitzero"`
 }
 
 type PR struct {
@@ -112,7 +115,7 @@ const consulta = `query($o:String!,$n:String!){repository(owner:$o,name:$n){
  prs:pullRequests(states:OPEN,first:50,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{...P}}
  prsHechas:pullRequests(states:[MERGED,CLOSED],first:10,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{...P}}
 }}
-fragment I on Issue{number title url state createdAt updatedAt closedAt author{login} issueType{name}
+fragment I on Issue{number title url state createdAt updatedAt closedAt author{login} authorAssociation issueType{name}
  assignees(first:5){nodes{login}} labels(first:10){nodes{name color}} comments{totalCount} milestone{title}
  closedByPullRequestsReferences(first:5,includeClosedPrs:true){nodes{number state isDraft}}}
 fragment P on PullRequest{number title url state isDraft headRefName baseRefName createdAt updatedAt mergedAt
@@ -141,6 +144,7 @@ type issueGQL struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	ClosedAt  time.Time `json:"closedAt"`
 	Author    struct{ Login string }
+	Assoc     string `json:"authorAssociation"`
 	IssueType *struct{ Name string }
 	Assignees struct{ Nodes []struct{ Login string } }
 	Labels    nodosEtiq
@@ -241,7 +245,7 @@ func fase(estado string, et []Etiqueta, prs []PRCorta) string {
 
 func convierteIssue(x issueGQL) Issue {
 	i := Issue{Numero: x.Number, Titulo: x.Title, URL: x.URL, Estado: x.State, Etiquetas: x.Labels.lista(), Autor: x.Author.Login,
-		Asignados: []string{}, Comentarios: x.Comments.TotalCount, PRs: []PRCorta{}, Creada: x.CreatedAt, Actualizada: x.UpdatedAt, Cerrada: x.ClosedAt}
+		Trusted: trustedAssociation[x.Assoc], Asignados: []string{}, Comentarios: x.Comments.TotalCount, PRs: []PRCorta{}, Creada: x.CreatedAt, Actualizada: x.UpdatedAt, Cerrada: x.ClosedAt}
 	if x.IssueType != nil {
 		i.Tipo = x.IssueType.Name
 	}
@@ -500,3 +504,6 @@ func (l *Lector) Accion(ctx context.Context, repo, tipo string, numero int, acci
 	l.mu.Unlock()
 	return nil
 }
+
+// trustedAssociation: the roles (GitHub's authorAssociation) of people who can write in the repository.
+var trustedAssociation = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}

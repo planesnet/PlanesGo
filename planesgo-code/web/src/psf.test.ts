@@ -84,10 +84,11 @@ test('ambigüedad, modelo barato, commits y tiempo', () => {
 
 test('resolución automática: solo issues nuevas, sin PR ni sesión, de una en una', () => {
   const i = (numero: number, creada: string, extra: Partial<P.WatchedIssue> = {}): P.WatchedIssue =>
-    ({ numero, titulo: 'T' + numero, url: 'u', estado: 'OPEN', fase: 'por-empezar', creada, prs: [], ...extra });
+    ({ numero, titulo: 'T' + numero, url: 'u', estado: 'OPEN', fase: 'por-empezar', creada, prs: [], autor_confiable: true, ...extra });
   const since = Date.parse('2026-10-24T10:00:00Z');
   const issues = [i(1, '2026-10-24T09:00:00Z'), i(3, '2026-10-24T12:00:00Z'), i(2, '2026-10-24T11:00:00Z'),
-    i(4, '2026-10-24T11:30:00Z', { prs: [{}] }), i(5, '2026-10-24T11:40:00Z', { estado: 'CLOSED' }), i(6, '2026-10-24T11:50:00Z', { fase: 'desarrollo' })];
+    i(4, '2026-10-24T11:30:00Z', { prs: [{}] }), i(5, '2026-10-24T11:40:00Z', { estado: 'CLOSED' }), i(6, '2026-10-24T11:50:00Z', { fase: 'desarrollo' }),
+    i(7, '2026-10-24T11:55:00Z', { autor_confiable: false })]; // a stranger's issue never starts on its own
   assert.deepEqual(P.issuesToResolve(issues, [], since).map(x => x.numero), [2, 3]);
   assert.deepEqual(P.issuesToResolve(issues, [{ psf: { issue: 2, phase: 'merged' }, archivada: true }], since).map(x => x.numero), [3]);
   assert.ok(P.canStartAutomatic([{ psf: { issue: 2, phase: 'approval' } }, {}]));

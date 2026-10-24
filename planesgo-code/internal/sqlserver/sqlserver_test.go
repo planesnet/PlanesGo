@@ -45,12 +45,16 @@ func TestDSN(t *testing.T) {
 }
 
 func TestReadOnlyCheck(t *testing.T) {
-	for _, b := range []string{"SELECT * FROM Clientes", "SELECT 'COMMIT' AS x -- ROLLBACK\n", "SELECT [commit] FROM t /* begin tran */", "UPDATE t SET a = 1"} {
+	for _, b := range []string{"SELECT * FROM Clientes", "SELECT 'COMMIT' AS x -- ROLLBACK\n", "SELECT [commit] FROM t /* begin tran */", "UPDATE t SET a = 1", "EXEC dbo.Informe 2026", "SELECT 'exec(x)'", "DECLARE @r int; EXEC @r = dbo.Informe 2026; SELECT @r", "SELECT [commit] FROM [Clientes]"} {
 		if why := ReadOnlyCheck(b); why != "" {
 			t.Errorf("%q: %s", b, why)
 		}
 	}
-	for _, b := range []string{"DELETE FROM t; COMMIT", "begin tran; update t set a=1", "SAVE TRANSACTION x", "rollback", "BEGIN DISTRIBUTED TRANSACTION"} {
+	for _, b := range []string{"DELETE FROM t; COMMIT", "begin tran; update t set a=1", "SAVE TRANSACTION x", "rollback", "BEGIN DISTRIBUTED TRANSACTION",
+		"EXEC('COMMIT'); DELETE FROM t", "execute (@sql)", "EXEC sp_executesql N'COMMIT'",
+		"EXEC [sp_executesql] N'COMMIT'", "EXEC master.dbo.[sp_executesql] N'x'", "DECLARE @p sysname = 'sp_executesql'; EXEC @p N'COMMIT'",
+		"DECLARE @p sysname = N'sp_executesql', @r int; EXEC @r = @p N'COMMIT; DELETE FROM t; BEGIN TRAN'", "EXEC sp_prepexec @h OUTPUT, NULL, N'x'", "EXECUTE @r=@p",
+		"EXEC xp_cmdshell 'dir'", "EXEC [xp_cmdshell] 'dir'", "EXEC sp_OACreate 'x', @o OUT", "EXEC \"sp_executesql\" N'x'"} {
 		if ReadOnlyCheck(b) == "" {
 			t.Errorf("%q must be refused when read only", b)
 		}

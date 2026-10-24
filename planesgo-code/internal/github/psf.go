@@ -81,6 +81,7 @@ func parseIssueDetail(b []byte) (IssueDetail, error) {
 		Labels      []struct{ Name string }
 		Comments    []struct {
 			Author    struct{ Login string }
+			Assoc     string `json:"authorAssociation"`
 			Body      string
 			CreatedAt time.Time
 		}
@@ -92,8 +93,12 @@ func parseIssueDetail(b []byte) (IssueDetail, error) {
 	for _, x := range r.Labels {
 		d.Labels = append(d.Labels, x.Name)
 	}
+	// Only the comments of people with a role in the repository: the issue goes to the agents of a PSF session, and in
+	// a public repository anyone can comment (a stranger's text would reach them as part of the work).
 	for _, c := range r.Comments {
-		d.Comments = append(d.Comments, IssueComment{c.Author.Login, c.Body, c.CreatedAt})
+		if trustedAssociation[c.Assoc] {
+			d.Comments = append(d.Comments, IssueComment{c.Author.Login, c.Body, c.CreatedAt})
+		}
 	}
 	return d, nil
 }

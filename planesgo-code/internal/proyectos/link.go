@@ -3,6 +3,7 @@ package proyectos
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -50,17 +51,34 @@ func readLinkFile(path string) (Link, bool) {
 }
 
 // WriteLink writes the folder's LinkFile, kept out of git locally (.git/info/exclude: nothing changes in the
-// repository).
+// repository). The folder may be a repository nobody checked (MigrateLinks walks every clone under the roots): the
+// temporary file is a new one of its own (never a link the repository brings, which would write wherever it points)
+// and a LinkFile that is not a plain file is left alone.
 func WriteLink(dir string, l Link) error {
 	if l.ProjectID <= 0 {
 		return errors.New("falta el proyecto de Odoo")
 	}
+	dest := filepath.Join(dir, LinkFile)
+	if st, err := os.Lstat(dest); err == nil && !st.Mode().IsRegular() {
+		return fmt.Errorf("%s no es un fichero normal: no se toca", dest)
+	}
 	b, _ := json.MarshalIndent(l, "", "  ")
-	tmp := filepath.Join(dir, LinkFile+".tmp")
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+	f, err := os.CreateTemp(dir, LinkFile+".*.tmp") // O_EXCL: a new file, never an existing one or a link
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, filepath.Join(dir, LinkFile)); err != nil {
+	_, err = f.Write(append(b, '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), dest)
+	}
+	if err != nil {
+		os.Remove(f.Name())
 		return err
 	}
 	repo.ExcludeLocally(dir, LinkFile)

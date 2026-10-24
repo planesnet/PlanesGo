@@ -403,7 +403,7 @@ func main() {
 	datos := filepath.Dir(*dirGrab) // ~/.local/share/pgocode
 	// Las apps cliente: se emparejan con el secreto de emparejar (solo lo lee este usuario del sistema) y luego
 	// entran con su token (internal/clients). El secreto cambia en cada arranque; los clientes emparejados siguen.
-	s.Clients = &clients.Registry{File: filepath.Join(datos, "clientes.json"), SecretFile: filepath.Join(datos, "emparejar")}
+	s.Clients = &clients.Registry{File: filepath.Join(datos, "clientes.json"), SecretFile: filepath.Join(datos, clients.SecretName)}
 	if err := s.Clients.Init(); err != nil {
 		log.Fatalf("clientes: %v", err)
 	}

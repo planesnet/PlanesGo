@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -71,5 +72,37 @@ func TestLinkReadAndMigrate(t *testing.T) {
 	}
 	if m, k := MigrateLinks([]string{root}, true); len(m) != 0 || len(k) != 1 {
 		t.Errorf("again: %v %v", m, k)
+	}
+}
+
+// A cloned repository nobody checked brings links named like the files pgocode writes: they are never followed (the
+// project name it also brings would end up wherever the link points, e.g. in ~/.bashrc).
+func TestWriteLinkNeverFollowsLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symbolic links")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "repo")
+	os.MkdirAll(dir, 0o755)
+	victim := filepath.Join(root, "bashrc")
+	os.WriteFile(victim, []byte("original\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, legacyLinkFile), []byte(`{"odoo_project_id":1,"odoo_project_name":"$(touch pwned)"}`), 0o644)
+	os.Symlink(victim, filepath.Join(dir, LinkFile+".tmp")) // the old temporary name
+	MigrateLinks([]string{root}, false)
+	if b, _ := os.ReadFile(victim); string(b) != "original\n" {
+		t.Fatalf("the link was followed: %q", b)
+	}
+	if l, ok := ReadLink(dir); !ok || l.ProjectID != 1 {
+		t.Errorf("link not written: %+v", l)
+	}
+	// A LinkFile that is a link is left alone.
+	other := filepath.Join(root, "otro")
+	os.MkdirAll(other, 0o755)
+	os.Symlink(victim, filepath.Join(other, LinkFile))
+	if err := WriteLink(other, Link{ProjectID: 2}); err == nil {
+		t.Error("a LinkFile that is a link is replaced")
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "original\n" {
+		t.Fatalf("the link was followed: %q", b)
 	}
 }

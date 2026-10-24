@@ -115,7 +115,7 @@ func (s *Servidor) anydeskState(w http.ResponseWriter, r *http.Request, ses *ses
 	st := s.anydeskSettingsLocked()
 	def, defName := st.Default, st.DefaultName
 	a.mu.Unlock()
-	jsonOK(w, map[string]any{"sessions": s.remote.list(remoteAnyDesk, true), "default_project": def, "default_project_name": defName})
+	jsonOK(w, map[string]any{"sessions": s.remote.list(remoteAnyDesk, true, ses.UID), "default_project": def, "default_project_name": defName})
 }
 
 // anydeskAssign: POST /api/anydesk/assign {id, project, default}. Gives an open session a project (and remembers it
@@ -137,7 +137,7 @@ func (s *Servidor) anydeskAssign(w http.ResponseWriter, r *http.Request, ses *se
 	rs := &s.remote
 	rs.mu.Lock()
 	c := rs.m[p.ID]
-	if c == nil || c.Kind != remoteAnyDesk || !c.open() {
+	if c == nil || c.Kind != remoteAnyDesk || !c.open() || !c.visibleTo(ses.UID) {
 		rs.mu.Unlock()
 		jsonError(w, http.StatusNotFound, "esa sesión de AnyDesk ya no está abierta")
 		return

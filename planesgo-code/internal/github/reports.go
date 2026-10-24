@@ -66,12 +66,13 @@ func (l *Lector) CommentIssue(ctx context.Context, repo string, n int, body stri
 	return err
 }
 
-// CanUse: whether the gh account of this computer can read the repository (and so open issues in it).
-func (l *Lector) CanUse(ctx context.Context, repo string) bool {
+// CanUse: whether the gh account of this computer can read the repository (and so open issues in it), and whether
+// the repository is public. A failed check counts as public: nothing is sent by default.
+func (l *Lector) CanUse(ctx context.Context, repo string) (ok, public bool) {
 	if !nombreRepo.MatchString(repo) {
-		return false
+		return false, true
 	}
-	b, err := gh(ctx, "", "repo", "view", repo, "--json", "viewerPermission", "-q", ".viewerPermission")
-	p := strings.TrimSpace(string(b))
-	return err == nil && p != "" && p != "NONE"
+	b, err := gh(ctx, "", "repo", "view", repo, "--json", "viewerPermission,visibility", "-q", ".viewerPermission + \" \" + .visibility")
+	p, vis, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
+	return err == nil && p != "" && p != "NONE", vis != "PRIVATE" && vis != "INTERNAL"
 }

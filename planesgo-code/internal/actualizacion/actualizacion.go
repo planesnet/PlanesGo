@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -143,15 +144,17 @@ func Nuevo(url, dirApp, dirPreparado, version string) *Actualizador {
 		return URLSegura(req.URL.String()) // una redirección tampoco puede bajar a http
 	}}
 	a.estado.Version = version
-	b, err := os.ReadFile(filepath.Join(dirApp, "paquete.sha256"))
-	a.instalado = strings.TrimSpace(string(b))
+	a.instalado = readSHA(dirApp)
 	switch {
 	case a.URL == "":
 		a.estado.Estado, a.estado.Error = "desactivada", "sin servidor de actualizaciones"
 	case URLSegura(a.URL) != nil:
 		a.estado.Estado, a.estado.Error = "desactivada", URLSegura(a.URL).Error()
-	case err != nil || a.instalado == "" || a.instalado == "desarrollo":
+	case a.instalado == "" || a.instalado == "desarrollo":
 		a.estado.Estado, a.estado.Error = "desactivada", "versión de desarrollo (no instalada desde un paquete)"
+	case runtime.GOOS == "windows":
+		// The running program cannot be swapped with its folder there, and the packages are only for Linux.
+		a.estado.Estado, a.estado.Error = "desactivada", "en Windows, las versiones nuevas se instalan con el instalador"
 	default:
 		a.estado.Estado = "al-dia"
 	}
@@ -280,7 +283,14 @@ func (a *Actualizador) revisa(ctx context.Context) {
 		})
 		return
 	}
-	if b, err := os.ReadFile(filepath.Join(a.DirPreparado, "nuevo", "paquete.sha256")); err == nil && strings.TrimSpace(string(b)) == p.SHA256 {
+	if why := a.failed(p.SHA256); why != "" {
+		a.pon(func(e *Estado) {
+			e.Estado, e.Nueva = "manual", p.Version
+			e.Error = fmt.Sprintf("la versión %s no se pudo instalar (%s): hay que reinstalar Planes Go Code", p.Version, why)
+		})
+		return
+	}
+	if readSHA(filepath.Join(a.DirPreparado, "nuevo")) == p.SHA256 {
 		a.pon(func(e *Estado) { e.Estado, e.Nueva, e.Error = "pendiente", p.Version, "" })
 		return
 	}
@@ -365,7 +375,7 @@ func (a *Actualizador) prepara(ctx context.Context, p Publicada) error {
 		os.RemoveAll(parcial)
 		return errors.New("el paquete no trae pgocode-backend")
 	}
-	if err := os.WriteFile(filepath.Join(parcial, "paquete.sha256"), []byte(p.SHA256+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(parcial, shaFile), []byte(p.SHA256+"\n"), 0o644); err != nil {
 		return err
 	}
 	os.RemoveAll(destino)

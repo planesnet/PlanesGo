@@ -380,3 +380,62 @@ func TestRDPArgs(t *testing.T) {
 		}
 	}
 }
+
+// A session that ended while its beat was telling a forgetful server again: the new id is ended too (otherwise the
+// server would keep it open, and count its time, until its silence runs out).
+func TestBeatAgainAfterFinish(t *testing.T) {
+	f := &fakeServer{beats: map[string][]bool{}, ended: map[string]string{}, token: "tok", forget: true}
+	hs := httptest.NewServer(f)
+	defer hs.Close()
+	h := &Helper{API: &API{Base: hs.URL, Token: "tok"}, sessions: map[string]*session{}}
+	s := &session{id: "s0", server: "s0", info: SessionInfo{Kind: "rdp", Project: 590, Host: "h", User: "u"}} // finished: not in sessions
+	h.beatOne(s, true)
+	created, _, ended := f.snapshot()
+	if len(created) != 1 {
+		t.Fatalf("created: %v", created)
+	}
+	if _, ok := ended["s1"]; !ok {
+		t.Errorf("the session told again is not ended: %v", ended)
+	}
+}
+
+// An RDP window opened while the app is closing (the order was in flight) is closed at once.
+func TestAddWhileClosing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FreeRDP simulado con sh")
+	}
+	fakeFreeRDP(t, "exec sleep 60")
+	w, err := StartRDP(RDPClient(), "n", "h", "u", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Helper{sessions: map[string]*session{}, closing: true}
+	h.add(&session{id: "s1", rdp: w})
+	done := make(chan string, 1)
+	go func() { done <- w.Wait() }()
+	select {
+	case msg := <-done:
+		if msg != "" {
+			t.Errorf("closed from pgocode, not an error: %q", msg)
+		}
+	case <-time.After(5 * time.Second):
+		w.Close()
+		t.Fatal("the window stays open after the app closed")
+	}
+}
+
+// The token comes as the first line of the input (never in the environment); the orders follow it.
+func TestReadToken(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader("abc123\n{\"op\":\"idle\"}\n"))
+	if got := readToken(in); got != "abc123" {
+		t.Errorf("token %q", got)
+	}
+	if rest, _ := in.ReadString('\n'); rest != "{\"op\":\"idle\"}\n" {
+		t.Errorf("the orders after it: %q", rest)
+	}
+	for _, s := range []string{"", "{\"op\":\"idle\"}\n"} {
+		if got := readToken(bufio.NewReader(strings.NewReader(s))); got != "" {
+			t.Errorf("%q: token %q", s, got)
+		}
+	}
+}

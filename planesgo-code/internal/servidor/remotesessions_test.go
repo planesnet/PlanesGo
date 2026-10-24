@@ -153,7 +153,7 @@ func TestRemoteSessionLifecycle(t *testing.T) {
 	if beat(e.a, `{"active":true}`) != 200 || !slices.Equal(e.open(), []string{"rdp-" + c.ID}) {
 		t.Fatalf("en uso: %v", e.open())
 	}
-	l := e.s.remote.list("", false)
+	l := e.s.remote.listAll(false)
 	if len(l) != 1 || l[0].State != remoteConnected || l[0].uid != 7 {
 		t.Fatalf("conectada: %+v", l)
 	}
@@ -164,7 +164,7 @@ func TestRemoteSessionLifecycle(t *testing.T) {
 	if w := e.call("POST", "/api/remote/sessions/"+c.ID+"/end", `{}`, e.b, true); w.Code != http.StatusNotFound {
 		t.Fatalf("fin ajeno: %d", w.Code)
 	}
-	if e.s.remote.list("", true) == nil || len(e.s.remote.list("", true)) != 1 {
+	if e.s.remote.listAll(true) == nil || len(e.s.remote.listAll(true)) != 1 {
 		t.Fatal("un cliente ajeno la ha cerrado")
 	}
 	// The end, with its explained error: the period closes and the interface sees why.
@@ -188,7 +188,7 @@ func TestRemoteSessionLifecycle(t *testing.T) {
 	// Ended sessions are forgotten after a while.
 	e.clock.pass(remoteKeepEnded + time.Second)
 	e.s.expireRemote()
-	if len(e.s.remote.list("", false)) != 0 {
+	if len(e.s.remote.listAll(false)) != 0 {
 		t.Fatal("no se olvida")
 	}
 }
@@ -205,12 +205,12 @@ func TestRemoteSessionExpires(t *testing.T) {
 	}
 	e.clock.pass(remoteSilence)
 	e.s.expireRemote()
-	if len(e.s.remote.list("", true)) != 1 {
+	if len(e.s.remote.listAll(true)) != 1 {
 		t.Fatal("cerrada antes de los 60 s")
 	}
 	e.clock.pass(time.Second)
 	e.s.expireRemote()
-	if l := e.s.remote.list("", false); len(l) != 1 || l[0].State != remoteEnded || l[0].Error == "" || len(e.open()) != 0 {
+	if l := e.s.remote.listAll(false); len(l) != 1 || l[0].State != remoteEnded || l[0].Error == "" || len(e.open()) != 0 {
 		t.Fatalf("sin latidos sigue abierta: %+v %v", l, e.open())
 	}
 	if e.s.TrabajoEnCurso() != "" {
@@ -269,4 +269,26 @@ func TestRemoteAnyDesk(t *testing.T) {
 	if st2.UID != 7 || st2.Default != 591 || st2.Peers["444555666"].Project != 591 || st2.Peers["111222333"].Project != 590 {
 		t.Fatalf("ajustes: %+v", st2)
 	}
+}
+
+// Each user sees their own remote sessions and the ones nobody owns yet, never another user's.
+func TestRemoteSessionsVisible(t *testing.T) {
+	rs := remoteSessions{m: map[string]*remoteSession{"a": {ID: "a", uid: 7}, "b": {ID: "b", uid: 8}, "c": {ID: "c"}}}
+	got := rs.list("", false, 7)
+	if len(got) != 2 || slices.ContainsFunc(got, func(c remoteSession) bool { return c.ID == "b" }) {
+		t.Errorf("visible: %+v", got)
+	}
+}
+
+// listAll: every session, whoever's it is (the tests look at the store as a whole).
+func (rs *remoteSessions) listAll(onlyOpen bool) []remoteSession {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	l := []remoteSession{}
+	for _, c := range rs.m {
+		if !onlyOpen || c.open() {
+			l = append(l, *c)
+		}
+	}
+	return l
 }

@@ -27,7 +27,7 @@ export default function ErrorReportSettings() {
       Si ya hay una issue abierta para el mismo fallo, se comenta en ella como mucho una vez al día; como mucho {v?.max_per_day ?? 5} issues nuevas al día.
       Antes de enviar nada se tapan contraseñas, tokens y tu carpeta personal.
     </span>
-    {v && <p className={'pequeno' + (v.enabled && !v.access ? ' aviso-txt' : ' suave')}>{statusText(v)}</p>}
+    {v && <p className={'pequeno' + ((v.enabled && !v.access) || v.public ? ' aviso-txt' : ' suave')}>{statusText(v)}</p>}
     <span className="suave pequeno">Para que se resuelvan solas, activa «Resolución automática» en los ajustes de Issues del proyecto PLANESGO: cada issue nueva arranca una sesión automática PSF.</span>
     {error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
     {!!v?.recent?.length && <>

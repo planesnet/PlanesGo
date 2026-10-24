@@ -18,6 +18,7 @@ func TestReadOnlyAllowed(t *testing.T) {
 		`Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion | Select-Object ProgramFilesDir`,
 		"Get-Content C:\\x.log -Tail 20 2>&1",
 		"Get-Item C:\\no > $null",
+		"Get-Item C:\\no > $null; Get-Date", "Get-Item C:\\no 2>$null | Out-Null", "Get-Item C:\\no >> $null\n",
 		"Get-WinEvent -LogName System -MaxEvents 5 | Select-Object TimeCreated, Id, @{n='Mensaje'; e={ $_.Message.Split(\"`n\")[0] }}",
 		"# a comment with Remove-Item\nGet-Date <# Stop-Computer #>",
 		"'Remove-Item C:\\ -Recurse'; \"Stop-Service x\"",
@@ -42,6 +43,8 @@ func TestReadOnlyRefused(t *testing.T) {
 	for _, s := range []string{
 		`Remove-Item C:\x.log`,
 		`Get-ChildItem C:\tmp | Remove-Item`,
+		`Write-Output 'x' > $null\ProgramData\a.vbs`, // PowerShell joins $null and the path: a file
+		`'x' >> $nullx`,
 		"Get-Service x |\n  Stop-Service",
 		`Stop-Computer -Force`,
 		`Set-ItemProperty HKLM:\x -Name a -Value 1`,

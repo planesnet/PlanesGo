@@ -2,7 +2,8 @@
 // user or a Windows one (DOMAIN\user, NTLM), and run batches that return their result sets as plain values.
 //
 // Read only unless the connection allows changes: each batch runs inside a transaction that is always rolled back,
-// and batches that would end that transaction themselves (COMMIT, ROLLBACK, BEGIN/SAVE TRANSACTION) are refused.
+// and batches that would end that transaction themselves (COMMIT, ROLLBACK, BEGIN/SAVE TRANSACTION) are refused, as is
+// dynamic SQL (EXEC of a string, sp_executesql), where those statements would hide inside a literal.
 // That stops accidents, not a determined user: for a guaranteed read-only access, the login needs read-only rights
 // in SQL Server too (db_datareader).
 package sqlserver
@@ -213,16 +214,46 @@ type Result struct {
 // transactionControl: statements that would end the read-only transaction themselves.
 var transactionControl = regexp.MustCompile(`(?i)\b(COMMIT|ROLLBACK|SAVE\s+TRAN(SACTION)?|BEGIN\s+(DISTRIBUTED\s+)?TRAN(SACTION)?)\b`)
 
+// dynamicSQL: SQL built from a string (EXEC('…'), EXEC(@sql), sp_executesql), where a COMMIT would not be seen,
+// and procedures that act outside the database (xp_cmdshell, the sp_OA* of OLE objects), which no rollback undoes:
+// the literals are removed before looking (the names between brackets are kept).
+var dynamicSQL = regexp.MustCompile(`(?i)\bEXEC(UTE)?\s*\(|\bsp_executesql\b|\bsp_prepexec\b|\bsp_prepare\b|\bsp_execute\b|\bsp_sqlexec\b|\bxp_cmdshell\b|\bsp_OA\w+`)
+
+// execVariable: EXEC of a procedure whose name is in a variable, with or without a return value (EXEC @p …,
+// EXEC @r = @p …): the variable can hold sp_executesql. EXEC @r = dbo.proc (a name) is not one.
+var execVariable = regexp.MustCompile(`(?i)\bEXEC(?:UTE)?\s+@[\w@$#]+`)
+
+// execOfVariable: whether code runs a procedure named by a variable (see execVariable).
+func execOfVariable(code string) bool {
+	for _, m := range execVariable.FindAllStringIndex(code, -1) {
+		rest := strings.TrimLeft(code[m[1]:], " \t\r\n")
+		after, isReturn := strings.CutPrefix(rest, "=")
+		if !isReturn || strings.HasPrefix(strings.TrimLeft(after, " \t\r\n"), "@") {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadOnlyCheck: why a batch cannot run in a read-only connection ("" if it can).
 func ReadOnlyCheck(batch string) string {
-	if m := transactionControl.FindString(stripLiterals(batch)); m != "" {
+	if m := transactionControl.FindString(stripLiterals(batch, false)); m != "" {
 		return fmt.Sprintf("«%s» no se puede usar en una conexión de solo lectura", strings.ToUpper(m))
+	}
+	code := stripLiterals(batch, true)
+	if dynamicSQL.MatchString(code) {
+		return "el SQL dinámico (EXEC de un texto, sp_executesql, sp_prepexec…) y xp_cmdshell o sp_OA* no se pueden usar en una conexión de solo lectura"
+	}
+	if execOfVariable(code) {
+		return "EXEC de un procedimiento guardado en una variable no se puede usar en una conexión de solo lectura"
 	}
 	return ""
 }
 
-// stripLiterals removes strings, quoted names and comments, so that keywords are only found in the code.
-func stripLiterals(s string) string {
+// stripLiterals removes strings, quoted names and comments, so that keywords are only found in the code. With
+// keepNames, the content of quoted names ([sp_executesql], "x") stays, without its quotes: a procedure is still found
+// by its name when it is written between brackets.
+func stripLiterals(s string, keepNames bool) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		switch {
@@ -251,6 +282,10 @@ func stripLiterals(s string) string {
 					break
 				}
 				j++
+			}
+			if keepNames && end != '\'' && j <= len(s) {
+				b.WriteByte(' ')
+				b.WriteString(strings.ReplaceAll(s[i+1:min(j, len(s))], string([]byte{end, end}), string(end)))
 			}
 			i = j + 1
 			b.WriteByte(' ')
@@ -305,6 +340,12 @@ func (c *Conn) Run(ctx context.Context, batch string, maxRows int, write bool) (
 			return Result{}, explain(err)
 		}
 	} // without one, the login's default: the driver resets a pooled connection before reusing it
+	// The read-only transaction, by its id (SQL Server 2016 or later; NULL before): a batch that commits it and opens
+	// another one is found below, which the count of open transactions alone would not show.
+	var txID sql.NullInt64
+	if tx != nil {
+		q.QueryRowContext(ctx, "SELECT CURRENT_TRANSACTION_ID()").Scan(&txID)
+	}
 	var res Result
 	rows, err := q.QueryContext(ctx, batch)
 	if err != nil {
@@ -328,7 +369,18 @@ func (c *Conn) Run(ctx context.Context, batch string, maxRows int, write bool) (
 		return Result{}, explain(err)
 	}
 	rows.Close()
-	q.QueryRowContext(ctx, "SELECT CAST(@@ROWCOUNT AS bigint)").Scan(&res.Affected)
+	open := -1 // unknown if the query fails: not taken as ended
+	var nowID sql.NullInt64
+	if txID.Valid {
+		q.QueryRowContext(ctx, "SELECT CAST(@@ROWCOUNT AS bigint), @@TRANCOUNT, CURRENT_TRANSACTION_ID()").Scan(&res.Affected, &open, &nowID)
+	} else {
+		q.QueryRowContext(ctx, "SELECT CAST(@@ROWCOUNT AS bigint), @@TRANCOUNT").Scan(&res.Affected, &open)
+	}
+	// Whatever got past ReadOnlyCheck (a procedure with its own COMMIT…): the transaction that undoes the batch is
+	// gone (or it is another one), so its changes may have stayed. Said, not hidden.
+	if tx != nil && (open == 0 || (txID.Valid && nowID.Valid && nowID.Int64 != txID.Int64)) {
+		return Result{}, errors.New("la orden ha terminado por su cuenta la transacción de solo lectura: lo que haya cambiado puede haberse guardado")
+	}
 	res.RolledBack = tx != nil // the deferred Rollback undoes it
 	res.Ms = time.Since(start).Milliseconds()
 	return res, nil

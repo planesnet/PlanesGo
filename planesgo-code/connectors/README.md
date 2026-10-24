@@ -70,8 +70,8 @@ ventanas de RDP se cierran con ella. En el navegador (sin la app de escritorio) 
 ### Ayudante de escritorio y contrato con el servidor
 
 La app de escritorio arranca el ayudante (`pgocode-backend cliente`, el mismo binario) como hijo suyo tras
-emparejarse, con la dirección del servidor y el token del cliente por entorno (`PGO_SERVIDOR`, `PGO_TOKEN_CLIENTE`;
-nunca como argumentos). Hablan en líneas JSON: órdenes por su entrada (`rdp`, `anydesk`, `disconnect` e `idle` cada
+emparejarse, con la dirección del servidor por entorno (`PGO_SERVIDOR`) y el token del cliente como primera línea de su
+entrada (nunca en el entorno ni como argumentos, que cualquier proceso del usuario puede leer). Hablan en líneas JSON: órdenes por su entrada (`rdp`, `anydesk`, `disconnect` e `idle` cada
 5 s con la inactividad del sistema) y eventos por su salida (`ready` con los visores instalados, `reply`, `state` y
 `error`). El ayudante cuenta al servidor cada sesión con la cookie del cliente:
 

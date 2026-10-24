@@ -15,6 +15,7 @@ type fakeGitHub struct {
 	comments map[int][]string
 	next     int
 	canUse   bool
+	public   bool
 }
 
 func newFake() *fakeGitHub {
@@ -41,7 +42,7 @@ func (f *fakeGitHub) CommentIssue(_ context.Context, _ string, n int, body strin
 	return nil
 }
 
-func (f *fakeGitHub) CanUse(context.Context, string) bool { return f.canUse }
+func (f *fakeGitHub) CanUse(context.Context, string) (bool, bool) { return f.canUse, f.public }
 
 func newReporter(t *testing.T, gh *fakeGitHub, version string) (*Reporter, *time.Time) {
 	t.Helper()
@@ -153,8 +154,12 @@ func TestDailyLimitAndDisabled(t *testing.T) {
 	gh3.canUse = false
 	r3, _ := newReporter(t, gh3, "0.5.9") // no access to the repository: off
 	r3.send(Report{Source: FromServer, Message: "fallo"})
-	if len(gh2.open)+len(gh3.open) != 0 {
-		t.Error("off by default in development builds and without access")
+	gh4 := newFake()
+	gh4.public = true
+	r4, _ := newReporter(t, gh4, "0.5.9") // a public repository: anyone would read the failures
+	r4.send(Report{Source: FromServer, Message: "fallo"})
+	if len(gh2.open)+len(gh3.open)+len(gh4.open) != 0 {
+		t.Error("off by default in development builds, without access and in a public repository")
 	}
 	r3.SetEnabled(true)
 	if on, chosen := r3.Enabled(context.Background()); !on || !chosen {

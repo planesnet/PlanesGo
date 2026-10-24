@@ -465,11 +465,12 @@ func at(s string, i int) byte {
 	return 0
 }
 
-var harmlessRedirect = regexp.MustCompile(`(?i)^>{1,2}(?:&[12]|\s*\$null\b)`)
+var harmlessRedirect = regexp.MustCompile(`(?i)^>{1,2}(?:&[12]|\s*\$null)`)
 
 func (p *roScanner) redirect(st *roStatement) string {
 	m := harmlessRedirect.FindString(p.s[p.i:])
-	if m == "" {
+	// $null only if nothing is glued to it: «> $null\ruta» is a file (PowerShell joins the two into a path).
+	if m == "" || !strings.ContainsRune(" \t\r\n;|)}", rune(at(p.s, p.i+len(m)))) && p.i+len(m) < len(p.s) {
 		return "redirigir la salida a un fichero (>) no se admite en solo lectura (sí > $null y 2>&1)"
 	}
 	p.i += len(m)

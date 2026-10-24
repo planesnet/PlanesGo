@@ -31,7 +31,7 @@ func (s *Servidor) clientOf(r *http.Request) (string, bool) {
 }
 
 // pairPath: the only route a client that is not paired yet can call.
-const pairPath = "/api/clientes/emparejar"
+const pairPath = clients.PairPath
 
 // POST /api/clientes/emparejar {secret, name}: a new client, if it knows the pairing secret. The token goes back once.
 func (s *Servidor) clientsPair(w http.ResponseWriter, r *http.Request) {
@@ -68,12 +68,12 @@ func (s *Servidor) clientsMe(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/clientes: the paired clients.
 func (s *Servidor) clientsList(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
-	if s.Clients == nil {
-		jsonOK(w, []clients.Client{})
-		return
-	}
 	me, _ := s.clientOf(r)
-	jsonOK(w, map[string]any{"clients": s.Clients.List(), "me": me})
+	l := []clients.Client{}
+	if s.Clients != nil {
+		l = s.Clients.List()
+	}
+	jsonOK(w, map[string]any{"clients": l, "me": me})
 }
 
 // POST /api/clientes/revocar {id}: a client stops having access at once.

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { failureText, statusText, type ErrorReportsView } from './errorReports.ts';
 
 const view = (x: Partial<ErrorReportsView>): ErrorReportsView =>
-  ({ enabled: false, chosen: false, repo: 'planesnet/PlanesGo', access: true, dev: false, max_per_day: 5, recent: [], ...x });
+  ({ enabled: false, chosen: false, repo: 'planesnet/PlanesGo', access: true, public: false, dev: false, max_per_day: 5, recent: [], ...x });
 
 test('statusText says why it is on or off', () => {
   assert.match(statusText(view({ enabled: true })), /por defecto/);
@@ -12,6 +12,8 @@ test('statusText says why it is on or off', () => {
   assert.match(statusText(view({ enabled: true, chosen: true, access: false })), /no se enviará nada/);
   assert.match(statusText(view({ dev: true })), /desarrollo/);
   assert.match(statusText(view({ access: false })), /no puede abrir issues/);
+  assert.match(statusText(view({ public: true })), /es público/); // public repository: off by default, said why
+  assert.match(statusText(view({ public: true, enabled: true, chosen: true })), /cualquiera puede leer/);
   assert.equal(statusText(view({ chosen: true })), 'Desactivado.');
 });
 

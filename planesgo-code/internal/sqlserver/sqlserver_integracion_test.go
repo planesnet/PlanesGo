@@ -1,5 +1,8 @@
 //go:build integracion
 
+// As in cmd/pgocode: SQL Server's own certificate has a negative serial number.
+//
+//go:debug x509negativeserial=1
 package sqlserver
 
 import (
@@ -55,6 +58,33 @@ func TestRealServer(t *testing.T) {
 	}
 	if _, err := ro.Run(ctx, "INSERT dbo.x VALUES (1); COMMIT", 0, false); err == nil || !strings.Contains(err.Error(), "COMMIT") {
 		t.Errorf("COMMIT: %v", err)
+	}
+	if _, err := ro.Run(ctx, "EXEC('COMMIT'); SELECT 1", 0, false); err == nil || !strings.Contains(err.Error(), "dinámico") {
+		t.Errorf("dynamic SQL: %v", err)
+	}
+	// A procedure with its own COMMIT gets past the check: the batch must not end as if it had been undone.
+	w, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	w.SetAllowChanges(true)
+	if _, err := w.Run(ctx, "CREATE OR ALTER PROCEDURE dbo.pgo_commit AS COMMIT", 0, true); err != nil {
+		t.Fatal(err)
+	}
+	defer w.Run(ctx, "DROP PROCEDURE IF EXISTS dbo.pgo_commit", 0, true)
+	if r, err := ro.Run(ctx, "EXEC dbo.pgo_commit", 0, false); err == nil {
+		t.Errorf("a procedure that commits passes as read only: %+v", r)
+	} else {
+		t.Logf("procedure with COMMIT: %v", err)
+	}
+	// One that commits and opens another transaction leaves the count as it was: the transaction id gives it away.
+	if _, err := w.Run(ctx, "CREATE OR ALTER PROCEDURE dbo.pgo_commit2 AS BEGIN COMMIT; BEGIN TRAN END", 0, true); err != nil {
+		t.Fatal(err)
+	}
+	defer w.Run(ctx, "DROP PROCEDURE IF EXISTS dbo.pgo_commit2", 0, true)
+	if r, err := ro.Run(ctx, "EXEC dbo.pgo_commit2", 0, false); err == nil || !strings.Contains(err.Error(), "terminado") {
+		t.Errorf("a procedure that commits and reopens passes as read only: %+v %v", r, err)
 	}
 
 	// Several result sets and the row limit.

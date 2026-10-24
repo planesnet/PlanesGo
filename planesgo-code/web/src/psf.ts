@@ -311,15 +311,17 @@ export const SHOW_EVIDENCE = 'pgo:ver-fotos';
 // automatic resolution is turned on), instead of waiting for the next 5-minute round.
 export const PSF_CHECK = 'pgo:psf-check';
 
-export interface WatchedIssue { numero: number; titulo: string; url: string; estado: string; fase: string; creada: string; prs: unknown[] }
+export interface WatchedIssue { numero: number; titulo: string; url: string; estado: string; fase: string; creada: string; prs: unknown[]; autor_confiable?: boolean }
 interface SessionLike { psf?: Pick<PsfState, 'issue' | 'phase'>; archivada?: boolean }
 
 // issuesToResolve: the new issues to start on their own, oldest first: open, not started (no PR), created after
 // the option was turned on and without an automatic session yet (archived ones count: they were already handled).
+// Only issues of people with a role in the repository: in a public one anyone can open an issue, and its text would
+// go to an agent working on this computer (a stranger's one is started by hand, after reading it).
 export function issuesToResolve(issues: readonly WatchedIssue[], sessions: readonly SessionLike[], since: number): WatchedIssue[] {
   const taken = new Set(sessions.filter(s => s.psf).map(s => s.psf!.issue));
   return issues
-    .filter(i => i.estado === 'OPEN' && i.fase === 'por-empezar' && !i.prs.length && Date.parse(i.creada) >= since && !taken.has(i.numero))
+    .filter(i => i.autor_confiable && i.estado === 'OPEN' && i.fase === 'por-empezar' && !i.prs.length && Date.parse(i.creada) >= since && !taken.has(i.numero))
     .sort((a, b) => Date.parse(a.creada) - Date.parse(b.creada));
 }
 

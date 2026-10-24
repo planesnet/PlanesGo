@@ -59,7 +59,8 @@ type Issuer interface {
 	FindOpenIssue(ctx context.Context, repo, word string) (int, error)
 	OpenReportIssue(ctx context.Context, repo, title, body string) (int, string, error)
 	CommentIssue(ctx context.Context, repo string, n int, body string) error
-	CanUse(ctx context.Context, repo string) bool
+	// CanUse: whether the gh account can open issues in repo, and whether repo is public (anyone reads its issues).
+	CanUse(ctx context.Context, repo string) (ok, public bool)
 }
 
 // Known: a failure already seen on this computer.
@@ -92,8 +93,10 @@ type Reporter struct {
 	queue chan Report
 	mu    sync.Mutex
 	st    state
-	// whether the gh account can use Repo (checked at most once an hour; it decides the default)
+	// whether the gh account can use Repo and whether it is public (checked at most once an hour; they decide the
+	// default)
 	access      bool
+	public      bool
 	accessFresh time.Time
 }
 
@@ -127,8 +130,9 @@ func (r *Reporter) Report(rep Report) {
 	}
 }
 
-// Enabled: the choice of the person or, without one, on when the gh account can use the repository and this is
-// not a development build (there the failures are usually the code being written).
+// Enabled: the choice of the person or, without one, on when the gh account can use the repository, the repository
+// is not public (a failure can carry names of projects, customers or data: anyone would read them) and this is not a
+// development build (there the failures are usually the code being written).
 func (r *Reporter) Enabled(ctx context.Context) (on, chosen bool) {
 	r.mu.Lock()
 	e := r.st.Enabled
@@ -136,22 +140,24 @@ func (r *Reporter) Enabled(ctx context.Context) (on, chosen bool) {
 	if e != nil {
 		return *e, true
 	}
-	return r.Version != "dev" && r.CanUse(ctx), false
+	ok, public := r.CanUse(ctx)
+	return r.Version != "dev" && ok && !public, false
 }
 
-// CanUse: whether the gh account of this computer can open issues in r.Repo (cached for an hour).
-func (r *Reporter) CanUse(ctx context.Context) bool {
+// CanUse: whether the gh account of this computer can open issues in r.Repo, and whether it is public (cached for an
+// hour).
+func (r *Reporter) CanUse(ctx context.Context) (ok, public bool) {
 	r.mu.Lock()
 	if r.Now().Sub(r.accessFresh) < time.Hour {
 		defer r.mu.Unlock()
-		return r.access
+		return r.access, r.public
 	}
 	r.mu.Unlock()
-	ok := r.Issuer.CanUse(ctx, r.Repo)
+	ok, public = r.Issuer.CanUse(ctx, r.Repo)
 	r.mu.Lock()
-	r.access, r.accessFresh = ok, r.Now()
+	r.access, r.public, r.accessFresh = ok, public, r.Now()
 	r.mu.Unlock()
-	return ok
+	return ok, public
 }
 
 // SetEnabled stores the choice of the person.

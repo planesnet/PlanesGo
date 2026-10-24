@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"planesgo-code/internal/clients"
 )
 
 // Blindaje del Odoo de PlanesNet (docs/odoo-blindaje.md): en Odoo solo escribe la imputación de pgocode, nunca un
@@ -49,6 +51,9 @@ func currentGuard() AgentGuard {
 	return guard
 }
 
+// DesktopAppName: the desktop app's name (productName in electron/package.json), the folder of its data.
+const DesktopAppName = "Planes Go Code"
+
 // DefaultAgentGuard: el blindaje para un pgocode con Odoo en odooURL, PlanesGo en planesgoURL y sus datos en datos.
 func DefaultAgentGuard(odooURL, planesgoURL, datos string) AgentGuard {
 	g := AgentGuard{}
@@ -61,13 +66,23 @@ func DefaultAgentGuard(odooURL, planesgoURL, datos string) AgentGuard {
 		// Arriba del todo, los ficheros de pgocode (sesiones, imputación, registros); no las subcarpetas, que son
 		// las copias de trabajo de las ramas (ramas/) donde trabajan los agentes, y los datos de OpenCode.
 		g.ReadDeny = append(g.ReadDeny, filepath.Join(datos, "*.json"), filepath.Join(datos, "*.json.*"),
-			filepath.Join(datos, "*.log"), filepath.Join(datos, "*.log.*"), filepath.Join(datos, "tiempos", "**"))
+			filepath.Join(datos, "*.log"), filepath.Join(datos, "*.log.*"), filepath.Join(datos, "tiempos", "**"),
+			// The audit logs of the sessions' connections (SQL, WinRM, agent desktop): the orders of every session.
+			filepath.Join(datos, "*.jsonl"),
+			// The pairing secret: with it, an agent could pair itself as a client app (internal/clients).
+			filepath.Join(datos, clients.SecretName))
 	}
 	if casa, err := os.UserHomeDir(); err == nil {
 		g.ReadDeny = append(g.ReadDeny, filepath.Join(casa, ".planesgo_auth.json"))
 	}
+	// The desktop app's data (electron/main.js, userData): its client token (cliente.json, encrypted with a key that
+	// the same system user can get) and the sessions of the integrated browser, Google's among them.
+	if conf, err := os.UserConfigDir(); err == nil {
+		g.ReadDeny = append(g.ReadDeny, filepath.Join(conf, DesktopAppName, "**"))
+	}
 	g.CommandWords = []string{"imputacion-dia", "sesiones-reinicio", "partes-abiertos", "planesgo_auth",
-		"/.claude/hooks/planesgo", "/.local/bin/pgo-mcp", "/.local/bin/planesgo-"}
+		"/.claude/hooks/planesgo", "/.local/bin/pgo-mcp", "/.local/bin/planesgo-",
+		clients.PairPath, "pgocode/" + clients.SecretName, ".config/" + DesktopAppName, `.config/Planes\ Go\ Code`}
 	g.Programs = []string{"pgo-mcp", "planesgo-mcp", "planesgo-track"}
 	return g
 }

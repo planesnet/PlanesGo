@@ -19,6 +19,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -34,11 +35,10 @@ const (
 	maxOrder    = 64 << 10
 )
 
-// Environment the desktop app gives the helper.
-const (
-	EnvServer = "PGO_SERVIDOR"      // http://127.0.0.1:7801
-	EnvToken  = "PGO_TOKEN_CLIENTE" // the client's token (secret: removed from the environment once read)
-)
+// EnvServer: the server's address, in the environment the desktop app gives the helper (http://127.0.0.1:7801). The
+// client's token comes as the first line of its standard input: in the environment, any process of the same user
+// (an agent among them) could read it in /proc/<pid>/environ for as long as the helper runs.
+const EnvServer = "PGO_SERVIDOR"
 
 // Order: what the desktop app asks (one JSON line).
 type Order struct {
@@ -97,6 +97,7 @@ type Helper struct {
 	idle     time.Duration
 	idleAt   time.Time
 	launches []anydeskLaunch
+	closing  bool // the app is closing: a window opened from now on is closed at once
 	wg       sync.WaitGroup
 }
 
@@ -122,19 +123,20 @@ func (h *Helper) emit(e Event) {
 	}
 }
 
-// Main runs the helper as «pgocode-backend cliente»: the server and token from the environment, orders on stdin.
+// Main runs the helper as «pgocode-backend cliente»: the server from the environment; the token and then the orders
+// on stdin.
 func Main() int {
 	log.SetPrefix("[ayudante] ")
-	base, token := os.Getenv(EnvServer), os.Getenv(EnvToken)
-	os.Unsetenv(EnvToken) // nothing it starts inherits it (also proceso.CleanEnviron)
+	in := bufio.NewReader(os.Stdin)
+	base, token := os.Getenv(EnvServer), readToken(in)
 	if base == "" || token == "" {
-		log.Printf("faltan %s y %s: lo arranca la app de escritorio", EnvServer, EnvToken)
+		log.Printf("faltan %s y el token del cliente en la entrada: lo arranca la app de escritorio", EnvServer)
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	h := &Helper{API: &API{Base: base, Token: token}, Traces: anydesk.TraceFiles()}
-	if err := h.Run(ctx, os.Stdin, os.Stdout); err != nil {
+	if err := h.Run(ctx, in, os.Stdout); err != nil {
 		log.Print(err)
 		return 1
 	}
@@ -236,10 +238,16 @@ func (h *Helper) active() bool {
 	return h.idle < idleLimit
 }
 
+// add keeps a session. If the app is closing (an order still in flight when its input closed), an RDP window is
+// closed at once: nobody would count its time any more (its goroutine reports the end).
 func (h *Helper) add(s *session) {
 	h.mu.Lock()
 	h.sessions[s.id] = s
+	closing := h.closing
 	h.mu.Unlock()
+	if closing && s.rdp != nil {
+		s.rdp.Close()
+	}
 }
 
 // openRDP reports the session (the server checks the project) and opens FreeRDP with the password on its input.
@@ -404,14 +412,19 @@ func (h *Helper) beatOne(s *session, active bool) {
 		return
 	}
 	h.mu.Lock()
+	_, open := h.sessions[s.id]
 	s.server = id
 	h.mu.Unlock()
+	if !open { // it ended meanwhile and finish told the old id: the new one is ended too
+		h.API.End(id, "")
+	}
 }
 
 // closeAll: the app is closing. The RDP windows close with it (nobody would count their time any more) and every
 // session's end is reported.
 func (h *Helper) closeAll() {
 	h.mu.Lock()
+	h.closing = true
 	var rest []*session
 	for _, s := range h.sessions {
 		if s.rdp != nil {
@@ -435,3 +448,16 @@ func (h *Helper) closeAll() {
 
 // String: an order as it would show in a log, never with its password.
 func (o Order) String() string { return fmt.Sprintf("%s %s", o.Op, o.Req) }
+
+// readToken: the client's token, the first line of the input ("" if there is none or it is not one).
+func readToken(in *bufio.Reader) string {
+	line, err := in.ReadString('\n')
+	if err != nil && line == "" {
+		return ""
+	}
+	t := strings.TrimSpace(line)
+	if len(t) > 256 || strings.ContainsAny(t, " {") { // a token, not an order
+		return ""
+	}
+	return t
+}

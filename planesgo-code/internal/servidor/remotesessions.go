@@ -74,6 +74,10 @@ type remoteSession struct {
 
 func (c *remoteSession) open() bool { return c.State != remoteEnded }
 
+// visibleTo: whether a user may see the session: theirs, or one nobody owns yet (an incoming AnyDesk one before anyone
+// used AnyDesk from pgocode). Other users' hosts, Windows users and projects are not shown.
+func (c *remoteSession) visibleTo(uid int) bool { return c.uid == 0 || c.uid == uid }
+
 // work: what the imputation service logs for the session.
 func (c *remoteSession) work() imputacion.Trabajo {
 	var what string
@@ -127,12 +131,12 @@ func (rs *remoteSessions) logging() int {
 	return n
 }
 
-// list: a copy of the sessions of a kind ("" all), the oldest first.
-func (rs *remoteSessions) list(kind string, onlyOpen bool) []remoteSession {
+// list: a copy of the sessions of a kind ("" all) that user uid may see, the oldest first.
+func (rs *remoteSessions) list(kind string, onlyOpen bool, uid int) []remoteSession {
 	rs.mu.Lock()
 	l := []remoteSession{}
 	for _, c := range rs.m {
-		if (kind == "" || c.Kind == kind) && (!onlyOpen || c.open()) {
+		if (kind == "" || c.Kind == kind) && (!onlyOpen || c.open()) && c.visibleTo(uid) {
 			l = append(l, *c)
 		}
 	}
@@ -452,7 +456,7 @@ func (s *Servidor) WatchRemoteSessions(ctx context.Context) {
 	}
 }
 
-// remoteList: GET /api/remote/sessions. The remote sessions, open and recently ended (for the interface).
-func (s *Servidor) remoteList(w http.ResponseWriter, r *http.Request, _ *sesiones.Sesion) {
-	jsonOK(w, s.remote.list("", false))
+// remoteList: GET /api/remote/sessions. The user's remote sessions, open and recently ended (for the interface).
+func (s *Servidor) remoteList(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	jsonOK(w, s.remote.list("", false, ses.UID))
 }

@@ -40,14 +40,16 @@ type errorReportsView struct {
 	Chosen    bool              `json:"chosen"` // the person chose; otherwise, the default
 	Repo      string            `json:"repo"`
 	Access    bool              `json:"access"` // the gh account of this computer can open issues there
+	Public    bool              `json:"public"` // anyone can read the issues of the repository
 	Dev       bool              `json:"dev"`
 	MaxPerDay int               `json:"max_per_day"`
 	Recent    []bugreport.Known `json:"recent"`
 }
 
 func (s *Servidor) errorReportsView(r *http.Request) errorReportsView {
+	access, public := s.Errores.CanUse(r.Context())
 	on, chosen := s.Errores.Enabled(r.Context())
-	return errorReportsView{Enabled: on, Chosen: chosen, Repo: s.Errores.Repo, Access: s.Errores.CanUse(r.Context()),
+	return errorReportsView{Enabled: on, Chosen: chosen, Repo: s.Errores.Repo, Access: access, Public: public,
 		Dev: s.Version == "dev", MaxPerDay: bugreport.MaxNewPerDay, Recent: s.Errores.Recent(10)}
 }
 

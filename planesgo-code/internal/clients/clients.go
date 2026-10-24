@@ -40,6 +40,13 @@ type Registry struct {
 	secret  string
 }
 
+// PairPath: the server route where a client pairs; SecretName: the file, in the server's data folder, with the pairing
+// secret. The agents' guard (internal/llm) blocks both: an agent must not pair itself as a client.
+const (
+	PairPath   = "/api/clientes/emparejar"
+	SecretName = "emparejar"
+)
+
 var ErrBadSecret = errors.New("el secreto de emparejamiento no es válido")
 
 func randomHex(n int) (string, error) {
