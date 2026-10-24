@@ -72,6 +72,8 @@ cat > "$BIN/pgocode" <<LANZADOR
 #!/bin/sh
 # Planes Go Code: abre la app de escritorio (instalada en $D).
 # Linux: sin ibus (si no conecta, GTK descarta las pulsaciones) y enlace de la ventana con su icono.
+# «pgocode --rdp»: el cliente de escritorio remoto independiente (connectors/rdp/cliente.py).
+if [ "\${1:-}" = "--rdp" ]; then shift; exec python3 -I "$D/app/connectors/rdp/cliente.py" "\$@"; fi
 export GTK_IM_MODULE=gtk-im-context-simple XMODIFIERS=@im=none QT_IM_MODULE= CHROME_DESKTOP=pgocode.desktop
 exec "$D/motor/pgocode" "$D/app" "\$@"
 LANZADOR

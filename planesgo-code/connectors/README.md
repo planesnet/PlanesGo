@@ -42,8 +42,8 @@ código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer
 
 ## Cliente de escritorio remoto: `rdp/cliente.py`
 
-Desde el menú de aplicaciones («Escritorio remoto (Windows)», lanzador en
-`~/.local/share/applications/win-escritorio-remoto.desktop`) o con `python3 -I connectors/rdp/cliente.py`:
+Se abre con **`pgocode --rdp`** (el lanzador de pgocode lo reconoce y abre este cliente en vez de la app; el
+paquete de la app incluye `connectors/`). En desarrollo, también con `python3 -I connectors/rdp/cliente.py`:
 
 1. Lista de conexiones guardadas o «Nueva conexión…» (nombre, equipo `nombre o IP[:puerto]`, usuario, dominio).
 2. Opciones de esa conexión (se recuerdan): portapapeles (texto y ficheros), impresoras de este equipo (todas las
