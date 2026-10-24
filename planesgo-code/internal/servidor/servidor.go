@@ -48,6 +48,7 @@ import (
 	"planesgo-code/internal/repo"
 	"planesgo-code/internal/selector"
 	"planesgo-code/internal/sesiones"
+	"planesgo-code/internal/versiones"
 )
 
 // cookie: nombre antiguo de la cookie de sesión, el mismo en todos los puertos (dos pgocode en el mismo host se
@@ -344,6 +345,11 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 		agente := esRutaAgente(r.URL.Path) && r.Header.Get("X-PGO-Agente") != ""
 		if !esRutaAgente(r.URL.Path) && r.URL.Path != "/healthz" && (r.Header.Get("X-PGO-Agente") != "" || s.fromAgentProcess(r)) {
 			jsonError(w, http.StatusForbidden, "los agentes solo pueden usar la orden «pgo»")
+			return
+		}
+		// A client app says its version: with another major version it cannot work with this server (internal/versiones).
+		if v := r.Header.Get(versiones.Header); v != "" && !versiones.Compatible(v, s.Version) {
+			jsonError(w, http.StatusUpgradeRequired, versiones.Mismatch(v, s.Version))
 			return
 		}
 		pairing := r.URL.Path == pairPath && r.Method == http.MethodPost // a client that is not paired yet

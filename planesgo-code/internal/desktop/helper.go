@@ -40,6 +40,9 @@ const (
 // (an agent among them) could read it in /proc/<pid>/environ for as long as the helper runs.
 const EnvServer = "PGO_SERVIDOR"
 
+// Version: the helper's version (the binary's: cmd/pgocode sets it before Main).
+var Version = "dev"
+
 // Order: what the desktop app asks (one JSON line).
 type Order struct {
 	Op       string  `json:"op"`            // rdp, anydesk, disconnect, idle
@@ -135,7 +138,7 @@ func Main() int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	h := &Helper{API: &API{Base: base, Token: token}, Traces: anydesk.TraceFiles()}
+	h := &Helper{API: &API{Base: base, Token: token, Version: Version}, Traces: anydesk.TraceFiles()}
 	if err := h.Run(ctx, in, os.Stdout); err != nil {
 		log.Print(err)
 		return 1

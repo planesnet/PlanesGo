@@ -115,6 +115,7 @@ declare global {
       escritorioRemoto?: () => Promise<void>; alActividad?: (cb: () => void) => () => void;
       remoto?: (orden: RemoteOrder) => Promise<{ id: string }>; visores?: () => Promise<Viewers>;
       alRemoto?: (cb: (ev: RemoteEvent) => void) => () => void; abrirRuta?: (ruta: string) => Promise<void>;
+      versionApp?: () => Promise<{ app: string; electron: string }>;
       salir?: () => Promise<void>;
     }
   }

@@ -108,3 +108,28 @@ func TestClientsRevokeAndStop(t *testing.T) {
 		t.Fatal("no se para")
 	}
 }
+
+// A client app with another major version is refused (426) with the explanation; another minor version works.
+func TestClientVersion(t *testing.T) {
+	s := &Servidor{Puerto: "7801", Sesiones: sesiones.NuevoAlmacen(), Version: "0.7.0", PermitirNavegador: true}
+	h := s.Handler()
+	call := func(v string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:7801/api/version", nil)
+		r.Header.Set("X-PGO", "1")
+		if v != "" {
+			r.Header.Set("X-PGO-Version", v)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for v, code := range map[string]int{"": 200, "0.7.4": 200, "dev": 200, "0.8.0": http.StatusUpgradeRequired, "0.6.9": http.StatusUpgradeRequired} {
+		w := call(v)
+		if w.Code != code {
+			t.Errorf("%q: %d %s", v, w.Code, w.Body)
+		}
+		if code == http.StatusUpgradeRequired && !strings.Contains(w.Body.String(), "misma versión mayor (0.7)") {
+			t.Errorf("%q: %s", v, w.Body)
+		}
+	}
+}

@@ -82,11 +82,17 @@ async function servidor() {
   throw new Error('El servidor pgocode no responde en ' + URL_ARNES);
 }
 
+// La versión de los ficheros de esta app (VERSION del paquete; "" en desarrollo) y la de esta app en marcha (la de
+// cuando arrancó: al actualizarse cambian los ficheros, no lo que corre). El servidor solo atiende a una app de su misma
+// versión mayor (0.7 de 0.7.0; internal/versiones): las menores pueden ser distintas.
+const versionPropia = () => { try { return fs.readFileSync(path.join(__dirname, 'VERSION'), 'utf8').trim(); } catch { return ''; } };
+const VERSION_APP = versionPropia();
+
 // pide: una petición al servidor con el token de este cliente (JSON de vuelta; error con el mensaje del servidor).
 function pide(metodo, ruta, cuerpo) {
   return new Promise((ok, mal) => {
     const datos = cuerpo ? JSON.stringify(cuerpo) : '';
-    const r = http.request(URL_ARNES + ruta, { method: metodo, headers: { 'X-PGO': '1', 'Content-Type': 'application/json',
+    const r = http.request(URL_ARNES + ruta, { method: metodo, headers: { 'X-PGO': '1', ...(VERSION_APP ? { 'X-PGO-Version': VERSION_APP } : {}), 'Content-Type': 'application/json',
       Cookie: 'pgo_escritorio=' + tokenCliente, 'Content-Length': Buffer.byteLength(datos) } }, res => {
       let t = '';
       res.on('data', c => { t += c; });
@@ -136,12 +142,11 @@ async function emparejado() {
   await guardaToken(tokenCliente);
 }
 
-// La versión de los ficheros de esta app (VERSION del paquete; "" en desarrollo).
-const versionPropia = () => { try { return fs.readFileSync(path.join(__dirname, 'VERSION'), 'utf8').trim(); } catch { return ''; } };
 
 // vigilaServidor: si el servidor se actualiza (otra versión) y con él los ficheros de esta app (la misma instalación),
 // la app se vuelve a abrir con la nueva; si sus ficheros no han cambiado (otra instalación, desarrollo), sigue como
 // está: volver a abrirla no cambiaría nada. Si el servidor se ha caído, se vuelve a arrancar.
+let avisoVersion = false;
 function vigilaServidor(version) {
   setInterval(async () => {
     try {
@@ -151,8 +156,15 @@ function vigilaServidor(version) {
         if (versionPropia() === v.version) { app.relaunch(); app.exit(0); }
         else console.error('[pgocode] el servidor está en la versión ' + v.version + '; esta app sigue con la suya');
       }
-    } catch {
+    } catch (e) {
       if (saliendo) return;
+      // Otra versión mayor: si los ficheros de esta app ya son otros (se ha actualizado con el servidor), se vuelve a
+      // abrir con ellos; si no, se avisa una vez (hay que actualizar la app o el servidor).
+      if (e.status === 426) {
+        if (versionPropia() !== VERSION_APP) { app.relaunch(); app.exit(0); return; }
+        if (!avisoVersion) { avisoVersion = true; dialog.showMessageBox({ type: 'warning', title: 'Planes Go Code', message: e.message }); }
+        return;
+      }
       if (!(await vivo())) servidor().catch(e => console.error('[pgocode] ' + e.message));
     }
   }, 20000);
@@ -380,6 +392,8 @@ ipcMain.handle('remoto', (e, o) => {
 });
 // Cerrar la app tras parar el servidor desde Propiedades (sin volver a arrancarlo: vigilaServidor).
 ipcMain.handle('salir', e => { if (!deArnes(e)) throw new Error('no permitido'); saliendo = true; app.quit(); });
+// La versión de esta app (la de sus ficheros al arrancar; "" en desarrollo) y la de su motor, para Propiedades.
+ipcMain.handle('version-app', e => { if (!deArnes(e)) throw new Error('no permitido'); return { app: VERSION_APP, electron: process.versions.electron }; });
 ipcMain.handle('visores', e => { if (!deArnes(e)) throw new Error('no permitido'); return visores; });
 // Abrir una carpeta de este equipo en el gestor de archivos (p. ej. «Abrir la carpeta» de una subcarpeta). Solo
 // carpetas que existen: un fichero podría ser un programa, y abrirlo sería ejecutarlo.

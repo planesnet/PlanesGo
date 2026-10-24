@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('psf', {
   alRemoto: cb => { const f = (_, ev) => cb(ev); ipcRenderer.on('pgo:remoto', f); return () => ipcRenderer.removeListener('pgo:remoto', f); },
   // Cerrar la app (tras parar el servidor: no lo vuelve a arrancar).
   salir: () => ipcRenderer.invoke('salir'),
+  // La versión de esta app y la de su motor (Electron).
+  versionApp: () => ipcRenderer.invoke('version-app'),
   // Abrir una carpeta de este equipo en el gestor de archivos.
   abrirRuta: ruta => ipcRenderer.invoke('abrir-ruta', String(ruta)),
   // Actividad de la persona en el navegador interno (sus eventos no llegan a esta ventana).

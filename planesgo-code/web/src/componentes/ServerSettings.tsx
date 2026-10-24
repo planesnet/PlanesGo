@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { get, post } from '../api';
-import { clientDate, stopQuestion, type PairedClient } from '../clients';
+import { clientDate, stopQuestion, versionsText, type PairedClient } from '../clients';
 import Icono from './Icono';
 import { askConfirm } from './Modal';
 
@@ -16,6 +16,12 @@ export default function ServerSettings({ working }: { working?: string }) {
   const load = () => get<{ clients: PairedClient[]; me: string }>('/api/clientes')
     .then(r => { setList(r.clients || []); setMe(r.me); }).catch(e => setError(String(e.message || e)));
   useEffect(() => { load(); }, []);
+  // The versions: the server's and this app's (the same major version, 0.7 of 0.7.0; the minor ones may differ).
+  const [versions, setVersions] = useState('');
+  useEffect(() => {
+    Promise.all([get<{ version: string }>('/api/version'), window.psf?.versionApp?.().catch(() => null) ?? Promise.resolve(null)])
+      .then(([srv, app]) => setVersions(versionsText(srv.version, app))).catch(() => {});
+  }, []);
 
   async function revoke(c: PairedClient) {
     if (!(await askConfirm(`¿Revocar «${c.name || c.id}»? Esa app deja de tener acceso al momento; para volver a usarla en ese equipo se tendrá que emparejar otra vez.`, { danger: true, okText: 'Revocar' }))) return;
@@ -40,6 +46,7 @@ export default function ServerSettings({ working }: { working?: string }) {
   return <>
     <h3>Servidor</h3>
     <span className="suave pequeno">El servidor de Planes Go Code sigue en marcha aunque cierres la ventana (los agentes y las sesiones automáticas siguen trabajando). Estas son las apps emparejadas con él.</span>
+    {versions && <p className="suave pequeno">{versions}</p>}
     {list === null ? <p className="suave pequeno">{error || 'Cargando…'}</p> : (
       <ul className="lista-clientes">
         {list.map(c => (

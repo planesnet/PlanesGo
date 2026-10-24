@@ -204,6 +204,7 @@ func main() {
 	// «pgocode-backend cliente»: the desktop helper of a client app (internal/desktop), started by it as its child;
 	// nothing of the server.
 	if len(os.Args) > 1 && os.Args[1] == "cliente" {
+		desktop.Version = version
 		os.Exit(desktop.Main())
 	}
 	ampliaPath()

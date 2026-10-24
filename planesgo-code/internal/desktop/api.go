@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"planesgo-code/internal/versiones"
 )
 
 // ClientCookie: the cookie that carries a client's token (the server's cookieEscritorio).
@@ -18,7 +20,9 @@ const ClientCookie = "pgo_escritorio"
 type API struct {
 	Base  string // http://127.0.0.1:7801
 	Token string
-	HTTP  *http.Client
+	// Version: this client's version, sent with every request (the server refuses another major version).
+	Version string
+	HTTP    *http.Client
 }
 
 // APIError: the server answered with an error (Msg: its explanation, in Spanish).
@@ -46,6 +50,9 @@ func (a *API) post(path string, body, out any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-PGO", "1")
+	if a.Version != "" {
+		req.Header.Set(versiones.Header, a.Version)
+	}
 	req.AddCookie(&http.Cookie{Name: ClientCookie, Value: a.Token})
 	c := a.HTTP
 	if c == nil {
