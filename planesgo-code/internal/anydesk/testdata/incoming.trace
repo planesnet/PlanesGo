@@ -1,0 +1,15 @@
+   info 2026-09-21 09:59:46.248    backend   ctrl 5200 5211                      unix_app.backend - Backend is starting up.
+   info 2026-09-21 09:59:46.263    backend   wrk0 5200 5212                      unix_app.backend - Incoming IPC connection.
+   info 2026-09-21 09:59:46.264    backend   wrk0 5200 5212                   app.backend_session - Initializing session.
+   info 2026-09-21 09:59:46.281    backend   wrk0 5200 5212                      unix_app.backend - Session count: 1
+   info 2026-09-21 09:59:46.282    backend   wrk1 5200 5213                   app.backend_session - Incoming session request: Ana Pruebas (444555666)
+   info 2026-09-21 09:59:46.282    backend   wrk1 5200 5213                   app.backend_session - Remote OS: Windows, Connection flags: direct paid 3 4 
+   info 2026-09-21 09:59:46.282    backend   wrk1 5200 5213                   app.backend_session - Trying to register a new backend session.
+   info 2026-09-21 09:59:48.583    backend   ctrl 5200 5211                   app.backend_session - Session started (ok).
+   info 2026-09-21 10:11:38.642    backend   wrk1 5200 5213                   app.backend_session - The user has requested a connection quit.
+   info 2026-09-21 10:11:38.642    backend   wrk0 5200 5212                   app.backend_session - The socket was closed remotely.
+   info 2026-09-21 10:11:38.649    backend   ctrl 5200 5211                   app.backend_session - Session stopped.
+   info 2026-09-21 10:11:38.652    backend   ctrl 5200 5211                      unix_app.backend - Session count: 0 (Shutting down: False)
+   info 2026-09-21 10:20:00.000    backend   wrk1 5200 5213                   app.backend_session - Incoming session request: - (equipo-01@ad)
+   info 2026-09-21 10:20:02.000    backend   ctrl 5200 5211                   app.backend_session - Session started (ok).
+   info 2026-09-21 11:07:42.107    backend   ctrl 5200 5211                      unix_app.backend - Backend is shutting down.
