@@ -25,8 +25,14 @@ apt-get download xvfb xdotool libxdo3 freerdp-shadow-x11 libfreerdp-shadow3-3 li
 for f in *.deb; do dpkg -x "$f" "$D/root"; done
 
 # 2. FreeRDP desde el código fuente
-# Se compila una vez y se guarda: solo se recompila con otra versión de FreeRDP o con otros parches.
+# Se compila una vez y se guarda: solo se recompila con otra versión de FreeRDP o con otros parches. Nunca con un
+# escritorio remoto abierto: un canal que se cargue después mezclaría librerías nuevas con las del binario en marcha.
 if [ ! -x "$P/bin/sdl-freerdp" ] || [ "$(cat "$P/.parches" 2>/dev/null)" != "$PATCHES" ]; then
+  for exe in /proc/[0-9]*/exe; do
+    case "$(readlink "$exe" 2>/dev/null)" in "$D"/freerdp*/bin/*)
+      echo "Hay un escritorio remoto abierto con este FreeRDP: ciérralo antes de recompilarlo."; exit 1 ;;
+    esac
+  done
   # Cabeceras que no trae el sistema (las de ffmpeg, OpenSSL, X11 y Kerberos ya están)
   cd "$B/debs"
   apt-get download libsdl3-dev libsdl3-ttf-dev libsdl3-image-dev libsdl3-ttf0 libsdl3-image0 libwayland-dev \
