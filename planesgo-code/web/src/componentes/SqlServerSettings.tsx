@@ -39,7 +39,8 @@ export default function SqlServerSettings({ project, session, login }: { project
     saveLastSql(login, project, c, name);
     act('connect', { ...c, password }).finally(() => setPassword(''));
   };
-  const set = (k: keyof SqlConfig, value: string | boolean) => setC(x => ({ ...x, [k]: value }));
+  // Kept as it is written (never the password): closing the window with «Guardar» and coming back finds it filled in.
+  const set = (k: keyof SqlConfig, value: string | boolean) => setC(x => { const n = { ...x, [k]: value }; saveLastSql(login, project, n, name); return n; });
 
   return (
     <ConnectionSection title="SQL Server" error={error}

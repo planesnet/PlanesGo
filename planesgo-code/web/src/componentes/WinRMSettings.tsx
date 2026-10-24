@@ -25,7 +25,8 @@ export default function WinRMSettings({ project, session, login }: { project: nu
     saveLastWinRM(login, project, c);
     act('connect', { ...c, host: c.host.trim(), user: c.user.trim(), password }).finally(() => setPassword(''));
   };
-  const set = (k: keyof WinRMConfig, value: string | boolean) => setC(x => ({ ...x, [k]: value }));
+  // Kept as it is written (never the password): closing the window with «Guardar» and coming back finds it filled in.
+  const set = (k: keyof WinRMConfig, value: string | boolean) => setC(x => { const n = { ...x, [k]: value }; saveLastWinRM(login, project, n); return n; });
 
   return (
     <ConnectionSection title="PowerShell remoto" error={error}

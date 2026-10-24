@@ -42,7 +42,8 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
     const [width, height] = parseSize(c.size) || [0, 0];
     act(() => post<AgentDesktopView>('/api/agent-desktop/start', { project, session, host: c.host, user: c.user, keyboard: c.keyboard, width, height, password }));
   };
-  const set = (k: keyof AgentDesktopConfig, value: string) => setC(x => ({ ...x, [k]: value }));
+  // Kept as it is written (never the password): closing the window with «Guardar» and coming back finds it filled in.
+  const set = (k: keyof AgentDesktopConfig, value: string) => setC(x => { const n = { ...x, [k]: value }; saveLastDesktop(login, project, n); return n; });
   const s = v?.status;
 
   return <>
