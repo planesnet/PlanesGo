@@ -2,11 +2,12 @@
 # Ubuntu 24.04+ restringe los «user namespaces» a los programas sin perfil, y el aislamiento (sandbox) del
 # motor de la app (Electron/Chromium) los necesita: sin este perfil, lanzado desde el menú, Electron se cierra al arrancar.
 # Solo permite crear user namespaces; no quita ninguna otra protección ni el sandbox de la app.
-# Vale para la app instalada en ~/.local/share/pgocode (instalar.sh o «make instalar») de cualquier usuario.
+# Apunta al motor en /opt/pgocode/motor, propiedad de root (lo deja ahí instalar.sh, con sudo): en una ruta que
+# el usuario pudiera escribir (p. ej. ~/.local/share), cualquier programa copiado ahí se saltaría la restricción.
 abi <abi/4.0>,
 include <tunables/global>
 
-profile pgocode /home/*/.local/share/pgocode/motor/pgocode flags=(unconfined) {
+profile pgocode /opt/pgocode/motor/pgocode flags=(unconfined) {
   userns,
 
   include if exists <local/pgocode>

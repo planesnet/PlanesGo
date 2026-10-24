@@ -122,12 +122,15 @@ clave-firma:
 # Desde Electron 42, npm ci no descarga el motor (sin postinstall): lo trae su install.js, con las huellas del paquete.
 instalar: paquete
 	cd electron && npm ci --no-fund --no-audit && node node_modules/electron/install.js
+	cp linux/apparmor-pgocode $(DIST)/
 	PGO_LOCAL=$(CURDIR)/$(DIST) PGO_ELECTRON_LOCAL=$(CURDIR)/electron/node_modules/electron/dist PGO_DESARROLLO=1 sh linux/instalar.sh
 
-# Ubuntu 24.04+: perfil de AppArmor para que el motor (~/.local/share/pgocode/motor/pgocode) pueda usar su sandbox.
+# Ubuntu 24.04+: perfil de AppArmor para que el motor (/opt/pgocode/motor/pgocode, de root) pueda usar su sandbox.
+# instalar.sh («make instalar») ya lo pone, con el motor en /opt; esto solo lo comprueba y dice cómo ponerlo a mano.
 apparmor:
-	@echo "Instálalo con:"
-	@echo "  sudo cp $(CURDIR)/linux/apparmor-pgocode /etc/apparmor.d/pgocode && sudo apparmor_parser -r /etc/apparmor.d/pgocode"
+	@if cmp -s linux/apparmor-pgocode /etc/apparmor.d/pgocode; then echo "El perfil de AppArmor está al día."; \
+	else echo "Instálalo con «make instalar» (pide sudo) o, si el motor ya está en /opt/pgocode/motor, con:"; \
+		echo "  sudo install -o root -g root -m 644 $(CURDIR)/linux/apparmor-pgocode /etc/apparmor.d/pgocode && sudo apparmor_parser -r /etc/apparmor.d/pgocode"; fi
 
 # Binario para este equipo, en dist/studio-tv
 studio-tv:

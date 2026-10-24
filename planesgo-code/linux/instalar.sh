@@ -1,9 +1,13 @@
 #!/bin/sh
-# Instalador de Planes Go Code (Linux x64), para el usuario actual (sin sudo):
+# Instalador de Planes Go Code (Linux x64), para el usuario actual:
 #   curl -fsSL https://planesgo.autopyme.com/install/pgocode/instalar.sh | sh
 # Deja el motor (Electron, con su ejecutable renombrado a «pgocode») en ~/.local/share/pgocode/motor, la app en
 # ~/.local/share/pgocode/app, el comando «pgocode»
 # en ~/.local/bin y la entrada en el menú de aplicaciones. Después la app se mantiene al día sola.
+# Ubuntu 24.04+ (apparmor_restrict_unprivileged_userns=1): el motor va en /opt/pgocode/motor, propiedad de root,
+# con su perfil de AppArmor en /etc/apparmor.d/pgocode. Pide sudo solo para eso (la primera vez y cuando cambia la
+# versión de Electron o el perfil); la app y sus actualizaciones siguen siendo del usuario. El motor de /opt lo
+# comparten los usuarios del equipo.
 # Uso interno («make instalar»): PGO_LOCAL=<dir con version.json y el paquete>, PGO_ELECTRON_LOCAL=<dist de Electron>,
 # PGO_DESARROLLO=1 (sin autoactualización).
 set -eu
@@ -33,11 +37,20 @@ VER=$(campo version); SHA=$(campo sha256); ARCHIVO=$(campo archivo); ELECTRON=$(
 echo "Planes Go Code $VER (Electron $ELECTRON)"
 mkdir -p "$D" "$BIN"
 
-# Motor (Electron) solo si cambia de versión. Su ejecutable se renombra a «pgocode».
-if [ "$(cat "$D/motor/.version" 2>/dev/null)" != "$ELECTRON" ]; then
-  rm -rf "$D/motor.nuevo"
+# Dónde va el motor: con la restricción de user namespaces, en /opt (root), que es adonde apunta su perfil.
+if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ]; then
+  MOTOR=/opt/pgocode/motor
+  falta sudo
+  echo "Ubuntu restringe el sandbox de Electron: el motor va en $MOTOR y su perfil de AppArmor en /etc/apparmor.d (con sudo, si hay que cambiarlos)."
+else
+  MOTOR="$D/motor"
+fi
+
+# Motor (Electron) solo si cambia de versión. Su ejecutable se renombra a «pgocode». Se prepara en $TMP y
+# después se pone en su sitio (en /opt, propiedad de root y sin escritura para nadie más).
+if [ "$(cat "$MOTOR/.version" 2>/dev/null)" != "$ELECTRON" ]; then
   if [ -n "${PGO_ELECTRON_LOCAL:-}" ]; then
-    cp -r "$PGO_ELECTRON_LOCAL" "$D/motor.nuevo"
+    cp -r "$PGO_ELECTRON_LOCAL" "$TMP/motor"
   else
     falta curl; falta unzip
     echo "Descargando el motor (Electron $ELECTRON)…"
@@ -49,13 +62,33 @@ if [ "$(cat "$D/motor/.version" 2>/dev/null)" != "$ELECTRON" ]; then
     [ -n "$SUMA" ] && echo "$SUMA  $TMP/$ZIP" | sha256sum -c --quiet - || {
       echo "La huella del motor (Electron $ELECTRON) no coincide con su SHASUMS256.txt: no se instala"; exit 1; }
     mv "$TMP/$ZIP" "$TMP/electron.zip"
-    mkdir -p "$D/motor.nuevo" && unzip -q "$TMP/electron.zip" -d "$D/motor.nuevo"
+    mkdir -p "$TMP/motor" && unzip -q "$TMP/electron.zip" -d "$TMP/motor"
   fi
-  mv "$D/motor.nuevo/electron" "$D/motor.nuevo/pgocode"
-  echo "$ELECTRON" > "$D/motor.nuevo/.version"
-  rm -rf "$D/motor" && mv "$D/motor.nuevo" "$D/motor"
+  mv "$TMP/motor/electron" "$TMP/motor/pgocode"
+  echo "$ELECTRON" > "$TMP/motor/.version"
+  if [ "$MOTOR" = "$D/motor" ]; then
+    rm -rf "$D/motor.nuevo" && mv "$TMP/motor" "$D/motor.nuevo"
+    rm -rf "$D/motor" && mv "$D/motor.nuevo" "$D/motor"
+  else
+    sudo sh -c 'set -e; mkdir -p /opt/pgocode; chown root:root /opt/pgocode; chmod 755 /opt/pgocode
+      rm -rf /opt/pgocode/motor.nuevo; cp -r "$1" /opt/pgocode/motor.nuevo
+      chown -R root:root /opt/pgocode/motor.nuevo; chmod -R u+rwX,go+rX,go-w /opt/pgocode/motor.nuevo
+      rm -rf /opt/pgocode/motor; mv /opt/pgocode/motor.nuevo /opt/pgocode/motor' sh "$TMP/motor"
+  fi
 fi
-rm -rf "$D/electron" # ubicación antigua
+# Ubicaciones antiguas (con el motor en /opt, también la de ~/.local/share)
+rm -rf "$D/electron"
+[ "$MOTOR" = "$D/motor" ] || rm -rf "$D/motor" "$D/motor.nuevo"
+
+# Perfil de AppArmor (sustituye al antiguo, que apuntaba a ~/.local/share y no era seguro)
+if [ "$MOTOR" != "$D/motor" ]; then
+  trae apparmor-pgocode "$TMP/apparmor-pgocode"
+  grep -q "^profile pgocode $MOTOR/pgocode " "$TMP/apparmor-pgocode" || { echo "Perfil de AppArmor no válido"; exit 1; }
+  if ! cmp -s "$TMP/apparmor-pgocode" /etc/apparmor.d/pgocode; then
+    sudo install -o root -g root -m 644 "$TMP/apparmor-pgocode" /etc/apparmor.d/pgocode
+    sudo apparmor_parser -r /etc/apparmor.d/pgocode
+  fi
+fi
 
 # App (paquete con huella comprobada)
 trae "$ARCHIVO" "$TMP/app.tar.gz"
@@ -73,7 +106,7 @@ cat > "$BIN/pgocode" <<LANZADOR
 # Planes Go Code: abre la app de escritorio (instalada en $D).
 # Linux: sin ibus (si no conecta, GTK descarta las pulsaciones) y enlace de la ventana con su icono.
 export GTK_IM_MODULE=gtk-im-context-simple XMODIFIERS=@im=none QT_IM_MODULE= CHROME_DESKTOP=pgocode.desktop
-exec "$D/motor/pgocode" "$D/app" "\$@"
+exec "$MOTOR/pgocode" "$D/app" "\$@"
 LANZADOR
 chmod 755 "$BIN/pgocode"
 for t in 16 32 48 64 128 256 512; do
@@ -96,8 +129,3 @@ ESCRITORIO
 gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 echo "Instalado. Ábrelo desde el menú de aplicaciones o con «pgocode»."
-if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ] && ! grep -qs "share/pgocode/motor/pgocode" /etc/apparmor.d/pgocode; then
-  echo
-  echo "Ubuntu restringe el sandbox de Electron: una sola vez, instala su perfil de AppArmor con:"
-  echo "  curl -fsSL $URL/apparmor-pgocode | sudo tee /etc/apparmor.d/pgocode >/dev/null && sudo apparmor_parser -r /etc/apparmor.d/pgocode"
-fi
