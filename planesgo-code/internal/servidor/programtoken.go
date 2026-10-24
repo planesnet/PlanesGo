@@ -212,7 +212,7 @@ func (s *Servidor) pgoProgram(w http.ResponseWriter, r *http.Request) {
 	case "ps-upload":
 		s.winrmUpload(w, r.Context(), ref, p.Path, p.Data, p.Escribir)
 	case "escritorio":
-		s.agentDesktopRun(w, g.project, g.session, p.Carpeta, p.Desktop)
+		s.agentDesktopRunAs(w, who, g.project, g.session, p.Carpeta, p.Desktop)
 	case "actividad":
 		s.programActivity(w, g, p.Titulo)
 	}

@@ -435,6 +435,8 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusForbidden, "orden no permitida a los agentes")
 		return
 	}
+	s.externalActivity(g) // an external agent's order: its time goes to the session (externalaccess.go)
+	who := g.origin()     // «agente», or «agente externo: <label>» in the audit logs
 	// Google Drive (solo lectura, por enlace): pgo drive leer.
 	if o, ok := strings.CutPrefix(r.PathValue("orden"), "drive-"); ok && r.Method == http.MethodGet {
 		s.driveOrden(w, r, o)
@@ -484,15 +486,15 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		x, _ := s.Procesos.Busca(p.Nombre)
 		jsonOK(w, map[string]any{"lineas": l, "total": total, "registro": x.Registro})
 	case "sql":
-		s.sqlRun(w, r.Context(), "agente", "agente", p.Proyecto, g.session, p.Conexion, p.SQL, p.N, p.Escribir)
+		s.sqlRun(w, r.Context(), who, who, p.Proyecto, g.session, p.Conexion, p.SQL, p.N, p.Escribir)
 	case "ps":
-		s.winrmRun(w, r.Context(), "agente", "agente", sessionRef{p.Proyecto, g.session}, p.Script, p.Escribir)
+		s.winrmRun(w, r.Context(), who, who, sessionRef{p.Proyecto, g.session}, p.Script, p.Escribir)
 	case "ps-download":
 		s.winrmDownload(w, r.Context(), sessionRef{p.Proyecto, g.session}, p.Path)
 	case "ps-upload":
 		s.winrmUpload(w, r.Context(), sessionRef{p.Proyecto, g.session}, p.Path, p.Data, p.Escribir)
 	case "escritorio":
-		s.agentDesktopRun(w, p.Proyecto, g.session, p.Carpeta, p.Desktop)
+		s.agentDesktopRunAs(w, who, p.Proyecto, g.session, p.Carpeta, p.Desktop)
 	case "abrir":
 		if !urlWeb(p.URL) {
 			jsonError(w, http.StatusBadRequest, "URL no válida (http o https)")

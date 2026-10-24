@@ -128,6 +128,8 @@ type Servidor struct {
 	agentes     agentTokens
 	// programas: the tokens of the programs launched from a work session (programtoken.go).
 	programas programTokens
+	// ExternalFile: where the external accesses are kept between restarts (externalaccess.go; 600, in the data folder).
+	ExternalFile string
 	// esProcesoAgente sustituye en las pruebas la comprobación del proceso que se conecta (peer.go).
 	esProcesoAgente func(*http.Request) bool
 	DirBin          string
@@ -276,6 +278,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/agent-desktop", s.conSesion(s.agentDesktopState))
 	mux.HandleFunc("POST /api/agent-desktop/start", s.conSesion(s.agentDesktopStart))
 	mux.HandleFunc("POST /api/agent-desktop/stop", s.conSesion(s.agentDesktopStop))
+	mux.HandleFunc("GET /api/acceso-externo", s.conSesion(s.externalState))
+	mux.HandleFunc("POST /api/acceso-externo", s.conSesion(s.externalGrant))
+	mux.HandleFunc("POST /api/acceso-externo/retirar", s.conSesion(s.externalRevoke))
 	// Remote sessions: reported by the clients' desktop helper (its token, no user session) and listed for the
 	// interface (remotesessions.go).
 	mux.HandleFunc("GET /api/remote/sessions", s.conSesion(s.remoteList))

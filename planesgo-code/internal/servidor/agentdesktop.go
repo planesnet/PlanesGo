@@ -148,6 +148,11 @@ func (s *Servidor) agentDesktopsRunning() int {
 // agentDesktopRun: an order of an agent («pgo escritorio»), on its own session's desktop only. Screenshots go to
 // .pgocode/salidas of the agent's folder (it has to be one of the project).
 func (s *Servidor) agentDesktopRun(w http.ResponseWriter, project int, session, folder string, a *agentdesktop.Action) {
+	s.agentDesktopRunAs(w, "agente", project, session, folder, a)
+}
+
+// agentDesktopRunAs: the same, saying in the audit who gives the order (an external agent, a program…).
+func (s *Servidor) agentDesktopRunAs(w http.ResponseWriter, who string, project int, session, folder string, a *agentdesktop.Action) {
 	x := s.agentDesktops.get(project, session)
 	if x == nil {
 		jsonError(w, http.StatusConflict, "esta sesión no tiene escritorio del agente: la persona lo inicia en las propiedades de la sesión (Escritorio del agente)")
@@ -169,7 +174,7 @@ func (s *Servidor) agentDesktopRun(w http.ResponseWriter, project int, session, 
 	res, err := x.conn.Do(*a, dir)
 	s.agentDesktops.used(x)
 	st := x.conn.Status()
-	s.desktopAudit("agente", "agente", project, session, st.User+"@"+st.Host, actionAudit(*a, res), err)
+	s.desktopAudit(who, who, project, session, st.User+"@"+st.Host, actionAudit(*a, res), err)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return

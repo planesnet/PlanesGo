@@ -77,12 +77,15 @@ func DefaultAgentGuard(odooURL, planesgoURL, datos string) AgentGuard {
 	}
 	// The desktop app's data (electron/main.js, userData): its client token (cliente.json, encrypted with a key that
 	// the same system user can get) and the sessions of the integrated browser, Google's among them.
+	// The access the person gives to an agent outside pgocode, in a session's folder (internal/servidor/externalaccess.go):
+	// pgocode's own agents have their own token, and must not take that one (another session's, perhaps).
+	g.ReadDeny = append(g.ReadDeny, "/**/.pgocode/acceso-externo.env")
 	if conf, err := os.UserConfigDir(); err == nil {
 		g.ReadDeny = append(g.ReadDeny, filepath.Join(conf, DesktopAppName, "**"))
 	}
 	g.CommandWords = []string{"imputacion-dia", "sesiones-reinicio", "partes-abiertos", "planesgo_auth",
 		"/.claude/hooks/planesgo", "/.local/bin/pgo-mcp", "/.local/bin/planesgo-",
-		clients.PairPath, "pgocode/" + clients.SecretName, ".config/" + DesktopAppName, `.config/Planes\ Go\ Code`}
+		clients.PairPath, "pgocode/" + clients.SecretName, ".pgocode/acceso-externo", ".config/" + DesktopAppName, `.config/Planes\ Go\ Code`}
 	g.Programs = []string{"pgo-mcp", "planesgo-mcp", "planesgo-track"}
 	return g
 }

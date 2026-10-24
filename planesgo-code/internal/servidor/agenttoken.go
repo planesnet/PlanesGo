@@ -17,11 +17,21 @@ import (
 // agentTokenTTL: lo más que vale un token aunque el turno no acabe (un turno colgado no deja una llave eterna).
 const agentTokenTTL = 12 * time.Hour
 
-// agentGrant: a quién pertenece un token de agente.
+// agentGrant: a quién pertenece un token de agente. external: the access the person gave to an agent outside pgocode
+// (externalaccess.go), with its id, its label, who gave it (their time is logged) and the file it was left in.
 type agentGrant struct {
 	project int
 	session string
 	expires time.Time
+
+	external    bool
+	id          string
+	label       string
+	login       string
+	uid         int
+	projectName string
+	file        string
+	created     time.Time
 }
 
 // agentTokens: los tokens vivos (solo en memoria: no sobreviven a un reinicio).
@@ -40,6 +50,11 @@ func (a *agentTokens) clock() time.Time {
 
 // issue crea el token de un turno; revoke lo anula.
 func (a *agentTokens) issue(project int, session string) (token string, revoke func()) {
+	return a.issueGrant(agentGrant{project: project, session: session}, agentTokenTTL)
+}
+
+// issueGrant: a token for g, valid for ttl.
+func (a *agentTokens) issueGrant(g agentGrant, ttl time.Duration) (token string, revoke func()) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", func() {}
@@ -56,7 +71,8 @@ func (a *agentTokens) issue(project int, session string) (token string, revoke f
 			delete(a.m, k)
 		}
 	}
-	a.m[token] = agentGrant{project: project, session: session, expires: ahora.Add(agentTokenTTL)}
+	g.expires = ahora.Add(ttl)
+	a.m[token] = g
 	a.mu.Unlock()
 	return token, func() {
 		a.mu.Lock()
@@ -78,6 +94,9 @@ func (a *agentTokens) lookup(token string) (agentGrant, bool) {
 	}
 	if !a.clock().Before(g.expires) {
 		delete(a.m, token)
+		if g.external {
+			removeExternalFile(g.file) // its time is over: its file goes too
+		}
 		return agentGrant{}, false
 	}
 	return g, true
@@ -122,4 +141,63 @@ func (s *Servidor) issueAgentToken(project int, session string) (string, func())
 		return "", func() {}
 	}
 	return s.agentes.issue(project, session)
+}
+
+// origin: who gives the orders of a token, for the audit logs.
+func (g agentGrant) origin() string {
+	if g.external {
+		return "agente externo: " + g.label
+	}
+	return "agente"
+}
+
+// external: the external accesses given to a session that are still valid.
+func (a *agentTokens) external(project int, session string) []agentGrant {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.clock()
+	var l []agentGrant
+	for _, g := range a.m {
+		if g.external && g.project == project && g.session == session && now.Before(g.expires) {
+			l = append(l, g)
+		}
+	}
+	return l
+}
+
+// externalTokens: every external access still valid, with its token (to keep them: externalaccess.go).
+func (a *agentTokens) externalTokens() map[string]agentGrant {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.clock()
+	l := map[string]agentGrant{}
+	for k, g := range a.m {
+		if g.external && now.Before(g.expires) {
+			l[k] = g
+		}
+	}
+	return l
+}
+
+// restore puts back a kept external access (when pgocode starts again).
+func (a *agentTokens) restore(token string, g agentGrant) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.m == nil {
+		a.m = map[string]agentGrant{}
+	}
+	a.m[token] = g
+}
+
+// revokeExternal ends an external access by its id (the grant, to clean up after it; ok false if there is none).
+func (a *agentTokens) revokeExternal(project int, session, id string) (agentGrant, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k, g := range a.m {
+		if g.external && g.id == id && g.project == project && g.session == session {
+			delete(a.m, k)
+			return g, true
+		}
+	}
+	return agentGrant{}, false
 }

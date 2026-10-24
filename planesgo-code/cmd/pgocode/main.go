@@ -428,6 +428,9 @@ func main() {
 	s.WinRMAudit = filepath.Join(datos, "winrm-audit.jsonl")
 	// And the agent desktop's: every order of the agents (never the text they type).
 	s.AgentDesktopAudit = filepath.Join(datos, "escritorio-auditoria.jsonl")
+	// The accesses the person gave to agents outside pgocode (externalaccess.go): they last across restarts.
+	s.ExternalFile = filepath.Join(datos, "accesos-externos.json")
+	s.LoadExternal()
 	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
 	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
 		s.Errores.Repo = v

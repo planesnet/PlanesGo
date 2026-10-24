@@ -13,6 +13,7 @@ import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 import SqlServerSettings from './SqlServerSettings';
 import WinRMSettings from './WinRMSettings';
 import AgentDesktopSettings from './AgentDesktopSettings';
+import ExternalAccessSettings from './ExternalAccessSettings';
 import ProgramSettings, { saveProgramChanges } from './ProgramSettings';
 import ProjectMemory from './ProjectMemory';
 import { MODEL_LABEL_HELP, modelLabel } from '../modelInfo';
@@ -26,13 +27,14 @@ interface Ramas { repo: string; repositorio?: string; ramas: string[]; actual?: 
 
 const NUEVA = '\u0000nueva';
 // Sections of the window, grouped by topic.
-export type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'memory' | 'spending' | 'programs' | 'sql' | 'winrm' | 'desktop' | 'ids';
+export type SessionSection = 'general' | 'agent' | 'access' | 'conversation' | 'memory' | 'spending' | 'programs' | 'sql' | 'winrm' | 'desktop' | 'external' | 'ids';
 const SESSION_SECTIONS: readonly PropertiesSection<SessionSection>[] = [{ id: 'general', name: 'General', icon: 'rama' }, { id: 'agent', name: 'Agente', icon: 'terminal' },
   { id: 'access', name: 'Acceso a carpetas', icon: 'carpeta' }, { id: 'conversation', name: 'Conversación', icon: 'comentario' },
   { id: 'memory', name: 'Memoria del proyecto', icon: 'plan' },
   { id: 'spending', name: 'Gasto e imputación', icon: 'reloj' }, { id: 'programs', name: 'Programas', icon: 'ejecutar' },
   { id: 'sql', name: 'SQL Server', icon: 'repo' },
   { id: 'winrm', name: 'PowerShell remoto', icon: 'terminal' }, { id: 'desktop', name: 'Escritorio del agente', icon: 'ordenador' },
+  { id: 'external', name: 'Acceso externo', icon: 'externo' },
   { id: 'ids', name: 'Identificador', icon: 'info' }];
 const unir = (dir: string, rama: string) => dir.replace(/\/+$/, '') + '/' + rama.replace(/\//g, '_');
 
@@ -138,7 +140,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
   return (
     <PropertiesModal title={nueva ? 'Nueva sesión' : <><span className="suave">Propiedades ·</span> {titulo(sesion)}</>}
       label={nueva ? 'Nueva sesión' : 'Propiedades'} className="ajustes-sesion" onClose={alCerrar}
-      sections={SESSION_SECTIONS.filter(x => !nueva || !['programs', 'sql', 'winrm', 'desktop'].includes(x.id)).map(x => ({ ...x, incomplete: incomplete[x.id] }))} initial={inicial}
+      sections={SESSION_SECTIONS.filter(x => !nueva || !['programs', 'sql', 'winrm', 'desktop', 'external'].includes(x.id)).map(x => ({ ...x, incomplete: incomplete[x.id] }))} initial={inicial}
       footer={<>
         {error && <p className="error footer-error">{error}</p>}
         {!nueva && <span className="suave pequeno">Cambiar la rama, la carpeta o el agente empieza una conversación nueva con el agente.</span>}
@@ -329,6 +331,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
         {section === 'sql' && <SqlServerSettings project={s.proyecto} session={sesion.id} login={login} />}
         {section === 'winrm' && <WinRMSettings project={s.proyecto} session={sesion.id} login={login} />}
         {section === 'desktop' && <AgentDesktopSettings project={s.proyecto} session={sesion.id} login={login} />}
+        {section === 'external' && <ExternalAccessSettings project={s.proyecto} session={sesion.id} folder={s.carpeta} />}
         {section === 'ids' && <>
           <h3>Identificador</h3>
           <span className="suave pequeno">Para localizar la sesión en los registros de pgocode (tiempos y depuracion.log) y su conversación en el agente. Pásaselo a quien vaya a investigarla.</span>
