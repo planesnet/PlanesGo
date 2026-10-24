@@ -78,10 +78,12 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
         ? 'Activado: el texto llega tal cual (acentos, ñ, €) sea cual sea la distribución de teclado de Windows.'
         : 'Desactivado: el texto va como pulsaciones de tecla; solo es fiable en ASCII.'}</span>
       {!s && <span className="suave pequeno">Carpeta de intercambio: <code>{v?.exchange}</code> (en Windows, \\tsclient\Intercambio).</span>}
+      {/* Above the button, where it is seen: below it, it was left out of the panel's view and «Iniciar» seemed to do nothing. */}
+      {error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
       <div className="fila-config app-actions">
         <button type="button" className="primario" disabled={busy || !v?.supported || !!v?.missing} onClick={start}>{busy ? 'Iniciando…' : 'Iniciar'}</button>
       </div>
     </>}
-    {error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
+    {v?.running && error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
   </>;
 }
