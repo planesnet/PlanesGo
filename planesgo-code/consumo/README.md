@@ -18,13 +18,24 @@ Gasta tokens de verdad: no entra en `make test`.
 ## Qué hay aquí
 
 - `pruebas.json`: los agentes (modelo y esfuerzo) y las 7 pruebas, con sus turnos y cómo se comprueba cada uno
-  (expresión regular de la respuesta, orden que ha de acabar bien, ficheros que no se pueden tocar…).
-- `proyecto/`: el proyecto de prueba (una librería de facturación en Python con un fallo en el descuento de las
-  líneas). Cada ejecución trabaja en una copia propia, como repositorio git nuevo.
-- `proyecto-grande/`: el de la prueba 7 (`"proyecto"` en `pruebas.json`): la gestión de un almacén con seis módulos
-  grandes (unos 85k tokens entre todos; catálogo, clientes, tarifas, zonas…) y un fallo en el descuento por volumen.
-  Lo generó un guion con datos inventados; se guarda tal cual para que no cambie entre rondas.
+  (expresión regular de la respuesta, orden que ha de acabar bien, comprobación en Go, ficheros que no se pueden
+  tocar, un patrón que ha de aparecer al menos N veces…).
+- `proyecto/`: el proyecto de prueba, un módulo Go propio (`facturacion-demo`): una librería de facturación con un
+  fallo en el descuento de las líneas. Cada ejecución trabaja en una copia propia, como repositorio git nuevo.
+- `proyecto-grande/`: el de la prueba 7 (`"proyecto"` en `pruebas.json`), otro módulo Go (`almacen-demo`): la
+  gestión de un almacén con seis ficheros grandes (unos 85k tokens entre todos; catálogo, clientes, tarifas, zonas…)
+  y un fallo en el descuento por volumen. Los datos son inventados; se guarda tal cual para que no cambie entre rondas.
+- `comprobaciones/`: los tests de Go que comprueban un turno (`"comprobacion"` en `pruebas.json`): `cmd/consumo`
+  copia el fichero a la copia de trabajo (`comprobacion_consumo/`), lo ejecuta con `go test` y lo borra, así que
+  el agente no lo ve. Tiene su propio `go.mod`, como los dos proyectos: ninguno entra en el `go test ./...` de
+  planesgo-code. `go test ./cmd/consumo` comprueba con un arreglo de referencia que cada orden y cada comprobación
+  fallan antes del cambio y pasan después.
 - `calibracion.json`: las medianas sin pgocode de la última ronda completa (la escribe `cmd/consumo`).
+
+**Calibración pendiente.** El 24-10-2026 se rehicieron los proyectos de prueba y se borraron la calibración y los
+resultados anteriores (siguen en el historial de git), porque medían otras tareas.
+Antes de comparar con pgocode hay que repetir la calibración con una ronda completa sin pgocode
+(`make consumo ARGS="-modo directo"`); sin ella, `-modo pgocode` sale sin referencia.
 
 | # | Prueba | Permisos | Qué mide |
 |---|---|---|---|

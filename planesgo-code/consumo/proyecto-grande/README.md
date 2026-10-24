@@ -1,7 +1,7 @@
 # almacen-demo
 
-Gestión de un almacén de ferretería: catálogo e inventario (`almacen/inventario.py`), pedidos y clientes
-(`pedidos.py`), precios y descuentos (`precios.py`), envíos (`envios.py`), informes (`informes.py`) y devoluciones
-(`devoluciones.py`).
+Gestión de un almacén de ferretería en Go (paquete `almacen`): catálogo e inventario (`almacen/inventario.go`),
+pedidos y clientes (`pedidos.go`), precios y descuentos (`precios.go`), envíos (`envios.go`), informes
+(`informes.go`) y devoluciones (`devoluciones.go`).
 
-Pruebas: `python3 -m unittest discover -s tests`
+Pruebas: `go test ./...`

@@ -24,50 +24,50 @@
       "mide": "Si busca con precisión o lee de más (hay distractores: IRPF, recargo, desglose)",
       "turnos": [
         {"mensaje": "¿En qué fichero y en qué línea se calcula el importe del IVA de una línea de factura? Responde solo «ruta:línea».",
-         "texto": "impuestos/calculo\\.py\\D{0,12}(1[7-9]|2[01])\\b"}
+         "texto": "impuestos/calculo\\.go\\D{0,12}(19|2[0-4])\\b"}
       ]
     },
     {
       "id": 4, "nombre": "Arreglo", "permisos": "auto",
       "mide": "Ciclo de editar, ejecutar y corregir; salidas de órdenes",
       "turnos": [
-        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
-         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]}
+        {"mensaje": "Las pruebas fallan (go test ./...). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
+         "orden": "go test ./...", "sin_cambios": ["tests"]}
       ]
     },
     {
       "id": 5, "nombre": "Conversación", "permisos": "auto",
       "mide": "Crecimiento del contexto en 3 turnos y aprovechamiento de la caché",
       "turnos": [
-        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
-         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]},
-        {"mensaje": "Añade a tests/test_lineas.py una prueba para una línea con un descuento del 100 % (subtotal 0) y comprueba que pasa.",
-         "orden": "python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 4}},
-        {"mensaje": "Resume en tres líneas lo que has cambiado en esta conversación.", "texto": "lineas\\.py"}
+        {"mensaje": "Las pruebas fallan (go test ./...). Encuentra el fallo y corrígelo sin tocar las pruebas; comprueba que pasan.",
+         "orden": "go test ./...", "sin_cambios": ["tests"]},
+        {"mensaje": "Añade a tests/lineas_test.go una prueba para una línea con un descuento del 100 % (subtotal 0) y comprueba que pasa.",
+         "orden": "go test ./...", "minimo": {"fichero": "tests/lineas_test.go", "patron": "func Test", "veces": 4}},
+        {"mensaje": "Resume en tres líneas lo que has cambiado en esta conversación.", "texto": "lineas\\.go"}
       ]
     },
     {
       "id": 6, "nombre": "Ida y vuelta", "permisos": "auto",
       "mide": "Diez turnos cortos que dependen de los anteriores: cuánto crece el contexto en un ir y venir (y, con otras estrategias, cuánto ahorran)",
       "turnos": [
-        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). Arregla el fallo del descuento sin tocar las pruebas.",
-         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]},
+        {"mensaje": "Las pruebas fallan (go test ./...). Arregla el fallo del descuento sin tocar las pruebas.",
+         "orden": "go test ./...", "sin_cambios": ["tests"]},
         {"mensaje": "Añade a las pruebas de las líneas una para un descuento del 100 % (subtotal 0) y comprueba que pasa.",
-         "orden": "python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 4}},
-        {"mensaje": "Añade a redondea un tercer parámetro opcional, modo: «mitad» (el de ahora, por defecto) o «abajo» (trunca hacia cero).",
-         "orden": "python3 -c \"from facturacion.redondeo import redondea as r; assert r(0.105) == 0.11; assert r(0.105, 2, 'abajo') == 0.1; assert r(2.999, modo='abajo') == 2.99\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "Usa ese modo «abajo» en la cuota de IVA (cuota_iva); lo demás, igual.",
-         "orden": "python3 -c \"from facturacion.impuestos import cuota_iva; from facturacion.redondeo import redondea; assert cuota_iva(0.5, 21) == 0.1; assert redondea(0.105) == 0.11\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "Renombra el método que arreglaste al principio a base_imponible, en todo el proyecto (pruebas incluidas).",
-         "orden": "! grep -rqE --include='*.py' '\\.subtotal\\(|def subtotal' facturacion tests && grep -q 'def base_imponible' facturacion/lineas.py && python3 -m unittest discover -s tests"},
-        {"mensaje": "Añade a Linea un campo opcional descuento_fijo (importe en euros, 0 por defecto) que se resta de la base después del descuento en porcentaje.",
-         "orden": "python3 -c \"from facturacion.lineas import Linea; from facturacion.productos import Producto as P; assert Linea(P('a', 'a', 10.0), 2, descuento=10, descuento_fijo=3).base_imponible() == 15.0; assert Linea(P('a', 'a', 10.0), 2).base_imponible() == 20.0\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "¿Qué has cambiado en lineas.py? Responde en pocas líneas.",
-         "texto": "base_imponible.*descuento_fijo|descuento_fijo.*base_imponible"},
+         "orden": "go test ./...", "minimo": {"fichero": "tests/lineas_test.go", "patron": "func Test", "veces": 4}},
+        {"mensaje": "Añade a Redondea un tercer parámetro opcional (variádico), modo string: «mitad» (el de ahora, por defecto) o «abajo» (trunca hacia cero).",
+         "orden": "go test ./...", "comprobacion": "p6_round_mode_test.go"},
+        {"mensaje": "Usa ese modo «abajo» en la cuota de IVA (CuotaIVA); lo demás, igual.",
+         "orden": "go test ./...", "comprobacion": "p6_vat_round_down_test.go"},
+        {"mensaje": "Renombra el método que arreglaste al principio a BaseImponible, en todo el proyecto (pruebas incluidas).",
+         "orden": "! grep -rq --include='*.go' 'Subtotal(' facturacion tests && grep -qE '\\) BaseImponible\\(' facturacion/lineas.go && go vet ./... && go test ./..."},
+        {"mensaje": "Añade a Linea un campo DescuentoFijo (importe en euros; cero por defecto) que se resta de la base después del descuento en porcentaje.",
+         "orden": "go test ./...", "comprobacion": "p6_fixed_discount_test.go"},
+        {"mensaje": "¿Qué has cambiado en lineas.go? Responde en pocas líneas.",
+         "texto": "base_?imponible.*descuento_?fijo|descuento_?fijo.*base_?imponible"},
         {"mensaje": "Que el descuento fijo nunca deje la base en negativo: como mínimo, 0.",
-         "orden": "python3 -c \"from facturacion.lineas import Linea; from facturacion.productos import Producto as P; assert Linea(P('a', 'a', 10.0), 1, descuento_fijo=50).base_imponible() == 0; assert Linea(P('a', 'a', 10.0), 2, descuento=10, descuento_fijo=3).base_imponible() == 15.0\" && python3 -m unittest discover -s tests"},
+         "orden": "go test ./...", "comprobacion": "p6_fixed_discount_floor_test.go"},
         {"mensaje": "Añade una prueba de eso al mismo fichero de pruebas de antes y comprueba que pasa.",
-         "orden": "grep -q descuento_fijo tests/test_lineas.py && python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_lineas.py", "patron": "def test_", "veces": 5}},
+         "orden": "grep -q DescuentoFijo tests/lineas_test.go && go test ./...", "minimo": {"fichero": "tests/lineas_test.go", "patron": "func Test", "veces": 5}},
         {"mensaje": "¿Cómo redondeaba la cuota de IVA antes de tu cambio y cómo redondea ahora? Una línea.",
          "texto": "(mitad|arriba|half).*(abajo|trunc|down|cero)"}
       ]
@@ -76,22 +76,22 @@
       "id": 7, "nombre": "Conversación larga", "permisos": "auto", "proyecto": "proyecto-grande",
       "mide": "Ocho turnos sobre un proyecto grande (consumo/proyecto-grande) que obligan a leer módulos enteros: el contexto crece hasta más de 100k (pasa del umbral real de compactación, 80k) y los últimos turnos preguntan por cosas del principio (memoria)",
       "turnos": [
-        {"mensaje": "Lee enteros, sin saltarte nada, almacen/inventario.py y almacen/pedidos.py. Explícame en pocas líneas cómo se reserva el stock de un pedido: qué función lo hace y qué margen de seguridad deja.",
-         "texto": "reserva_stock.*\\b7\\b|\\b7\\b.*reserva_stock"},
-        {"mensaje": "Las pruebas fallan (python3 -m unittest discover -s tests). El fallo está en almacen/precios.py: léelo entero y corrígelo sin tocar las pruebas.",
-         "orden": "python3 -m unittest discover -s tests", "sin_cambios": ["tests"]},
-        {"mensaje": "Lee entero almacen/envios.py. Añade a coste_envio un parámetro opcional urgente (False por defecto) que sume el recargo urgente de la zona, con la tabla que ya hay en el módulo.",
-         "orden": "python3 -c \"from almacen.envios import coste_envio as c; assert c(4, 3, urgente=True) == round(c(4, 3) + 5.25, 2); assert c(50, 2, urgente=True) == round(c(50, 2) + 4.0, 2); assert c(0.5, 1) == 3.9\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "Lee entero almacen/informes.py. Añade ahí una función total_pedido(pedido, cp) con el total a cobrar: el importe del pedido con el descuento por volumen que arreglaste antes, más el envío a ese código postal según el peso del pedido (urgente si el pedido lo es), redondeado a céntimos.",
-         "orden": "python3 -c \"from almacen.pedidos import Pedido; from almacen.informes import total_pedido as t; p = Pedido('P', 'C-0001'); p.anade('AL-0001', 1000, 0.5); assert t(p, '28013') == 488.45, t(p, '28013'); p.urgente = True; assert t(p, '28013') == 491.95, t(p, '28013')\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "En pedidos.py, que al pasar un pedido a EN_PREPARACION se reserve, en el inventario que recibe cambia_estado, el stock de todas sus líneas con la función de reserva que me explicaste al principio. Si alguna línea no se puede reservar, se deshace lo reservado, el pedido no cambia de estado y se lanza el error. Añade una prueba de eso a tests/test_pedidos.py.",
-         "orden": "python3 -c \"from almacen.pedidos import Pedido; from almacen.inventario import Inventario, SinStock; i = Inventario(); i.entrada('AL-0001', 30); i.entrada('AL-0002', 10); p = Pedido('P', 'C-0001'); p.anade('AL-0001', 20); p.anade('AL-0002', 5); p.cambia_estado('CONFIRMADO')\ntry:\n    p.cambia_estado('EN_PREPARACION', i); raise SystemExit('reserva sin stock')\nexcept SinStock:\n    pass\nassert p.estado == 'CONFIRMADO' and i.reservado.get('AL-0001', 0) == 0, (p.estado, i.reservado)\ni.entrada('AL-0002', 10); p.cambia_estado('EN_PREPARACION', i); assert p.estado == 'EN_PREPARACION' and i.reservado['AL-0001'] == 20 and i.reservado['AL-0002'] == 5\" && python3 -m unittest discover -s tests", "minimo": {"fichero": "tests/test_pedidos.py", "patron": "def test_", "veces": 3}},
-        {"mensaje": "Lee entero almacen/devoluciones.py. En reembolso, el envío no se devuelve cuando el motivo es desistimiento; con los demás motivos, sí.",
-         "orden": "python3 -c \"from almacen.devoluciones import reembolso as r; assert r(100, 7.5, 'desistimiento') == 100; assert r(100, 7.5, 'defectuoso') == 107.5\" && python3 -m unittest discover -s tests"},
-        {"mensaje": "¿Qué comparación estaba mal en descuento_volumen antes de tu arreglo y cómo ha quedado? Una línea.",
+        {"mensaje": "Lee enteros, sin saltarte nada, almacen/inventario.go y almacen/pedidos.go. Explícame en pocas líneas cómo se reserva el stock de un pedido: qué función lo hace y qué margen de seguridad deja.",
+         "texto": "reserva_?stock.*\\b7\\b|\\b7\\b.*reserva_?stock"},
+        {"mensaje": "Las pruebas fallan (go test ./...). El fallo está en almacen/precios.go: léelo entero y corrígelo sin tocar las pruebas.",
+         "orden": "go test ./...", "sin_cambios": ["tests"]},
+        {"mensaje": "Lee entero almacen/envios.go. Añade a CosteEnvio un parámetro urgente bool (false: como ahora) que sume el recargo urgente de la zona, con la tabla que ya hay en el módulo, y actualiza las llamadas.",
+         "orden": "go test ./...", "comprobacion": "p7_urgent_shipping_test.go"},
+        {"mensaje": "Lee entero almacen/informes.go. Añade ahí una función TotalPedido(p *Pedido, cp string) (float64, error) con el total a cobrar: el importe del pedido con el descuento por volumen que arreglaste antes, más el envío a ese código postal según el peso del pedido (urgente si el pedido lo es), redondeado a céntimos.",
+         "orden": "go test ./...", "comprobacion": "p7_order_total_test.go"},
+        {"mensaje": "En pedidos.go, que al pasar un pedido a EN_PREPARACION se reserve, en el inventario que recibe CambiaEstado, el stock de todas sus líneas con la función de reserva que me explicaste al principio. Si alguna línea no se puede reservar, se deshace lo reservado, el pedido no cambia de estado y se devuelve el error. Añade una prueba de eso a tests/pedidos_test.go.",
+         "orden": "go test ./...", "comprobacion": "p7_stock_reservation_test.go", "minimo": {"fichero": "tests/pedidos_test.go", "patron": "func Test", "veces": 3}},
+        {"mensaje": "Lee entero almacen/devoluciones.go. En Reembolso, el envío no se devuelve cuando el motivo es desistimiento; con los demás motivos, sí.",
+         "orden": "go test ./...", "comprobacion": "p7_refund_test.go"},
+        {"mensaje": "¿Qué comparación estaba mal en DescuentoVolumen antes de tu arreglo y cómo ha quedado? Una línea.",
          "texto": ">=|≥|mayor o igual"},
         {"mensaje": "¿Qué margen de seguridad deja la reserva de stock (y en qué constante está) y cuánto es el recargo urgente de la zona 3? Una línea.",
-         "texto": "(MARGEN_SEGURIDAD\\D{0,30}\\b7\\b|\\b7\\b\\D{0,40}MARGEN_SEGURIDAD).*5[.,]25|5[.,]25.*(MARGEN_SEGURIDAD\\D{0,30}\\b7\\b|\\b7\\b\\D{0,40}MARGEN_SEGURIDAD)"}
+         "texto": "(margen_?seguridad\\D{0,30}\\b7\\b|\\b7\\b\\D{0,40}margen_?seguridad).*5[.,]25|5[.,]25.*(margen_?seguridad\\D{0,30}\\b7\\b|\\b7\\b\\D{0,40}margen_?seguridad)"}
       ]
     }
   ]
