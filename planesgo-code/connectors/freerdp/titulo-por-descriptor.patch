@@ -13,7 +13,7 @@ leería un título como contraseña. Se aplica con: patch -p1 -d freerdp-<versi�
  
  #include <freerdp/config.h>
  
-@@ -158,6 +160,55 @@
+@@ -158,6 +160,57 @@
  	std::ignore = sdl_push_quit();
  }
  
@@ -22,7 +22,6 @@ leería un título como contraseña. Se aplica con: patch -p1 -d freerdp-<versi�
 + * title as the password. The title is applied from this (the SDL video) thread. */
 +static std::mutex pgoTitleLock;
 +static std::string pgoTitle;
-+static bool pgoTitleNew = false;
 +
 +static void pgo_title_reader(FILE* f)
 +{
@@ -32,7 +31,6 @@ leería un título como contraseña. Se aplica con: patch -p1 -d freerdp-<versi�
 +		line[strcspn(line, "\r\n")] = '\0';
 +		std::scoped_lock lock(pgoTitleLock);
 +		pgoTitle = line;
-+		pgoTitleNew = true;
 +	}
 +	fclose(f);
 +}
@@ -50,26 +48,30 @@ leería un título como contraseña. Se aplica con: patch -p1 -d freerdp-<versi�
 +	}();
 +	if (!started)
 +		return;
++	// The last title received, applied again whenever a window shows another one (FreeRDP sets its /title when it
++	// finishes creating the window, after the first line may have arrived).
 +	std::string title;
 +	{
 +		std::scoped_lock lock(pgoTitleLock);
-+		if (pgoTitleNew)
-+			title = pgoTitle;
-+		pgoTitleNew = false;
++		title = pgoTitle;
 +	}
 +	if (title.empty())
 +		return;
 +	int count = 0;
 +	SDL_Window** windows = SDL_GetWindows(&count);
 +	for (int i = 0; windows && i < count; i++)
-+		SDL_SetWindowTitle(windows[i], title.c_str());
++	{
++		const char* cur = SDL_GetWindowTitle(windows[i]);
++		if (!cur || title != cur)
++			SDL_SetWindowTitle(windows[i], title.c_str());
++	}
 +	SDL_free(static_cast<void*>(windows));
 +}
 +
  [[nodiscard]] static int sdl_run(SdlContext* sdl)
  {
  	int rc = -1;
-@@ -168,8 +219,10 @@
+@@ -168,8 +221,10 @@
  		while (!sdl->shallAbort())
  		{
  			SDL_Event windowEvent = {};
