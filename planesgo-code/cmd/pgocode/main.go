@@ -401,8 +401,9 @@ func main() {
 	// Los fallos del propio pgocode, como issues de PlanesGo (las sesiones automáticas PSF las pueden resolver): las
 	// excepciones de la interfaz, los pánicos de las peticiones y los cierres por pánico (el runtime los deja en
 	// cierre.log y se informan al arrancar la vez siguiente).
-	// Auditoría de SQL Server: cada orden que llega a las conexiones de las sesiones (la orden, no los datos).
+	// Audit logs of the sessions' SQL Server and WinRM connections: every order (the order, not its data or output).
 	s.SQLAudit = filepath.Join(datos, "sql-auditoria.jsonl")
+	s.WinRMAudit = filepath.Join(datos, "winrm-audit.jsonl")
 	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
 	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
 		s.Errores.Repo = v

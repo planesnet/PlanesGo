@@ -4,7 +4,6 @@
 #    moderno: H.264 por ffmpeg, PulseAudio, CUPS, FUSE y Kerberos. Código verificado con su SHA-256 y con los
 #    parches de connectors/freerdp, si los hay.
 #  - Xvfb, xdotool y el servidor RDP de prueba (freerdp-shadow-cli): paquetes de Ubuntu desempaquetados.
-#  - pywinrm (PowerShell remoto) en un venv.
 # Todo va en ~/.local/opt/rdp-agente. Se puede repetir: lo ya hecho no se rehace.
 set -eu
 FREERDP_VERSION=3.32.2
@@ -74,10 +73,6 @@ for old in "$D"/freerdp-*/; do
   [ "$old" = "$P" ] && continue
   grep -qsF "$old/" /proc/[0-9]*/maps || rm -rf "$old"
 done
-
-# 3. PowerShell remoto
-[ -x "$D/venv/bin/python" ] || python3 -m venv "$D/venv"
-"$D/venv/bin/python" -m pip install -q pywinrm
 
 # Comprobación
 for b in "$D/freerdp/bin/sdl-freerdp" "$D/freerdp/bin/xfreerdp"; do

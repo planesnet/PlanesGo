@@ -5,11 +5,11 @@ Conectores de pgocode para entrar en servidores remotos, la persona y el agente.
 ```
 connectors/
 ├── instala.sh        instala sin root lo que necesitan (Linux)
-├── rdp/
-│   └── rdp.py        escritorio remoto para el agente (pantalla virtual: capturas, ratón, teclado, vídeo)
-└── winrm/
-    └── ps.py         PowerShell remoto: órdenes, ficheros y auditoría
+└── rdp/
+    └── rdp.py        escritorio remoto para el agente (pantalla virtual: capturas, ratón, teclado, vídeo)
 ```
+
+PowerShell remoto (WinRM) ya no es un conector: es parte de pgocode, en Go (ver más abajo).
 
 Pendientes: `ssh/` (túnel para RDP, SQL Server, ficheros y WinRM) y otros cuando hagan falta.
 
@@ -37,7 +37,6 @@ Todo va en `~/.local/opt/rdp-agente`, sin `sudo` (no funciona dentro de la app):
   PulseAudio/PipeWire, impresoras CUPS, portapapeles con ficheros (FUSE) y Kerberos. Sin ALSA ni OSS, servidor,
   proxy, tarjetas inteligentes ni USB.
 - **Xvfb, xdotool y el servidor RDP de prueba** (`freerdp-shadow-cli`): paquetes de Ubuntu desempaquetados.
-- **pywinrm** en un venv.
 
 Los datos (carpeta de intercambio, grabaciones y auditoría) van en `~/.local/share/pgocode-connectors`, fuera del
 código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer y necesitan la de intercambio).
@@ -96,8 +95,8 @@ connectors/rdp/rdp.py estado | para
 
 - **Seguridad**: la misma que el cliente (NLA, `seclevel:2`, AVC444). La contraseña se lee de la entrada estándar
   antes de conectar (en un terminal, sin eco).
-- **Tamaño**: con `--tamaño auto` (por defecto) toma la resolución del servidor si el puente WinRM está arrancado;
-  si no, 1600x900. La pantalla virtual es un lienzo fijo de 3840x2160 y lo que cambia es la ventana de FreeRDP,
+- **Tamaño**: con `--tamaño auto` (por defecto) toma la resolución del servidor si la sesión tiene conexión WinRM
+  (`pgo ps`); si no, 1600x900. La pantalla virtual es un lienzo fijo de 3840x2160 y lo que cambia es la ventana de FreeRDP,
   que con resolución dinámica pide al servidor que ajuste su sesión; capturas y vídeo se recortan a ella.
 - **Teclado**: `--teclado unicode` (por defecto) manda el texto como Unicode por la tubería de FreeRDP: acentos, ñ
   y € llegan tal cual sea cual sea la distribución de teclado del servidor (Windows lo admite).
@@ -106,26 +105,28 @@ connectors/rdp/rdp.py estado | para
   portapapeles de texto se comparte.
 - `--acepta-certificado` es solo para servidores de prueba.
 
-## PowerShell remoto: `winrm/ps.py`
+## PowerShell remoto: conexión WinRM de la sesión (`pgo ps`)
+
+Es parte de pgocode, en Go (`internal/winrm`, `internal/servidor/winrmconn.go`, sección «PowerShell remoto» de las
+propiedades de la sesión). La persona define en la sesión el equipo, el usuario (local o `DOMINIO\usuario`) y la
+contraseña, que se queda solo en la memoria de pgocode; los agentes de esa sesión la usan:
 
 ```sh
-connectors/winrm/ps.py puente --host 192.168.125.229 --usuario 'DOMINIO\usuario'   # pide la contraseña; dejarlo abierto
-connectors/winrm/ps.py "Get-ChildItem 'C:\Program Files'"
-connectors/winrm/ps.py -f script.ps1
-connectors/winrm/ps.py baja 'C:\ruta\remota.log' ./local.log
-connectors/winrm/ps.py sube ./local.txt 'C:\ruta\remota.txt'
+pgo ps "Get-ChildItem 'C:\Program Files'"
+pgo ps -f script.ps1 [--escribir]
+pgo ps baja 'C:\ruta\remota.log' ./local.log
+pgo ps sube ./local.txt 'C:\ruta\remota.txt' --escribir
 ```
 
-El puente guarda la contraseña solo en su memoria y atiende por un socket local con permisos 600. Cada orden
-queda en `~/.local/share/pgocode-connectors/auditoria.log` (la orden, no su salida).
+Por HTTP (5985) con cada mensaje cifrado por NTLM (claves de 128 bits), o por HTTPS (5986) validando el certificado
+(o aceptándolo sin comprobar, si se elige). Solo lectura salvo que la conexión sea actualizable: en solo lectura solo
+pasan órdenes de consulta y el script corre en el modo restringido de PowerShell; evita accidentes, no es una
+garantía (para eso, un usuario sin permisos de escritura). Cada orden queda en `winrm-audit.jsonl` de la carpeta de
+datos de pgocode (la orden, no su salida).
 
-Por defecto va por HTTP (5985), donde NTLM cifra cada mensaje. Con `--https` va por HTTPS (5986) validando el
-certificado del servidor (`--ca` para una CA propia); hay que activarlo antes en Windows (un listener HTTPS de
-WinRM con su certificado). El servidor de Sage (192.168.125.229) no lo tiene abierto.
-
-`rdp.py` y `ps.py` guardan su estado, la tubería del teclado y el socket del puente en `$XDG_RUNTIME_DIR/rdp-agente`.
-Sin `XDG_RUNTIME_DIR` no arrancan (nada de `/tmp`, donde otro usuario podría crear antes la carpeta), y si la carpeta
-no es propia con permisos 700 se niegan a usarla.
+`rdp.py` guarda su estado y la tubería del teclado en `$XDG_RUNTIME_DIR/rdp-agente`.
+Sin `XDG_RUNTIME_DIR` no arranca (nada de `/tmp`, donde otro usuario podría crear antes la carpeta), y si la carpeta
+no es propia con permisos 700 se niega a usarla.
 
 ## Probado
 
@@ -139,5 +140,5 @@ sin NLA):
   teclas (modo `teclas`), cambio de tamaño en caliente y grabación.
 
 Sin probar todavía, porque necesitan el Windows real: la ventana SDL3 en el escritorio, que se vean las impresoras
-y se oiga el sonido, el modo `unicode`, la resolución automática y `winrm/ps.py`. El paso de `instala.sh` que
+y se oiga el sonido, el modo `unicode`, la resolución automática y `pgo ps` (WinRM). El paso de `instala.sh` que
 compila FreeRDP reproduce lo hecho a mano, pero no se ha ejecutado desde cero.
