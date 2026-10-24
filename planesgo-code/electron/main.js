@@ -34,6 +34,13 @@ app.userAgentFallback = app.userAgentFallback.replace(/\s(?:pgocode|Electron)\/\
 // no se puede usar desde un navegador normal salvo que se arranque con -navegador.
 const TOKEN_ESCRITORIO = crypto.randomBytes(32).toString('hex');
 
+// Una sola instancia: «pgocode» o «pgocode --rdp» con la app ya abierta se lo pasan a la que está en marcha, que abre
+// su ventana (el escritorio remoto, con la misma sesión, o la principal). El backend y la sesión son los mismos.
+const quiereRdp = argv => argv.includes('--rdp');
+if (!app.requestSingleInstanceLock()) app.quit();
+let principal = null;
+let rdp = null;
+
 function binario() {
   const nombre = process.platform === 'win32' ? 'pgocode-backend.exe' : 'pgocode-backend';
   const candidatos = [
@@ -162,6 +169,7 @@ function ventana() {
   const soloArnes = (e, url) => { if (!esArnes(url)) { e.preventDefault(); if (esWeb(url)) shell.openExternal(url); } };
   w.webContents.on('will-navigate', soloArnes);
   w.webContents.on('will-redirect', soloArnes);
+  principal = w;
   if (previa.maximizada) w.maximize();
   const guardaVentana = () => {
     try {
@@ -176,13 +184,38 @@ function ventana() {
   w.on('maximize', guardaVentana);
   w.on('unmaximize', guardaVentana);
   w.on('close', () => { guardaVentana(); console.error('[pgocode] ventana cerrada'); });
-  // Las ventanas ocultas de lectura de Google no mantienen viva la app.
-  w.on('closed', () => app.quit());
+  // Las ventanas ocultas de lectura de Google no mantienen viva la app; la del escritorio remoto, sí.
+  w.on('closed', () => { principal = null; if (!rdp) app.quit(); });
   // Menú contextual (clic derecho): copiar lo seleccionado, cortar y pegar en los campos, copiar enlaces.
   w.webContents.on('context-menu', (_, p) => menuContextual(p, w));
   w.webContents.on('did-fail-load', (_, c, d) => console.error('[pgocode] no carga la interfaz:', c, d));
   w.loadURL(URL_ARNES);
 }
+
+// Ventana del escritorio remoto (pgocode --rdp): la interfaz de pgocode en modo escritorio remoto, con la sesión de
+// esta app. La ventana de Windows la abre el backend (FreeRDP).
+function ventanaRdp() {
+  if (rdp) { if (rdp.isMinimized()) rdp.restore(); rdp.focus(); return; }
+  rdp = new BrowserWindow({
+    width: 560, height: 680, minWidth: 460, minHeight: 520, title: 'Escritorio remoto · Planes Go Code', autoHideMenuBar: true,
+    icon: path.join(__dirname, 'icono', 'pgocode.png'),
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  rdp.webContents.setWindowOpenHandler(({ url }) => { if (esWeb(url)) shell.openExternal(url); return { action: 'deny' }; });
+  const soloArnes = (e, url) => { if (!esArnes(url)) e.preventDefault(); };
+  rdp.webContents.on('will-navigate', soloArnes);
+  rdp.webContents.on('will-redirect', soloArnes);
+  rdp.webContents.on('context-menu', (_, p) => menuContextual(p, rdp));
+  rdp.on('closed', () => { rdp = null; if (!principal) app.quit(); });
+  rdp.loadURL(URL_ARNES + '/?modo=rdp');
+}
+
+app.on('second-instance', (_, argv) => {
+  if (quiereRdp(argv)) return ventanaRdp();
+  if (!principal) return ventana();
+  if (principal.isMinimized()) principal.restore();
+  principal.focus();
+});
 
 app.on('web-contents-created', (_, wc) => {
   // Endurecer los <webview>: sin preload, sin Node, solo http/https.
@@ -228,7 +261,7 @@ app.whenReady().then(async () => {
     await arrancaBackend();
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
     await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: TOKEN_ESCRITORIO, httpOnly: true, sameSite: 'strict' });
-    ventana();
+    if (quiereRdp(process.argv)) ventanaRdp(); else ventana();
     // Descargas de Google que pide el backend (pgo drive leer, pgo gmail leer), con la sesión del panel Web.
     const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),
       testOrigin: process.env.PGO_GOOGLE_PRUEBA || '', log: m => console.error('[pgocode] ' + m) });

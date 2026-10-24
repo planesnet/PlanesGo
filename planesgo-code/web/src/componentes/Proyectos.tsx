@@ -25,16 +25,51 @@ interface Props {
 // Proyectos recientes de cada usuario (los últimos que ha abierto, el más reciente primero).
 const MAX_RECIENTES = 10;
 const claveRecientes = (login: string) => 'pgo:recientes:' + login.toLowerCase();
-function leeRecientes(login: string): number[] {
+export function leeRecientes(login: string): number[] {
   try { return (JSON.parse(localStorage.getItem(claveRecientes(login)) || '[]') as number[]).filter(n => Number.isInteger(n)); } catch { return []; }
 }
-function guardaReciente(login: string, id: number): number[] {
+export function guardaReciente(login: string, id: number): number[] {
   const l = [id, ...leeRecientes(login).filter(x => x !== id)].slice(0, MAX_RECIENTES);
   try { localStorage.setItem(claveRecientes(login), JSON.stringify(l)); } catch { /* sin almacenamiento */ }
   return l;
 }
 
 const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// filtraProyectos: sin buscar, los recientes en orden de uso; buscando, todos los que coinciden por nombre o cliente
+// (sin acentos). El de la barra de proyectos y el de otras ventanas (BuscaProyecto).
+export function filtraProyectos(todos: Proyecto[], filtro: string, recientes: number[]): Proyecto[] {
+  if (!filtro.trim()) {
+    const porId = new Map(todos.map(p => [p.id, p]));
+    return recientes.map(id => porId.get(id)).filter((p): p is Proyecto => Boolean(p));
+  }
+  const f = sinAcentos(filtro.trim());
+  return todos.filter(p => sinAcentos(p.nombre + ' ' + (p.cliente?.nombre || '')).includes(f));
+}
+
+// BuscaProyecto: el buscador de la barra de proyectos para elegir uno en otra ventana (p. ej. el escritorio remoto).
+export function BuscaProyecto({ login, lista, elegido, alElegir }: { login: string; lista: Proyecto[]; elegido?: number; alElegir: (p: Proyecto) => void }) {
+  const [filtro, setFiltro] = useState('');
+  const [recientes, setRecientes] = useState<number[]>(() => leeRecientes(login));
+  const visibles = useMemo(() => filtraProyectos(lista, filtro, recientes), [lista, filtro, recientes]);
+  const actual = lista.find(p => p.id === elegido);
+  return (
+    <div className="busca-proyecto">
+      <div className="busca"><input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" /></div>
+      <div className="lista">
+        {!filtro.trim() && visibles.length > 0 && <p className="titulo-lista">Recientes</p>}
+        {visibles.length === 0 && <p className="suave">{filtro.trim() ? 'Ningún proyecto coincide.' : 'Busca el proyecto por su nombre o su cliente.'}</p>}
+        {visibles.map(p => (
+          <button type="button" key={p.id} className={'proyecto' + (actual?.id === p.id ? ' activo' : '')}
+            onClick={() => { setRecientes(guardaReciente(login, p.id)); alElegir(p); setFiltro(''); }}>
+            <span className="nombre">{p.nombre}</span>
+            <span className="detalle">{p.cliente?.nombre || 'Sin cliente'}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const PROJECTS_MIN = 180;
 
@@ -114,15 +149,7 @@ export default function Proyectos(props: Props) {
   }, []);
   // Sin buscar: solo los recientes, en orden de uso. Buscando: todos los proyectos de Odoo.
   const buscando = filtro.trim() !== '';
-  const visibles = useMemo(() => {
-    const todos = lista || [];
-    if (!buscando) {
-      const porId = new Map(todos.map(p => [p.id, p]));
-      return recientes.map(id => porId.get(id)).filter((p): p is Proyecto => Boolean(p));
-    }
-    const f = sinAcentos(filtro.trim());
-    return todos.filter(p => sinAcentos(p.nombre + ' ' + (p.cliente?.nombre || '')).includes(f));
-  }, [lista, filtro, recientes, buscando]);
+  const visibles = useMemo(() => filtraProyectos(lista || [], filtro, recientes), [lista, filtro, recientes]);
 
   // Un proyecto (como los grupos de Claude Code) con sus sesiones abiertas debajo.
   const grupo = (p: Proyecto) => {

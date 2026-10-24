@@ -6,7 +6,6 @@ Conectores de pgocode para entrar en servidores remotos, la persona y el agente.
 connectors/
 ├── instala.sh        instala sin root lo que necesitan (Linux)
 ├── rdp/
-│   ├── cliente.py    cliente de escritorio remoto para la persona (ventana normal)
 │   └── rdp.py        escritorio remoto para el agente (pantalla virtual: capturas, ratón, teclado, vídeo)
 └── winrm/
     └── ps.py         PowerShell remoto: órdenes, ficheros y auditoría
@@ -40,32 +39,24 @@ Todo va en `~/.local/opt/rdp-agente`, sin `sudo` (no funciona dentro de la app):
 Los datos (carpeta de intercambio, grabaciones y auditoría) van en `~/.local/share/pgocode-connectors`, fuera del
 código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer y necesitan la de intercambio).
 
-## Cliente de escritorio remoto: `rdp/cliente.py`
+## Escritorio remoto para la persona: `pgocode --rdp`
 
-Se abre con **`pgocode --rdp`** (el lanzador de pgocode lo reconoce y abre este cliente en vez de la app; el
-paquete de la app incluye `connectors/`). En desarrollo, también con `python3 -I connectors/rdp/cliente.py`:
+Es parte de pgocode, no de esta carpeta: `pgocode --rdp` abre la app en modo escritorio remoto (con pgocode ya abierto,
+la misma instancia y la misma sesión; si no, el acceso de siempre). Código: `electron/main.js` (instancia única y
+ventana), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo de pgocode) e
+`internal/servidor/rdp.go` (abre FreeRDP e imputa). La ventana pide:
 
-1. Lista de conexiones guardadas o «Nueva conexión…» (nombre, equipo `nombre o IP[:puerto]`, usuario, dominio).
-2. Opciones de esa conexión (se recuerdan): portapapeles (texto y ficheros), impresoras de este equipo (todas las
-   de CUPS), sonido, micrófono, carpeta compartida (en Windows, «Intercambio») y pantalla completa.
-3. **Proyecto de Odoo al que se imputa el tiempo (obligatorio)**: se ofrece el último de la conexión o se busca
-   por nombre. Sin proyecto no se conecta.
-4. Contraseña en su propio diálogo: pasa del diálogo a FreeRDP por una tubería; no se guarda en ningún sitio.
+1. **Proyecto** (obligatorio), con el buscador de la barra de proyectos: el tiempo se imputa en él con el servicio
+   de imputación de pgocode, mientras la sesión está conectada y hay uso del teclado o el ratón (inactividad de
+   GNOME); tras 10 minutos sin uso, nada. Se rige por las reglas del servicio (tramos y bloques de 15 minutos).
+2. **Conexión**: nombre, equipo y usuario de Windows (`DOMINIO\usuario` o `usuario`).
+3. **Contraseña**: va del backend a FreeRDP por su entrada y no se guarda.
+4. **Opciones**: sonido y micrófono (sí, salvo que se quiten) e impresoras de este equipo (ninguna salvo que se pidan).
+   Siempre: portapapeles y carpeta compartida «Intercambio». Pantalla completa: Ctrl+Alt+Intro.
 
-**Imputación.** El cliente es independiente: no necesita pgocode abierto, ni git, ni carpeta de proyecto. El tiempo
-va a Odoo por PlanesGo con `pgo-mcp` (el token de PlanesGo de este equipo), como las sesiones de Claude Code o
-Antigravity fuera de pgocode: antes de conectar se comprueba que PlanesGo admite imputar en ese proyecto
-(`--check`); con la sesión conectada y uso del teclado o el ratón (inactividad de GNOME), un latido cada 30 s
-(`--beat`, tarea «Escritorio remoto», tipo Desarrollo); tras 10 minutos sin uso se cierra el parte (`--stop`) y,
-al volver, se abre otro; al terminar se cierra. Si un latido falla, avisa sin cortar la sesión. Dentro de pgocode
-no se lanza así (allí imputa pgocode: `pgo-mcp` está bloqueado).
-
-Solo seguridad moderna: NLA (`/sec:nla`), nivel 2 de OpenSSL (`/tls:seclevel:2`), certificado aceptado la primera
-vez y aviso si cambia (`/cert:tofu`). Gráficos H.264 4:4:4 (`/gfx:AVC444`). La ventana se puede redimensionar y
-Windows ajusta su resolución; Ctrl+Alt+Intro alterna la pantalla completa; se reconecta sola si se corta la red. Si
-algo falla, explica el motivo (usuario o contraseña, cuenta bloqueada, contraseña caducada, equipo inalcanzable…).
-
-Las conexiones (sin contraseña) se guardan en `~/.config/pgocode-connectors/conexiones.json`.
+La ventana de Windows es la nativa de FreeRDP (SDL3), con solo seguridad moderna: NLA, nivel 2 de OpenSSL,
+certificado aceptado la primera vez y aviso si cambia, y gráficos H.264 4:4:4. Mientras haya un escritorio abierto,
+pgocode no se actualiza. Las conexiones (sin contraseña) se guardan en el navegador de la app.
 
 ## Escritorio remoto para el agente: `rdp/rdp.py`
 
@@ -118,9 +109,9 @@ no es propia con permisos 700 se niegan a usarla.
 Contra servidores RDP locales de prueba (`freerdp-shadow-cli` en 127.0.0.1:3390 sobre otra pantalla virtual, con y
 sin NLA):
 
-- `rdp/cliente.py`: lista de conexiones, nueva conexión, opciones recordadas, diálogo de contraseña, conexión,
-  cancelar sin conectar y mensajes de error comprensibles. En el registro de FreeRDP: el portapapeles se carga, el
-  sonido negocia formatos, el micrófono abre su flujo en PulseAudio y el servicio de impresoras se carga.
+- `pgocode --rdp`: conexión real al servidor de Sage (192.168.125.229) con imputación en su proyecto; pruebas de
+  `internal/servidor/rdp_test.go` (proyecto obligatorio, contraseña solo por la entrada de FreeRDP, opciones,
+  usuario con dominio y mensajes de error).
 - `rdp/rdp.py` con FreeRDP 3.32.2 y NLA: conexión, contraseña incorrecta rechazada, captura, clic, escritura y
   teclas (modo `teclas`), cambio de tamaño en caliente y grabación.
 

@@ -65,7 +65,7 @@ export const post = <T,>(ruta: string, cuerpo: unknown, signal?: AbortSignal) =>
 export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; tarea?: Tarea; uso?: Uso; vivo?: Uso; sesion_agente?: string; punto?: string; error?: string; fin?: boolean; poda?: PruneReport; via?: string; subagentes?: string; memoria?: { tokens: number; motivo: string } } // via: quién respondió una pregunta aparte (copia, modelo, local/<modelo>); subagentes: pgocode los ha sugerido (el porqué); memoria: el mensaje lleva la memoria del proyecto (sus tokens y por qué)
 
 // Avisos del backend: cambios en los programas y URL que abrir en el navegador integrado.
-export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
+export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'rdp' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
 export function escuchaAvisos(cada: (a: Aviso) => void): () => void {
   const es = new EventSource('/api/eventos');
   es.onmessage = e => { try { cada(JSON.parse(e.data)); } catch { /* aviso incompleto */ } };

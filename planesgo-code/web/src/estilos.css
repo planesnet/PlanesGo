@@ -60,6 +60,29 @@ textarea { resize: none; }
 .tarjeta-acceso label { display: grid; gap: 4px; font-size: 12px; color: var(--suave); }
 .tarjeta-acceso input { width: 100%; padding: 8px 10px; }
 .tarjeta-acceso button.primario { padding: 8px; }
+/* Escritorio remoto (pgocode --rdp): la tarjeta del acceso, más ancha, con sus campos y las conexiones abiertas */
+.rdp .tarjeta-acceso { width: min(460px, 100%); }
+.tarjeta-acceso select { width: 100%; padding: 7px 8px; }
+.rdp-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rdp-opciones { border: 1px solid var(--linea); border-radius: 6px; padding: 8px 10px; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.rdp-proyecto { display: grid; gap: 4px; }
+.rdp-etiqueta { font-size: 12px; color: var(--suave); }
+.rdp-etiqueta b { color: var(--texto); font-weight: 600; }
+.busca-proyecto { border: 1px solid var(--linea); border-radius: 6px; padding: 6px 0 4px; background: var(--panel); }
+.busca-proyecto .busca { padding: 0 6px 4px; }
+.busca-proyecto .busca input { padding: 6px 8px; background: var(--superficie); }
+.busca-proyecto .lista { display: flex; flex-direction: column; max-height: 168px; overflow-y: auto; padding: 0 4px; }
+.busca-proyecto .titulo-lista, .busca-proyecto .lista > p { padding: 2px 8px; text-align: left; }
+.rdp-nota { font-size: 12px; text-align: left !important; }
+.rdp-opciones label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--texto); }
+.rdp-opciones input { width: auto; }
+.rdp-abiertas { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 10px; }
+.rdp-abiertas li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.rdp-abiertas li > span:nth-child(2) { flex: 1; min-width: 0; }
+.rdp-estado { width: 8px; height: 8px; border-radius: 50%; background: var(--tenue); flex: none; }
+.rdp-estado.conectando { background: var(--warning); }
+.rdp-estado.conectado { background: var(--acento); }
+@media (max-width: 420px) { .rdp-campos, .rdp-opciones { grid-template-columns: 1fr; } }
 .clave { position: relative; display: block; }
 .clave input { padding-right: 38px; }
 .clave .ojo { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 4px 6px; color: var(--suave); display: grid; place-items: center; }

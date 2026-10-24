@@ -135,6 +135,8 @@ type Servidor struct {
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
 	// no se atiende ninguna petición.
 	PermitirNavegador bool
+	// escritorios: los escritorios remotos abiertos (rdp.go).
+	escritorios rdpSessions
 	// memPending: las sesiones del agente que reciben otra vez la memoria del proyecto (memory.go).
 	memPending memoryPending
 
@@ -227,6 +229,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/psf/discard", s.conSesion(s.psfDiscard))
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
+	mux.HandleFunc("GET /api/rdp", s.conSesion(s.rdpState))
+	mux.HandleFunc("POST /api/rdp/conectar", s.conSesion(s.rdpConnect))
+	mux.HandleFunc("POST /api/rdp/desconectar", s.conSesion(s.rdpDisconnect))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
 	mux.HandleFunc("POST /api/procesos/lanzar", s.conSesion(s.procesosLanza))
 	mux.HandleFunc("POST /api/procesos/parar", s.conSesion(s.procesosPara))
@@ -514,6 +519,8 @@ func (s *Servidor) TrabajoEnCurso() string {
 		return "hay un programa en marcha"
 	case s.EstudioOcupado != nil && s.EstudioOcupado():
 		return "el Studio TV está emitiendo o grabando"
+	case s.escritorios.open() > 0:
+		return "hay un escritorio remoto abierto"
 	}
 	return ""
 }
