@@ -143,6 +143,9 @@ type Servidor struct {
 	// sqls: las conexiones con SQL Server de las sesiones de trabajo (sqlconn.go); SQLAudit: su registro de auditoría.
 	sqls     sqlConns
 	SQLAudit string
+	// winrms: the WinRM (remote PowerShell) connections of the work sessions (winrmconn.go); WinRMAudit: their audit log.
+	winrms     winrmConns
+	WinRMAudit string
 	// anydesk: the AnyDesk sessions seen in its traces (anydesk.go); AnyDeskFile: its settings (default project and
 	// the project of each remote computer).
 	anydesk     anydeskSessions
@@ -247,6 +250,11 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sql/run", s.conSesion(s.sqlRunUI))
 	mux.HandleFunc("POST /api/sql/mode", s.conSesion(s.sqlMode))
 	mux.HandleFunc("POST /api/sql/database", s.conSesion(s.sqlDatabase))
+	mux.HandleFunc("GET /api/winrm", s.conSesion(s.winrmState))
+	mux.HandleFunc("POST /api/winrm/connect", s.conSesion(s.winrmConnect))
+	mux.HandleFunc("POST /api/winrm/disconnect", s.conSesion(s.winrmDisconnect))
+	mux.HandleFunc("POST /api/winrm/mode", s.conSesion(s.winrmMode))
+	mux.HandleFunc("POST /api/winrm/run", s.conSesion(s.winrmRunUI))
 	mux.HandleFunc("POST /api/rdp/conectar", s.conSesion(s.rdpConnect))
 	mux.HandleFunc("POST /api/rdp/desconectar", s.conSesion(s.rdpDisconnect))
 	mux.HandleFunc("GET /api/anydesk", s.conSesion(s.anydeskState))

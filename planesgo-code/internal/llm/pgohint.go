@@ -40,14 +40,23 @@ const sqlHint = "(pgocode: para consultar SQL Server usa la orden de terminal «
 // sqlWords: el mensaje habla de SQL Server, de una base de datos o de Sage.
 var sqlWords = regexp.MustCompile(`(?i)\bsql\b|\bt-sql\b|\bmssql\b|\bsage\b|\bbases?\s+de\s+datos\b|\bconsultas?\s+sql\b`)
 
+// psHint: el uso de «pgo ps» (PowerShell remoto por WinRM, si la persona ha definido la conexión de la sesión).
+const psHint = "(pgocode: para PowerShell en el equipo Windows remoto usa la orden de terminal «pgo» con la conexión WinRM de esta sesión (la define la persona; tú no ves la contraseña): " +
+	"`pgo ps \"<PowerShell>\"` o `pgo ps -f <fichero.ps1>` (salida, errores y código de salida); `pgo ps baja <remoto> <local>`; `pgo ps sube <local> <remoto> --escribir`. " +
+	"Solo lectura: solo órdenes de consulta (Get-*, Select-*, Where-*…); lo que cambia algo necesita `--escribir` y que la persona haya permitido los cambios. Si dice que la sesión no tiene conexión, pídesela al usuario.)"
+
+// psWords: el mensaje habla de PowerShell, WinRM o de un equipo o servidor Windows remoto («Windows» solo no cuenta:
+// compilar para Windows no es usarlo en remoto).
+var psWords = regexp.MustCompile(`(?i)\bpowershell\b|\bpwsh\b|\bwinrm\b|\bwinrs\b|\.ps1\b|\b(?:servidor|servidores|equipo|equipos|m[aá]quina|m[aá]quinas)\s+(?:de\s+)?windows\b|\bwindows\s+(?:remoto|server)\b|\bremot[oa]\s+(?:de\s+)?windows\b`)
+
 var (
 	pgoWord = regexp.MustCompile(`(?i)\bpgo\b`)
 	pgoVerb = regexp.MustCompile(`(?i)\bpgo\s+(?:ejecutar|parar|procesos|salida|abrir)\b|\b(?:ejecut|arranc|lanz|levant|parar|det[eé]n|salida|abr[eií]|procesos?|programas?|servidor)`)
 )
 
 // pgoHintFor: la línea de uso de «pgo» si el mensaje la menciona (ejecutar, parar, salida, abrir…) y la de
-// «pgo drive» si habla de Google Drive, Docs o Sheets, la de «pgo gmail» si habla del correo y la de «pgo sql» si habla
-// de SQL Server, bases de datos o Sage; "" si nada. Las órdenes («/pgo …», la skill de imputación)
+// «pgo drive» si habla de Google Drive, Docs o Sheets, la de «pgo gmail» si habla del correo, la de «pgo sql» si habla
+// de SQL Server, bases de datos o Sage y la de «pgo ps» si habla de PowerShell, WinRM o un Windows remoto; "" si nada. Las órdenes («/pgo …», la skill de imputación)
 // no cuentan.
 func pgoHintFor(text string) string {
 	t := strings.TrimSpace(text)
@@ -66,6 +75,9 @@ func pgoHintFor(text string) string {
 	}
 	if sqlWords.MatchString(t) {
 		hs = append(hs, sqlHint)
+	}
+	if psWords.MatchString(t) {
+		hs = append(hs, psHint)
 	}
 	return strings.Join(hs, "\n")
 }
