@@ -11,11 +11,11 @@ FREERDP_VERSION=3.32.2
 FREERDP_SHA256=e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c
 D="$HOME/.local/opt/rdp-agente"
 HERE=$(cd "$(dirname "$0")" && pwd)
-# Parches propios de FreeRDP (connectors/freerdp/*.patch): su huella va junto al binario; si cambian, se recompila.
-PATCHES=$(cat "$HERE"/freerdp/*.patch 2>/dev/null | sha256sum | cut -d' ' -f1)
+# Parches propios de FreeRDP (connectors/freerdp/*.patch): su huella forma parte de la carpeta de cada compilación.
+PATCHES=$(cat "$HERE"/freerdp/*.patch 2>/dev/null | sha256sum | cut -c1-12)
 B="$D/build"
 S="$B/sysroot"
-P="$D/freerdp-$FREERDP_VERSION"
+P="$D/freerdp-$FREERDP_VERSION-$PATCHES"
 LIBDIR=/usr/lib/x86_64-linux-gnu
 mkdir -p "$D/debs" "$D/root" "$B/debs" "$S" "$HOME/.local/share/pgocode-connectors/intercambio/grabaciones"
 
@@ -25,14 +25,11 @@ apt-get download xvfb xdotool libxdo3 freerdp-shadow-x11 libfreerdp-shadow3-3 li
 for f in *.deb; do dpkg -x "$f" "$D/root"; done
 
 # 2. FreeRDP desde el código fuente
-# Se compila una vez y se guarda: solo se recompila con otra versión de FreeRDP o con otros parches. Nunca con un
-# escritorio remoto abierto: un canal que se cargue después mezclaría librerías nuevas con las del binario en marcha.
-if [ ! -x "$P/bin/sdl-freerdp" ] || [ "$(cat "$P/.parches" 2>/dev/null)" != "$PATCHES" ]; then
-  for exe in /proc/[0-9]*/exe; do
-    case "$(readlink "$exe" 2>/dev/null)" in "$D"/freerdp*/bin/*)
-      echo "Hay un escritorio remoto abierto con este FreeRDP: ciérralo antes de recompilarlo."; exit 1 ;;
-    esac
-  done
+# Se compila una vez y se guarda: solo se recompila con otra versión de FreeRDP o con otros parches. Cada compilación
+# va en su carpeta (versión y huella de los parches) y el enlace «freerdp» se cambia al final, de golpe: los
+# escritorios remotos abiertos siguen con la suya intacta (su binario y sus canales) y los nuevos usan la nueva.
+if [ ! -f "$P/.completo" ]; then
+  rm -rf "$P"
   # Cabeceras que no trae el sistema (las de ffmpeg, OpenSSL, X11 y Kerberos ya están)
   cd "$B/debs"
   apt-get download libsdl3-dev libsdl3-ttf-dev libsdl3-image-dev libsdl3-ttf0 libsdl3-image0 libwayland-dev \
@@ -68,9 +65,15 @@ if [ ! -x "$P/bin/sdl-freerdp" ] || [ "$(cat "$P/.parches" 2>/dev/null)" != "$PA
   cmake --build build -j"$(nproc)"
   cmake --install build
   cp -a "$L"/libSDL3_ttf.so.0* "$L"/libSDL3_image.so.0* "$P/lib/"  # el binario solo busca en su lib/
-  echo "$PATCHES" > "$P/.parches"
+  touch "$P/.completo"  # una compilación a medias nunca cuenta
 fi
 ln -sfn "$P" "$D/freerdp"
+# Las compilaciones anteriores, fuera, salvo las que use algún escritorio remoto abierto
+for old in "$D"/freerdp-*/; do
+  old=${old%/}
+  [ "$old" = "$P" ] && continue
+  grep -qsF "$old/" /proc/[0-9]*/maps || rm -rf "$old"
+done
 
 # 3. PowerShell remoto
 [ -x "$D/venv/bin/python" ] || python3 -m venv "$D/venv"
