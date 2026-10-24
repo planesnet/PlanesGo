@@ -89,10 +89,26 @@ func (s *Servidor) clientsRevoke(w http.ResponseWriter, r *http.Request, ses *se
 		jsonError(w, http.StatusNotFound, "no hay ese cliente")
 		return
 	}
+	if me, _ := s.clientOf(r); me == p.ID {
+		jsonError(w, http.StatusBadRequest, "es esta misma app: revócala desde otra o borra sus datos")
+		return
+	}
 	if err := s.Clients.Revoke(p.ID); err != nil {
 		jsonError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	log.Printf("cliente revocado: %s (%s)", p.ID, ses.Login)
 	jsonOK(w, map[string]bool{"ok": true})
+}
+
+// POST /api/servidor/parar: the person stops the server (Propiedades → Servidor). It closes as on any shutdown: what
+// is running stops and the periods close. The answer goes first (Shutdown waits for it).
+func (s *Servidor) serverStop(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	if s.Stop == nil {
+		jsonError(w, http.StatusConflict, "este servidor no se puede parar desde la app")
+		return
+	}
+	log.Printf("%s para el servidor", ses.Login)
+	jsonOK(w, map[string]bool{"ok": true})
+	go s.Stop()
 }

@@ -139,6 +139,7 @@ function vigilaServidor(version) {
       const v = await pide('GET', '/api/version');
       if (v.version && v.version !== version) { app.relaunch(); app.exit(0); }
     } catch {
+      if (saliendo) return;
       if (!(await vivo())) servidor().catch(e => console.error('[pgocode] ' + e.message));
     }
   }, 20000);
@@ -360,6 +361,8 @@ ipcMain.handle('remoto', (e, o) => {
       throw new Error('orden no válida');
   }
 });
+// Cerrar la app tras parar el servidor desde Propiedades (sin volver a arrancarlo: vigilaServidor).
+ipcMain.handle('salir', e => { if (!deArnes(e)) throw new Error('no permitido'); saliendo = true; app.quit(); });
 ipcMain.handle('visores', e => { if (!deArnes(e)) throw new Error('no permitido'); return visores; });
 // Abrir una carpeta de este equipo en el gestor de archivos (p. ej. «Abrir la carpeta» de una subcarpeta). Solo
 // carpetas que existen: un fichero podría ser un programa, y abrirlo sería ejecutarlo.

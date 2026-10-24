@@ -1167,3 +1167,7 @@ button.miga-item:hover { background: var(--hover); }
 .psf-badge.waiting { color: var(--warning); }
 .psf-badge.failed { color: var(--error); }
 .psf-badge.done { color: #2e8b57; }
+
+/* Propiedades → Servidor: las apps emparejadas */
+.lista-clientes { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lista-clientes li { align-items: center; gap: 8px; min-width: 0; }

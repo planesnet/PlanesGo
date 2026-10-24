@@ -3,15 +3,17 @@ import type { Usuario } from '../api';
 import Icono from './Icono';
 import ErrorReportSettings from './ErrorReportSettings';
 import LocalAISettings from './LocalAISettings';
+import ServerSettings from './ServerSettings';
 import { PropertiesModal, type PropertiesSection } from './Modal';
 
-// Application properties (logo menu): account, updates, local AI, error reports and about.
+// Application properties (logo menu): account, updates, server (paired clients, stop it), local AI, error reports
+// and about.
 
 export interface UpdateStatus { version: string; estado: string; nueva?: string; error?: string; revisado?: string; ocupado?: boolean; trabajando?: string; pausada?: boolean } // trabajando: qué hay en marcha (entonces no se actualiza)
 
-export type AppSection = 'account' | 'updates' | 'localai' | 'errors' | 'about';
+export type AppSection = 'account' | 'updates' | 'server' | 'localai' | 'errors' | 'about';
 const APP_SECTIONS: readonly PropertiesSection<AppSection>[] = [{ id: 'account', name: 'Cuenta', icon: 'equipo' },
-  { id: 'updates', name: 'Actualizaciones', icon: 'recargar' }, { id: 'localai', name: 'IA local', icon: 'ordenador' },
+  { id: 'updates', name: 'Actualizaciones', icon: 'recargar' }, { id: 'server', name: 'Servidor', icon: 'equipo' }, { id: 'localai', name: 'IA local', icon: 'ordenador' },
   { id: 'errors', name: 'Errores', icon: 'warning' },   { id: 'about', name: 'Acerca de', icon: 'info' }];
 
 // Update state as shown to the user.
@@ -75,6 +77,8 @@ export default function AppProperties({ user, avatar, status, initial, checkResu
             <span className="suave pequeno">La versión nueva se instala sola cuando llevas un rato sin usar la aplicación, sin agentes ni programas en marcha.</span>
           </>}
         </>}
+
+        {section === 'server' && <ServerSettings working={status?.trabajando} />}
 
         {section === 'localai' && <LocalAISettings />}
 

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('psf', {
   remoto: orden => ipcRenderer.invoke('remoto', orden),
   visores: () => ipcRenderer.invoke('visores'),
   alRemoto: cb => { const f = (_, ev) => cb(ev); ipcRenderer.on('pgo:remoto', f); return () => ipcRenderer.removeListener('pgo:remoto', f); },
+  // Cerrar la app (tras parar el servidor: no lo vuelve a arrancar).
+  salir: () => ipcRenderer.invoke('salir'),
   // Abrir una carpeta de este equipo en el gestor de archivos.
   abrirRuta: ruta => ipcRenderer.invoke('abrir-ruta', String(ruta)),
   // Actividad de la persona en el navegador interno (sus eventos no llegan a esta ventana).

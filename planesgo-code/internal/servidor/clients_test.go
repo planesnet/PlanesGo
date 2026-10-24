@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"planesgo-code/internal/clients"
 	"planesgo-code/internal/sesiones"
@@ -59,5 +60,51 @@ func TestClientPairing(t *testing.T) {
 	reg.Revoke(p.ID)
 	if w := call("GET", "/api/version", "", p.Token); w.Code != http.StatusForbidden {
 		t.Errorf("revoked: %d", w.Code)
+	}
+}
+
+// Propiedades → Servidor: the clients are listed (without hashes), another one can be revoked but not the app
+// that asks, and the server can be stopped.
+func TestClientsRevokeAndStop(t *testing.T) {
+	e := newRemoteEnv(t)
+	w := e.call("GET", "/api/clientes", "", e.a, true)
+	var l struct {
+		Clients []clients.Client `json:"clients"`
+		Me      string           `json:"me"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &l)
+	if w.Code != 200 || len(l.Clients) != 2 || l.Me == "" || strings.Contains(w.Body.String(), `"hash":"`+"a") {
+		t.Fatalf("lista: %d %s", w.Code, w.Body)
+	}
+	for _, c := range l.Clients {
+		if c.Hash != "" {
+			t.Fatal("la lista lleva el hash del token")
+		}
+	}
+	other := l.Clients[0].ID
+	if other == l.Me {
+		other = l.Clients[1].ID
+	}
+	if w := e.call("POST", "/api/clientes/revocar", `{"id":"`+l.Me+`"}`, e.a, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("revocarse a sí misma: %d", w.Code)
+	}
+	if w := e.call("POST", "/api/clientes/revocar", `{"id":"`+other+`"}`, e.a, true); w.Code != 200 {
+		t.Fatalf("revocar: %d %s", w.Code, w.Body)
+	}
+	if w := e.call("GET", "/api/remote/sessions", "", e.b, true); w.Code != http.StatusForbidden {
+		t.Fatalf("el revocado sigue entrando: %d", w.Code)
+	}
+	if w := e.call("POST", "/api/servidor/parar", `{}`, e.a, true); w.Code != http.StatusConflict {
+		t.Fatalf("sin Stop: %d", w.Code)
+	}
+	stopped := make(chan struct{})
+	e.s.Stop = func() { close(stopped) }
+	if w := e.call("POST", "/api/servidor/parar", `{}`, e.a, true); w.Code != 200 {
+		t.Fatalf("parar: %d", w.Code)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no se para")
 	}
 }

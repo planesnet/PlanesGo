@@ -98,6 +98,8 @@ type Servidor struct {
 	TokenEscritorio string
 	// Clients: las apps cliente emparejadas con este servidor (clients.go); su token va en cookieEscritorio.
 	Clients *clients.Registry
+	// Stop: para el servidor con un cierre limpio (POST /api/servidor/parar); nil: no se puede desde la app.
+	Stop func()
 	// Actualizador: autoactualización desde PlanesGo (nil: sin actualizaciones).
 	Actualizador *actualizacion.Actualizador
 	// QA: pruebas lanzadas desde la app (campañas .psf/qa del proyecto).
@@ -254,6 +256,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/clientes/yo", s.clientsMe)
 	mux.HandleFunc("GET /api/clientes", s.conSesion(s.clientsList))
 	mux.HandleFunc("POST /api/clientes/revocar", s.conSesion(s.clientsRevoke))
+	mux.HandleFunc("POST /api/servidor/parar", s.conSesion(s.serverStop))
 	mux.HandleFunc("GET /api/sql", s.conSesion(s.sqlState))
 	mux.HandleFunc("POST /api/sql/connect", s.conSesion(s.sqlConnect))
 	mux.HandleFunc("POST /api/sql/disconnect", s.conSesion(s.sqlDisconnect))

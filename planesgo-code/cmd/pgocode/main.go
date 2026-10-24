@@ -445,6 +445,7 @@ func main() {
 		stop() // cierre limpio; al terminar se sale con actualizacion.SalidaActualizar
 	}
 	s.Actualizador = act
+	s.Stop = stop // «Parar el servidor» (Propiedades): el mismo cierre limpio que con una señal
 	s.DirRamas = filepath.Join(datos, "ramas")
 	// Remote sessions (RDP and AnyDesk) run in the clients; here, their time (closed if a client stops beating) and
 	// the AnyDesk settings.
