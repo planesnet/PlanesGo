@@ -9,7 +9,6 @@ package servidor
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,6 +34,7 @@ import (
 
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/bugreport"
+	"planesgo-code/internal/clients"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/github"
@@ -97,6 +97,8 @@ type Servidor struct {
 	// TokenEscritorio: secreto que genera la app de escritorio (Electron) y guarda como cookie en su ventana.
 	// Si está puesto, toda petición tiene que traerlo: un navegador normal no puede usar Planes Go Code.
 	TokenEscritorio string
+	// Clients: las apps cliente emparejadas con este servidor (clients.go); su token va en cookieEscritorio.
+	Clients *clients.Registry
 	// Actualizador: autoactualización desde PlanesGo (nil: sin actualizaciones).
 	Actualizador *actualizacion.Actualizador
 	// QA: pruebas lanzadas desde la app (campañas .psf/qa del proyecto).
@@ -240,6 +242,10 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/psf/discard", s.conSesion(s.psfDiscard))
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
+	mux.HandleFunc("POST "+pairPath, s.clientsPair)
+	mux.HandleFunc("GET /api/clientes/yo", s.clientsMe)
+	mux.HandleFunc("GET /api/clientes", s.conSesion(s.clientsList))
+	mux.HandleFunc("POST /api/clientes/revocar", s.conSesion(s.clientsRevoke))
 	mux.HandleFunc("GET /api/rdp", s.conSesion(s.rdpState))
 	mux.HandleFunc("GET /api/sql", s.conSesion(s.sqlState))
 	mux.HandleFunc("POST /api/sql/connect", s.conSesion(s.sqlConnect))
@@ -273,16 +279,13 @@ func (s *Servidor) Handler() http.Handler {
 	return s.cabeceras(s.recovers(mux))
 }
 
-// desdeEscritorio dice si la petición viene de la app de escritorio (o si se permite el navegador).
+// desdeEscritorio dice si la petición viene de una app cliente emparejada (o si se permite el navegador).
 func (s *Servidor) desdeEscritorio(r *http.Request) bool {
 	if s.PermitirNavegador {
 		return true
 	}
-	if s.TokenEscritorio == "" {
-		return false
-	}
-	c, err := r.Cookie(cookieEscritorio)
-	return err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.TokenEscritorio)) == 1
+	_, ok := s.clientOf(r)
+	return ok
 }
 
 const paginaSoloEscritorio = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Planes Go Code</title>
@@ -321,7 +324,8 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 			jsonError(w, http.StatusForbidden, "los agentes solo pueden usar la orden «pgo»")
 			return
 		}
-		if r.URL.Path != "/healthz" && !agente && !s.desdeEscritorio(r) {
+		pairing := r.URL.Path == pairPath && r.Method == http.MethodPost // a client that is not paired yet
+		if r.URL.Path != "/healthz" && !agente && !pairing && !s.desdeEscritorio(r) {
 			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusForbidden)

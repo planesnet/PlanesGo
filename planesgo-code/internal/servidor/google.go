@@ -2,7 +2,6 @@ package servidor
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -22,11 +21,11 @@ import (
 // mensaje original de Gmail), que lo descarga con la sesión de Google que el usuario haya abierto en el panel Web; el
 // fichero se lee aquí (internal/gbrowser). Nunca se lee una página de Google.
 
-// esElectron: la petición viene del proceso principal de la app de escritorio (con su secreto). Con -navegador
+// esElectron: la petición viene del proceso principal de una app cliente emparejada (con su token). Con -navegador
 // tampoco vale otra cosa: el canal de Google es solo para Electron.
 func (s *Servidor) esElectron(r *http.Request) bool {
-	c, err := r.Cookie(cookieEscritorio)
-	return s.TokenEscritorio != "" && err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.TokenEscritorio)) == 1
+	_, ok := s.clientOf(r)
+	return ok
 }
 
 // GET /api/escritorio/google/trabajo: Electron recoge la siguiente descarga (espera hasta 25 s; 204 si no hay).

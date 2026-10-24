@@ -29,11 +29,13 @@ import (
 	"planesgo-code/internal/actualizacion"
 	"planesgo-code/internal/anydesk"
 	"planesgo-code/internal/bugreport"
+	"planesgo-code/internal/clients"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
 	"planesgo-code/internal/odoo"
+	"planesgo-code/internal/proceso"
 	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/proyectos"
 	"planesgo-code/internal/repo"
@@ -193,6 +195,8 @@ func entornoShell() []string {
 }
 
 func main() {
+	// Arrancado por la app de escritorio para que viva por su cuenta: primero, sin lo que haya heredado de ella.
+	proceso.StartClean()
 	// Enlazado como «pgo»: la orden de los agentes para ejecutar programas del proyecto.
 	if filepath.Base(os.Args[0]) == "pgo" {
 		os.Exit(pgo(os.Args[1:]))
@@ -392,6 +396,12 @@ func main() {
 	// Autoactualización: la app instalada (paquete) vive junto al ejecutable; las versiones nuevas se preparan en
 	// ~/.local/share/pgocode/actualizacion y se aplican cuando no hay nada en curso.
 	datos := filepath.Dir(*dirGrab) // ~/.local/share/pgocode
+	// Las apps cliente: se emparejan con el secreto de emparejar (solo lo lee este usuario del sistema) y luego
+	// entran con su token (internal/clients). El secreto cambia en cada arranque; los clientes emparejados siguen.
+	s.Clients = &clients.Registry{File: filepath.Join(datos, "clientes.json"), SecretFile: filepath.Join(datos, "emparejar")}
+	if err := s.Clients.Init(); err != nil {
+		log.Fatalf("clientes: %v", err)
+	}
 	exe, _ := os.Executable()
 	if v := s.Version; v == "dev" || v == "" {
 		if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "VERSION")); err == nil {
@@ -439,9 +449,6 @@ func main() {
 	} else {
 		go act.Funciona(ctx)
 	}
-	if s.TokenEscritorio == "" && !s.PermitirNavegador {
-		log.Print("aviso: sin PGO_TOKEN_ESCRITORIO ni -navegador nadie podrá usar la interfaz; ábrelo con la app de escritorio")
-	}
 	// Las peticiones heredan base: al apagar se cancelan todas, y con ellas los agentes en marcha
 	// (exec.CommandContext), los chats y los directos. Sin esto, un agente podía seguir editando
 	// ficheros con el arnés ya cerrado.
@@ -484,6 +491,23 @@ func main() {
 	}
 	<-apagado // espera a que los agentes y conexiones hayan terminado
 	if salirParaActualizar.Load() {
-		os.Exit(actualizacion.SalidaActualizar) // la app de escritorio cambia los ficheros y se vuelve a abrir
+		restartUpdated(act)
 	}
+}
+
+// restartUpdated: the server puts the prepared version in place of the installed one and starts it on its own
+// (the clients notice the new version and reopen). If the new version cannot be started, it exits with
+// actualizacion.SalidaActualizar, as before, so a desktop app that started this server can still apply it.
+func restartUpdated(act *actualizacion.Actualizador) {
+	if err := act.Apply(); err != nil {
+		log.Printf("actualización: %v; se vuelve a abrir la versión instalada", err)
+	}
+	cmd := exec.Command(act.Backend(), os.Args[1:]...)
+	proceso.Detach(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("no se pudo arrancar la versión nueva: %v", err)
+		os.Exit(actualizacion.SalidaActualizar)
+	}
+	log.Printf("versión nueva en marcha (pid %d)", cmd.Process.Pid)
+	os.Exit(0)
 }

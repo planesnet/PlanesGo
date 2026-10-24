@@ -2,9 +2,9 @@
 //
 // Cada minuto consulta <URL>/version.json. Si la huella del paquete (sha256) no es la instalada, lo descarga,
 // comprueba la huella y lo deja preparado en <DirPreparado>/nuevo. Cuando la app lleva un rato sin hacer nada
-// (sin chats ni agentes en curso, sin directo ni grabación en el estudio local), llama a AlAplicar: el backend
-// guarda las sesiones y sale con el código SalidaActualizar, y la app de escritorio cambia los ficheros y se
-// vuelve a abrir. Si la app no está instalada desde un paquete (desarrollo), no hace nada.
+// (sin chats ni agentes en curso, sin directo ni grabación en el estudio local), llama a AlAplicar: el servidor
+// guarda las sesiones, se cierra, pone la versión nueva en lugar de la instalada (Apply) y la arranca; los clientes
+// ven la versión nueva y se vuelven a abrir. Si la app no está instalada desde un paquete (desarrollo), no hace nada.
 //
 // version.json va firmado con ed25519 (campo «firma», sobre MensajeFirmado) por quien publica, con la clave
 // privada que solo tiene él (make publicar). La app solo acepta lo firmado con la clave pública que lleva dentro,
@@ -34,8 +34,8 @@ import (
 	"time"
 )
 
-// SalidaActualizar es el código de salida con el que el backend pide a la app de escritorio que aplique la
-// actualización preparada y vuelva a abrirse.
+// SalidaActualizar: el código de salida con el que el servidor pide a la app de escritorio que lo arrancó que
+// aplique la actualización, si él no ha podido arrancar la versión nueva.
 const SalidaActualizar = 75
 
 const (
@@ -122,7 +122,7 @@ type Actualizador struct {
 	ClavePub     ed25519.PublicKey // con la que se comprueba version.json (ClavePublica; otra en las pruebas)
 	Ocupado      func() bool       // ¿hay algo en curso o se está usando la app? (la automática espera)
 	Trabajando   func() bool       // ¿hay algo en marcha que se cortaría? (entonces nunca, ni pidiéndolo)
-	AlAplicar    func()            // guarda el estado y sale con SalidaActualizar
+	AlAplicar    func()            // guarda el estado y cierra el servidor para aplicar la versión nueva
 	HTTP         *http.Client
 
 	mu        sync.Mutex

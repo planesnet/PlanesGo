@@ -43,7 +43,8 @@ func concreta(patron string) string {
 // Toda ruta /api/* exige sesión (401 sin ella o con una cookie que no existe), salvo las públicas a propósito
 // (login y versión) y las del agente, que exigen su token (403).
 func TestRutasSinSesion(t *testing.T) {
-	publicas := map[string]bool{"POST /api/login": true, "GET /api/version": true}
+	// Public on purpose: a client pairs and checks its token before anybody logs in (clients.go).
+	publicas := map[string]bool{"POST /api/login": true, "GET /api/version": true, "POST /api/clientes/emparejar": true, "GET /api/clientes/yo": true}
 	// Las del canal de Google con Electron: sin sesión de usuario, pero solo con el secreto de la app de escritorio.
 	soloElectron := map[string]bool{"GET /api/escritorio/google/trabajo": true, "POST /api/escritorio/google/resultado": true}
 	s := &Servidor{Puerto: "7801", PermitirNavegador: true, TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen()}

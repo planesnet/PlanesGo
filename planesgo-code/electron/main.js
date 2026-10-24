@@ -1,7 +1,8 @@
-// Planes Go Code escritorio: arranca el backend Go (o usa uno que ya esté en marcha) y lo muestra en una ventana.
+// Planes Go Code escritorio (el cliente): usa el servidor pgocode de este equipo (lo arranca si no está en marcha; sigue
+// funcionando aunque se cierre la ventana) y muestra su interfaz. Se empareja con él una vez y entra con su token.
 // El panel de navegador usa <webview>, que puede cargar cualquier web (un iframe no).
-const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, session, shell } = require('electron');
-const crypto = require('node:crypto');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, safeStorage, session, shell } = require('electron');
+const os = require('node:os');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -10,7 +11,6 @@ const googleReader = require('./googleReader');
 
 const ADDR = process.env.PGO_ADDR || '127.0.0.1:7801';
 const URL_ARNES = 'http://' + ADDR;
-let backend = null;
 
 // Linux: sin ibus. Si ibus no conecta, GTK le pasa igualmente las pulsaciones y las descarta («Events queue
 // growing too big»): no se podía escribir nada. El método de entrada sencillo de GTK sí admite tildes, ñ y
@@ -30,9 +30,11 @@ if (process.platform === 'linux') {
 // en navegadores que se anuncian como integrados, y el panel Web es donde el usuario abre su sesión de Google (con
 // la que pgocode lee Drive, Docs y Gmail: googleReader.js).
 app.userAgentFallback = app.userAgentFallback.replace(/\s(?:pgocode|Electron)\/\S+/g, '');
-// Secreto de esta app: el backend solo atiende a quien lo traiga (cookie de esta ventana), así que Planes Go Code
-// no se puede usar desde un navegador normal salvo que se arranque con -navegador.
-const TOKEN_ESCRITORIO = crypto.randomBytes(32).toString('hex');
+// Datos del servidor de este equipo (los del backend: -datos / PGO_DATOS): ahí deja el secreto de emparejar.
+const DATOS_SERVIDOR = process.env.PGO_DATOS || path.join(os.homedir(), '.local', 'share', 'pgocode');
+// Token de este cliente: el servidor solo atiende a los clientes emparejados (cookie de esta ventana), así que Planes
+// Go Code no se puede usar desde un navegador normal salvo que el servidor se arranque con -navegador.
+let tokenCliente = '';
 
 // Una sola instancia: «pgocode» o «pgocode --rdp» con la app ya abierta se lo pasan a la que está en marcha, que abre
 // su ventana (el escritorio remoto, con la misma sesión, o la principal). El backend y la sesión son los mismos.
@@ -55,35 +57,6 @@ function binario() {
   return candidatos.find(p => fs.existsSync(p));
 }
 
-// Autoactualización: el backend prepara la versión nueva en ~/.local/share/pgocode/actualizacion/nuevo y,
-// cuando la app está parada, sale con este código. Aquí se cambia la carpeta de la app por la nueva y se
-// vuelve a abrir (la sesión la recupera el backend). Si algo falla, se vuelve a la versión anterior.
-const SALIDA_ACTUALIZAR = 75;
-function aplicaActualizacion() {
-  const nuevo = path.join(app.getPath('home'), '.local', 'share', 'pgocode', 'actualizacion', 'nuevo');
-  const actual = __dirname;
-  const anterior = actual + '.anterior';
-  if (!fs.existsSync(path.join(actual, 'paquete.sha256')) || !fs.existsSync(path.join(nuevo, 'pgocode-backend'))) {
-    console.error('[pgocode] no hay actualización que aplicar (o la app no está instalada desde un paquete)');
-    return false;
-  }
-  try {
-    fs.rmSync(anterior, { recursive: true, force: true });
-    fs.renameSync(actual, anterior);
-    try {
-      fs.renameSync(nuevo, actual);
-    } catch (e) {
-      fs.renameSync(anterior, actual); // vuelta atrás
-      throw e;
-    }
-    console.error('[pgocode] actualización aplicada; se vuelve a abrir');
-    return true;
-  } catch (e) {
-    console.error('[pgocode] no se pudo aplicar la actualización:', e.message);
-    return false;
-  }
-}
-
 function vivo() {
   return new Promise(ok => {
     const r = http.get(URL_ARNES + '/healthz', res => { res.resume(); ok(res.statusCode === 200); });
@@ -92,28 +65,82 @@ function vivo() {
   });
 }
 
-async function arrancaBackend() {
-  // Un backend ya en marcha no conoce el secreto de esta ventana: no se puede reutilizar.
-  if (await vivo()) throw new Error('Planes Go Code ya está abierto (o hay otro programa en ' + ADDR + '). Ciérralo antes de abrirlo de nuevo.');
+// El servidor de este equipo: si ya está en marcha se usa; si no, se arranca por su cuenta (no es hijo de esta app:
+// sigue con los agentes y las sesiones aunque se cierre la ventana).
+async function servidor() {
+  if (await vivo()) return;
   const bin = binario();
-  if (!bin) throw new Error('No encuentro el backend pgocode (compílalo con «make» o indica PGO_BACKEND)');
-  backend = spawn(bin, ['-addr', ADDR], { stdio: 'inherit',
-    env: { ...process.env, PGO_TOKEN_ESCRITORIO: TOKEN_ESCRITORIO, PGO_ELECTRON: process.versions.electron } });
-  backend.on('exit', c => {
-    backend = null;
-    if (c === SALIDA_ACTUALIZAR) {
-      aplicaActualizacion();
-      app.relaunch(); // con la versión nueva (o con la misma, si no se pudo aplicar)
-      app.exit(0);
-      return;
-    }
-    if (c) console.error('pgocode terminó con código', c);
-  });
+  if (!bin) throw new Error('No encuentro el servidor pgocode (compílalo con «make» o indica PGO_BACKEND)');
+  const p = spawn(bin, ['-addr', ADDR], { detached: true, stdio: 'ignore', windowsHide: true,
+    env: { ...process.env, PGO_ELECTRON: process.versions.electron, PGO_DESACOPLADO: '1' } }); // sin lo heredado (proceso.StartClean)
+  p.unref();
   for (let i = 0; i < 100; i++) {
     if (await vivo()) return;
     await new Promise(r => setTimeout(r, 100));
   }
-  throw new Error('El backend pgocode no responde en ' + URL_ARNES);
+  throw new Error('El servidor pgocode no responde en ' + URL_ARNES);
+}
+
+// pide: una petición al servidor con el token de este cliente (JSON de vuelta; error con el mensaje del servidor).
+function pide(metodo, ruta, cuerpo) {
+  return new Promise((ok, mal) => {
+    const datos = cuerpo ? JSON.stringify(cuerpo) : '';
+    const r = http.request(URL_ARNES + ruta, { method: metodo, headers: { 'X-PGO': '1', 'Content-Type': 'application/json',
+      Cookie: 'pgo_escritorio=' + tokenCliente, 'Content-Length': Buffer.byteLength(datos) } }, res => {
+      let t = '';
+      res.on('data', c => { t += c; });
+      res.on('end', () => {
+        let j = {};
+        try { j = JSON.parse(t || '{}'); } catch { /* sin JSON */ }
+        if (res.statusCode >= 200 && res.statusCode < 300) ok(j); else mal(Object.assign(new Error(j.error || 'HTTP ' + res.statusCode), { status: res.statusCode }));
+      });
+    });
+    r.on('error', mal);
+    r.setTimeout(10000, () => r.destroy(new Error('el servidor no responde')));
+    r.end(datos);
+  });
+}
+
+// Token del cliente, cifrado con el almacén del sistema (safeStorage) en los datos de esta app, solo para este usuario.
+const ficheroToken = () => path.join(app.getPath('userData'), 'cliente.json');
+function leeToken() {
+  try {
+    const j = JSON.parse(fs.readFileSync(ficheroToken(), 'utf8'));
+    return j.cifrado ? safeStorage.decryptString(Buffer.from(j.cifrado, 'base64')) : (j.token || '');
+  } catch { return ''; }
+}
+function guardaToken(t) {
+  const j = safeStorage.isEncryptionAvailable() ? { cifrado: safeStorage.encryptString(t).toString('base64') } : { token: t };
+  fs.writeFileSync(ficheroToken(), JSON.stringify(j), { mode: 0o600 });
+}
+
+// emparejado: este cliente con un token que el servidor reconoce; si no lo tiene (o lo han revocado), se empareja con
+// el secreto que el servidor deja en su carpeta de datos (solo lo puede leer este usuario del sistema).
+async function emparejado() {
+  tokenCliente = leeToken();
+  if (tokenCliente) {
+    try { await pide('GET', '/api/clientes/yo'); return; } catch (e) { if (e.status !== 401 && e.status !== 403) throw e; }
+  }
+  let secreto = '';
+  try { secreto = fs.readFileSync(path.join(DATOS_SERVIDOR, 'emparejar'), 'utf8').trim(); } catch { /* sin acceso */ }
+  if (!secreto) throw new Error('No se puede emparejar con el servidor de este equipo: falta su secreto (' + path.join(DATOS_SERVIDOR, 'emparejar') + ')');
+  tokenCliente = '';
+  const r = await pide('POST', '/api/clientes/emparejar', { secret: secreto, name: os.hostname() + ' · ' + os.userInfo().username });
+  tokenCliente = r.token;
+  guardaToken(tokenCliente);
+}
+
+// vigilaServidor: si el servidor se actualiza (otra versión), esta app se vuelve a abrir con la nueva (sus ficheros
+// también han cambiado); si se ha caído, se vuelve a arrancar.
+function vigilaServidor(version) {
+  setInterval(async () => {
+    try {
+      const v = await pide('GET', '/api/version');
+      if (v.version && v.version !== version) { app.relaunch(); app.exit(0); }
+    } catch {
+      if (!(await vivo())) servidor().catch(e => console.error('[pgocode] ' + e.message));
+    }
+  }, 20000);
 }
 
 const esWeb = u => { try { return ['http:', 'https:'].includes(new URL(u).protocol); } catch { return false; } };
@@ -263,14 +290,16 @@ app.whenReady().then(async () => {
   if (!unica) return; // the running instance does it (second-instance)
   endurece(session.defaultSession);
   try {
-    await arrancaBackend();
+    await servidor();
+    await emparejado();
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
-    await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: TOKEN_ESCRITORIO, httpOnly: true, sameSite: 'strict' });
+    await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: tokenCliente, httpOnly: true, sameSite: 'strict' });
+    vigilaServidor((await pide('GET', '/api/version')).version);
     if (quiereRdp(process.argv)) ventanaRdp(); else ventana();
     // Descargas de Google que pide el backend (pgo drive leer, pgo gmail leer), con la sesión del panel Web.
     const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),
       testOrigin: process.env.PGO_GOOGLE_PRUEBA || '', log: m => console.error('[pgocode] ' + m) });
-    const paraGoogle = googleReader.startPolling({ base: URL_ARNES, token: TOKEN_ESCRITORIO, reader, log: m => console.error('[pgocode] ' + m) });
+    const paraGoogle = googleReader.startPolling({ base: URL_ARNES, token: tokenCliente, reader, log: m => console.error('[pgocode] ' + m) });
     app.on('before-quit', () => { paraGoogle(); reader.cleanup(); });
   } catch (e) {
     console.error(e.message);
@@ -283,4 +312,3 @@ app.whenReady().then(async () => {
 app.on('render-process-gone', (_, wc, d) => console.error('[pgocode] proceso de la ventana caído:', d.reason, d.exitCode));
 app.on('child-process-gone', (_, d) => console.error('[pgocode] proceso hijo caído:', d.type, d.reason, d.exitCode));
 app.on('window-all-closed', () => { console.error('[pgocode] todas las ventanas cerradas'); app.quit(); });
-app.on('quit', () => { if (backend) backend.kill('SIGTERM'); });
