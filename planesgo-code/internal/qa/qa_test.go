@@ -3,7 +3,9 @@ package qa
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestCampanaYLanzar(t *testing.T) {
@@ -50,4 +52,43 @@ func TestCampanaYLanzar(t *testing.T) {
 	if _, err := e.Lanza("0:madera", d, "../evil.py"); err == nil {
 		t.Error("script fuera de la campaña aceptado")
 	}
+}
+
+// Tests in any language: listed (without libraries) and run by their own runner, with the local studio in their
+// environment.
+func TestTestsInAnyLanguage(t *testing.T) {
+	d := t.TempDir()
+	for _, f := range []string{"alta.go", "alta_test.go", "baja.py", "rpc.py", "_comun.py", "web.mjs", "prepara.sh", "notas.txt"} {
+		os.WriteFile(filepath.Join(d, f), []byte(""), 0o644)
+	}
+	os.MkdirAll(filepath.Join(d, "pruebas"), 0o755)
+	os.WriteFile(filepath.Join(d, "pruebas", "otra.js"), []byte(""), 0o644)
+	want := []string{"alta.go", "baja.py", "prepara.sh", "pruebas/otra.js", "web.mjs"}
+	if got := Pruebas(d); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("pruebas: %v", got)
+	}
+	for script, prog := range map[string]string{"alta.go": "go", "web.mjs": "node", "prepara.sh": "sh", "baja.py": "python3"} {
+		if p, _, _ := testRunner(d, script); p != prog {
+			t.Errorf("%s: %s", script, p)
+		}
+	}
+
+	t.Setenv("PCO_URL", "http://127.0.0.1:7802")
+	t.Setenv("PCO_TOKEN", "emitir")
+	t.Setenv("PCO_CANAL", "")
+	os.WriteFile(filepath.Join(d, "estudio.sh"), []byte("echo \"estudio $PCO_URL canal $PCO_CANAL\"\n"), 0o644)
+	var e Ejecutor
+	if _, err := e.Lanza("0:c", d, "estudio.sh"); err != nil {
+		t.Fatal(err)
+	}
+	for range 100 {
+		if l := e.Lista("0:c"); len(l) == 1 && l[0].Estado != "curso" {
+			if l[0].Estado != "ok" || !strings.Contains(strings.Join(l[0].Salida, "\n"), "estudio http://127.0.0.1:7802 canal auto") {
+				t.Errorf("run: %+v", l[0])
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the test did not finish")
 }

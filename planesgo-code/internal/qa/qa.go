@@ -1,5 +1,6 @@
 // Package qa da acceso a las campañas de pruebas de un proyecto (<carpeta>/.psf/qa/<campaña>/): sus casos
-// (visor/casos.json), sus vídeos (visor/media), sus pruebas ejecutables (*.py) y los comentarios de cada caso.
+// (visor/casos.json), sus vídeos (visor/media), sus pruebas ejecutables (Go, Python, JavaScript o shell) y los
+// comentarios de cada caso.
 // Lanza las pruebas en este equipo, con el navegador visible: el grabador de la campaña emite al Studio TV local.
 package qa
 
@@ -21,11 +22,12 @@ import (
 	"time"
 
 	"planesgo-code/internal/proceso"
+	"planesgo-code/studio-tv/emitter"
 )
 
 var (
 	nombreValido = regexp.MustCompile(`^[A-Za-z0-9._-]{1,80}$`)
-	scriptValido = regexp.MustCompile(`^(pruebas/)?[A-Za-z0-9._-]{1,80}\.py$`)
+	scriptValido = regexp.MustCompile(`^(pruebas/)?[A-Za-z0-9._-]{1,80}\.(go|py|js|mjs|sh)$`)
 	archivoMedia = regexp.MustCompile(`^media/[A-Za-z0-9._-]{1,120}\.(mp4|webm|jpg|jpeg|png)$`)
 	ErrNoExiste  = errors.New("campaña no encontrada")
 	ErrNoValido  = errors.New("nombre no válido")
@@ -106,15 +108,16 @@ func Media(dir, archivo string) (string, error) {
 	return p, nil
 }
 
-// Pruebas lista los scripts que se pueden lanzar: *.py de la campaña y de pruebas/ (sin bibliotecas como rpc.py).
+// Pruebas lista los scripts que se pueden lanzar, de la campaña y de pruebas/, en cualquiera de los lenguajes de
+// testRunner (sin bibliotecas: rpc.py, los que empiezan por «_» y los *_test.go).
 func Pruebas(dir string) []string {
 	l := []string{}
-	for _, patron := range []string{"*.py", "pruebas/*.py"} {
-		fs, _ := filepath.Glob(filepath.Join(dir, patron))
-		for _, f := range fs {
-			rel, _ := filepath.Rel(dir, f)
-			rel = filepath.ToSlash(rel)
-			if b := filepath.Base(rel); b == "rpc.py" || strings.HasPrefix(b, "_") {
+	for _, sub := range []string{"", "pruebas"} {
+		entries, _ := os.ReadDir(filepath.Join(dir, sub))
+		for _, e := range entries {
+			rel := filepath.ToSlash(filepath.Join(sub, e.Name()))
+			b := e.Name()
+			if e.IsDir() || !scriptValido.MatchString(rel) || b == "rpc.py" || strings.HasPrefix(b, "_") || strings.HasSuffix(b, "_test.go") {
 				continue
 			}
 			l = append(l, rel)
@@ -122,6 +125,41 @@ func Pruebas(dir string) []string {
 	}
 	sort.Strings(l)
 	return l
+}
+
+// testRunner: how a campaign test runs, by its language (the campaign's, not pgocode's): the program, its arguments
+// and what it needs in its environment to show its output at once.
+func testRunner(dir, script string) (program string, args, env []string) {
+	switch filepath.Ext(script) {
+	case ".go":
+		return "go", []string{"run", script}, nil
+	case ".js", ".mjs":
+		return "node", []string{script}, nil
+	case ".sh":
+		return "sh", []string{script}, nil
+	}
+	python := filepath.Join(dir, ".venv", "bin", "python") // the campaign's own environment, if it has one
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+	return python, []string{"-u", script}, []string{"PYTHONUNBUFFERED=1"}
+}
+
+// studioEnv: the local Studio TV for the campaign's recorder (PCO_URL, PCO_TOKEN, PCO_CANAL), whatever its language:
+// the same data pgocode leaves in emitter.ConfigFile.
+func studioEnv() []string {
+	c := emitter.LoadConfig()
+	if c.URL == "" || c.Token == "" {
+		return nil
+	}
+	return []string{"PCO_URL=" + c.URL, "PCO_TOKEN=" + c.Token, "PCO_CANAL=" + firstNonEmpty(c.Channel, "auto")}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // Comentario es una nota sobre un caso en un segundo concreto del vídeo.
@@ -236,8 +274,8 @@ func (e *Ejecutor) Para(id string) bool {
 	return false
 }
 
-// Lanza ejecuta un script de la campaña con su Python (.venv si existe), el navegador visible y sin búfer, para
-// ver la salida al momento. El grabador de la campaña emite solo al Studio TV local (~/.planesgo/studio_tv.env).
+// Lanza ejecuta una prueba de la campaña según su lenguaje (testRunner), con el navegador visible y la salida al
+// momento. El grabador de la campaña emite al Studio TV local: recibe su dirección y su token en el entorno.
 func (e *Ejecutor) Lanza(campana, dir, script string) (*Ejecucion, error) {
 	if !scriptValido.MatchString(script) || strings.Contains(script, "..") {
 		return nil, ErrNoValido
@@ -245,14 +283,11 @@ func (e *Ejecutor) Lanza(campana, dir, script string) (*Ejecucion, error) {
 	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(script))); err != nil {
 		return nil, ErrNoExiste
 	}
-	python := filepath.Join(dir, ".venv", "bin", "python")
-	if _, err := os.Stat(python); err != nil {
-		python = "python3"
-	}
+	program, args, env := testRunner(dir, script)
 	ctx, cancela := context.WithTimeout(context.Background(), 4*time.Hour)
-	cmd := exec.CommandContext(ctx, python, "-u", script)
+	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	cmd.Env = append(append(os.Environ(), env...), studioEnv()...)
 	proceso.GrupoPropio(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	salida, err := cmd.StdoutPipe()

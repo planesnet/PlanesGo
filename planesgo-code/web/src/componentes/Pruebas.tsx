@@ -74,7 +74,7 @@ export default function Pruebas({ proyecto, alVerDirecto }: { proyecto: Proyecto
   if (!campanas.length) return (
     <div className="relleno suave">
       <p>Este proyecto no tiene campañas de pruebas.</p>
-      <p className="pequeno">Una campaña es una carpeta <code>.psf/qa/&lt;nombre&gt;/</code> en la carpeta del proyecto, con <code>visor/casos.json</code> y sus pruebas (<code>*.py</code>).</p>
+      <p className="pequeno">Una campaña es una carpeta <code>.psf/qa/&lt;nombre&gt;/</code> en la carpeta del proyecto, con <code>visor/casos.json</code> y sus pruebas (Go, Python, JavaScript o shell).</p>
     </div>
   );
 

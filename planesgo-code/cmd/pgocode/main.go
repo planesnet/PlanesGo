@@ -41,6 +41,7 @@ import (
 	"planesgo-code/internal/servidor"
 	"planesgo-code/internal/sesiones"
 	studiotv "planesgo-code/studio-tv"
+	"planesgo-code/studio-tv/emitter"
 	"planesgo-code/web"
 )
 
@@ -83,14 +84,13 @@ func tokensEstudio(fichero string) (emitir, ver string, err error) {
 	return t.Emitir, t.Ver, os.WriteFile(fichero, b, 0o600)
 }
 
-// configuraEmisor deja ~/.planesgo/studio_tv.env apuntando al estudio local (lo lee pco_emisor.py: las pruebas
-// emiten sin exportar nada). No lo toca si apunta a otro estudio (p. ej. el de PlanesGo en producción).
+// configuraEmisor deja emitter.ConfigFile (~/.config/pgocode/studio_tv.env) apuntando al estudio local: las pruebas
+// emiten sin exportar nada. No lo toca si apunta a otro estudio.
 func configuraEmisor(url, token string) (string, error) {
-	h, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	f := emitter.ConfigFile()
+	if f == "" {
+		return "", errors.New("sin carpeta de configuración del usuario")
 	}
-	f := filepath.Join(h, ".planesgo", "studio_tv.env")
 	canal := "auto" // el emisor usa qa-<repositorio>-<rama> de la carpeta de la prueba
 	if b, err := os.ReadFile(f); err == nil {
 		v := map[string]string{}

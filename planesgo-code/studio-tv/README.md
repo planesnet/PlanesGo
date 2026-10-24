@@ -16,7 +16,7 @@ Al arrancar muestra dos líneas:
 - **Ver:** ábrela en el navegador. Sin `canal` muestra la parrilla; pulsa un canal para verlo en grande con la escaleta de pasos.
 - **Emitir:** define `PCO_URL` y `PCO_TOKEN` en la consola donde se lanza la prueba. Si emites varias pruebas a la vez, pon también `PCO_CANAL=<nombre>` (letras, números, `.`, `_` o `-`; por defecto `principal`).
 
-El grabador de QA (`grabador.py`, Playwright + CDP `Page.startScreencast`) emite solo si existen esas variables. El cliente Python está en [`clients/python/pco_emisor.py`](clients/python/pco_emisor.py): emite desde un hilo propio a 8 imágenes por segundo como mucho y descarta imágenes si el estudio va lento, así que nunca frena la prueba.
+El cliente para pruebas escritas en Go es el paquete [`emitter`](emitter/emitter.go) (`emitter.New(emitter.Config{}, 8)`, luego `Frame(jpeg)` y `State(…)`): emite en segundo plano a 8 imágenes por segundo como mucho y descarta imágenes si el estudio va lento, así que nunca frena la prueba. Sin las variables lee `~/.config/pgocode/studio_tv.env`, que pgocode deja apuntando a su estudio local; y a las campañas de QA que lanza pgocode les pasa `PCO_URL`, `PCO_TOKEN` y `PCO_CANAL` en el entorno, sea cual sea su lenguaje.
 
 ## Estudio en un servidor (para ver pruebas que corren en la nube)
 
