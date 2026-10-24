@@ -24,7 +24,9 @@ export const formatPeer = (peer: string) => /^\d+$/.test(peer) ? peer.replace(/\
 // normalizePeer: what the backend accepts (digits, with spaces between groups, or an alias like equipo@ad); '' if
 // it is not valid.
 export function normalizePeer(s: string): string {
-  const t = s.trim();
+  let t = s.trim();
+  const id = t.split('/')[0];
+  if (t.includes('/') && /^[\d ]+$/.test(id)) t = id; // «123 456 789/dominio/usuario», as AnyDesk shows it: the ID
   const digits = t.replace(/ /g, '');
   if (/^\d{6,12}$/.test(digits)) return digits;
   const alias = t.toLowerCase();

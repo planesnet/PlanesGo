@@ -113,12 +113,14 @@ func TestValidID(t *testing.T) {
 	for in, want := range map[string]string{
 		"111222333": "111222333", " 111 222 333 ": "111222333", "1234567890": "1234567890",
 		"Equipo-01@AD": "equipo-01@ad", "mi.pc@ad": "mi.pc@ad", "hon-nb-01@s": "hon-nb-01@s",
+		// as AnyDesk shows a computer with its user: only the ID (the rest never reaches the command)
+		"800 929 247/maderasplanes/administrador": "800929247", "111222333/--plain": "111222333",
 	} {
 		if got, ok := ValidID(in); !ok || got != want {
 			t.Errorf("%q -> %q %v", in, got, ok)
 		}
 	}
-	for _, bad := range []string{"", "-h", "--plain", "12345", "1234567890123", "111222333/dom/usu", "111222333.", "a b@ad",
+	for _, bad := range []string{"", "-h", "--plain", "12345", "1234567890123", "12345/dom/usu", "pc@ad/x", "111222333.", "a b@ad",
 		"x;rm -rf ~@ad", "$(id)@ad", "pc@", "@ad", "-pc@ad", "pc@ad --x", "111222333 --plain"} {
 		if got, ok := ValidID(bad); ok {
 			t.Errorf("%q aceptado como %q", bad, got)

@@ -17,5 +17,6 @@ test('formatPeer: el ID de AnyDesk en grupos de tres', () => {
 test('normalizePeer: cifras o alias; lo demás no', () => {
   assert.equal(normalizePeer(' 123 456 789 '), '123456789');
   assert.equal(normalizePeer('Equipo-01@AD'), 'equipo-01@ad');
-  for (const bad of ['', '-h', '12345', '123456789/dominio', '$(id)@ad', 'a b@ad', '123456789 --plain']) assert.equal(normalizePeer(bad), '', bad);
+  assert.equal(normalizePeer('800 929 247/maderasplanes/administrador'), '800929247'); // as AnyDesk shows it
+  for (const bad of ['', '-h', '12345', '12345/dominio', 'pc@ad/x', '$(id)@ad', 'a b@ad', '123456789 --plain']) assert.equal(normalizePeer(bad), '', bad);
 });

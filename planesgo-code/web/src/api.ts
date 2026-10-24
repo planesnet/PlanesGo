@@ -108,7 +108,7 @@ export async function chat(cuerpo: unknown, cada: (e: EventoChat) => void, seña
 
 // Puente con Electron (preload): solo existe dentro de la app de escritorio.
 declare global {
-  interface Window { psf?: { escritorio: true; abrirFuera: (url: string) => Promise<void>; elegirCarpeta?: (inicial?: string) => Promise<string | null>; alActividad?: (cb: () => void) => () => void } }
+  interface Window { psf?: { escritorio: true; abrirFuera: (url: string) => Promise<void>; elegirCarpeta?: (inicial?: string) => Promise<string | null>; escritorioRemoto?: () => Promise<void>; alActividad?: (cb: () => void) => () => void } }
 }
 export const enEscritorio = () => Boolean(window.psf?.escritorio);
 

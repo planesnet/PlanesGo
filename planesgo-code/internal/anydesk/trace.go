@@ -33,13 +33,13 @@ type Line struct {
 
 var lineRe = regexp.MustCompile(`^\s*([a-z]+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\s+(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(?:\d+\s+)?(\S+) - (.*)$`)
 
-// ParseLine reads one trace line (the date is local time); ok false if it does not have the expected format.
+// ParseLine reads one trace line (AnyDesk writes the date in UTC); ok false if it does not have the expected format.
 func ParseLine(s string) (Line, bool) {
 	m := lineRe.FindStringSubmatch(strings.TrimRight(s, "\r\n"))
 	if m == nil {
 		return Line{}, false
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05.000", m[2], time.Local)
+	t, err := time.ParseInLocation("2006-01-02 15:04:05.000", m[2], time.UTC) // AnyDesk writes UTC (checked against the file times)
 	if err != nil {
 		return Line{}, false
 	}
@@ -228,6 +228,12 @@ var (
 // to be an argument of the client; ok false if it is anything else (never starts with «-»).
 func ValidID(s string) (string, bool) {
 	s = strings.TrimSpace(s)
+	// «123 456 789/dominio/usuario», as AnyDesk shows a computer with its user: only the ID is used.
+	if id, _, ok := strings.Cut(s, "/"); ok {
+		if d := strings.ReplaceAll(id, " ", ""); d != "" && strings.Trim(d, "0123456789") == "" {
+			s = id
+		}
+	}
 	if strings.ContainsAny(s, "/.'\"\t\r\n") && !aliasRe.MatchString(strings.ToLower(s)) {
 		return "", false
 	}

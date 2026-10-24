@@ -49,7 +49,7 @@ export function AnyDeskForm({ user, projects, state, reload }: { user: Usuario; 
   async function connect(e: FormEvent) {
     e.preventDefault();
     const peer = normalizePeer(c.peer);
-    if (!c.project) return;
+    if (!c.project) { showMessage('Elige el proyecto al que se imputa el tiempo de la sesión.', { level: 'error', title: TITLE }); return; }
     if (!peer) { showMessage('El ID de AnyDesk son solo cifras (p. ej. 123 456 789) o un alias como equipo@ad.', { level: 'error', title: TITLE }); return; }
     setSending(true);
     try {
@@ -78,7 +78,7 @@ export function AnyDeskForm({ user, projects, state, reload }: { user: Usuario; 
       {state?.default_project ? (
         <p className="rdp-nota">Entrantes: <b>{state.default_project_name}</b><button type="button" className="enlace" onClick={clearDefault}>Quitar</button></p>
       ) : null}
-      <button className="primario" disabled={sending || !c.project || unavailable} title={unavailable ? 'AnyDesk no está instalado en este equipo' : undefined}>
+      <button className="primario" disabled={sending || unavailable} title={unavailable ? 'AnyDesk no está instalado en este equipo' : undefined}>
         {sending ? 'Abriendo AnyDesk…' : 'Conectar'}
       </button>
     </form>

@@ -10,6 +10,13 @@ type EstadoAct = UpdateStatus;
 const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '?';
 
 // Barra superior: marca, aviso de actualización pendiente y menú del usuario (avatar).
+// openRemoteDesktop: the remote desktop window (RDP and AnyDesk), the same as «pgocode --rdp»: in the desktop app,
+// in this same instance; in a browser, as a window of its own.
+function openRemoteDesktop() {
+  if (window.psf?.escritorioRemoto) void window.psf.escritorioRemoto();
+  else window.open('/?modo=rdp', 'pgo-escritorio-remoto', 'width=560,height=680');
+}
+
 export default function Barra({ usuario, alSalir, versionImputacion, sesion }: { usuario: Usuario; alSalir: () => void; versionImputacion: number; sesion?: SesionMarcador }) {
   const [act, setAct] = useState<EstadoAct | null>(null);
   const [abierto, setAbierto] = useState(false);
@@ -111,6 +118,9 @@ export default function Barra({ usuario, alSalir, versionImputacion, sesion }: {
       <span className="hueco" />
       {/* El reloj de imputación, centrado en la ventana. */}
       <div className="centro-barra"><Imputacion version={versionImputacion} sesion={sesion} /></div>
+      <button className="icono boton-barra" onClick={openRemoteDesktop} title="Escritorio remoto (Windows por RDP y AnyDesk)" aria-label="Escritorio remoto">
+        <Icono n="ordenador" t={16} />
+      </button>
       {etiqueta && (act!.estado === 'pendiente'
         ? <button className={'chip ' + act!.estado} title={etiqueta.titulo} onClick={aplicar}>{etiqueta.texto}</button>
         : <span className={'chip ' + act!.estado} title={etiqueta.titulo}>{etiqueta.texto}</span>)}
