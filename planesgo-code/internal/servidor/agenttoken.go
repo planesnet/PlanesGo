@@ -96,6 +96,13 @@ var agentEndpoints = map[string]string{
 	"gmail-leer": http.MethodGet,
 	// SQL Server de la sesión del agente (sqlconn.go): solo lectura salvo que la conexión permita cambios.
 	"sql": http.MethodPost,
+	// WinRM (remote PowerShell) of the agent's session (winrmconn.go): read only unless the connection allows
+	// changes; downloads are reads, uploads need changes allowed.
+	"ps":          http.MethodPost,
+	"ps-download": http.MethodPost,
+	"ps-upload":   http.MethodPost,
+	// The desktop of the agent's session (agentdesktop.go): screenshots, mouse and keyboard.
+	"escritorio": http.MethodPost,
 }
 
 // agentEndpointAllowed: la orden está en la lista blanca con ese método.

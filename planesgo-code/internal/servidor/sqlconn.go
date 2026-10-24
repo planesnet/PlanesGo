@@ -2,13 +2,8 @@ package servidor
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"regexp"
-	"strconv"
-	"sync"
 	"time"
 
 	"planesgo-code/internal/depuracion"
@@ -16,82 +11,14 @@ import (
 	"planesgo-code/internal/sqlserver"
 )
 
-// SQL Server connections of the work sessions: a service pgocode offers to its own parts. The person defines the
-// connection of a session (server, database, SQL Server or Windows user, password) in its properties; then the
-// session's agents use it with «pgo sql», and pgocode's services through SQLFor. The password only lives in the
-// backend's memory (it is lost when pgocode closes): agents and programs never see it. Read only unless the
-// connection allows changes; every batch goes to the audit log (the batch, not its data).
+// SQL Server connections of the work sessions (sessionconn.go): server, database, SQL Server or Windows user and
+// password, defined in the session's properties; its agents use it with «pgo sql», pgocode's services through
+// SQLFor. Read only unless the connection allows changes; every batch goes to the audit log (the batch, not its
+// data).
 
 const sqlRunTimeout = 2 * time.Minute
 
-// sqlConn: the open connection of a session.
-type sqlConn struct {
-	conn    *sqlserver.Conn
-	project int
-	session string
-	login   string // who opened it
-	opened  time.Time
-	used    time.Time
-	batches int
-}
-
-type sqlConns struct {
-	mu sync.Mutex
-	m  map[string]*sqlConn // project|session
-}
-
-func sqlKey(project int, session string) string { return strconv.Itoa(project) + "|" + session }
-
-// safeSession: the id of a work session (the interface makes them; it goes into keys and the audit log).
-var safeSession = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,80}$`)
-
-func (c *sqlConns) get(project int, session string) *sqlConn {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.m[sqlKey(project, session)]
-}
-
-// put stores the connection of a session, closing the one it replaces.
-func (c *sqlConns) put(x *sqlConn) {
-	c.mu.Lock()
-	if c.m == nil {
-		c.m = map[string]*sqlConn{}
-	}
-	old := c.m[sqlKey(x.project, x.session)]
-	c.m[sqlKey(x.project, x.session)] = x
-	c.mu.Unlock()
-	if old != nil {
-		old.conn.Close()
-	}
-}
-
-func (c *sqlConns) remove(project int, session string) bool {
-	c.mu.Lock()
-	x := c.m[sqlKey(project, session)]
-	delete(c.m, sqlKey(project, session))
-	c.mu.Unlock()
-	if x != nil {
-		x.conn.Close()
-	}
-	return x != nil
-}
-
-// CloseConnections closes, on shutdown, what pgocode keeps open towards other servers: the remote desktops (their
-// time would not be counted any more) and the SQL Server connections of the sessions.
-func (s *Servidor) CloseConnections() {
-	s.escritorios.closeAll()
-	s.sqls.closeAll()
-}
-
-func (c *sqlConns) closeAll() {
-	c.mu.Lock()
-	l := c.m
-	c.m = nil
-	c.mu.Unlock()
-	for _, x := range l {
-		x.conn.Close()
-	}
-}
+type sqlConns = sessionConns[*sqlserver.Conn]
 
 // SQLFor: the SQL Server connection of a work session, for pgocode's own services (nil if it has none).
 func (s *Servidor) SQLFor(project int, session string) *sqlserver.Conn {
@@ -117,13 +44,12 @@ func (s *Servidor) sqlView(project int, session string) sqlView {
 		return sqlView{}
 	}
 	cfg := x.conn.Config()
-	return sqlView{Connected: true, Config: &cfg, Server: x.conn.Server, Opened: &x.opened, Batches: x.batches}
+	return sqlView{Connected: true, Config: &cfg, Server: x.conn.Server, Opened: &x.opened, Batches: s.sqls.counted(x)}
 }
 
 // sqlRequest: the body of the /api/sql requests of the interface.
 type sqlRequest struct {
-	Project  int    `json:"project"`
-	Session  string `json:"session"`
+	sessionRef
 	Server   string `json:"server"`
 	Database string `json:"database"`
 	User     string `json:"user"`
@@ -138,21 +64,8 @@ type sqlRequest struct {
 // sqlRead: the request with a project of the user and a valid session.
 func (s *Servidor) sqlRead(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) (sqlRequest, bool) {
 	var p sqlRequest
-	if r.Method == http.MethodGet {
-		p.Project, _ = strconv.Atoi(r.URL.Query().Get("project"))
-		p.Session = r.URL.Query().Get("session")
-	} else if err := lee(r, &p); err != nil {
-		errorLectura(w, err)
-		return p, false
-	}
-	if _, ok := s.proyecto(w, r, ses, p.Project); !ok {
-		return p, false
-	}
-	if !safeSession.MatchString(p.Session) {
-		jsonError(w, http.StatusBadRequest, "sesión no válida")
-		return p, false
-	}
-	return p, true
+	ok := s.readSessionRequest(w, r, ses, &p, &p.sessionRef)
+	return p, ok
 }
 
 // GET /api/sql?project=&session=
@@ -178,8 +91,7 @@ func (s *Servidor) sqlConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	now := time.Now()
-	s.sqls.put(&sqlConn{conn: conn, project: p.Project, session: p.Session, login: ses.Login, opened: now, used: now})
+	s.sqls.open(conn, p.Project, p.Session, ses.Login)
 	s.sqlAudit(ses.Login, "interfaz", p.Project, p.Session, cfg, "(conectar)", false, nil, nil)
 	log.Printf("SQL Server: %s conectado a %s (proyecto %d, sesión %s, cambios %v)", ses.Login, cfg, p.Project, p.Session, cfg.AllowChanges)
 	jsonOK(w, s.sqlViewWithDatabases(r.Context(), p.Project, p.Session))
@@ -267,10 +179,7 @@ func (s *Servidor) sqlRun(w http.ResponseWriter, ctx context.Context, login, ori
 	ctx, cancel := context.WithTimeout(ctx, sqlRunTimeout)
 	defer cancel()
 	res, err := x.conn.Run(ctx, batch, rows, write)
-	s.sqls.mu.Lock()
-	x.used = time.Now()
-	x.batches++
-	s.sqls.mu.Unlock()
+	s.sqls.used(x)
 	s.sqlAudit(login, origin, project, session, x.conn.Config(), batch, write, &res, err)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
@@ -279,14 +188,9 @@ func (s *Servidor) sqlRun(w http.ResponseWriter, ctx context.Context, login, ori
 	jsonOK(w, res)
 }
 
-var sqlAuditMu sync.Mutex
-
 // sqlAudit writes one line per batch to the audit log (JSON lines): who, from where, on which connection, the batch
 // (secrets hidden, at most 4000 characters), rows and time; never the data.
 func (s *Servidor) sqlAudit(login, origin string, project int, session string, cfg sqlserver.Config, batch string, write bool, res *sqlserver.Result, err error) {
-	if s.SQLAudit == "" {
-		return
-	}
 	e := map[string]any{"t": time.Now().Format(time.RFC3339Nano), "login": login, "origin": origin, "project": project,
 		"session": session, "connection": cfg.String(), "allow_changes": cfg.AllowChanges, "write": write,
 		"sql": recortaTexto(depuracion.Tapa(batch), 4000)}
@@ -300,14 +204,5 @@ func (s *Servidor) sqlAudit(login, origin string, project int, session string, c
 	if err != nil {
 		e["error"] = err.Error()
 	}
-	b, _ := json.Marshal(e)
-	sqlAuditMu.Lock()
-	defer sqlAuditMu.Unlock()
-	f, ferr := os.OpenFile(s.SQLAudit, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if ferr != nil {
-		log.Printf("SQL Server: auditoría: %v", ferr)
-		return
-	}
-	f.Write(append(b, '\n'))
-	f.Close()
+	appendAudit(s.SQLAudit, "SQL Server", e)
 }

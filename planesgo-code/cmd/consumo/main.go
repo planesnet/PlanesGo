@@ -10,7 +10,7 @@
 // (texto de la respuesta, una orden que ha de acabar bien, ficheros que no se pueden tocar…): gastar poco y
 // hacerlo mal no cuenta. Gasta tokens de verdad: no entra en «make test».
 //
-//	go run ./cmd/consumo                                  # todo: 3 agentes × 6 pruebas × 3 repeticiones × 2 modos
+//	go run ./cmd/consumo                                  # todo: 3 agentes × 7 pruebas × 3 repeticiones × 2 modos
 //	go run ./cmd/consumo -pruebas 1,2,3 -repeticiones 1   # ronda rápida
 //	go run ./cmd/consumo -modo pgocode                    # solo con pgocode, comparado con la última calibración
 //
@@ -72,6 +72,8 @@ type Turno struct {
 	Orden      string   `json:"orden,omitempty"`       // ha de acabar bien en la carpeta de trabajo
 	SinCambios []string `json:"sin_cambios,omitempty"` // rutas que no se pueden tocar
 	Minimo     *Minimo  `json:"minimo,omitempty"`      // un patrón que ha de aparecer al menos N veces en un fichero
+	// Check: a Go test file of consumo/comprobaciones that has to pass in the work copy (see runCheck).
+	Check string `json:"comprobacion,omitempty"`
 }
 
 type Prueba struct {
@@ -628,13 +630,18 @@ func comprueba(t Turno, texto, carpeta string) string {
 	if t.Orden != "" {
 		cmd := exec.Command("sh", "-c", t.Orden)
 		cmd.Dir = carpeta
+		cmd.Env = checkEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Sprintf("«%s» falla: %s", t.Orden, recorta(string(out), 200))
 		}
 	}
+	if t.Check != "" {
+		if f := runCheck(t.Check, carpeta); f != "" {
+			return f
+		}
+	}
 	for _, r := range t.SinCambios {
-		// Sin contar la caché de Python (__pycache__): la crea ejecutar las pruebas sin PYTHONDONTWRITEBYTECODE (CI).
-		if out, _ := exec.Command("git", "-C", carpeta, "status", "--porcelain", "--", r, ":(exclude,glob)**/__pycache__/**").Output(); len(bytes.TrimSpace(out)) > 0 {
+		if out, _ := exec.Command("git", "-C", carpeta, "status", "--porcelain", "--", r).Output(); len(bytes.TrimSpace(out)) > 0 {
 			return fmt.Sprintf("ha cambiado %s (no se podía tocar)", r)
 		}
 	}
@@ -643,6 +650,46 @@ func comprueba(t Turno, texto, carpeta string) string {
 		if n := len(regexp.MustCompile(m.Patron).FindAll(b, -1)); n < m.Veces {
 			return fmt.Sprintf("%s: %d veces «%s», al menos %d", m.Fichero, n, m.Patron, m.Veces)
 		}
+	}
+	return ""
+}
+
+// checksDir: the folder of the Go checks (consumo/comprobaciones); main sets it next to pruebas.json.
+var checksDir = filepath.Join("..", "..", "consumo", "comprobaciones")
+
+// checkDirName: where a check is copied in the work copy, as a package of its own with only that test. It is
+// removed before the next turn, so the agent never sees it and «sin_cambios» does not count it.
+const checkDirName = "comprobacion_consumo"
+
+// checkEnv: the environment of the checks; each bench project is a module of its own, so no go.work around it
+// may take part.
+func checkEnv() []string {
+	return append(os.Environ(), "GOWORK=off")
+}
+
+// runCheck copies the check file into the work copy, runs it with go test and removes it. Returns what failed
+// (empty when it passes).
+func runCheck(file, carpeta string) string {
+	if file != filepath.Base(file) || !strings.HasSuffix(file, "_test.go") {
+		return fmt.Sprintf("comprobación no válida: %q (ha de ser un fichero _test.go de consumo/comprobaciones)", file)
+	}
+	src, err := os.ReadFile(filepath.Join(checksDir, file))
+	if err != nil {
+		return fmt.Sprintf("no puedo leer la comprobación %s: %v", file, err)
+	}
+	dir := filepath.Join(carpeta, checkDirName)
+	defer os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Sprintf("no puedo preparar la comprobación %s: %v", file, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "comprobacion_test.go"), src, 0o644); err != nil {
+		return fmt.Sprintf("no puedo preparar la comprobación %s: %v", file, err)
+	}
+	cmd := exec.Command("go", "test", "-count=1", "./"+checkDirName+"/")
+	cmd.Dir = carpeta
+	cmd.Env = checkEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Sprintf("la comprobación %s falla: %s", file, recorta(string(out), 300))
 	}
 	return ""
 }
@@ -729,6 +776,7 @@ func main() {
 	}
 	modulo := filepath.Dir(strings.TrimSpace(string(out)))
 	dirBanco := filepath.Join(modulo, "consumo")
+	checksDir = filepath.Join(dirBanco, "comprobaciones")
 	var banco Banco
 	if b, err := os.ReadFile(filepath.Join(dirBanco, "pruebas.json")); err != nil || json.Unmarshal(b, &banco) != nil {
 		log.Fatalf("no puedo leer %s: %v", filepath.Join(dirBanco, "pruebas.json"), err)

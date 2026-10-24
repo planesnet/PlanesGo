@@ -38,7 +38,19 @@ SQL Server de la sesión (la conexión la define la persona en las propiedades d
                                    resultados en texto separado por tabuladores (200 filas por resultado; --filas
                                    hasta 5000). Solo lectura: lo que cambie la orden se deshace al acabar. --escribir
                                    solo vale si la persona ha permitido los cambios en esa conexión
-`
+
+PowerShell remoto (WinRM) de la sesión (la conexión con el equipo Windows la define la persona en las propiedades
+de la sesión; tú no ves la contraseña):
+  pgo ps "<orden PowerShell>" [--escribir]
+  pgo ps -f <fichero.ps1> [--escribir]
+                                   salida, errores y código de salida (hasta 1 MiB). Solo lectura: solo órdenes de
+                                   consulta (Get-*, Test-*, Select-*, Where-*, Measure-*, Format-*…), sin
+                                   asignar propiedades ni escribir ficheros; nada se puede deshacer, así que lo que
+                                   cambia algo necesita --escribir y que la persona haya permitido los cambios
+  pgo ps baja <ruta remota> <fichero local>
+  pgo ps sube <fichero local> <ruta remota> --escribir
+                                   copia un fichero (hasta 4 MiB); subir solo con los cambios permitidos
+` + desktopHelp
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
 func pgo(args []string) int {
@@ -72,6 +84,9 @@ func pgo(args []string) int {
 		espera := 60 * time.Second
 		if strings.HasPrefix(orden, "drive-") || strings.HasPrefix(orden, "gmail-") {
 			espera = 4 * time.Minute
+		}
+		if strings.HasPrefix(orden, "ps") { // a remote script: up to 5 minutes in the backend
+			espera = 6 * time.Minute
 		}
 		res, err := (&http.Client{Timeout: espera}).Do(req)
 		if err != nil {
@@ -188,6 +203,32 @@ func pgo(args []string) int {
 		var r sqlResult
 		json.Unmarshal(raw, &r)
 		fmt.Print(sqlText(r))
+	case "ps":
+		req, err := psArgs(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgo ps: %v\n", err)
+			return 2
+		}
+		raw, err := llama("POST", req.endpoint, req.body, nil)
+		if err != nil {
+			return falla(err)
+		}
+		return psOutput(req, raw)
+	case "escritorio":
+		dir, _ := os.Getwd() // las capturas van a su .pgocode/salidas
+		body, err := desktopArgs(args[1:], dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgo escritorio: %v\n", err)
+			fmt.Fprint(os.Stderr, desktopHelp)
+			return 2
+		}
+		raw, err := llama("POST", "escritorio", body, nil)
+		if err != nil {
+			return falla(err)
+		}
+		var r struct{ Text string }
+		json.Unmarshal(raw, &r)
+		fmt.Println(strings.TrimRight(r.Text, "\n"))
 	case "drive", "gmail":
 		q, err := googleQuery(args[0], args[1:])
 		if err != nil {

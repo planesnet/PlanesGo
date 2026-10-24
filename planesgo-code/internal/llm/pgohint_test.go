@@ -67,3 +67,29 @@ func TestSQLHint(t *testing.T) {
 		}
 	}
 }
+
+func TestPsHint(t *testing.T) {
+	for _, m := range []string{"mira los servicios del servidor Windows", "ejecuta un PowerShell en Sage", "¿funciona WinRM?", "lanza el script limpia.ps1", "en el equipo Windows remoto"} {
+		if !strings.Contains(pgoHintFor(m), "pgo ps") {
+			t.Errorf("%q: sin la pista de pgo ps", m)
+		}
+	}
+	for _, m := range []string{"compila pgocode para Windows", "arregla el test de fechas", "las ventanas de Windows"} {
+		if strings.Contains(pgoHintFor(m), "pgo ps") {
+			t.Errorf("%q: pista de pgo ps de más", m)
+		}
+	}
+}
+
+func TestDesktopHint(t *testing.T) {
+	for _, m := range []string{"entra por el escritorio remoto y abre Sage", "conéctate por RDP al servidor", "haz una captura de la pantalla de Windows", "en Windows, haz clic en Aceptar"} {
+		if !strings.Contains(pgoHintFor(m), "pgo escritorio") {
+			t.Errorf("%q: sin la pista del escritorio", m)
+		}
+	}
+	for _, m := range []string{"compila para Windows", "arregla la captura de pantalla de la web", "/pgo escritorio"} {
+		if strings.Contains(pgoHintFor(m), "pgo escritorio") {
+			t.Errorf("%q: no debería llevar la pista del escritorio", m)
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"planesgo-code/internal/agentdesktop"
 	"planesgo-code/internal/procesos"
 	"planesgo-code/internal/sesiones"
 )
@@ -373,17 +374,21 @@ func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
 	return ok && p.Proyecto == proyecto
 }
 
-// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-leer y gmail-leer.
+// pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-leer, gmail-leer, sql, ps* y escritorio.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		Proyecto int    `json:"proyecto"`
-		Carpeta  string `json:"carpeta"`
-		Nombre   string `json:"nombre"`
-		Orden    string `json:"orden"`
-		URL      string `json:"url"`
-		N        int    `json:"n"`
-		SQL      string `json:"sql"`
-		Escribir bool   `json:"escribir"`
+		Proyecto int                  `json:"proyecto"`
+		Carpeta  string               `json:"carpeta"`
+		Nombre   string               `json:"nombre"`
+		Orden    string               `json:"orden"`
+		URL      string               `json:"url"`
+		N        int                  `json:"n"`
+		SQL      string               `json:"sql"`
+		Escribir bool                 `json:"escribir"`
+		Script   string               `json:"script"` // PowerShell (pgo ps)
+		Path     string               `json:"path"`   // remote file (pgo ps baja|sube)
+		Data     string               `json:"data"`   // its content, base64 (pgo ps sube)
+		Desktop  *agentdesktop.Action `json:"desktop"`
 	}
 	if r.Method == http.MethodPost {
 		if err := lee(r, &p); err != nil {
@@ -459,6 +464,14 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"lineas": l, "total": total, "registro": x.Registro})
 	case "sql":
 		s.sqlRun(w, r.Context(), "agente", "agente", p.Proyecto, g.session, p.SQL, p.N, p.Escribir)
+	case "ps":
+		s.winrmRun(w, r.Context(), "agente", "agente", sessionRef{p.Proyecto, g.session}, p.Script, p.Escribir)
+	case "ps-download":
+		s.winrmDownload(w, r.Context(), sessionRef{p.Proyecto, g.session}, p.Path)
+	case "ps-upload":
+		s.winrmUpload(w, r.Context(), sessionRef{p.Proyecto, g.session}, p.Path, p.Data, p.Escribir)
+	case "escritorio":
+		s.agentDesktopRun(w, p.Proyecto, g.session, p.Carpeta, p.Desktop)
 	case "abrir":
 		if !urlWeb(p.URL) {
 			jsonError(w, http.StatusBadRequest, "URL no válida (http o https)")

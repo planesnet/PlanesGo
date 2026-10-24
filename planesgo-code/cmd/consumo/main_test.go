@@ -29,8 +29,8 @@ func TestTextosEsperados(t *testing.T) {
 	casos := map[int]struct{ bien, mal []string }{
 		1: {[]string{"OK", "OK.", "**OK**"}, []string{"Vale, OK", "No"}},
 		2: {[]string{"8473", "El puerto es 8473."}, []string{"84730", "8069"}},
-		3: {[]string{"facturacion/impuestos/calculo.py:21", "`facturacion/impuestos/calculo.py:17`", "facturacion/impuestos/calculo.py, línea 21"},
-			[]string{"facturacion/impuestos/calculo.py:12", "facturacion/lineas.py:21"}},
+		3: {[]string{"facturacion/impuestos/calculo.go:24", "`facturacion/impuestos/calculo.go:20`", "facturacion/impuestos/calculo.go, línea 24"},
+			[]string{"facturacion/impuestos/calculo.go:16", "facturacion/lineas.go:24"}},
 	}
 	for _, p := range b.Pruebas {
 		c, ok := casos[p.ID]
@@ -50,29 +50,66 @@ func TestTextosEsperados(t *testing.T) {
 	}
 }
 
-// El proyecto de prueba: con el fallo, las pruebas fallan; con el arreglo, pasan, y tocar las pruebas no vale.
-func TestProyectoDePrueba(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("sin python3")
-	}
-	b := banco(t)
-	arreglo := b.Pruebas[3].Turnos[0]
-	d := filepath.Join(t.TempDir(), "p")
-	if err := copia("../../consumo/proyecto", d); err != nil {
+// benchProject copies a bench project (consumo/<name>) into a temporary git repository, as each run does, and
+// returns its folder with helpers to change it like an agent would: edit replaces a text that has to be there,
+// appendTo adds to the end of a file.
+func benchProject(t *testing.T, name string) (dir string, edit func(file, old, new string), appendTo func(file, text string)) {
+	t.Helper()
+	dir = filepath.Join(t.TempDir(), "p")
+	if err := copia(filepath.Join("../../consumo", name), dir); err != nil {
 		t.Fatal(err)
 	}
+	edit = func(file, old, new string) {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil || !strings.Contains(string(b), old) {
+			t.Fatalf("%s: no está %q", file, old)
+		}
+		os.WriteFile(filepath.Join(dir, file), []byte(strings.Replace(string(b), old, new, 1)), 0o644)
+	}
+	appendTo = func(file, text string) {
+		t.Helper()
+		f, err := os.OpenFile(filepath.Join(dir, file), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		f.WriteString(text)
+	}
+	return dir, edit, appendTo
+}
+
+// El proyecto de prueba: con el fallo, las pruebas fallan; con el arreglo, pasan, y tocar las pruebas no vale.
+func TestProyectoDePrueba(t *testing.T) {
+	b := banco(t)
+	arreglo := b.Pruebas[3].Turnos[0]
+	d, edit, _ := benchProject(t, "proyecto")
 	if comprueba(arreglo, "", d) == "" {
 		t.Fatal("sin arreglar, las pruebas pasan")
 	}
-	f := filepath.Join(d, "facturacion", "lineas.py")
-	bs, _ := os.ReadFile(f)
-	os.WriteFile(f, []byte(strings.Replace(string(bs), "self.bruto() - self.descuento", "self.bruto() * (1 - self.descuento / 100)", 1)), 0o644)
+	edit("facturacion/lineas.go", "Redondea(l.Bruto()-l.Descuento, 2)", "Redondea(l.Bruto()*(1-l.Descuento/100), 2)")
 	if r := comprueba(arreglo, "", d); r != "" {
 		t.Fatalf("arreglado: %s", r)
 	}
-	os.WriteFile(filepath.Join(d, "tests", "test_lineas.py"), []byte("\n"), 0o644)
+	os.WriteFile(filepath.Join(d, "tests", "lineas_test.go"), []byte("package tests\n"), 0o644)
 	if comprueba(arreglo, "", d) == "" {
 		t.Error("tocar las pruebas tendría que fallar")
+	}
+}
+
+// A check is copied into the work copy only while it runs: the agent never sees it and it leaves no changes.
+func TestRunCheck(t *testing.T) {
+	d, _, _ := benchProject(t, "proyecto")
+	for _, bad := range []string{"../pruebas.json", "p6_round_mode.go", "no_existe_test.go"} {
+		if runCheck(bad, d) == "" {
+			t.Errorf("%q: tendría que fallar", bad)
+		}
+	}
+	if runCheck("p6_round_mode_test.go", d) == "" {
+		t.Error("sin el modo de redondeo, la comprobación pasa")
+	}
+	if out, _ := exec.Command("git", "-C", d, "status", "--porcelain").Output(); len(out) > 0 {
+		t.Errorf("la comprobación deja cambios: %s", out)
 	}
 }
 
@@ -136,9 +173,6 @@ func TestEvolucionPorTurno(t *testing.T) {
 // Prueba 6 («Ida y vuelta»): con una solución de referencia, cada turno cumple su comprobación y, antes de
 // hacerlo, no (salvo las preguntas, que se comprueban con una respuesta mala).
 func TestIdaYVuelta(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("sin python3")
-	}
 	b := banco(t)
 	i := slices.IndexFunc(b.Pruebas, func(p Prueba) bool { return p.ID == 6 })
 	if i < 0 {
@@ -148,74 +182,61 @@ func TestIdaYVuelta(t *testing.T) {
 	if len(p.Turnos) != 10 {
 		t.Fatalf("%d turnos", len(p.Turnos))
 	}
-	d := filepath.Join(t.TempDir(), "p")
-	if err := copia("../../consumo/proyecto", d); err != nil {
-		t.Fatal(err)
-	}
-	cambia := func(f, de, a string) {
-		t.Helper()
-		bs, err := os.ReadFile(filepath.Join(d, f))
-		if err != nil || !strings.Contains(string(bs), de) {
-			t.Fatalf("%s: no está %q", f, de)
-		}
-		os.WriteFile(filepath.Join(d, f), []byte(strings.Replace(string(bs), de, a, 1)), 0o644)
-	}
-	renombra := func() {
+	d, edit, appendTo := benchProject(t, "proyecto")
+	rename := func() {
 		filepath.WalkDir(d, func(f string, e os.DirEntry, _ error) error {
-			if strings.HasSuffix(f, ".py") {
+			if strings.HasSuffix(f, ".go") {
 				bs, _ := os.ReadFile(f)
-				os.WriteFile(f, []byte(strings.ReplaceAll(string(bs), "subtotal(", "base_imponible(")), 0o644)
+				os.WriteFile(f, []byte(strings.ReplaceAll(string(bs), "Subtotal(", "BaseImponible(")), 0o644)
 			}
 			return nil
 		})
 	}
-	pruebaLineas := func(nombre, cuerpo string) {
-		cambia("tests/test_lineas.py", "\n\nif __name__", "\n\n    def "+nombre+"(self):\n        "+cuerpo+"\n\n\nif __name__")
+	lineTest := func(name, body string) {
+		appendTo("tests/lineas_test.go", "\nfunc "+name+"(t *testing.T) {\n\t"+body+"\n}\n")
 	}
-	pasos := []struct {
-		hace      func()
-		bien, mal string
+	steps := []struct {
+		do        func()
+		good, bad string
 	}{
-		{hace: func() {
-			cambia("facturacion/lineas.py", "self.bruto() - self.descuento", "self.bruto() * (1 - self.descuento / 100)")
+		{do: func() {
+			edit("facturacion/lineas.go", "Redondea(l.Bruto()-l.Descuento, 2)", "Redondea(l.Bruto()*(1-l.Descuento/100), 2)")
 		}},
-		{hace: func() {
-			pruebaLineas("test_descuento_total", "self.assertEqual(Linea(TORNILLO, 4, descuento=100).subtotal(), 0.0)")
+		{do: func() {
+			lineTest("TestDescuentoTotal", "if got := (facturacion.Linea{Producto: tornillo, Cantidad: 4, Descuento: 100}).Subtotal(); got != 0 {\n\t\tt.Error(got)\n\t}")
 		}},
-		{hace: func() {
-			cambia("facturacion/redondeo.py", "decimales=2):", "decimales=2, modo=\"mitad\"):")
-			cambia("facturacion/redondeo.py", "rounding=ROUND_HALF_UP", "rounding=ROUND_DOWN if modo == \"abajo\" else ROUND_HALF_UP")
-			cambia("facturacion/redondeo.py", "import Decimal, ROUND_HALF_UP", "import Decimal, ROUND_DOWN, ROUND_HALF_UP")
+		{do: func() {
+			edit("facturacion/redondeo.go", "decimales int) float64 {", "decimales int, modo ...string) float64 {")
+			edit("facturacion/redondeo.go", "\tif new(big.Int)", "\tif (len(modo) == 0 || modo[0] != \"abajo\") && new(big.Int)")
 		}},
-		{hace: func() {
-			cambia("facturacion/impuestos/calculo.py", "redondea(base * porcentaje / 100)", "redondea(base * porcentaje / 100, modo=\"abajo\")")
+		{do: func() {
+			edit("facturacion/impuestos/calculo.go", "Redondea(base*porcentaje/100, 2)", "Redondea(base*porcentaje/100, 2, \"abajo\")")
 		}},
-		{hace: renombra},
-		{hace: func() {
-			cambia("facturacion/lineas.py", "descuento: float = 0.0  # porcentaje (0-100)", "descuento: float = 0.0  # porcentaje (0-100)\n    descuento_fijo: float = 0.0  # euros")
-			cambia("facturacion/lineas.py", "self.bruto() * (1 - self.descuento / 100))", "self.bruto() * (1 - self.descuento / 100) - self.descuento_fijo)")
+		{do: rename},
+		{do: func() {
+			edit("facturacion/lineas.go", "\tDescuento float64 // porcentaje (0-100)\n", "\tDescuento float64 // porcentaje (0-100)\n\tDescuentoFijo float64 // euros\n")
+			edit("facturacion/lineas.go", "Redondea(l.Bruto()*(1-l.Descuento/100), 2)", "Redondea(l.Bruto()*(1-l.Descuento/100)-l.DescuentoFijo, 2)")
 		}},
-		{bien: "Arreglé el descuento (porcentaje), renombré subtotal a `base_imponible` y añadí `descuento_fijo`.", mal: "Arreglé el descuento."},
-		{hace: func() {
-			cambia("facturacion/lineas.py", "redondea(self.bruto()", "redondea(max(0, self.bruto()")
-			cambia("facturacion/lineas.py", "- self.descuento_fijo)", "- self.descuento_fijo))")
+		{good: "Arreglé el descuento (porcentaje), renombré Subtotal a `BaseImponible` y añadí `DescuentoFijo`.", bad: "Arreglé el descuento."},
+		{do: func() {
+			edit("facturacion/lineas.go", "Redondea(l.Bruto()*(1-l.Descuento/100)-l.DescuentoFijo, 2)", "Redondea(max(0, l.Bruto()*(1-l.Descuento/100)-l.DescuentoFijo), 2)")
 		}},
-		{hace: func() {
-			pruebaLineas("test_descuento_fijo_minimo", "self.assertEqual(Linea(TORNILLO, 1, descuento_fijo=50).base_imponible(), 0.0)")
+		{do: func() {
+			lineTest("TestDescuentoFijoMinimo", "if got := (facturacion.Linea{Producto: tornillo, Cantidad: 1, DescuentoFijo: 50}).BaseImponible(); got != 0 {\n\t\tt.Error(got)\n\t}")
 		}},
-		{bien: "Antes, mitad hacia arriba (ROUND_HALF_UP); ahora, hacia abajo (trunca).", mal: "Igual que antes."},
+		{good: "Antes, mitad hacia arriba; ahora, hacia abajo (trunca).", bad: "Igual que antes."},
 	}
-	for n, x := range pasos {
-		tu := p.Turnos[n]
-		if x.hace != nil {
-			if f := comprueba(tu, x.bien, d); f == "" {
+	for n, s := range steps {
+		turn := p.Turnos[n]
+		if s.do != nil {
+			if comprueba(turn, s.good, d) == "" {
 				t.Errorf("turno %d: se cumple sin hacerlo", n+1)
 			}
-			x.hace()
-		} else if comprueba(tu, x.mal, d) == "" {
-			t.Errorf("turno %d acepta %q", n+1, x.mal)
+			s.do()
+		} else if comprueba(turn, s.bad, d) == "" {
+			t.Errorf("turno %d acepta %q", n+1, s.bad)
 		}
-		if f := comprueba(tu, x.bien, d); f != "" {
+		if f := comprueba(turn, s.good, d); f != "" {
 			t.Fatalf("turno %d: %s", n+1, f)
 		}
 	}
@@ -287,13 +308,13 @@ func TestUIMessages(t *testing.T) {
 	c := &recoge{agente: "claude-code"}
 	c.evento(llm.Evento{Texto: "Voy "})
 	c.evento(llm.Evento{Texto: "a arreglarlo."})
-	c.evento(llm.Evento{Herramienta: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.py", Entrada: "{}", Estado: "curso"}})
+	c.evento(llm.Evento{Herramienta: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.go", Entrada: "{}", Estado: "curso"}})
 	c.evento(llm.Evento{Herramienta: &llm.Herramienta{ID: "1", Estado: "ok", Salida: "hecho"}})
 	c.evento(llm.Evento{Tarea: &llm.Tarea{ID: "l", Tipo: "lista", Elementos: []llm.Elemento{{Texto: "Arreglar", Estado: "curso"}}}})
 	c.evento(llm.Evento{Tarea: &llm.Tarea{ID: "l", Elementos: []llm.Elemento{{Texto: "Arreglar", Estado: "hecho"}}}})
 	c.evento(llm.Evento{Texto: "Hecho."})
 	r := c.fin()
-	if len(r.parts) != 3 || r.parts[0].Texto != "Voy a arreglarlo." || r.parts[1].H.Nombre != "Edit" || r.parts[1].H.Resumen != "facturacion/lineas.py" ||
+	if len(r.parts) != 3 || r.parts[0].Texto != "Voy a arreglarlo." || r.parts[1].H.Nombre != "Edit" || r.parts[1].H.Resumen != "facturacion/lineas.go" ||
 		r.parts[1].H.Estado != "ok" || r.parts[2].Texto != "Hecho." || r.Herramientas != 1 {
 		t.Fatalf("%+v", r.parts)
 	}
@@ -302,7 +323,7 @@ func TestUIMessages(t *testing.T) {
 	}
 	ms := uiMessages([]exchange{{Message: "Arregla", Reply: r.texto, Parts: r.parts, Tasks: r.tasks}})
 	b, _ := json.Marshal(ms)
-	for _, x := range []string{`"rol":"user","texto":"Arregla"`, `"tipo":"herramienta","h":{"id":"1","nombre":"Edit","resumen":"facturacion/lineas.py"`, `"tareas":[{"id":"l","tipo":"lista"`} {
+	for _, x := range []string{`"rol":"user","texto":"Arregla"`, `"tipo":"herramienta","h":{"id":"1","nombre":"Edit","resumen":"facturacion/lineas.go"`, `"tareas":[{"id":"l","tipo":"lista"`} {
 		if !strings.Contains(string(b), x) {
 			t.Errorf("falta %s en %s", x, b)
 		}
@@ -318,8 +339,8 @@ func TestRelayStrategy(t *testing.T) {
 	s := relayStrategy{threshold: 20000, script: "relay.mts"}
 	h := []exchange{
 		{Message: "Las pruebas fallan. Arregla el fallo del descuento sin tocar las pruebas.", Reply: "Arreglado: el descuento es un porcentaje.",
-			Parts: []uiPart{{Tipo: "herramienta", H: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.py", Estado: "ok"}},
-				{Tipo: "herramienta", H: &llm.Herramienta{ID: "2", Nombre: "Bash", Resumen: "python3 -m unittest discover -s tests", Estado: "ok", Salida: "OK"}},
+			Parts: []uiPart{{Tipo: "herramienta", H: &llm.Herramienta{ID: "1", Nombre: "Edit", Resumen: "facturacion/lineas.go", Estado: "ok"}},
+				{Tipo: "herramienta", H: &llm.Herramienta{ID: "2", Nombre: "Bash", Resumen: "go test ./...", Estado: "ok", Salida: "OK"}},
 				{Tipo: "texto", Texto: "Arreglado: el descuento es un porcentaje."}},
 			Usage: Medida{Contexto: 17000}},
 	}
@@ -334,8 +355,8 @@ func TestRelayStrategy(t *testing.T) {
 	if c.Session != "" || !strings.HasPrefix(c.Note, "relevo") {
 		t.Fatalf("por encima del umbral: %+v", c)
 	}
-	for _, x := range []string{"[Memoria de trabajo", "Arregla el fallo del descuento", "facturacion/lineas.py",
-		"ok: `python3 -m unittest discover -s tests`", "[Fin de la memoria de trabajo]\n\nRenombra subtotal a base_imponible."} {
+	for _, x := range []string{"[Memoria de trabajo", "Arregla el fallo del descuento", "facturacion/lineas.go",
+		"ok: `go test ./...`", "[Fin de la memoria de trabajo]\n\nRenombra subtotal a base_imponible."} {
 		if !strings.Contains(c.Message, x) {
 			t.Errorf("falta %q en:\n%s", x, c.Message)
 		}
@@ -361,76 +382,67 @@ func TestCompactionNote(t *testing.T) {
 }
 
 // La prueba 7 (Conversación larga): su proyecto falla al empezar; con un arreglo de referencia de cada turno
-// cumple las comprobaciones una tras otra, y las de memoria aceptan las respuestas buenas y no las malas.
+// cumple las comprobaciones una tras otra (y, antes de cada arreglo, no), y las de memoria aceptan las respuestas
+// buenas y no las malas.
 func TestConversacionLarga(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("sin python3")
-	}
 	b := banco(t)
 	i := slices.IndexFunc(b.Pruebas, func(p Prueba) bool { return p.ID == 7 })
 	if i < 0 {
 		t.Fatal("falta la prueba 7")
 	}
 	p := b.Pruebas[i]
-	d := filepath.Join(t.TempDir(), "p")
-	if err := copia(filepath.Join("../../consumo", p.Proyecto), d); err != nil {
-		t.Fatal(err)
+	d, edit, appendTo := benchProject(t, p.Proyecto)
+	steps := []func(){
+		func() { edit("almacen/precios.go", "if importe > t.Minimo {", "if importe >= t.Minimo {") },
+		func() {
+			edit("almacen/envios.go", "func CosteEnvio(peso float64, zona int) float64 {\n",
+				"func CosteEnvio(peso float64, zona int, urgente bool) float64 {\n\tc := costeBase(peso, zona)\n"+
+					"\tif urgente {\n\t\tc += RecargoUrgente[zona]\n\t}\n\treturn redondea2(c)\n}\n\n"+
+					"func costeBase(peso float64, zona int) float64 {\n")
+			edit("tests/envios_test.go", "almacen.CosteEnvio(0.5, 1)", "almacen.CosteEnvio(0.5, 1, false)")
+		},
+		func() {
+			appendTo("almacen/informes.go", "\nfunc TotalPedido(p *Pedido, cp string) (float64, error) {\n"+
+				"\tz, err := ZonaDe(cp)\n\tif err != nil {\n\t\treturn 0, err\n\t}\n"+
+				"\treturn redondea2(AplicaDescuento(p.Importe()) + CosteEnvio(p.Peso(), z, p.Urgente)), nil\n}\n")
+		},
+		func() {
+			edit("almacen/pedidos.go", "\tp.Historial = append(p.Historial, [2]string{p.Estado, nuevo})\n",
+				"\tif nuevo == \"EN_PREPARACION\" && inv != nil {\n\t\tfor i, l := range p.Lineas {\n"+
+					"\t\t\tif err := inv.ReservaStock(l.SKU, l.Cantidad); err != nil {\n"+
+					"\t\t\t\tfor _, hecha := range p.Lineas[:i] {\n\t\t\t\t\tinv.Libera(hecha.SKU, hecha.Cantidad)\n\t\t\t\t}\n"+
+					"\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t}\n"+
+					"\tp.Historial = append(p.Historial, [2]string{p.Estado, nuevo})\n")
+			appendTo("tests/pedidos_test.go", "\nfunc TestReservaAlPreparar(t *testing.T) {}\n")
+		},
+		func() {
+			edit("almacen/devoluciones.go", "\treturn redondea2(importeProductos + costeEnvio), nil",
+				"\tif motivo == \"desistimiento\" {\n\t\tcosteEnvio = 0\n\t}\n\treturn redondea2(importeProductos + costeEnvio), nil")
+		},
 	}
-	cambia := func(f, viejo, nuevo string) {
-		t.Helper()
-		bs, err := os.ReadFile(filepath.Join(d, f))
-		if err != nil || !strings.Contains(string(bs), viejo) {
-			t.Fatalf("%s: no está %q", f, viejo)
+	for n, step := range steps {
+		turn := p.Turnos[n+1]
+		if comprueba(turn, "", d) == "" {
+			t.Errorf("turno %d: se cumple sin hacerlo", n+2)
 		}
-		os.WriteFile(filepath.Join(d, f), []byte(strings.Replace(string(bs), viejo, nuevo, 1)), 0o644)
-	}
-	if comprueba(p.Turnos[1], "", d) == "" {
-		t.Fatal("sin arreglar, las pruebas pasan")
-	}
-	pasos := []func(){
-		func() { cambia("almacen/precios.py", "if importe > minimo:", "if importe >= minimo:") },
-		func() {
-			cambia("almacen/envios.py", "def coste_envio(peso, zona):\n", "def coste_envio(peso, zona, urgente=False):\n"+
-				"    return round(_base(peso, zona) + (RECARGO_URGENTE[zona] if urgente else 0), 2)\n\n\ndef _base(peso, zona):\n")
-		},
-		func() {
-			cambia("almacen/informes.py", "ANCHO = 78\n", "from .envios import coste_envio, zona_de\nfrom .precios import aplica_descuento\n\n"+
-				"ANCHO = 78\n\n\ndef total_pedido(pedido, cp):\n"+
-				"    return round(aplica_descuento(pedido.importe()) + coste_envio(pedido.peso(), zona_de(cp), pedido.urgente), 2)\n")
-		},
-		func() {
-			cambia("almacen/pedidos.py", "        self.historial.append((self.estado, nuevo))\n",
-				"        if nuevo == \"EN_PREPARACION\" and inventario is not None:\n"+
-					"            hechas = []\n            try:\n                for l in self.lineas:\n"+
-					"                    inventario.reserva_stock(l.sku, l.cantidad)\n                    hechas.append(l)\n"+
-					"            except SinStock:\n                for l in hechas:\n                    inventario.libera(l.sku, l.cantidad)\n"+
-					"                raise\n        self.historial.append((self.estado, nuevo))\n")
-			cambia("tests/test_pedidos.py", "\n\nif __name__", "\n    def test_reserva(self):\n        pass\n\n\nif __name__")
-		},
-		func() {
-			cambia("almacen/devoluciones.py", "    return round(importe_productos + coste_envio, 2)",
-				"    if motivo == \"desistimiento\":\n        coste_envio = 0\n    return round(importe_productos + coste_envio, 2)")
-		},
-	}
-	for n, f := range pasos {
-		f()
-		if r := comprueba(p.Turnos[n+1], "", d); r != "" {
+		step()
+		if r := comprueba(turn, "", d); r != "" {
 			t.Fatalf("turno %d: %s", n+2, r)
 		}
 	}
-	textos := map[int]struct{ bien, mal []string }{
-		0: {[]string{"Lo hace `Inventario.reserva_stock`: deja siempre 7 unidades (MARGEN_SEGURIDAD)."}, []string{"Lo hace reserva_stock, sin margen."}},
-		6: {[]string{"Usaba `importe > minimo` y ahora `importe >= minimo`.", "Comparaba con > en vez de ≥."}, []string{"Comparaba con > y ahora también."}},
-		7: {[]string{"MARGEN_SEGURIDAD = 7 unidades; el recargo urgente de la zona 3 es 5,25 €.", "5.25 € en la zona 3 y 7 unidades de margen (MARGEN_SEGURIDAD)."},
-			[]string{"MARGEN_SEGURIDAD = 3; zona 3: 5,25 €.", "MARGEN_SEGURIDAD = 7; zona 3: 4 €."}},
+	texts := map[int]struct{ good, bad []string }{
+		0: {[]string{"Lo hace `Inventario.ReservaStock`: deja siempre 7 unidades (MargenSeguridad)."}, []string{"Lo hace ReservaStock, sin margen."}},
+		6: {[]string{"Usaba `importe > t.Minimo` y ahora `importe >= t.Minimo`.", "Comparaba con > en vez de ≥."}, []string{"Comparaba con > y ahora también."}},
+		7: {[]string{"MargenSeguridad = 7 unidades; el recargo urgente de la zona 3 es 5,25 €.", "5.25 € en la zona 3 y 7 unidades de margen (MargenSeguridad)."},
+			[]string{"MargenSeguridad = 3; zona 3: 5,25 €.", "MargenSeguridad = 7; zona 3: 4 €."}},
 	}
-	for n, c := range textos {
-		for _, x := range c.bien {
+	for n, c := range texts {
+		for _, x := range c.good {
 			if f := comprueba(p.Turnos[n], x, d); f != "" {
 				t.Errorf("turno %d, %q: %s", n+1, x, f)
 			}
 		}
-		for _, x := range c.mal {
+		for _, x := range c.bad {
 			if comprueba(p.Turnos[n], x, d) == "" {
 				t.Errorf("turno %d acepta %q", n+1, x)
 			}
