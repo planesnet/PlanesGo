@@ -61,18 +61,23 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
       <button type="button" className="boton-secundario peligro" disabled={busy}
         onClick={() => act(() => post<AgentDesktopView>('/api/agent-desktop/stop', { project, session }))}>Parar</button>
     </div> : <>
-      <label>Equipo
-        <input value={c.host} onChange={e => set('host', e.target.value)} placeholder="nombre o IP (y :puerto si no es el 3389)" spellCheck={false} />
-      </label>
-      <label>Usuario
-        <input value={c.user} onChange={e => set('user', e.target.value)} placeholder="DOMINIO\usuario o usuario" autoComplete="off" spellCheck={false} />
-      </label>
-      <label>Contraseña
-        <CampoClave value={password} onChange={setPassword} autoComplete="new-password" />
-      </label>
-      <label>Tamaño de la pantalla
-        <input value={c.size} onChange={e => set('size', e.target.value)} placeholder="1600x900" spellCheck={false} />
-      </label>
+      {/* Two per row: the form fits and «Iniciar» stays in view. */}
+      <div className="fila-dos">
+        <label>Equipo
+          <input value={c.host} onChange={e => set('host', e.target.value)} placeholder="nombre o IP (y :puerto)" spellCheck={false} />
+        </label>
+        <label>Usuario
+          <input value={c.user} onChange={e => set('user', e.target.value)} placeholder="DOMINIO\usuario o usuario" autoComplete="off" spellCheck={false} />
+        </label>
+      </div>
+      <div className="fila-dos">
+        <label>Contraseña
+          <CampoClave value={password} onChange={setPassword} autoComplete="new-password" />
+        </label>
+        <label>Tamaño de la pantalla
+          <input value={c.size} onChange={e => set('size', e.target.value)} placeholder="1600x900" spellCheck={false} />
+        </label>
+      </div>
       <Switch on={c.keyboard === 'unicode'} onChange={on => set('keyboard', on ? 'unicode' : 'keys')}>Teclado Unicode</Switch>
       <span className="suave pequeno">{c.keyboard === 'unicode'
         ? 'Activado: el texto llega tal cual (acentos, ñ, €) sea cual sea la distribución de teclado de Windows.'

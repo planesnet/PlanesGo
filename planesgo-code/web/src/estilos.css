@@ -1171,3 +1171,5 @@ button.miga-item:hover { background: var(--hover); }
 /* Propiedades → Servidor: las apps emparejadas */
 .lista-clientes { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .lista-clientes li { align-items: center; gap: 8px; min-width: 0; }
+.fila-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } /* two fields per row (Escritorio del agente) */
+@media (max-width: 560px) { .fila-dos { grid-template-columns: 1fr; } }
