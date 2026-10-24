@@ -20,5 +20,6 @@ export function stopQuestion(working?: string): string {
 export function versionsText(server: string, app: { app: string; electron: string } | null): string {
   const v = (x: string) => (!x || x === 'dev' ? 'desarrollo' : x);
   const mine = app ? ` · esta app ${v(app.app)} (Electron ${app.electron})` : ' · en el navegador';
-  return `Servidor ${v(server)}${mine}. Tienen que compartir la versión mayor (0.7 de 0.7.0); las menores pueden ser distintas.`;
+  const major = /^\d+\.\d+\.\d+$/.test(server) ? ` (${server.split('.').slice(0, 2).join('.')} de ${server})` : '';
+  return `Servidor ${v(server)}${mine}. Tienen que compartir la versión mayor${major}; las menores pueden ser distintas.`;
 }

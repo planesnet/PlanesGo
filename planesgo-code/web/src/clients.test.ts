@@ -18,4 +18,6 @@ test('versiones del servidor y de la app', () => {
     'Servidor 0.7.0 · esta app 0.7.2 (Electron 45.0.0). Tienen que compartir la versión mayor (0.7 de 0.7.0); las menores pueden ser distintas.');
   assert.match(versionsText('dev', { app: '', electron: '45.0.0' }), /^Servidor desarrollo · esta app desarrollo/);
   assert.match(versionsText('0.7.0', null), /en el navegador/);
+  assert.match(versionsText('0.7.1', null), /(0.7 de 0.7.1)/);
+  assert.doesNotMatch(versionsText('dev', null), / de /);
 });
