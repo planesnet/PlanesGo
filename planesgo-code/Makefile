@@ -85,7 +85,6 @@ paquete: web
 	cp electron/main.js electron/preload.js electron/googleReader.js electron/package.json VERSION $(DIST)/paquete/
 	cp electron/icono/pgocode*.png electron/icono/pgocode*.svg $(DIST)/paquete/icono/
 	cp -r connectors $(DIST)/paquete/connectors
-	find $(DIST)/paquete/connectors -name __pycache__ -prune -exec rm -rf {} +  # reproducible: sin .pyc locales
 	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C $(DIST)/paquete -cf - . | gzip -9n > $(DIST)/pgocode-linux-amd64.tar.gz
 	@sha=$$(sha256sum $(DIST)/pgocode-linux-amd64.tar.gz | cut -d' ' -f1); bytes=$$(stat -c %s $(DIST)/pgocode-linux-amd64.tar.gz); \
 	printf '{"version": "%s", "sha256": "%s", "bytes": %s, "archivo": "pgocode-linux-amd64.tar.gz", "electron": "%s"}\n' \
@@ -133,10 +132,13 @@ apparmor:
 studio-tv:
 	go -C studio-tv build -trimpath -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DIST)/studio-tv ./cmd/studio-tv
 
-# Binarios para todas las plataformas, en dist/studio-tv-<so>-<arq>[.exe]
-dist:
+# Binarios para todas las plataformas, en dist/pgocode-backend-<so>-<arq>[.exe] y dist/studio-tv-<so>-<arq>[.exe]
+dist: web
 	@for p in $(PLATAFORMAS); do \
 		so=$${p%/*}; arq=$${p#*/}; ext=; [ $$so = windows ] && ext=.exe; \
+		echo "pgocode $$so/$$arq"; \
+		CGO_ENABLED=0 GOOS=$$so GOARCH=$$arq go build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' \
+			-o $(DIST)/pgocode-backend-$$so-$$arq$$ext ./cmd/pgocode || exit 1; \
 		echo "studio-tv $$so/$$arq"; \
 		CGO_ENABLED=0 GOOS=$$so GOARCH=$$arq go -C studio-tv build -trimpath -ldflags '$(LDFLAGS)' \
 			-o $(CURDIR)/$(DIST)/studio-tv-$$so-$$arq$$ext ./cmd/studio-tv || exit 1; \
