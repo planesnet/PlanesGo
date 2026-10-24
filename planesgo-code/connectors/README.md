@@ -95,6 +95,14 @@ connectors/winrm/ps.py sube ./local.txt 'C:\ruta\remota.txt'
 El puente guarda la contraseña solo en su memoria y atiende por un socket local con permisos 600. Cada orden
 queda en `~/.local/share/pgocode-connectors/auditoria.log` (la orden, no su salida).
 
+Por defecto va por HTTP (5985), donde NTLM cifra cada mensaje. Con `--https` va por HTTPS (5986) validando el
+certificado del servidor (`--ca` para una CA propia); hay que activarlo antes en Windows (un listener HTTPS de
+WinRM con su certificado). El servidor de Sage (192.168.125.229) no lo tiene abierto.
+
+`rdp.py` y `ps.py` guardan su estado, la tubería del teclado y el socket del puente en `$XDG_RUNTIME_DIR/rdp-agente`.
+Sin `XDG_RUNTIME_DIR` no arrancan (nada de `/tmp`, donde otro usuario podría crear antes la carpeta), y si la carpeta
+no es propia con permisos 700 se niegan a usarla.
+
 ## Probado
 
 Contra servidores RDP locales de prueba (`freerdp-shadow-cli` en 127.0.0.1:3390 sobre otra pantalla virtual, con y

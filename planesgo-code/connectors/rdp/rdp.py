@@ -26,12 +26,13 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "rdp-agente")
+STATE_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or sys.exit("falta XDG_RUNTIME_DIR"), "rdp-agente")
 STATE = os.path.join(STATE_DIR, "estado.json")
 # Text goes through FreeRDP's keyboard pipe as Unicode (accents, ñ, €… whatever the server's keyboard layout);
 # xdotool type loses the characters the virtual X keymap does not have.
@@ -55,6 +56,16 @@ os.environ["PATH"] = os.path.join(LOCAL, "usr/bin") + os.pathsep + os.environ.ge
 LOCAL_LIBS = os.path.join(LOCAL, "usr/lib/x86_64-linux-gnu")
 
 
+def private_dir(path):
+    """Creates (if needed) and checks a runtime folder: ours and 700. No /tmp fallback: there another user could
+    create it first and plant a socket or a pipe."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    st = os.lstat(path)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        sys.exit(f"{path}: no es una carpeta propia con permisos 700; no se usa")
+    return path
+
+
 def load():
     try:
         return json.load(open(STATE))
@@ -63,7 +74,7 @@ def load():
 
 
 def save(st):
-    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    private_dir(STATE_DIR)
     json.dump(st, open(STATE, "w"))
 
 
@@ -306,6 +317,7 @@ def main():
     p = sp.add_parser("graba"); p.add_argument("accion", choices=["inicio", "fin"])
     sp.add_parser("estado"); sp.add_parser("para")
     a = ap.parse_args()
+    private_dir(STATE_DIR)  # before anything reads or writes there
     globals()["cmd_" + a.orden](a)
 
 
