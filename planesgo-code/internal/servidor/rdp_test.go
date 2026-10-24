@@ -17,9 +17,11 @@ import (
 
 func TestRdpExplain(t *testing.T) {
 	for log, want := range map[string]string{
-		"x ERRCONNECT_LOGON_FAILURE [0x00020014]":                                             "Usuario o contraseña incorrectos.",
-		"ERRCONNECT_CONNECT_FAILED":                                                           "No se puede llegar",
-		"ERRCONNECT_CONNECT_CANCELLED":                                                        "",
+		"x ERRCONNECT_LOGON_FAILURE [0x00020014]": "Usuario o contraseña incorrectos.",
+		"ERRCONNECT_CONNECT_FAILED":               "No se puede llegar",
+		"ERRCONNECT_CONNECT_CANCELLED":            "",
+		"fusermount3: mount failed: Operation not permitted\n[ERROR][com.freerdp.core] - [rdp_set_error_info]: ERRINFO_RPC_INITIATED_DISCONNECT [0x00010001]": "",
+		"ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION":                                            "otra conexión",
 		"krb5 ... default realm\nfallo raro de verdad":                                        "fallo raro de verdad",
 		"[ERROR][com.winpr.sspi.Kerberos] - Cannot find KDC for realm \"MAZANA\"\notro fallo": "otro fallo",
 	} {
@@ -35,22 +37,20 @@ func TestRdpExplain(t *testing.T) {
 
 func TestRdpArgs(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	a := strings.Join(rdpArgs("Sage", "192.168.125.229", `MAZANA\planes`, rdpOptions{Sound: true}), " ")
+	a := strings.Join(rdpArgs("Sage", "192.168.125.229", `MAZANA\planes`), " ")
 	for _, want := range []string{"/v:192.168.125.229", "/u:planes", "/d:MAZANA", "/sec:nla", "/tls:seclevel:2", "/gfx:AVC444",
-		"/from-stdin:force", "+clipboard", "/drive:Intercambio,", "/sound:sys:pulse", "/microphone:sys:pulse", "/size:85%"} {
+		"/from-stdin:force", "+clipboard", "/drive:Intercambio,", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer", "/size:85%"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("falta %s en %s", want, a)
 		}
 	}
-	for _, not := range []string{"/printer", "+f", "/p:"} {
+	for _, not := range []string{"+f", "/p:"} {
 		if strings.Contains(a, not) {
 			t.Errorf("sobra %s en %s", not, a)
 		}
 	}
-	// Without a domain; printers only when asked; no sound when turned off
-	a = strings.Join(rdpArgs("Sage", "h", "planes", rdpOptions{Printers: true}), " ")
-	if strings.Contains(a, "/d:") || !strings.Contains(a, "/u:planes") || !strings.Contains(a, "/printer") || strings.Contains(a, "/sound") {
-		t.Errorf("sin dominio, con impresoras y sin sonido: %s", a)
+	if a = strings.Join(rdpArgs("Sage", "h", "planes"), " "); strings.Contains(a, "/d:") || !strings.Contains(a, "/u:planes") {
+		t.Errorf("sin dominio: %s", a)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestRdpConnect(t *testing.T) {
 	if w := pide("/api/rdp/conectar", `{"equipo":"h","usuario":"u","contrasena":"x"}`); w.Code == 200 {
 		t.Fatal("sin proyecto no se conecta")
 	}
-	w := pide("/api/rdp/conectar", `{"proyecto":590,"nombre":"Sage","equipo":"192.168.125.229","usuario":"MAZANA\\luis","contrasena":"S3cr3t!","opciones":{"sonido":true}}`)
+	w := pide("/api/rdp/conectar", `{"proyecto":590,"nombre":"Sage","equipo":"192.168.125.229","usuario":"MAZANA\\luis","contrasena":"S3cr3t!"}`)
 	if w.Code != 200 {
 		t.Fatalf("conectar: %d %s", w.Code, w.Body)
 	}
