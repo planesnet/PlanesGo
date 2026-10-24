@@ -254,6 +254,12 @@ func main() {
 		fmt.Println("pgocode", version)
 		return
 	}
+	// The port first: a second server (another pgocode already running, or one started in the gap of an update's
+	// restart) stops here, before it touches anything of the one that runs (its pairing secret, its sessions…).
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatalf("no se puede escuchar en %s (¿ya hay otro pgocode en marcha?): %v", *addr, err)
+	}
 
 	var rs []string
 	for _, r := range strings.Split(*raices, ",") {
@@ -497,7 +503,7 @@ func main() {
 		}
 	}()
 	log.Printf("Planes Go Code %s en http://%s  (Odoo %s, base %s; proyectos en %s)", version, *addr, *odooURL, *odooDB, strings.Join(rs, ", "))
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 	<-apagado // espera a que los agentes y conexiones hayan terminado

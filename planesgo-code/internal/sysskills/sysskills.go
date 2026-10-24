@@ -93,6 +93,19 @@ func Install(name, dir string) (Skill, error) {
 	}
 	rel := path.Join(Dir, name)
 	base := filepath.Join(dir, filepath.FromSlash(rel))
+	// The folder is a repository nobody checked: none of the folders on the way may be a link it brings (the files
+	// would be written wherever it points).
+	for p := dir; ; {
+		next, ok := strings.CutPrefix(base, p+string(filepath.Separator))
+		if !ok {
+			break
+		}
+		first, _, _ := strings.Cut(next, string(filepath.Separator))
+		p = filepath.Join(p, first)
+		if st, err := os.Lstat(p); err == nil && !st.IsDir() {
+			return sk, fmt.Errorf("%s no es una carpeta: no se instala la skill", p)
+		}
+	}
 	if err := os.RemoveAll(base); err != nil {
 		return sk, err
 	}

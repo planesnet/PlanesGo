@@ -19,6 +19,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -270,7 +271,13 @@ func (h *Helper) openRDP(o Order) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	w, err := StartRDP(bin, o.Name, o.Host, o.User, o.Password)
+	// The project's own shared folder: another project's files are not seen from Windows.
+	exchange, err := freerdp.ExchangePath("persona", strconv.Itoa(o.Project))
+	if err != nil {
+		h.API.End(id, err.Error())
+		return "", err
+	}
+	w, err := StartRDP(bin, o.Name, o.Host, o.User, o.Password, exchange)
 	if err != nil {
 		h.API.End(id, err.Error())
 		return "", err

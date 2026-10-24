@@ -26,7 +26,7 @@ func TestAgentDesktopSession(t *testing.T) {
 	tools := agentdesktoptest.Tools(t, fakes, "")
 	run := filepath.Join(t.TempDir(), "run")
 	s.agentDesktopOptions = func() (agentdesktop.Options, error) {
-		return agentdesktop.Options{Tools: tools, RuntimeDir: run, Exchange: filepath.Join(fakes, "intercambio")}, nil
+		return agentdesktop.Options{Tools: tools, RuntimeDir: run, Exchange: filepath.Join(fakes, "intercambio"), Recordings: filepath.Join(fakes, "grabaciones")}, nil
 	}
 	s.AgentDesktopAudit = filepath.Join(t.TempDir(), "escritorio.jsonl")
 	t.Cleanup(s.CloseConnections)
@@ -120,7 +120,7 @@ func TestAgentDesktopClosedOnShutdown(t *testing.T) {
 	fakes := t.TempDir()
 	tools := agentdesktoptest.Tools(t, fakes, "")
 	s.agentDesktopOptions = func() (agentdesktop.Options, error) {
-		return agentdesktop.Options{Tools: tools, RuntimeDir: filepath.Join(t.TempDir(), "run"), Exchange: fakes}, nil
+		return agentdesktop.Options{Tools: tools, RuntimeDir: filepath.Join(t.TempDir(), "run"), Exchange: fakes, Recordings: fakes}, nil
 	}
 	ses, _ := s.Sesiones.Crea(2, "Prueba", "prueba", "sesion-odoo")
 	ses.MarcaProyecto(7, time.Now().Add(time.Hour))

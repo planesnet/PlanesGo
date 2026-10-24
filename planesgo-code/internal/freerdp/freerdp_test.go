@@ -1,6 +1,8 @@
 package freerdp
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -70,5 +72,31 @@ func TestExplainLoginAfterCertificateWarning(t *testing.T) {
 	}
 	if got := Explain("certificate has changed\nERRCONNECT_TLS_CONNECT_FAILED", 131); !strings.Contains(got, "certificado") {
 		t.Errorf("%q", got)
+	}
+}
+
+// Each connection has its own shared folder, private (700), and nothing outside the connectors' folder is named.
+func TestExchangePath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a, _ := ExchangePath("agente", "589", "s1")
+	b, _ := ExchangePath("agente", "590", "s1")
+	if a == b || !strings.HasSuffix(a, filepath.Join("intercambio", "agente", "589", "s1")) {
+		t.Errorf("%s %s", a, b)
+	}
+	for _, bad := range [][]string{{".."}, {"a/b"}, {""}, {"agente", "../../x"}} {
+		if _, err := ExchangePath(bad...); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if r, _ := RecordingsPath("agente", "589", "s1"); strings.HasPrefix(r, ExchangeDir()) {
+		t.Error("the recordings must not be in a shared folder")
+	}
+	if args := DriveArgs(a); len(args) != 1 || args[0] != "/drive:Intercambio,"+a {
+		t.Fatalf("drive: %v", args)
+	}
+	for d := a; d != filepath.Dir(dataDir()); d = filepath.Dir(d) {
+		if st, err := os.Stat(d); err != nil || st.Mode().Perm() != 0o700 {
+			t.Errorf("%s: %v %v", d, st.Mode().Perm(), err)
+		}
 	}
 }

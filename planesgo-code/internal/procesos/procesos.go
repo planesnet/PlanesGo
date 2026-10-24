@@ -65,6 +65,9 @@ type Proceso struct {
 	logN    int      // lo escrito en él
 }
 
+// Done: closed when the program has ended (for whoever has to undo something then).
+func (p *Proceso) Done() <-chan struct{} { return p.hecho }
+
 // Gestor guarda los procesos por nombre. Al lanzar uno con el nombre de otro en curso, el anterior se para.
 type Gestor struct {
 	mu    sync.Mutex

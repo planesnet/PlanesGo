@@ -46,9 +46,22 @@ else
   MOTOR="$D/motor"
 fi
 
-# Motor (Electron) solo si cambia de versión. Su ejecutable se renombra a «pgocode». Se prepara en $TMP y
+# Fusibles de Electron: sin «ejecutar como Node» (ELECTRON_RUN_AS_NODE), sin NODE_OPTIONS y sin el inspector por
+# argumentos. El perfil de AppArmor da user namespaces a este ejecutable: con esos fusibles, cualquier usuario del equipo
+# lo podría usar como un Node con ese permiso. Se cambian los bytes de los fusibles (versión 1 del formato de Electron):
+# 0 RunAsNode, 2 EnableNodeOptionsEnvironmentVariable, 3 EnableNodeCliInspectArguments.
+FUSIBLES=dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX
+fusibles() {
+  o=$(grep -obUa "$FUSIBLES" "$1" | head -1 | cut -d: -f1)
+  [ -n "$o" ] || { echo "No encuentro los fusibles de Electron en el motor: no se instala"; exit 1; }
+  [ "$(dd if="$1" bs=1 skip=$((o + 32)) count=1 2>/dev/null | od -An -tu1 | tr -d " ")" = 1 ] || {
+    echo "Formato de fusibles de Electron desconocido: no se instala"; exit 1; }
+  for i in 0 2 3; do printf 0 | dd of="$1" bs=1 seek=$((o + 34 + i)) conv=notrunc 2>/dev/null; done
+}
+
+# Motor (Electron) solo si cambia de versión (o si aún no tiene los fusibles cambiados). Su ejecutable se renombra a «pgocode». Se prepara en $TMP y
 # después se pone en su sitio (en /opt, propiedad de root y sin escritura para nadie más).
-if [ "$(cat "$MOTOR/.version" 2>/dev/null)" != "$ELECTRON" ]; then
+if [ "$(cat "$MOTOR/.version" 2>/dev/null)" != "$ELECTRON fusibles" ]; then
   if [ -n "${PGO_ELECTRON_LOCAL:-}" ]; then
     cp -r "$PGO_ELECTRON_LOCAL" "$TMP/motor"
   else
@@ -65,7 +78,8 @@ if [ "$(cat "$MOTOR/.version" 2>/dev/null)" != "$ELECTRON" ]; then
     mkdir -p "$TMP/motor" && unzip -q "$TMP/electron.zip" -d "$TMP/motor"
   fi
   mv "$TMP/motor/electron" "$TMP/motor/pgocode"
-  echo "$ELECTRON" > "$TMP/motor/.version"
+  fusibles "$TMP/motor/pgocode"
+  echo "$ELECTRON fusibles" > "$TMP/motor/.version"
   if [ "$MOTOR" = "$D/motor" ]; then
     rm -rf "$D/motor.nuevo" && mv "$TMP/motor" "$D/motor.nuevo"
     rm -rf "$D/motor" && mv "$D/motor.nuevo" "$D/motor"

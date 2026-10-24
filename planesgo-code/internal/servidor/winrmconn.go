@@ -92,7 +92,10 @@ func (s *Servidor) winrmConnect(w http.ResponseWriter, r *http.Request, ses *ses
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.winrms.open(conn, p.Project, p.Session, ses.Login)
+	if !s.winrms.open(conn, p.Project, p.Session, ses.Login) {
+		jsonError(w, http.StatusServiceUnavailable, "pgocode se está cerrando: vuelve a intentarlo cuando esté abierto")
+		return
+	}
 	s.winrmAudit(ses.Login, "interfaz", p.sessionRef, cfg, "(conectar)", false, nil, nil)
 	log.Printf("WinRM: %s conectado a %s (proyecto %d, sesión %s, cambios %v)", ses.Login, cfg, p.Project, p.Session, cfg.AllowChanges)
 	jsonOK(w, s.winrmView(p.Project, p.Session))

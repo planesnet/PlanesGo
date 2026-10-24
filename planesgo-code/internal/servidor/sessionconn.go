@@ -31,8 +31,9 @@ type sessionConn[C interface{ Close() error }] struct {
 
 // sessionConns: the open connections of one kind, by project and session.
 type sessionConns[C interface{ Close() error }] struct {
-	mu sync.Mutex
-	m  map[string]*sessionConn[C] // project|session
+	mu     sync.Mutex
+	m      map[string]*sessionConn[C] // project|session
+	closed bool                       // pgocode is closing (closeAll): nothing new is kept
 }
 
 func sessionKey(project int, session string) string { return strconv.Itoa(project) + "|" + session }
@@ -46,11 +47,17 @@ func (c *sessionConns[C]) get(project int, session string) *sessionConn[C] {
 	return c.m[sessionKey(project, session)]
 }
 
-// open stores a new connection of a session, closing the one it replaces.
-func (c *sessionConns[C]) open(conn C, project int, session, login string) {
+// open stores a new connection of a session, closing the one it replaces. If pgocode started closing while it was
+// being opened (closeAll already ran), it is closed at once and open answers false: nobody would close it later.
+func (c *sessionConns[C]) open(conn C, project int, session, login string) bool {
 	now := time.Now()
 	x := &sessionConn[C]{conn: conn, project: project, session: session, login: login, opened: now, used: now}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		conn.Close()
+		return false
+	}
 	if c.m == nil {
 		c.m = map[string]*sessionConn[C]{}
 	}
@@ -60,6 +67,7 @@ func (c *sessionConns[C]) open(conn C, project int, session, login string) {
 	if old != nil {
 		old.conn.Close()
 	}
+	return true
 }
 
 func (c *sessionConns[C]) remove(project int, session string) bool {
@@ -91,7 +99,7 @@ func (c *sessionConns[C]) counted(x *sessionConn[C]) int {
 func (c *sessionConns[C]) closeAll() {
 	c.mu.Lock()
 	l := c.m
-	c.m = nil
+	c.m, c.closed = nil, true
 	c.mu.Unlock()
 	for _, x := range l {
 		x.conn.Close()

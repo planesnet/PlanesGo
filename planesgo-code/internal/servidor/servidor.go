@@ -126,6 +126,8 @@ type Servidor struct {
 	// agenttoken.go); DirBin: carpeta con «pgo».
 	TokenAgente string
 	agentes     agentTokens
+	// programas: the tokens of the programs launched from a work session (programtoken.go).
+	programas programTokens
 	// esProcesoAgente sustituye en las pruebas la comprobación del proceso que se conecta (peer.go).
 	esProcesoAgente func(*http.Request) bool
 	DirBin          string
@@ -255,6 +257,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
 	mux.HandleFunc("POST "+pairPath, s.clientsPair)
+	mux.HandleFunc("GET "+proofPath, s.clientsProof)
 	mux.HandleFunc("GET /api/clientes/yo", s.clientsMe)
 	mux.HandleFunc("GET /api/clientes", s.conSesion(s.clientsList))
 	mux.HandleFunc("POST /api/clientes/revocar", s.conSesion(s.clientsRevoke))
@@ -342,7 +345,8 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 		// Las órdenes del agente llevan su token (que /api/pgo comprueba contra el proyecto de la orden). Con el token
 		// de agente o desde un proceso de agente, nada fuera de /api/pgo: ni la interfaz ni las rutas que hablan con
 		// Odoo (docs/odoo-blindaje.md).
-		agente := esRutaAgente(r.URL.Path) && r.Header.Get("X-PGO-Agente") != ""
+		// An agent (X-PGO-Agente) or a program of a session (X-PGO-Programa): only /api/pgo, with its own token.
+		agente := esRutaAgente(r.URL.Path) && (r.Header.Get("X-PGO-Agente") != "" || r.Header.Get(programHeader) != "")
 		if !esRutaAgente(r.URL.Path) && r.URL.Path != "/healthz" && (r.Header.Get("X-PGO-Agente") != "" || s.fromAgentProcess(r)) {
 			jsonError(w, http.StatusForbidden, "los agentes solo pueden usar la orden «pgo»")
 			return
@@ -352,7 +356,8 @@ func (s *Servidor) cabeceras(h http.Handler) http.Handler {
 			jsonError(w, http.StatusUpgradeRequired, versiones.Mismatch(v, s.Version))
 			return
 		}
-		pairing := r.URL.Path == pairPath && r.Method == http.MethodPost // a client that is not paired yet
+		// A client that is not paired yet: pairing and checking that this is its server.
+		pairing := (r.URL.Path == pairPath && r.Method == http.MethodPost) || (r.URL.Path == proofPath && r.Method == http.MethodGet)
 		if r.URL.Path != "/healthz" && !agente && !pairing && !s.desdeEscritorio(r) {
 			if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -476,26 +481,44 @@ func (s *Servidor) proyecto(w http.ResponseWriter, r *http.Request, ses *sesione
 		jsonError(w, http.StatusBadRequest, "elige un proyecto de Odoo")
 		return "", false
 	}
+	name, err := s.projectAccess(r.Context(), ses, id)
+	switch {
+	case errors.Is(err, errNoProject):
+		jsonError(w, http.StatusForbidden, err.Error())
+		return "", false
+	case err != nil:
+		s.errorOdoo(w, ses, err)
+		return "", false
+	}
+	return name, true
+}
+
+var errNoProject = errors.New("ese proyecto no existe en Odoo o no tienes acceso")
+
+// projectAccess: the name of the project if the user has access to it in Odoo (errNoProject if not; another error if
+// Odoo cannot say). The answer is kept for a while in the session.
+func (s *Servidor) projectAccess(ctx context.Context, ses *sesiones.Sesion, id int) (string, error) {
+	if id <= 0 {
+		return "", errNoProject
+	}
 	if ses.ProyectoComprobado(id, time.Now()) {
 		s.mu.Lock()
 		n := s.nombres[id]
 		s.mu.Unlock()
-		return n, true
+		return n, nil
 	}
-	ps, err := s.Odoo.Proyectos(r.Context(), ses.OdooSesion, id)
+	ps, err := s.Odoo.Proyectos(ctx, ses.OdooSesion, id)
 	if err != nil {
-		s.errorOdoo(w, ses, err)
-		return "", false
+		return "", err
 	}
 	if len(ps) == 0 {
-		jsonError(w, http.StatusForbidden, "ese proyecto no existe en Odoo o no tienes acceso")
-		return "", false
+		return "", errNoProject
 	}
 	ses.MarcaProyecto(id, time.Now().Add(vigenciaProyecto))
 	s.mu.Lock()
 	s.nombres[id] = ps[0].Nombre
 	s.mu.Unlock()
-	return ps[0].Nombre, true
+	return ps[0].Nombre, nil
 }
 
 func idProyecto(r *http.Request) int {

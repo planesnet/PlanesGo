@@ -30,7 +30,7 @@ func startFake(t *testing.T, keyboard, clientExit string) (*agentdesktop.Desktop
 	dir := t.TempDir()
 	run := filepath.Join(t.TempDir(), "run")
 	d, err := agentdesktop.Start(agentdesktop.Config{Host: "127.0.0.1:3392", User: `PRUEBAS\agente`, Password: "S3cr3t! ñ", Keyboard: keyboard},
-		agentdesktop.Options{Tools: agentdesktoptest.Tools(t, dir, clientExit), RuntimeDir: run, Exchange: filepath.Join(dir, "intercambio")})
+		agentdesktop.Options{Tools: agentdesktoptest.Tools(t, dir, clientExit), RuntimeDir: run, Exchange: filepath.Join(dir, "intercambio"), Recordings: filepath.Join(dir, "grabaciones")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestActions(t *testing.T) {
 		t.Errorf("tamaño: %+v", st)
 	}
 	r, err = d.Do(agentdesktop.Action{Name: "record", Record: "start"}, out)
-	if err != nil || !strings.HasPrefix(r.Path, filepath.Join(dir, "intercambio", "grabaciones")) || !d.Status().Recording {
+	if err != nil || !strings.HasPrefix(r.Path, filepath.Join(dir, "grabaciones")) || !d.Status().Recording {
 		t.Fatalf("graba: %+v %v", r, err)
 	}
 	if _, err := d.Do(agentdesktop.Action{Name: "record", Record: "start"}, out); err == nil {

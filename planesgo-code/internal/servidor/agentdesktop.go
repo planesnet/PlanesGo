@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -40,22 +41,33 @@ type agentDesktopRequest struct {
 	Height   int    `json:"height"`
 }
 
-// desktopOptions: the programs and folders (the installed ones, except in the tests).
-func (s *Servidor) desktopOptions() (agentdesktop.Options, error) {
+// desktopOptions: the programs (the installed ones, except in the tests) and the session's own folders: its shared
+// folder (another session or project never sees its files from Windows) and its recordings.
+func (s *Servidor) desktopOptions(project int, session string) (agentdesktop.Options, error) {
+	var opts agentdesktop.Options
+	var err error
 	if s.agentDesktopOptions != nil {
-		return s.agentDesktopOptions()
+		opts, err = s.agentDesktopOptions()
+	} else {
+		opts.Tools, err = agentdesktop.FindTools()
 	}
-	t, err := agentdesktop.FindTools()
-	return agentdesktop.Options{Tools: t}, err
+	p := strconv.Itoa(project)
+	if opts.Exchange == "" {
+		opts.Exchange, _ = freerdp.ExchangePath("agente", p, session)
+	}
+	if opts.Recordings == "" {
+		opts.Recordings, _ = freerdp.RecordingsPath("agente", p, session)
+	}
+	return opts, err
 }
 
 func (s *Servidor) agentDesktopView(project int, session string) agentDesktopView {
-	v := agentDesktopView{Supported: runtime.GOOS == "linux", Exchange: freerdp.ExchangeDir()}
-	if opts, err := s.desktopOptions(); err != nil {
+	v := agentDesktopView{Supported: runtime.GOOS == "linux"}
+	opts, err := s.desktopOptions(project, session)
+	if err != nil {
 		v.Missing = err.Error()
-	} else if opts.Exchange != "" {
-		v.Exchange = opts.Exchange
 	}
+	v.Exchange = opts.Exchange
 	if x := s.agentDesktops.get(project, session); x != nil {
 		st := x.conn.Status()
 		v.Running, v.Status, v.Exchange = x.conn.Running(), &st, st.Exchange
@@ -81,7 +93,7 @@ func (s *Servidor) agentDesktopStart(w http.ResponseWriter, r *http.Request, ses
 	}
 	cfg := agentdesktop.Config{Host: p.Host, User: p.User, Password: p.Password, Keyboard: p.Keyboard, Width: p.Width, Height: p.Height}
 	p.Password = ""
-	opts, err := s.desktopOptions()
+	opts, err := s.desktopOptions(p.Project, p.Session)
 	status := http.StatusServiceUnavailable // programs missing, or not Linux
 	var d *agentdesktop.Desktop
 	if err == nil {
@@ -99,7 +111,10 @@ func (s *Servidor) agentDesktopStart(w http.ResponseWriter, r *http.Request, ses
 		jsonError(w, status, err.Error())
 		return
 	}
-	s.agentDesktops.open(d, p.Project, p.Session, ses.Login)
+	if !s.agentDesktops.open(d, p.Project, p.Session, ses.Login) {
+		jsonError(w, http.StatusServiceUnavailable, "pgocode se está cerrando: vuelve a intentarlo cuando esté abierto")
+		return
+	}
 	s.desktopAudit(ses.Login, "interfaz", p.Project, p.Session, conn, map[string]any{"action": "start"}, nil)
 	log.Printf("escritorio del agente: %s lo inicia en %s (proyecto %d, sesión %s)", ses.Login, conn, p.Project, p.Session)
 	jsonOK(w, s.agentDesktopView(p.Project, p.Session))

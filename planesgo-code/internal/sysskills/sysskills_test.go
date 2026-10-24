@@ -62,3 +62,17 @@ func TestInstall(t *testing.T) {
 		}
 	}
 }
+
+// A link brought by the repository on the way (.pgocode, say) is never followed.
+func TestInstallRefusesLinks(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, ".pgocode")); err != nil {
+		t.Skip(err)
+	}
+	if _, err := Install("psf-builder", dir); err == nil {
+		t.Error("installed through a link")
+	}
+	if l, _ := os.ReadDir(outside); len(l) != 0 {
+		t.Errorf("written outside: %v", l)
+	}
+}

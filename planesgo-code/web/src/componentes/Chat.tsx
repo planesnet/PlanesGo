@@ -2098,7 +2098,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
             {sesion.psf && <PsfStrip state={sesion.psf} busy={Boolean(psfBusy[sesion.id])} now={psfNow} cost={psfCost(sesion)}
               onStop={() => stopPsf(sesion.id)} onResume={() => runPsf(sesion.id)} onMerge={() => psfMerge(sesion.id)} onRetry={text => psfRetry(sesion.id, text)} onDiscard={why => psfDiscard(sesion.id, why)} />}
             {/* Barra de prueba (debajo de la cola): lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
-            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
+            <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} sesion={sesion.id} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
             {adjuntos.length > 0 && (
               <div className="adjuntos-pendientes">
                 {adjuntos.map(a => (

@@ -94,7 +94,10 @@ func TestSQLArgs(t *testing.T) {
 	if b, err := sqlArgs([]string{"-f", f}); err != nil || b["sql"] != "SELECT 2" {
 		t.Errorf("-f: %v %v", b, err)
 	}
-	for _, a := range [][]string{{}, {"a", "b"}, {"SELECT 1", "--filas", "x"}, {"--otra"}} {
+	if b, err := sqlArgs([]string{"SELECT 3", "--conexion", "pruebas"}); err != nil || b["conexion"] != "pruebas" {
+		t.Errorf("--conexion: %v %v", b, err)
+	}
+	for _, a := range [][]string{{}, {"a", "b"}, {"SELECT 1", "--filas", "x"}, {"--otra"}, {"SELECT 1", "--conexion"}} {
 		if _, err := sqlArgs(a); err == nil {
 			t.Errorf("%v must fail", a)
 		}

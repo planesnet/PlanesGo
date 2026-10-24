@@ -26,15 +26,15 @@ func RDPClient() string {
 
 // rdpArgs: the person's window on top of the shared secure settings. Everything is allowed (clipboard, the shared
 // folder «Intercambio», sound, microphone and this computer's printers) and the person decides what to use; full
-// screen whenever wanted (Ctrl+Alt+Intro in the window).
-func rdpArgs(name, host, login string) []string {
+// screen whenever wanted (Ctrl+Alt+Intro in the window). exchange: the shared folder of this connection (its project's).
+func rdpArgs(name, host, login, exchange string) []string {
 	a := append(freerdp.SecureArgs(host, login), "/title:"+name,
 		"+auto-reconnect", "/auto-reconnect-max-retries:20", "+dynamic-resolution", "/log-level:ERROR",
 		// Without grabbing the keyboard: GNOME asks every time for permission to inhibit its shortcuts. Alt+Tab and
 		// the Windows key stay on this desktop.
 		"-grab-keyboard",
 		"/size:85%", "+clipboard", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer")
-	return append(a, freerdp.DriveArgs()...)
+	return append(a, freerdp.DriveArgs(exchange)...)
 }
 
 // RDPWindow: a FreeRDP window that is open.
@@ -47,12 +47,12 @@ type RDPWindow struct {
 
 // StartRDP opens FreeRDP (bin) on host as user, with the password through its input. Nothing of pgocode's
 // environment (tokens) reaches it, and it runs in its own process group (Close ends it all).
-func StartRDP(bin, name, host, user, password string) (*RDPWindow, error) {
+func StartRDP(bin, name, host, user, password, exchange string) (*RDPWindow, error) {
 	if err := freerdp.ValidateTarget(host, user); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, bin, rdpArgs(name, host, user)...)
+	cmd := exec.CommandContext(ctx, bin, rdpArgs(name, host, user, exchange)...)
 	proceso.GrupoPropio(cmd)
 	cmd.Env = proceso.CleanEnviron()
 	var log bytes.Buffer

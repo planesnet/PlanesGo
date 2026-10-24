@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { authKind, EMPTY_SQL, sqlFormError, sqlStatusText } from './sqlConnection.ts';
+import * as S from './sqlConnection.ts';
 
 test('sqlFormError asks for what is missing', () => {
   assert.match(sqlFormError(EMPTY_SQL, 'x'), /servidor/);
@@ -20,4 +21,14 @@ test('sqlStatusText sums up the connection', () => {
   const v = { connected: true, config: { ...EMPTY_SQL, server: 'sage', database: 'Sage', user: 'sa' }, batches: 3 };
   assert.equal(sqlStatusText(v), 'sa@sage/Sage · solo lectura · 3 órdenes');
   assert.match(sqlStatusText({ ...v, config: { ...v.config, allow_changes: true }, batches: 1 }), /con cambios · 1 orden$/);
+});
+
+test('varias conexiones con nombre', () => {
+  assert.equal(S.sqlNameError('pruebas'), '');
+  assert.equal(S.sqlNameError('contenedor-2'), '');
+  assert.notEqual(S.sqlNameError('Pruebas'), '');
+  assert.notEqual(S.sqlNameError('año'), '');
+  assert.notEqual(S.sqlNameError(''), '');
+  assert.deepEqual(S.sqlNames(['pruebas', 'contenedor'], 'nueva'), ['principal', 'contenedor', 'nueva', 'pruebas']);
+  assert.deepEqual(S.sqlNames(undefined, 'principal'), ['principal']);
 });

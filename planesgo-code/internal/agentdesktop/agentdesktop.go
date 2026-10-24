@@ -243,7 +243,8 @@ type Options struct {
 	Tools      Tools
 	Display    string // a fixed display (":84"); empty: Xvfb takes a free one
 	RuntimeDir string // private folder (700) for the X cookie and the keyboard pipe; empty: $XDG_RUNTIME_DIR/rdp-agente
-	Exchange   string // shared folder (\\tsclient\Intercambio); empty: freerdp.ExchangeDir()
+	Exchange   string // shared folder (\\tsclient\Intercambio), the session's own; empty: one for the agent with no session
+	Recordings string // where the videos go (out of the shared folder); empty: the agent's
 }
 
 // Status: what the interface and «pgo escritorio estado» show.
@@ -330,7 +331,13 @@ func Start(cfg Config, opts Options) (*Desktop, error) {
 		return nil, err
 	}
 	if opts.Exchange == "" {
-		opts.Exchange = freerdp.ExchangeDir()
+		opts.Exchange, _ = freerdp.ExchangePath("agente")
+	}
+	if opts.Recordings == "" {
+		opts.Recordings, _ = freerdp.RecordingsPath("agente")
+	}
+	if err := freerdp.PrivateDir(opts.Exchange); err != nil {
+		return nil, err
 	}
 	password := cfg.Password
 	cfg.Password = ""
@@ -700,7 +707,7 @@ func recordArgs(display string, w, h int, out string) []string {
 		"-i", display, "-pix_fmt", "yuv420p", "-y", out}
 }
 
-// recordStart: video of the session in the shared folder (grabaciones), for evidence.
+// recordStart: video of the session, for evidence (in Recordings: out of the shared folder, only this user).
 func (d *Desktop) recordStart() (Result, error) {
 	if d.tools.FFmpeg == "" {
 		return Result{}, errors.New("falta ffmpeg para grabar")
@@ -711,8 +718,8 @@ func (d *Desktop) recordStart() (Result, error) {
 	if recording {
 		return Result{}, errors.New("ya se está grabando")
 	}
-	dir := filepath.Join(d.opts.Exchange, "grabaciones")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir := d.opts.Recordings
+	if err := freerdp.PrivateDir(dir); err != nil {
 		return Result{}, err
 	}
 	out := filepath.Join(dir, "escritorio-"+time.Now().Format("20060102-150405")+".mp4")
@@ -802,4 +809,28 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.b)
+}
+
+// pipeRead: what FreeRDP reads from its keyboard pipe at a time (a 64-byte buffer with its terminator), and keyTime:
+// how long it takes to type one character (key down, 5 ms, key up, 5 ms).
+const (
+	pipeRead = 63
+	keyTime  = 10 * time.Millisecond
+)
+
+// pipeChunks cuts text into pieces of at most max bytes, never inside a character.
+func pipeChunks(text string, max int) []string {
+	var l []string
+	for len(text) > 0 {
+		n := min(max, len(text))
+		for n > 0 && n < len(text) && !utf8.RuneStart(text[n]) {
+			n--
+		}
+		if n == 0 { // a character longer than max: cannot happen with max ≥ 4
+			n = min(max, len(text))
+		}
+		l = append(l, text[:n])
+		text = text[n:]
+	}
+	return l
 }

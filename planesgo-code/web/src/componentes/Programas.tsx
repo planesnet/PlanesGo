@@ -8,8 +8,10 @@ import { askConfirm } from './Modal';
 // y su salida. Cuando un programa dice su URL, pgocode la abre en el navegador integrado. Aquí solo se ejecutan,
 // se paran y se ve su salida: se definen en Propiedades de la sesión → Programas. asSection (Actividad): con su
 // solo los que están en marcha (los parados, plegados) y nada si no hay ninguno.
-export default function Programas({ proyecto, carpeta, version, alAbrir, asSection }: {
-  proyecto: Proyecto; carpeta: string; version: number; alAbrir: (url: string) => void; asSection?: boolean;
+// sesion: the work session they are launched from: the program gets its access (its SQL Server connections, its remote
+// PowerShell, its agent's desktop and the imputation of its time; internal/servidor/programtoken.go).
+export default function Programas({ proyecto, carpeta, version, alAbrir, asSection, sesion }: {
+  proyecto: Proyecto; carpeta: string; version: number; alAbrir: (url: string) => void; asSection?: boolean; sesion?: string;
 }) {
   const [procs, setProcs] = useState<Proceso[]>([]);
   const [cfg, setCfg] = useState<ConfigPrograma[]>([]);
@@ -23,7 +25,7 @@ export default function Programas({ proyecto, carpeta, version, alAbrir, asSecti
 
   const lanza = async (c: ConfigPrograma, guardar = false) => {
     setError('');
-    try { await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, ...c, guardar }); setVerSalida(c.nombre); carga(); }
+    try { await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, ...c, guardar, sesion }); setVerSalida(c.nombre); carga(); }
     catch (e) { setError((e as Error).message); }
   };
   const para = async (nombre: string, quitar = false) => {

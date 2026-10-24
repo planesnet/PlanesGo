@@ -104,7 +104,7 @@ publicar: arbol-limpio verifica paquete
 	[ -n "$$tok" ] || { echo "Falta el token de publicación (PGO_TOKEN_PUBLICAR o $(PGO_TOKEN_FICHERO))"; exit 1; }; \
 	firma=$$(go run ./cmd/firmar-version -clave "$(PGO_CLAVE_FIRMA)" $(DIST)/version.json) || { \
 		echo "No se pudo firmar la versión (clave: $(PGO_CLAVE_FIRMA); ver «make clave-firma»)"; exit 1; }; \
-	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) -F "firma=$$firma" \
+	printf 'X-Antigravity-Token: %s\n' "$$tok" | curl -fsS -H @- -F version=$(VERSION) -F electron=$(ELECTRON_VER) -F "firma=$$firma" \
 		-F paquete=@$(DIST)/pgocode-linux-amd64.tar.gz $(PUBLICAR_EN) && echo && echo "Publicada la versión $(VERSION)."
 
 # Clave de firma de las versiones (una sola vez; guarda una copia del fichero en el gestor de contraseñas: si se

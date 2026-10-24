@@ -67,10 +67,24 @@ export interface EventoChat { texto?: string; pensamiento?: string; herramienta?
 
 // Avisos del backend: cambios en los programas y URL que abrir en el navegador integrado.
 export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'remoto' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
+// One connection per window for every listener: the browser allows only 6 at a time to the server (HTTP/1.1), and a
+// chat, the reads and the other windows need theirs.
+const oyentes = new Set<(a: Aviso) => void>();
+let fuenteAvisos: EventSource | null = null;
 export function escuchaAvisos(cada: (a: Aviso) => void): () => void {
-  const es = new EventSource('/api/eventos');
-  es.onmessage = e => { try { cada(JSON.parse(e.data)); } catch { /* aviso incompleto */ } };
-  return () => es.close();
+  oyentes.add(cada);
+  if (!fuenteAvisos) {
+    fuenteAvisos = new EventSource('/api/eventos');
+    fuenteAvisos.onmessage = e => {
+      let a: Aviso;
+      try { a = JSON.parse(e.data); } catch { return; } // aviso incompleto
+      for (const f of [...oyentes]) f(a);
+    };
+  }
+  return () => {
+    oyentes.delete(cada);
+    if (!oyentes.size && fuenteAvisos) { fuenteAvisos.close(); fuenteAvisos = null; }
+  };
 }
 
 export interface Proceso {

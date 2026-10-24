@@ -367,7 +367,7 @@ func TestHelperAnyDeskRefused(t *testing.T) {
 
 func TestRDPArgs(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	a := strings.Join(rdpArgs("Sage", "192.168.125.229", `MAZANA\planes`), " ")
+	a := strings.Join(rdpArgs("Sage", "192.168.125.229", `MAZANA\planes`, filepath.Join(t.TempDir(), "intercambio")), " ")
 	for _, want := range []string{"/v:192.168.125.229", "/u:planes", "/d:MAZANA", "/sec:nla", "/tls:seclevel:2", "/gfx:AVC444",
 		"/from-stdin:force", "+clipboard", "/drive:Intercambio,", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer", "/size:85%", "/title:Sage"} {
 		if !strings.Contains(a, want) {
@@ -405,7 +405,7 @@ func TestAddWhileClosing(t *testing.T) {
 		t.Skip("FreeRDP simulado con sh")
 	}
 	fakeFreeRDP(t, "exec sleep 60")
-	w, err := StartRDP(RDPClient(), "n", "h", "u", "x")
+	w, err := StartRDP(RDPClient(), "n", "h", "u", "x", "")
 	if err != nil {
 		t.Fatal(err)
 	}

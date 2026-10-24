@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -24,10 +25,9 @@ type anydeskProject struct {
 	Name    string `json:"name"`
 }
 
-// anydeskSettings (AnyDeskFile): who logs the AnyDesk sessions, their default project for incoming sessions and the
-// last project of each remote computer. Nothing secret.
+// anydeskSettings (AnyDeskFile): the default project for incoming AnyDesk sessions and the last project of each remote
+// computer. Nothing secret. (The time is logged to the user with a pgocode session in that app: anydeskProjectFor.)
 type anydeskSettings struct {
-	UID         int                       `json:"uid"`
 	Default     int                       `json:"default_project"`
 	DefaultName string                    `json:"default_project_name"`
 	Peers       map[string]anydeskProject `json:"peers"`
@@ -81,31 +81,37 @@ func (s *Servidor) anydeskSaveLocked() {
 }
 
 // anydeskProjectFor completes a new AnyDesk session (not listed yet). With a project (opened from pgocode), it is
-// remembered for that computer; without one: the computer's last project or, incoming, the default one.
-func (s *Servidor) anydeskProjectFor(c *remoteSession) {
+// remembered for that computer; without one: the computer's last project or, incoming, the default one, but only for
+// the user with a pgocode session in that app (ses) and only if they still have access to it in Odoo. With nobody
+// there it gets no project: nobody's time is logged on a guess, and the person gives it one in the interface.
+func (s *Servidor) anydeskProjectFor(ctx context.Context, c *remoteSession, ses *sesiones.Sesion) {
 	a := &s.anydesk
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	st := s.anydeskSettingsLocked()
 	if c.Project > 0 {
-		st.UID = c.uid
+		defer a.mu.Unlock()
 		if c.Peer != "" {
 			st.Peers[c.Peer] = anydeskProject{Project: c.Project, Name: c.ProjectName}
 		}
 		s.anydeskSaveLocked()
 		return
 	}
+	project := 0
 	if p, ok := st.Peers[c.Peer]; ok && c.Peer != "" {
-		c.Project, c.ProjectName = p.Project, p.Name
+		project = p.Project
 	} else if c.Direction == string(anydesk.Incoming) && st.Default > 0 {
-		c.Project, c.ProjectName = st.Default, st.DefaultName
+		project = st.Default
 	}
-	if c.uid == 0 {
-		c.uid = st.UID
+	a.mu.Unlock()
+	if project == 0 || ses == nil {
+		return
 	}
-	if c.uid == 0 {
-		c.Project, c.ProjectName = 0, "" // nobody has used AnyDesk from pgocode: whose time would it be?
+	name, err := s.projectAccess(ctx, ses, project)
+	if err != nil {
+		log.Printf("anydesk: sesión %s sin proyecto: %v", c.Peer, err)
+		return
 	}
+	c.Project, c.ProjectName, c.uid, c.odooSession = project, name, ses.UID, ses.OdooSesion
 }
 
 // anydeskState: GET /api/anydesk. The open AnyDesk sessions and the default project of incoming ones.
@@ -115,7 +121,8 @@ func (s *Servidor) anydeskState(w http.ResponseWriter, r *http.Request, ses *ses
 	st := s.anydeskSettingsLocked()
 	def, defName := st.Default, st.DefaultName
 	a.mu.Unlock()
-	jsonOK(w, map[string]any{"sessions": s.remote.list(remoteAnyDesk, true, ses.UID), "default_project": def, "default_project_name": defName})
+	client, _ := s.clientOf(r)
+	jsonOK(w, map[string]any{"sessions": s.remote.list(remoteAnyDesk, true, ses.UID, client), "default_project": def, "default_project_name": defName})
 }
 
 // anydeskAssign: POST /api/anydesk/assign {id, project, default}. Gives an open session a project (and remembers it
@@ -134,10 +141,11 @@ func (s *Servidor) anydeskAssign(w http.ResponseWriter, r *http.Request, ses *se
 	if !ok {
 		return
 	}
+	client, _ := s.clientOf(r)
 	rs := &s.remote
 	rs.mu.Lock()
 	c := rs.m[p.ID]
-	if c == nil || c.Kind != remoteAnyDesk || !c.open() || !c.visibleTo(ses.UID) {
+	if c == nil || c.Kind != remoteAnyDesk || !c.open() || !c.visibleTo(ses.UID, client) {
 		rs.mu.Unlock()
 		jsonError(w, http.StatusNotFound, "esa sesión de AnyDesk ya no está abierta")
 		return
@@ -149,7 +157,6 @@ func (s *Servidor) anydeskAssign(w http.ResponseWriter, r *http.Request, ses *se
 	a := &s.anydesk
 	a.mu.Lock()
 	st := s.anydeskSettingsLocked()
-	st.UID = ses.UID
 	if snap.Peer != "" {
 		st.Peers[snap.Peer] = anydeskProject{Project: p.Project, Name: projectName}
 	}
@@ -185,7 +192,6 @@ func (s *Servidor) anydeskDefault(w http.ResponseWriter, r *http.Request, ses *s
 	a := &s.anydesk
 	a.mu.Lock()
 	st := s.anydeskSettingsLocked()
-	st.UID = ses.UID
 	st.Default, st.DefaultName = p.Project, name
 	s.anydeskSaveLocked()
 	a.mu.Unlock()

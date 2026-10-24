@@ -13,7 +13,7 @@ const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(
 // openRemoteDesktop: the remote desktop window (RDP and AnyDesk), the same as «pgocode --rdp»: in the desktop app,
 // in this same instance; in a browser, as a window of its own.
 function openRemoteDesktop() {
-  if (window.psf?.escritorioRemoto) void window.psf.escritorioRemoto();
+  if (window.psf?.escritorioRemoto) window.psf.escritorioRemoto().catch(() => { /* the window could not open: nothing to undo */ });
   else window.open('/?modo=rdp', 'pgo-escritorio-remoto', 'width=560,height=680');
 }
 

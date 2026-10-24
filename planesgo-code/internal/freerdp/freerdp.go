@@ -37,18 +37,59 @@ func SDLClient() string {
 // X11Client: the agent's client (an X11 window on the virtual screen).
 func X11Client() string { return filepath.Join(InstallDir(), "freerdp", "bin", "xfreerdp") }
 
-// ExchangeDir: the shared folder (in Windows, \\tsclient\Intercambio).
-func ExchangeDir() string {
+// dataDir: what the connections keep on this computer (out of pgocode's data folder: its agents must not read it).
+func dataDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "pgocode-connectors", "intercambio")
+	return filepath.Join(home, ".local", "share", "pgocode-connectors")
 }
 
-// DriveArgs: the shared folder for FreeRDP (nothing if it cannot be created).
-func DriveArgs() []string {
-	if os.MkdirAll(ExchangeDir(), 0o755) != nil {
+// ExchangeDir: the root of the shared folders. Each connection has its own one under it (ExchangePath): a session or
+// a project never sees another one's files from Windows.
+func ExchangeDir() string { return filepath.Join(dataDir(), "intercambio") }
+
+// ExchangePath: the shared folder of one connection (in Windows, \\tsclient\Intercambio), e.g. («agente», «589»,
+// «sesion-1») or («persona», «589»). Parts that are not a plain name are refused.
+func ExchangePath(parts ...string) (string, error) { return under(ExchangeDir(), parts) }
+
+// RecordingsPath: where the videos of one connection go, out of the shared folders.
+func RecordingsPath(parts ...string) (string, error) {
+	return under(filepath.Join(dataDir(), "grabaciones"), parts)
+}
+
+var plainName = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,80}$`)
+
+func under(root string, parts []string) (string, error) {
+	for _, p := range parts {
+		if !plainName.MatchString(p) || p == "." || p == ".." {
+			return "", fmt.Errorf("nombre de carpeta no válido: %q", p)
+		}
+	}
+	return filepath.Join(append([]string{root}, parts...)...), nil
+}
+
+// PrivateDir creates dir and the folders up to the connectors' one with permissions 700 (only this user).
+func PrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	root := dataDir()
+	for d := dir; strings.HasPrefix(d, root) && len(d) >= len(root); d = filepath.Dir(d) {
+		if err := os.Chmod(d, 0o700); err != nil {
+			return err
+		}
+		if d == root {
+			break
+		}
+	}
+	return nil
+}
+
+// DriveArgs: dir as the shared folder «Intercambio» for FreeRDP, private (nothing if it cannot be created).
+func DriveArgs(dir string) []string {
+	if dir == "" || PrivateDir(dir) != nil {
 		return nil
 	}
-	return []string{"/drive:Intercambio," + ExchangeDir()}
+	return []string{"/drive:Intercambio," + dir}
 }
 
 // SplitUser splits «DOMINIO\usuario» (or just «usuario»).

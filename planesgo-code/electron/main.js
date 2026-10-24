@@ -3,6 +3,7 @@
 // El panel de navegador usa <webview>, que puede cargar cualquier web (un iframe no).
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, powerMonitor, safeStorage, session, shell } = require('electron');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -112,36 +113,61 @@ function pide(metodo, ruta, cuerpo) {
 // Con la API asíncrona (la síncrona desaparece en Electron 46), que también descifra lo cifrado con la síncrona. Si
 // la clave del almacén ha cambiado, se vuelve a cifrar; si no se puede descifrar, se empareja de nuevo.
 const ficheroToken = () => path.join(app.getPath('userData'), 'cliente.json');
+// Junto al token, el id del cliente (no es secreto): con él el servidor demuestra que es el suyo (compruebaServidor).
 async function leeToken() {
   try {
     const j = JSON.parse(fs.readFileSync(ficheroToken(), 'utf8'));
-    if (!j.cifrado) return j.token || '';
+    if (!j.cifrado) return { token: j.token || '', id: j.id || '' };
     const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(j.cifrado, 'base64'));
-    if (shouldReEncrypt && result) await guardaToken(result);
-    return result || '';
-  } catch { return ''; }
+    if (shouldReEncrypt && result) await guardaToken(result, j.id);
+    return { token: result || '', id: j.id || '' };
+  } catch { return { token: '', id: '' }; }
 }
-async function guardaToken(t) {
+async function guardaToken(t, id) {
   const j = await safeStorage.isAsyncEncryptionAvailable() ? { cifrado: (await safeStorage.encryptStringAsync(t)).toString('base64') } : { token: t };
-  fs.writeFileSync(ficheroToken(), JSON.stringify(j), { mode: 0o600 });
+  fs.writeFileSync(ficheroToken(), JSON.stringify({ ...j, id: id || '' }), { mode: 0o600 });
 }
+
+// compruebaServidor: antes de mandarle nada secreto, el servidor demuestra que es el de este cliente (o, para
+// emparejar, el de este usuario del sistema): firma un número aleatorio con el hash del token (o con el secreto de
+// emparejar), que otro programa en el mismo puerto (de otro usuario del equipo, por ejemplo) no conoce. Sin la prueba no
+// se le manda ni el token ni el secreto. 404: el servidor no conoce a este cliente (revocado, o datos de otro servidor).
+async function compruebaServidor(clave, consulta) {
+  const nonce = crypto.randomBytes(32).toString('hex');
+  const r = await pide('GET', '/api/clientes/prueba?' + consulta + '&nonce=' + nonce);
+  const esperado = crypto.createHmac('sha256', clave).update(nonce).digest('hex');
+  if (typeof r.proof !== 'string' || r.proof.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(r.proof), Buffer.from(esperado))) {
+    throw new Error('El programa que escucha en ' + ADDR + ' no ha demostrado ser el servidor de pgocode de este usuario: no se le manda nada.');
+  }
+}
+const sha256 = t => crypto.createHash('sha256').update(t).digest('hex');
 
 // emparejado: este cliente con un token que el servidor reconoce; si no lo tiene (o lo han revocado), se empareja con
 // el secreto que el servidor deja en su carpeta de datos (solo lo puede leer este usuario del sistema).
 async function emparejado() {
-  tokenCliente = await leeToken();
-  if (tokenCliente) {
-    try { await pide('GET', '/api/clientes/yo'); return; } catch (e) { if (e.status !== 401 && e.status !== 403) throw e; }
+  tokenCliente = ''; // nada secreto hasta que el servidor demuestre que es el suyo
+  const g = await leeToken();
+  if (g.token && g.id) {
+    let conocido = true;
+    try { await compruebaServidor(sha256(g.token), 'id=' + encodeURIComponent(g.id)); } catch (e) { if (e.status === 404) conocido = false; else throw e; }
+    if (conocido) {
+      tokenCliente = g.token;
+      try { await pide('GET', '/api/clientes/yo'); return; } catch (e) { if (e.status !== 401 && e.status !== 403) throw e; }
+      tokenCliente = '';
+    }
   }
   let secreto = '';
   try { secreto = fs.readFileSync(path.join(DATOS_SERVIDOR, 'emparejar'), 'utf8').trim(); } catch { /* sin acceso */ }
   if (!secreto) throw new Error('No se puede emparejar con el servidor de este equipo: falta su secreto (' + path.join(DATOS_SERVIDOR, 'emparejar') + ')');
-  tokenCliente = '';
+  await compruebaServidor(secreto, 'emparejar=1');
   const r = await pide('POST', '/api/clientes/emparejar', { secret: secreto, name: os.hostname() + ' · ' + os.userInfo().username });
   tokenCliente = r.token;
-  await guardaToken(tokenCliente);
+  await guardaToken(tokenCliente, r.id);
 }
 
+
+// ponCookie: el token de este cliente en la ventana (la cookie solo existe en su sesión; los <webview> usan otras).
+const ponCookie = () => session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: tokenCliente, httpOnly: true, sameSite: 'strict' });
 
 // vigilaServidor: si el servidor se actualiza (otra versión) y con él los ficheros de esta app (la misma instalación),
 // la app se vuelve a abrir con la nueva; si sus ficheros no han cambiado (otra instalación, desarrollo), sigue como
@@ -165,7 +191,12 @@ function vigilaServidor(version) {
         if (!avisoVersion) { avisoVersion = true; dialog.showMessageBox({ type: 'warning', title: 'Planes Go Code', message: e.message }); }
         return;
       }
-      if (!(await vivo())) servidor().catch(e => console.error('[pgocode] ' + e.message));
+      // Si el servidor se ha caído, la ventana deja de llevar el token hasta que el que conteste demuestre que es el suyo
+      // (otro programa podría ocupar el puerto mientras tanto).
+      if (!(await vivo())) {
+        await session.defaultSession.cookies.remove(URL_ARNES, 'pgo_escritorio').catch(() => {});
+        servidor().then(emparejado).then(ponCookie).catch(e => console.error('[pgocode] ' + e.message));
+      }
     }
   }, 20000);
 }
@@ -335,7 +366,12 @@ function ventanaRdp() {
   rdp.loadURL(URL_ARNES + '/?modo=rdp');
 }
 
-app.on('second-instance', (_, argv) => {
+// listo: el arranque ha terminado (servidor, emparejamiento, cookie y primera ventana). Un segundo «pgocode» mientras
+// tanto espera: sin esto abriría una ventana sin la cookie del cliente y después otra principal repetida.
+let marcaListo;
+const listo = new Promise(r => { marcaListo = r; });
+app.on('second-instance', async (_, argv) => {
+  await listo;
   if (quiereRdp(argv)) return ventanaRdp();
   if (!principal) return ventana();
   if (principal.isMinimized()) principal.restore();
@@ -424,10 +460,11 @@ app.whenReady().then(async () => {
     await servidor();
     await emparejado();
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
-    await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: tokenCliente, httpOnly: true, sameSite: 'strict' });
+    await ponCookie();
     vigilaServidor((await pide('GET', '/api/version')).version);
     lanzaAyudante();
     if (quiereRdp(process.argv)) ventanaRdp(); else ventana();
+    marcaListo();
     // Descargas de Google que pide el backend (pgo drive leer, pgo gmail leer), con la sesión del panel Web.
     const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),
       testOrigin: process.env.PGO_GOOGLE_PRUEBA || '', log: m => console.error('[pgocode] ' + m) });

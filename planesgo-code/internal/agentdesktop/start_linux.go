@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
+	"unsafe"
 
 	"planesgo-code/internal/freerdp"
 )
@@ -129,6 +131,42 @@ func writePipe(path, text string) error {
 		return fmt.Errorf("no se puede escribir en el teclado de FreeRDP: %v", err)
 	}
 	defer f.Close()
-	_, err = f.WriteString(text)
-	return err
+	// FreeRDP reads the pipe 63 bytes at a time and types each read as a whole: a character split between two reads
+	// makes it stop reading. So the text goes in pieces it reads whole: each one once it has read the previous one.
+	chunks := pipeChunks(text, pipeRead)
+	for _, c := range chunks {
+		if err := waitDrained(f); err != nil {
+			return err
+		}
+		if _, err := f.WriteString(c); err != nil {
+			return err
+		}
+	}
+	if err := waitDrained(f); err != nil {
+		return err
+	}
+	// It types each character in about 10 ms once read: the answer waits for the last piece (a click or a capture
+	// right after must not get there first).
+	if len(chunks) > 0 {
+		time.Sleep(time.Duration(utf8.RuneCountInString(chunks[len(chunks)-1]))*keyTime + 50*time.Millisecond)
+	}
+	return nil
+}
+
+// waitDrained waits until FreeRDP has read everything in the pipe (it checks every 100 ms when it is empty).
+func waitDrained(f *os.File) error {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var n int32
+		if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCINQ, uintptr(unsafe.Pointer(&n))); e != 0 {
+			return fmt.Errorf("teclado de FreeRDP: %v", e)
+		}
+		if n == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("FreeRDP ha dejado de leer el teclado: el texto no ha llegado entero (vuelve a iniciar el escritorio del agente)")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

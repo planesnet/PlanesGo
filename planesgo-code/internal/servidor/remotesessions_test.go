@@ -261,21 +261,25 @@ func TestRemoteAnyDesk(t *testing.T) {
 	if c3.Project != 591 || c4.Project != 590 || c5.Project != 0 {
 		t.Fatalf("por defecto %d, recordado %d, desconocido %d", c3.Project, c4.Project, c5.Project)
 	}
+	// From an app where nobody has a pgocode session: no project on a guess (whose time would it be?).
+	if c6 := e.create(t, e.b, `{"kind":"anydesk","direction":"incoming","peer":"777888999"}`); c6.Project != 0 {
+		t.Fatalf("sin nadie en esa app: %+v", c6)
+	}
 	// The settings survive a restart.
 	s2 := &Servidor{AnyDeskFile: e.s.AnyDeskFile}
 	s2.anydesk.mu.Lock()
 	st2 := s2.anydeskSettingsLocked()
 	s2.anydesk.mu.Unlock()
-	if st2.UID != 7 || st2.Default != 591 || st2.Peers["444555666"].Project != 591 || st2.Peers["111222333"].Project != 590 {
+	if st2.Default != 591 || st2.Peers["444555666"].Project != 591 || st2.Peers["111222333"].Project != 590 {
 		t.Fatalf("ajustes: %+v", st2)
 	}
 }
 
 // Each user sees their own remote sessions and the ones nobody owns yet, never another user's.
 func TestRemoteSessionsVisible(t *testing.T) {
-	rs := remoteSessions{m: map[string]*remoteSession{"a": {ID: "a", uid: 7}, "b": {ID: "b", uid: 8}, "c": {ID: "c"}}}
-	got := rs.list("", false, 7)
-	if len(got) != 2 || slices.ContainsFunc(got, func(c remoteSession) bool { return c.ID == "b" }) {
+	rs := remoteSessions{m: map[string]*remoteSession{"a": {ID: "a", uid: 7}, "b": {ID: "b", uid: 8}, "c": {ID: "c", client: "app1"}, "d": {ID: "d", client: "app2"}}}
+	got := rs.list("", false, 7, "app1")
+	if len(got) != 2 || slices.ContainsFunc(got, func(c remoteSession) bool { return c.ID == "b" || c.ID == "d" }) {
 		t.Errorf("visible: %+v", got)
 	}
 }

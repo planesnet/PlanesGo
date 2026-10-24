@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"planesgo-code/internal/agentdesktop"
 	"planesgo-code/internal/freerdp"
@@ -79,7 +80,7 @@ func TestAgentDesktopReal(t *testing.T) {
 	startBg("freerdp-shadow-cli", rdp)
 	time.Sleep(2 * time.Second)
 
-	opts := agentdesktop.Options{Tools: tools, Display: ":84", Exchange: filepath.Join(tmp, "intercambio")}
+	opts := agentdesktop.Options{Tools: tools, Display: ":84", Exchange: filepath.Join(tmp, "intercambio"), Recordings: filepath.Join(tmp, "grabaciones")}
 	cfg := agentdesktop.Config{Host: "127.0.0.1:3392", User: "prueba", Keyboard: agentdesktop.KeyboardUnicode}
 
 	// A wrong password: it ends with the reason.
@@ -151,6 +152,15 @@ func TestAgentDesktopReal(t *testing.T) {
 	do(agentdesktop.Action{Name: "wheel", Up: true, Count: 2})
 	do(agentdesktop.Action{Name: "key", Keys: []string{"Escape"}})
 	do(agentdesktop.Action{Name: "type", Text: "Año 10 €"})
+	// A long text with accents (more than one read of FreeRDP's pipe): it is not cut inside a character, so FreeRDP keeps
+	// reading (the second one would not get through otherwise), and the answer waits until it is typed.
+	long := strings.Repeat("Ñandú cañón €uro ", 8)
+	start := time.Now()
+	do(agentdesktop.Action{Name: "type", Text: long})
+	do(agentdesktop.Action{Name: "type", Text: long})
+	if took := time.Since(start); took < time.Duration(2*utf8.RuneCountInString(long))*10*time.Millisecond {
+		t.Errorf("the answer came before the text was typed: %v", took)
+	}
 	do(agentdesktop.Action{Name: "size", Width: 1280, Height: 720})
 	time.Sleep(time.Second)
 	if w, h := size(do(agentdesktop.Action{Name: "capture"}).Path); w != 1280 || h != 720 {

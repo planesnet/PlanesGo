@@ -100,7 +100,8 @@ export function AnyDeskUnassigned({ login, projects: given }: { login: string; p
   useEffect(() => { if (session && !given && !loaded.length) get<Proyecto[]>('/api/proyectos').then(setLoaded).catch(() => {}); }, [session, given, loaded.length]);
   if (!session) return null;
   const incoming = session.direction === 'incoming';
-  const later = () => { setDismissed(d => [...d, session.id]); setChosen(0); };
+  // «Ahora no»: this one waits; the choice is not carried to the next session (nor «for every incoming one»).
+  const later = () => { setDismissed(d => [...d, session.id]); setChosen(0); setAsDefault(false); };
 
   async function assign() {
     if (!session || !chosen) return;

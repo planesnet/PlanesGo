@@ -112,3 +112,28 @@ func (s *Servidor) serverStop(w http.ResponseWriter, r *http.Request, ses *sesio
 	jsonOK(w, map[string]bool{"ok": true})
 	go s.Stop()
 }
+
+// proofPath: where a client checks, before sending anything secret, that this is the server it paired with (or the
+// one of this computer's user, to pair). Like pairPath, open to clients that are not paired yet.
+const proofPath = "/api/clientes/prueba"
+
+// GET /api/clientes/prueba?id=&nonce= (or ?emparejar=1&nonce=): the server's proof (internal/clients: Proof).
+func (s *Servidor) clientsProof(w http.ResponseWriter, r *http.Request) {
+	if s.Clients == nil {
+		jsonError(w, http.StatusServiceUnavailable, "este servidor no admite clientes")
+		return
+	}
+	q := r.URL.Query()
+	var proof string
+	var ok bool
+	if q.Get("emparejar") != "" {
+		proof, ok = s.Clients.SecretProof(q.Get("nonce"))
+	} else {
+		proof, ok = s.Clients.Proof(q.Get("id"), q.Get("nonce"))
+	}
+	if !ok {
+		jsonError(w, http.StatusNotFound, "no hay ese cliente")
+		return
+	}
+	jsonOK(w, map[string]string{"proof": proof})
+}

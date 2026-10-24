@@ -5,6 +5,7 @@
 package clients
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -200,4 +202,45 @@ func (r *Registry) Revoke(id string) error {
 		}
 	}
 	return errors.New("no hay ese cliente")
+}
+
+// The server proves to a client that it is the one it paired with before the client sends it anything secret: the
+// client sends a random nonce and checks the answer, an HMAC that only whoever holds the token's hash (or the pairing
+// secret, to pair) can work out. Another program listening on the port (another user's, say) cannot.
+
+var validNonce = regexp.MustCompile(`^[0-9a-f]{32,128}$`)
+
+// Proof: the proof for the client id (HMAC-SHA256 of the nonce with the hash of its token as the key, in hex); ok
+// false if there is no such client or the nonce is not valid.
+func (r *Registry) Proof(id, nonce string) (string, bool) {
+	if !validNonce.MatchString(nonce) {
+		return "", false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.loadLocked() != nil {
+		return "", false
+	}
+	for _, c := range r.clients {
+		if c.ID == id {
+			return mac(c.Hash, nonce), true
+		}
+	}
+	return "", false
+}
+
+// SecretProof: the proof of the pairing secret (HMAC-SHA256 of the nonce with the secret as the key, in hex).
+func (r *Registry) SecretProof(nonce string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !validNonce.MatchString(nonce) || r.secret == "" {
+		return "", false
+	}
+	return mac(r.secret, nonce), true
+}
+
+func mac(key, nonce string) string {
+	m := hmac.New(sha256.New, []byte(key))
+	m.Write([]byte(nonce))
+	return hex.EncodeToString(m.Sum(nil))
 }

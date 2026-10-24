@@ -33,11 +33,12 @@ del navegador de pgocode; nunca lee páginas, no busca ni lista):
                                    el mensaje original (.eml): texto sin lo citado y adjuntos (nombre, tipo, tamaño)
 
 SQL Server de la sesión (la conexión la define la persona en las propiedades de la sesión; tú no ves la contraseña):
-  pgo sql "<orden T-SQL>" [--filas N] [--escribir]
-  pgo sql -f <fichero.sql> [--filas N] [--escribir]
+  pgo sql "<orden T-SQL>" [--conexion NOMBRE] [--filas N] [--escribir]
+  pgo sql -f <fichero.sql> [--conexion NOMBRE] [--filas N] [--escribir]
                                    resultados en texto separado por tabuladores (200 filas por resultado; --filas
                                    hasta 5000). Solo lectura: lo que cambie la orden se deshace al acabar. --escribir
-                                   solo vale si la persona ha permitido los cambios en esa conexión
+                                   solo vale si la persona ha permitido los cambios en esa conexión. Una sesión puede
+                                   tener varias conexiones con nombre; sin --conexion, la principal
 
 PowerShell remoto (WinRM) de la sesión (la conexión con el equipo Windows la define la persona en las propiedades
 de la sesión; tú no ves la contraseña):
@@ -301,7 +302,7 @@ func googleQuery(service string, args []string) (url.Values, error) {
 	return q, nil
 }
 
-// sqlArgs: el cuerpo de «pgo sql "<orden>" | -f <fichero> [--filas N] [--escribir]».
+// sqlArgs: el cuerpo de «pgo sql "<orden>" | -f <fichero> [--conexion NOMBRE] [--filas N] [--escribir]».
 func sqlArgs(args []string) (map[string]any, error) {
 	body := map[string]any{}
 	var batch string
@@ -309,6 +310,12 @@ func sqlArgs(args []string) (map[string]any, error) {
 		switch a := args[i]; {
 		case a == "--escribir":
 			body["escribir"] = true
+		case a == "--conexion":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("falta el nombre de la conexión")
+			}
+			i++
+			body["conexion"] = args[i]
 		case a == "--filas" || a == "-f":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("falta el valor de %s", a)

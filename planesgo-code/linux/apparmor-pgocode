@@ -4,6 +4,8 @@
 # Solo permite crear user namespaces; no quita ninguna otra protección ni el sandbox de la app.
 # Apunta al motor en /opt/pgocode/motor, propiedad de root (lo deja ahí instalar.sh, con sudo): en una ruta que
 # el usuario pudiera escribir (p. ej. ~/.local/share), cualquier programa copiado ahí se saltaría la restricción.
+# Y sin los fusibles de Node de Electron (instalar.sh los apaga: RunAsNode, NODE_OPTIONS, inspector): con ellos, el
+# motor serviría a cualquier usuario como un intérprete de Node con este permiso.
 abi <abi/4.0>,
 include <tunables/global>
 

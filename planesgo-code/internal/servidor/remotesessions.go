@@ -74,9 +74,12 @@ type remoteSession struct {
 
 func (c *remoteSession) open() bool { return c.State != remoteEnded }
 
-// visibleTo: whether a user may see the session: theirs, or one nobody owns yet (an incoming AnyDesk one before anyone
-// used AnyDesk from pgocode). Other users' hosts, Windows users and projects are not shown.
-func (c *remoteSession) visibleTo(uid int) bool { return c.uid == 0 || c.uid == uid }
+// visibleTo: whether a user, from a client app, may see (and give a project to) the session: theirs, or one nobody owns
+// yet that their own app reported (an incoming AnyDesk one without a pgocode session there). Other users' hosts,
+// Windows users and projects are not shown.
+func (c *remoteSession) visibleTo(uid int, client string) bool {
+	return c.uid == uid && uid != 0 || c.uid == 0 && client != "" && c.client == client
+}
 
 // work: what the imputation service logs for the session.
 func (c *remoteSession) work() imputacion.Trabajo {
@@ -131,12 +134,12 @@ func (rs *remoteSessions) logging() int {
 	return n
 }
 
-// list: a copy of the sessions of a kind ("" all) that user uid may see, the oldest first.
-func (rs *remoteSessions) list(kind string, onlyOpen bool, uid int) []remoteSession {
+// list: a copy of the sessions of a kind ("" all) that user uid may see from that client, the oldest first.
+func (rs *remoteSessions) list(kind string, onlyOpen bool, uid int, client string) []remoteSession {
 	rs.mu.Lock()
 	l := []remoteSession{}
 	for _, c := range rs.m {
-		if (kind == "" || c.Kind == kind) && (!onlyOpen || c.open()) && c.visibleTo(uid) {
+		if (kind == "" || c.Kind == kind) && (!onlyOpen || c.open()) && c.visibleTo(uid, client) {
 			l = append(l, *c)
 		}
 	}
@@ -291,7 +294,11 @@ func (s *Servidor) remoteCreate(w http.ResponseWriter, r *http.Request) {
 		c.Project, c.ProjectName = p.Project, name
 	}
 	if c.Kind == remoteAnyDesk {
-		s.anydeskProjectFor(c)
+		var who *sesiones.Sesion
+		if haveUser {
+			who = ses
+		}
+		s.anydeskProjectFor(r.Context(), c, who)
 	}
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
@@ -458,5 +465,6 @@ func (s *Servidor) WatchRemoteSessions(ctx context.Context) {
 
 // remoteList: GET /api/remote/sessions. The user's remote sessions, open and recently ended (for the interface).
 func (s *Servidor) remoteList(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	jsonOK(w, s.remote.list("", false, ses.UID))
+	client, _ := s.clientOf(r)
+	jsonOK(w, s.remote.list("", false, ses.UID, client))
 }

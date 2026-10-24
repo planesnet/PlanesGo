@@ -114,3 +114,15 @@ func TestDefaultChannel(t *testing.T) {
 		t.Errorf("channel: %q", got)
 	}
 }
+
+// After Close, State and Frame do nothing (they used to panic sending on the closed wake channel).
+func TestEmitterAfterClose(t *testing.T) {
+	studio := studiotv.Nuevo("emitir", "ver")
+	srv := httptest.NewServer(studio.Handler())
+	defer srv.Close()
+	e := New(Config{URL: srv.URL, Token: "emitir", Channel: "x"}, 50)
+	e.Close()
+	e.State(map[string]string{"paso": "después"})
+	e.Frame(testJPEG(t))
+	e.Close()
+}

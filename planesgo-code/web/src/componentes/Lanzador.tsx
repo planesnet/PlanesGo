@@ -57,8 +57,9 @@ export function SelectorFormato({ dispositivo, orientacion, alCambiar }: {
   );
 }
 
-export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbrirWeb }: {
+export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbrirWeb, sesion }: {
   proyecto: Proyecto; carpeta: string; version: number; alAbrirWeb: AbreWeb;
+  sesion?: string; // the work session: its programs get its access (Programas)
   propuesta?: string; // dirección local que acaba de dar el agente: se rellena (sin abrirla) para que el usuario la abra
 }) {
   const [p, setP] = useState<L.Prueba>(() => { try { return L.leePrueba(localStorage.getItem(clave(proyecto.id))); } catch { return { ...L.PRUEBA_DEFECTO }; } });
@@ -129,7 +130,7 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
   };
 
   const lanza = async (c: { nombre: string; orden: string; url?: string }) => {
-    await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, nombre: c.nombre, orden: c.orden, url: c.url });
+    await post('/api/procesos/lanzar', { proyecto: proyecto.id, carpeta, nombre: c.nombre, orden: c.orden, url: c.url, sesion });
   };
   const para = async (nombre: string) => { await post('/api/procesos/parar', { nombre }); };
   const haz = async (f: () => Promise<unknown>) => {

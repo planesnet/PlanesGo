@@ -264,10 +264,15 @@ export function parseVerdict(text: string): { verdict: Verdict; findings: string
   const found = section(text, 'HALLAZGOS');
   const improvements = section(text, 'MEJORAS');
   const decisions = section(text, 'DECISIONES').join('\n');
-  const rated = found.filter(l => /^\s*[-*]/.test(l)).map(rating);
+  // Each finding with its continuation lines (a finding can take several).
+  const items = found.reduce<string[]>((l, line) => {
+    if (/^\s*[-*]/.test(line) || !l.length) l.push(line); else l[l.length - 1] += '\n' + line;
+    return l;
+  }, []);
+  const rated = items.map(rating);
   if (rated.length && rated.every(Boolean)) {
-    const blocking = found.filter(l => /^\s*[-*]/.test(l) && blocks(rating(l)!));
-    improvements.unshift(...found.filter(l => /^\s*[-*]/.test(l) && !blocks(rating(l)!)));
+    const blocking = items.filter((_, i) => blocks(rated[i]!));
+    improvements.unshift(...items.filter((_, i) => !blocks(rated[i]!)));
     verdict = blocking.length ? 'RECHAZADO' : 'APROBADO';
     return { verdict, findings: blocking.join('\n'), improvements: improvements.join('\n'), decisions };
   }

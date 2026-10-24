@@ -300,6 +300,49 @@ func stripLiterals(s string, keepNames bool) string {
 // Run executes a batch and returns up to maxRows rows of each result set. Read only (the connection does not allow
 // changes, or write is false): inside a transaction that is always rolled back.
 func (c *Conn) Run(ctx context.Context, batch string, maxRows int, write bool) (Result, error) {
+	if maxRows <= 0 {
+		maxRows = DefaultRows
+	}
+	k := &collect{max: min(maxRows, MaxRows)}
+	res, err := c.Stream(ctx, batch, write, k)
+	if err != nil {
+		return Result{}, err
+	}
+	res.Sets = k.sets
+	return res, nil
+}
+
+// Sink: what a batch gives, as it comes: each result set's columns and types, then its rows (plain values).
+type Sink interface {
+	Set(columns, types []string) error
+	Row(values []any) error
+}
+
+// collect keeps up to max rows of each result set (Run).
+type collect struct {
+	max  int
+	sets []ResultSet
+}
+
+func (k *collect) Set(columns, types []string) error {
+	k.sets = append(k.sets, ResultSet{Columns: columns, Types: types, Rows: [][]any{}})
+	return nil
+}
+
+func (k *collect) Row(values []any) error {
+	s := &k.sets[len(k.sets)-1]
+	if len(s.Rows) >= k.max {
+		s.Truncated = true // the rest is read (so that the next result set comes) but not kept
+		return nil
+	}
+	s.Rows = append(s.Rows, values)
+	return nil
+}
+
+// Stream executes a batch handing its result sets and rows to sink as they come, with no limit of rows (for an
+// application reading a large catalog; the sink stops it by returning an error). The Result has no Sets. Same rules as
+// Run: read only unless allowed, inside a transaction that is always rolled back.
+func (c *Conn) Stream(ctx context.Context, batch string, write bool, sink Sink) (Result, error) {
 	start := time.Now()
 	batch = strings.TrimSpace(batch)
 	if batch == "" {
@@ -308,10 +351,6 @@ func (c *Conn) Run(ctx context.Context, batch string, maxRows int, write bool) (
 	if utf8.RuneCountInString(batch) > MaxBatch {
 		return Result{}, fmt.Errorf("la orden es demasiado larga (máximo %d caracteres)", MaxBatch)
 	}
-	if maxRows <= 0 {
-		maxRows = DefaultRows
-	}
-	maxRows = min(maxRows, MaxRows)
 	write = write && c.changes.Load()
 	if !write {
 		if why := ReadOnlyCheck(batch); why != "" {
@@ -352,13 +391,9 @@ func (c *Conn) Run(ctx context.Context, batch string, maxRows int, write bool) (
 		return Result{}, explain(err)
 	}
 	for {
-		set, err := readSet(rows, maxRows)
-		if err != nil {
+		if err := streamSet(rows, sink); err != nil {
 			rows.Close()
 			return Result{}, explain(err)
-		}
-		if len(set.Columns) > 0 {
-			res.Sets = append(res.Sets, set)
 		}
 		if !rows.NextResultSet() {
 			break
@@ -393,35 +428,37 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func readSet(rows *sql.Rows, maxRows int) (ResultSet, error) {
+// streamSet hands sink one result set (nothing if the statement returned none).
+func streamSet(rows *sql.Rows, sink Sink) error {
 	cols, err := rows.Columns()
 	if err != nil || len(cols) == 0 {
-		return ResultSet{}, err
+		return err
 	}
-	types, _ := rows.ColumnTypes()
-	set := ResultSet{Columns: cols, Types: make([]string, len(cols)), Rows: [][]any{}}
-	for i, t := range types {
-		set.Types[i] = t.DatabaseTypeName()
+	ct, _ := rows.ColumnTypes()
+	types := make([]string, len(cols))
+	for i, t := range ct {
+		types[i] = t.DatabaseTypeName()
+	}
+	if err := sink.Set(cols, types); err != nil {
+		return err
 	}
 	for rows.Next() {
-		if len(set.Rows) >= maxRows {
-			set.Truncated = true
-			continue // read the rest, so the next result set comes
-		}
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return set, err
+			return err
 		}
 		for i, v := range vals {
-			vals[i] = plain(v, set.Types[i])
+			vals[i] = plain(v, types[i])
 		}
-		set.Rows = append(set.Rows, vals)
+		if err := sink.Row(vals); err != nil {
+			return err
+		}
 	}
-	return set, rows.Err()
+	return rows.Err()
 }
 
 // plain turns a driver value into one that JSON shows as it is.
@@ -466,4 +503,12 @@ func explain(err error) error {
 		return errors.New("no responde el servidor: revisa el nombre o la IP, el puerto (1433) y el cortafuegos")
 	}
 	return err
+}
+
+// Database: the database the batches run in (the chosen one, or the one of the configuration).
+func (c *Conn) Database() string {
+	if db, _ := c.database.Load().(string); db != "" {
+		return db
+	}
+	return c.cfg.Database
 }

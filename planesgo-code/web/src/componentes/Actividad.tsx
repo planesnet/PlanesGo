@@ -110,7 +110,7 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
       )}
 
       {/* Solo los programas en marcha (los guardados, plegados): se definen en Propiedades de la sesión → Programas. */}
-      <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} asSection />
+      <Programas proyecto={proyecto} carpeta={carpeta} sesion={sesion?.id} version={versionProcesos} alAbrir={alAbrir} asSection />
 
       {planes && planes.length > 0 && (
         <section>

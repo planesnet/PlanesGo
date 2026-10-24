@@ -133,3 +133,30 @@ func TestClientVersion(t *testing.T) {
 		}
 	}
 }
+
+// A client that is not paired yet can ask for the server's proof (and nothing else); the proof is the registry's.
+func TestClientsProofRoute(t *testing.T) {
+	dir := t.TempDir()
+	reg := &clients.Registry{File: filepath.Join(dir, "clientes.json"), SecretFile: filepath.Join(dir, "emparejar")}
+	if err := reg.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s := &Servidor{Puerto: "7801", Sesiones: sesiones.NuevoAlmacen(), Clients: reg}
+	h := s.Handler()
+	nonce := strings.Repeat("0f", 16)
+	r := httptest.NewRequest("GET", "http://127.0.0.1:7801/api/clientes/prueba?emparejar=1&nonce="+nonce, nil)
+	r.Header.Set("X-PGO", "1")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	want, _ := reg.SecretProof(nonce)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+		t.Errorf("proof: %d %s", w.Code, w.Body)
+	}
+	r = httptest.NewRequest("GET", "http://127.0.0.1:7801/api/clientes/prueba?id=nadie&nonce="+nonce, nil)
+	r.Header.Set("X-PGO", "1")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown client: %d", w.Code)
+	}
+}

@@ -164,12 +164,19 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 		Orden    string `json:"orden"`
 		URL      string `json:"url"`
 		Guardar  bool   `json:"guardar"`
+		// Sesion: the work session it is launched from: the program gets its access (programtoken.go).
+		Sesion string `json:"sesion"`
 	}
 	if err := lee(r, &p); err != nil {
 		errorLectura(w, err)
 		return
 	}
-	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
+	projectName, ok := s.proyecto(w, r, ses, p.Proyecto)
+	if !ok {
+		return
+	}
+	if p.Sesion != "" && !safeSession.MatchString(p.Sesion) {
+		jsonError(w, http.StatusBadRequest, "sesión no válida")
 		return
 	}
 	if !s.Indice.Pertenece(p.Proyecto, p.Carpeta) {
@@ -186,10 +193,16 @@ func (s *Servidor) procesosLanza(w http.ResponseWriter, r *http.Request, ses *se
 			return
 		}
 	}
-	x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "usuario", s.entornoPrograma(p.Proyecto))
+	grant := programGrant{project: p.Proyecto, projectName: projectName, session: p.Sesion, program: p.Nombre, login: ses.Login, uid: ses.UID, odooSession: ses.OdooSesion}
+	env, watch := s.programEnv(grant)
+	x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "usuario", env)
+	watch(x)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if p.Sesion != "" {
+		logProgram(grant)
 	}
 	excluyeDeGit(p.Carpeta) // su registro va a .pgocode/salidas
 	log.Printf("programa lanzado por %s: %s (%s)", ses.Login, p.Nombre, p.Carpeta)
@@ -376,6 +389,10 @@ func (s *Servidor) delProyecto(nombre string, proyecto int) bool {
 
 // pgo atiende las órdenes del agente: ejecutar, parar, procesos, salida, abrir, drive-leer, gmail-leer, sql, ps* y escritorio.
 func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(programHeader) != "" { // a program of a session, not an agent (programtoken.go)
+		s.pgoProgram(w, r)
+		return
+	}
 	var p struct {
 		Proyecto int                  `json:"proyecto"`
 		Carpeta  string               `json:"carpeta"`
@@ -385,9 +402,10 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		N        int                  `json:"n"`
 		SQL      string               `json:"sql"`
 		Escribir bool                 `json:"escribir"`
-		Script   string               `json:"script"` // PowerShell (pgo ps)
-		Path     string               `json:"path"`   // remote file (pgo ps baja|sube)
-		Data     string               `json:"data"`   // its content, base64 (pgo ps sube)
+		Conexion string               `json:"conexion"` // the session's SQL connection («» the main one)
+		Script   string               `json:"script"`   // PowerShell (pgo ps)
+		Path     string               `json:"path"`     // remote file (pgo ps baja|sube)
+		Data     string               `json:"data"`     // its content, base64 (pgo ps sube)
 		Desktop  *agentdesktop.Action `json:"desktop"`
 	}
 	if r.Method == http.MethodPost {
@@ -440,7 +458,10 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusForbidden, "la carpeta tiene que ser una del proyecto")
 			return
 		}
-		x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "agente", s.entornoPrograma(p.Proyecto))
+		// The agent's session's access (not the agent's: no time is logged from it, there is no person).
+		env, watch := s.programEnv(programGrant{project: p.Proyecto, session: g.session, program: p.Nombre, login: "agente"})
+		x, err := s.Procesos.Lanza(p.Nombre, p.Proyecto, p.Carpeta, p.Orden, "agente", env)
+		watch(x)
 		if err != nil {
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return
@@ -463,7 +484,7 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		x, _ := s.Procesos.Busca(p.Nombre)
 		jsonOK(w, map[string]any{"lineas": l, "total": total, "registro": x.Registro})
 	case "sql":
-		s.sqlRun(w, r.Context(), "agente", "agente", p.Proyecto, g.session, p.SQL, p.N, p.Escribir)
+		s.sqlRun(w, r.Context(), "agente", "agente", p.Proyecto, g.session, p.Conexion, p.SQL, p.N, p.Escribir)
 	case "ps":
 		s.winrmRun(w, r.Context(), "agente", "agente", sessionRef{p.Proyecto, g.session}, p.Script, p.Escribir)
 	case "ps-download":

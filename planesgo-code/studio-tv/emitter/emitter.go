@@ -169,7 +169,7 @@ func (e *Emitter) Frame(jpeg []byte) {
 		e.mu.Unlock()
 		return
 	}
-	e.lastSent, e.frame = time.Now(), jpeg
+	e.lastSent, e.frame = time.Now(), append([]byte(nil), jpeg...) // a copy: the caller may reuse its buffer
 	e.mu.Unlock()
 	e.signal()
 }
@@ -191,7 +191,13 @@ func (e *Emitter) State(v any) {
 	e.signal()
 }
 
+// signal wakes the sender (nothing once closed: wake is closed then, and a send on it would panic).
 func (e *Emitter) signal() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
 	select {
 	case e.wake <- struct{}{}:
 	default:
@@ -204,12 +210,11 @@ func (e *Emitter) Close() {
 		return
 	}
 	e.mu.Lock()
-	already := e.closed
-	e.closed = true
-	e.mu.Unlock()
-	if !already {
-		close(e.wake)
+	if !e.closed {
+		e.closed = true
+		close(e.wake) // under the lock: signal never sends on it afterwards
 	}
+	e.mu.Unlock()
 	<-e.done
 }
 

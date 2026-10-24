@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { authKind, readLastSql, saveLastSql, sqlFormError, sqlStatusText, type SqlConfig, type SqlView } from '../sqlConnection';
+import { useEffect, useState } from 'react';
+import { authKind, readLastSql, saveLastSql, SQL_MAIN, sqlFormError, sqlNameError, sqlNames, sqlStatusText, type SqlConfig, type SqlView } from '../sqlConnection';
 import { CampoClave } from './Acceso';
 import { ConnectionSection, ModeSwitch, OpenConnection, useSessionConnection } from './SessionConnection';
 
-// «SQL Server» (session properties): the connection of this work session. Its agents use it with «pgo sql» and
-// pgocode's services from the backend; the password stays in the backend's memory until pgocode closes.
+// «SQL Server» (session properties): the connections of this work session, each with its name and its own mode
+// (one against the test server read only, another against the local container that allows changes…). Its agents use
+// them with «pgo sql [--conexion nombre]», its programs and pgocode's services from the backend; the password stays in
+// the backend's memory until pgocode closes.
 
 const MODE_TEXTS = {
   onText: 'Activado: los agentes pueden guardar cambios pidiéndolo expresamente (pgo sql --escribir). Cada orden queda en la auditoría.',
@@ -14,21 +16,48 @@ const MODE_TEXTS = {
 const TEST_SQL = 'SELECT @@SERVERNAME AS servidor, DB_NAME() AS base_de_datos, SUSER_SNAME() AS usuario';
 
 export default function SqlServerSettings({ project, session, login }: { project: number; session: string; login: string }) {
-  const { view: v, busy, error, setError, note, act, probe } = useSessionConnection<SqlView>('/api/sql', project, session);
+  const [name, setName] = useState(SQL_MAIN);
+  const [newName, setNewName] = useState('');
+  const { view: v, busy, error, setError, note, act, probe } = useSessionConnection<SqlView>('/api/sql', project, session, name === SQL_MAIN ? '' : name);
   const [c, setC] = useState<SqlConfig>(() => readLastSql(login, project));
   const [password, setPassword] = useState('');
+  const [names, setNames] = useState<string[]>([SQL_MAIN]);
+  useEffect(() => { if (v) setNames(n => sqlNames([...n, ...(v.names || [])], name)); }, [v, name]);
 
+  const choose = (n: string) => { setName(n); setC(readLastSql(login, project, n)); setPassword(''); };
+  const add = () => {
+    const n = newName.trim().toLowerCase();
+    const why = sqlNameError(n);
+    if (why) { setError(why); return; }
+    setNewName('');
+    setNames(l => sqlNames(l, n));
+    choose(n);
+  };
   const connect = () => {
     const why = sqlFormError(c, password);
     if (why) { setError(why); return; }
-    saveLastSql(login, project, c);
+    saveLastSql(login, project, c, name);
     act('connect', { ...c, password }).finally(() => setPassword(''));
   };
   const set = (k: keyof SqlConfig, value: string | boolean) => setC(x => ({ ...x, [k]: value }));
 
   return (
     <ConnectionSection title="SQL Server" error={error}
-      intro="La conexión de esta sesión: la usan sus agentes («pgo sql») y los servicios de pgocode. La contraseña se queda en la memoria de pgocode hasta que lo cierras; nadie más la ve."
+      intro="Las conexiones de esta sesión, cada una con su nombre y su modo: las usan sus agentes («pgo sql», o «pgo sql --conexion nombre» para otra que no sea la principal), sus programas y los servicios de pgocode. Las contraseñas se quedan en la memoria de pgocode hasta que lo cierras; nadie más las ve."
+      chooser={
+        <div className="fila-config">
+          <label>Conexión
+            <select value={name} disabled={busy} onChange={e => choose(e.target.value)}>
+              {names.map(n => <option key={n} value={n}>{n}{n === SQL_MAIN ? ' (la de pgo sql sin --conexion)' : ''}{v?.names?.includes(n) ? ' · conectada' : ''}</option>)}
+            </select>
+          </label>
+          <label>Otra
+            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="nombre, p. ej. pruebas" spellCheck={false}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+          </label>
+          <button type="button" disabled={busy || !newName.trim()} onClick={add}>Añadir</button>
+        </div>
+      }
       connected={v?.connected && (
         <OpenConnection busy={busy} note={note}
           rows={[['Conexión', sqlStatusText(v)], ...(v.server_version ? [['Servidor', `SQL Server ${v.server_version}`] as [string, string]] : [])]}

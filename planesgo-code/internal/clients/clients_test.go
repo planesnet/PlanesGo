@@ -79,3 +79,24 @@ func TestLastSeen(t *testing.T) {
 		t.Errorf("last seen %v", l[0].LastSeen)
 	}
 }
+
+// The server proves it holds the client's token (or the pairing secret) without anyone sending it.
+func TestProof(t *testing.T) {
+	r := newRegistry(t)
+	secret, _ := ReadSecret(r.SecretFile)
+	id, token, _ := r.Pair(secret, "a")
+	nonce := strings.Repeat("ab", 16)
+	p, ok := r.Proof(id, nonce)
+	if !ok || p != mac(hash(token), nonce) {
+		t.Errorf("proof %q %v", p, ok)
+	}
+	if _, ok := r.Proof("otro", nonce); ok {
+		t.Error("an unknown client has a proof")
+	}
+	if _, ok := r.Proof(id, "no-hex"); ok {
+		t.Error("a nonce that is not hex is accepted")
+	}
+	if p, ok := r.SecretProof(nonce); !ok || p != mac(secret, nonce) {
+		t.Errorf("secret proof %q %v", p, ok)
+	}
+}

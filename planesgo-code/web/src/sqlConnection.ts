@@ -6,6 +6,8 @@ import { connectionStatus, readLast, saveLast } from './sessionConnection.ts';
 export interface SqlConfig { server: string; database: string; user: string; allow_changes: boolean; trust_certificate: boolean }
 
 export interface SqlView {
+  name?: string;     // this connection («principal» the main one)
+  names?: string[];  // the session's open connections
   connected: boolean;
   config?: SqlConfig;
   databases?: string[]; // the ones the user can use (to change it while connected)
@@ -16,9 +18,18 @@ export interface SqlView {
 
 export const EMPTY_SQL: SqlConfig = { server: '', database: '', user: '', allow_changes: false, trust_certificate: true };
 
-// The last connection used in a project (without the password), to fill the form.
-export const readLastSql = (login: string, project: number) => readLast('sql', login, project, EMPTY_SQL);
-export const saveLastSql = (login: string, project: number, c: SqlConfig) => saveLast('sql', login, project, c);
+// The last connection used in a project with that name (without the password), to fill the form.
+const lastKey = (name: string) => (name === SQL_MAIN ? 'sql' : 'sql:' + name);
+export const readLastSql = (login: string, project: number, name = SQL_MAIN) => readLast(lastKey(name), login, project, EMPTY_SQL);
+export const saveLastSql = (login: string, project: number, c: SqlConfig, name = SQL_MAIN) => saveLast(lastKey(name), login, project, c);
+
+// A session can have several connections, each with its name ('pruebas', 'contenedor'…); the main one is «principal»
+// (the one «pgo sql» uses without --conexion).
+export const SQL_MAIN = 'principal';
+export const sqlNameError = (name: string) =>
+  /^[a-z0-9][a-z0-9-]{0,31}$/.test(name) ? '' : 'El nombre: letras minúsculas sin acentos, cifras y guiones (hasta 32), p. ej. «pruebas».';
+// sqlNames: the connections to choose from: the open ones, the main one and the one being defined.
+export const sqlNames = (open: string[] | undefined, current: string) => [...new Set([SQL_MAIN, ...(open || []), current])].sort((a, b) => (a === SQL_MAIN ? -1 : b === SQL_MAIN ? 1 : a.localeCompare(b)));
 
 // sqlFormError: what is missing before connecting ('' if nothing).
 export function sqlFormError(c: SqlConfig, password: string): string {

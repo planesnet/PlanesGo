@@ -38,8 +38,11 @@ Todo va en `~/.local/opt/rdp-agente`, sin `sudo` (no funciona dentro de la app):
 - **Xvfb, xdotool** (el escritorio del agente) **y el servidor RDP de prueba** (`freerdp-shadow-cli`): paquetes de
   Ubuntu desempaquetados. Las capturas y el vídeo usan `import` (ImageMagick) y `ffmpeg` del sistema.
 
-Los datos (carpeta de intercambio, grabaciones y auditoría) van en `~/.local/share/pgocode-connectors`, fuera del
-código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer y necesitan la de intercambio).
+Los datos (carpetas de intercambio y grabaciones) van en `~/.local/share/pgocode-connectors`, fuera del código y fuera
+de la carpeta de datos de pgocode, con permisos 700. Cada conexión tiene su propia carpeta de intercambio:
+`intercambio/agente/<proyecto>/<sesión>` para el escritorio del agente e `intercambio/persona/<proyecto>` para el de la
+persona. Así, desde Windows no se ven los ficheros de otro proyecto ni de otra sesión. Las grabaciones van aparte, en
+`grabaciones/agente/<proyecto>/<sesión>`, fuera de lo que se comparte.
 
 ## Escritorio remoto para la persona: `pgocode --rdp`
 
@@ -123,7 +126,7 @@ pgo escritorio mueve X Y | arrastra X1 Y1 X2 Y2 | rueda arriba|abajo [N]
 pgo escritorio escribe "texto"
 pgo escritorio tecla ctrl+s Return              # nombres de xdotool
 pgo escritorio tamaño 1920x1080                 # cambia el tamaño en caliente
-pgo escritorio graba inicio | graba fin         # vídeo en …/pgocode-connectors/intercambio/grabaciones
+pgo escritorio graba inicio | graba fin         # vídeo en …/pgocode-connectors/grabaciones/agente/<proyecto>/<sesión>
 pgo escritorio estado
 ```
 

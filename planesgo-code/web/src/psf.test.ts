@@ -177,3 +177,10 @@ test('veredictos puntuados: solo bloquea lo grave y probable', () => {
   assert.match(P.builderPrompt(issue, '# Spec', 1, sk), /No toques \.psf\/specs\/ ni \.pgocode\/skills-sistema\//);
   assert.doesNotMatch(P.builderPrompt(issue, '# Spec', 2, null, '- x'), /Checklist/); // the skill is already in its conversation
 });
+
+test('hallazgos de varias líneas: se conservan enteros', () => {
+  const r = P.parseVerdict('VEREDICTO: RECHAZADO\nHALLAZGOS:\n- [alta] (confianza 9) a.go:3 — inyección\n  cómo: el nombre va sin citar\n  arreglo: quoteName\n- [baja] (confianza 9) b.go:1 — nombre\nMEJORAS:\n- ninguna');
+  assert.equal(r.verdict, 'RECHAZADO');
+  assert.equal(r.findings, '- [alta] (confianza 9) a.go:3 — inyección\n  cómo: el nombre va sin citar\n  arreglo: quoteName');
+  assert.equal(r.improvements, '- [baja] (confianza 9) b.go:1 — nombre');
+});

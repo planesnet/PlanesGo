@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { get, post } from '../api';
 import { desktopFormError, desktopStatusText, parseSize, readLastDesktop, saveLastDesktop, type AgentDesktopConfig, type AgentDesktopView } from '../agentDesktop';
 import { CampoClave } from './Acceso';
@@ -18,19 +18,22 @@ export default function AgentDesktopSettings({ project, session, login }: { proj
   const [error, setError] = useState('');
   const url = `/api/agent-desktop?project=${project}&session=${encodeURIComponent(session)}`;
 
+  // Only the latest request's answer counts: a poll that left before «Parar» must not bring the desktop back.
+  const latest = useRef(0);
+  const fresh = (n: number) => (x: AgentDesktopView) => { if (n === latest.current) setV(x); };
   useEffect(() => {
-    get<AgentDesktopView>(url).then(setV).catch(e => setError(String(e.message || e)));
-  }, [url]);
+    get<AgentDesktopView>(url).then(fresh(++latest.current)).catch(e => setError(String(e.message || e)));
+  }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
   // While it runs, its state changes on its own (login, recording, end).
   useEffect(() => {
     if (!v?.running) return;
-    const t = setInterval(() => get<AgentDesktopView>(url).then(setV).catch(() => {}), POLL_MS);
+    const t = setInterval(() => get<AgentDesktopView>(url).then(fresh(++latest.current)).catch(() => {}), POLL_MS);
     return () => clearInterval(t);
-  }, [url, v?.running]);
+  }, [url, v?.running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = (f: () => Promise<AgentDesktopView>) => {
     setBusy(true); setError('');
-    f().then(setV).catch(e => setError(String(e.message || e))).finally(() => { setBusy(false); setPassword(''); });
+    f().then(fresh(++latest.current)).catch(e => setError(String(e.message || e))).finally(() => { setBusy(false); setPassword(''); });
   };
   const start = () => {
     const why = desktopFormError(c, password);

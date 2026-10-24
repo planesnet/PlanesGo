@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestActionValidate(t *testing.T) {
@@ -115,5 +116,22 @@ func TestXauthority(t *testing.T) {
 	want = append(append(want, 0, 16), bytes.Repeat([]byte{7}, 16)...)
 	if !bytes.Equal(b, want) {
 		t.Errorf("%x", b)
+	}
+}
+
+// The text goes to FreeRDP's pipe in pieces it reads whole: never a character split between two of them.
+func TestPipeChunks(t *testing.T) {
+	text := strings.Repeat("ñé€ a", 30) + "😀"
+	l := pipeChunks(text, 63)
+	if strings.Join(l, "") != text {
+		t.Fatal("the pieces do not make the text")
+	}
+	for _, c := range l {
+		if len(c) > 63 || !utf8.ValidString(c) {
+			t.Errorf("piece %q (%d bytes)", c, len(c))
+		}
+	}
+	if len(pipeChunks("", 63)) != 0 || len(pipeChunks("hola", 63)) != 1 {
+		t.Error("short texts")
 	}
 }
