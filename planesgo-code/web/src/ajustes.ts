@@ -41,7 +41,15 @@ export const TIPOS_HOSTING: { id: TipoHosting; nombre: string; descripcion: stri
 // envía) o pgocode la elige con embeddings y se la indica al agente.
 export type SeleccionSkills = 'agente' | 'sugerir' | 'elegir';
 
-export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills; directorio?: string }
+// Automatic PSF sessions for the project's GitHub issues (the «Issues» section of the project properties).
+export interface IssueSettings {
+  autoResolve?: boolean;     // every new issue starts an automatic PSF session on its own
+  autoResolveSince?: number; // only issues created after this moment (when autoResolve was turned on)
+  autoMerge?: boolean;       // with the 4 reviewers approving and green GitHub checks, the PR merges without asking
+  mergeBranch?: string;      // branch the PRs merge into ('' or missing: the repository default)
+}
+
+export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills; directorio?: string; issues?: IssueSettings }
 
 export const AJUSTES_DEFECTO: AjustesProyecto = { detalle: 'normal', skills: 'sugerir' };
 

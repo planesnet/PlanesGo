@@ -8,6 +8,7 @@ import Icono from './Icono';
 import { Hosting } from './Marca';
 import { askConfirm, PropertiesModal, type PropertiesSection } from './Modal';
 import ProgressSpinner from './ProgressSpinner';
+import * as PSF from '../psf';
 import './config-sesion.css';
 
 interface Props {
@@ -17,6 +18,7 @@ interface Props {
   alAjustes: (p: Proyecto, a: AjustesProyecto) => void;
   alElegirSesion: (p: Proyecto, s: Sesion) => void;
   alAjustesSesion: (s: Sesion) => void; alNuevaSesion: (p: Proyecto) => void; alCambiarSesion: (s: Sesion) => void; alBorrarSesion: (s: Sesion) => void;
+  width?: number; onResize?: (px: number) => void; onHide?: () => void; // the panel width (0: fits its content), resizing and hiding it
   onDuplicateSession: (p: Proyecto, s: Sesion) => void;
 }
 
@@ -34,11 +36,29 @@ function guardaReciente(login: string, id: number): number[] {
 
 const sinAcentos = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+const PROJECTS_MIN = 180;
+
 export default function Proyectos(props: Props) {
   const { usuario, actual, inicial, alElegir } = props;
   const [lista, setLista] = useState<Proyecto[] | null>(null);
   const [error, setError] = useState('');
   const [filtro, setFiltro] = useState('');
+  // Resizing the panel by dragging its right edge (between PROJECTS_MIN and half the window).
+  const navRef = useRef<HTMLElement>(null);
+  const [resizing, setResizing] = useState(false);
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const left = navRef.current?.getBoundingClientRect().left || 0;
+    setResizing(true);
+    const move = (ev: PointerEvent) => props.onResize?.(Math.round(Math.min(window.innerWidth / 2, Math.max(PROJECTS_MIN, ev.clientX - left))));
+    const up = () => {
+      setResizing(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const [recientes, setRecientes] = useState<number[]>(() => leeRecientes(usuario.login));
   // Proyectos plegados en la lista (se recuerdan).
   const [plegados, setPlegados] = useState<Set<number>>(() => {
@@ -141,10 +161,14 @@ export default function Proyectos(props: Props) {
   };
 
   return (
-    <nav className="proyectos" aria-label="Proyectos">
+    <nav className="proyectos" aria-label="Proyectos" ref={navRef} style={props.width ? { width: props.width, minWidth: PROJECTS_MIN, maxWidth: 'none' } : undefined}>
+      {props.onResize && <div className="asa asa-proyectos" onPointerDown={startResize} onDoubleClick={() => props.onResize!(0)} role="separator" aria-orientation="vertical"
+        aria-label="Redimensionar el panel de proyectos" title="Arrastra para cambiar el ancho (doble clic: el ancho por defecto)" />}
+      {resizing && <div className="capa-arrastre" />}
       <div className="busca">
         <input placeholder="Buscar proyecto…" value={filtro} onChange={e => setFiltro(e.target.value)} aria-label="Buscar proyecto" />
         <button className="icono" title="Volver a cargar de Odoo" aria-label="Volver a cargar de Odoo" onClick={() => carga(true)}><Icono n="recargar" t={16} /></button>
+        {props.onHide && <button className="icono" title="Ocultar los proyectos" aria-label="Ocultar los proyectos" onClick={props.onHide}><Icono n="barra" t={16} /></button>}
       </div>
       <div className="lista">
         {error && <p className="error">{error}</p>}
@@ -239,10 +263,47 @@ function Alojamiento({ a, alCambiar }: { a: AjustesProyecto; alCambiar: (c: Part
   </>;
 }
 
+// Issues section: automatic PSF sessions for new GitHub issues, automatic merge and the branch PRs merge into.
+function IssueSettingsSection({ p, a, onChange }: { p: Proyecto; a: AjustesProyecto; onChange: (c: Partial<AjustesProyecto>) => void }) {
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    get<{ ramas: string[] }>(`/api/proyecto/ramas?proyecto=${p.id}`).then(r => setBranches(r.ramas || [])).catch(e => setError((e as Error).message));
+  }, [p.id]);
+  const s = a.issues || {};
+  const set = (c: Partial<NonNullable<AjustesProyecto['issues']>>) => onChange({ issues: { ...s, ...c } });
+  const merge = s.mergeBranch || '';
+  return <>
+    <h3>Issues</h3>
+    <fieldset className="opciones-detalle">
+    <legend>Sesiones automáticas PSF</legend>
+    <p className="suave pequeno">Sesiones automáticas de Planes Software Factory (PSF) para las issues de GitHub del repositorio del proyecto: rama <code>psf/issue-N</code>, PR en borrador, spec, Builder con TDD y comité de 4 revisores.</p>
+    <label className={'opcion-detalle' + (s.autoResolve ? ' elegida' : '')}>
+      <input type="checkbox" checked={Boolean(s.autoResolve)} onChange={e => set({ autoResolve: e.target.checked, autoResolveSince: e.target.checked ? Date.now() : undefined })} />
+      <span><b>Resolución automática</b><span className="suave pequeno">Cada issue nueva que aparezca en GitHub (abierta y sin PR) arranca sola su sesión automática. Solo las creadas desde que se activa, una a la vez por proyecto, y mientras pgocode está abierto (lo mira cada 5 minutos). La spec sigue esperando tu aprobación.</span></span>
+    </label>
+    <label className={'opcion-detalle' + (s.autoMerge ? ' elegida' : '')}>
+      <input type="checkbox" checked={Boolean(s.autoMerge)} onChange={e => set({ autoMerge: e.target.checked })} />
+      <span><b>Confirmación automática</b><span className="suave pequeno">Si los 4 revisores aprueban y los checks de GitHub están en verde, el PR se fusiona sin preguntar (squash). Con checks en curso, espera a que terminen; si alguno falla, se queda para que lo decidas tú.</span></span>
+    </label>
+    </fieldset>
+    <div className="psf-merge-field">
+      <label htmlFor="psf-merge-branch">Rama en la que se fusionan los PR</label>
+      <select id="psf-merge-branch" value={merge} onChange={e => set({ mergeBranch: e.target.value || undefined })} disabled={!branches}>
+        <option value="">La principal del repositorio</option>
+        {merge && branches && !branches.includes(merge) && <option value={merge}>{merge} (ya no está en el repositorio)</option>}
+        {(branches || []).map(b => <option key={b} value={b}>{b}</option>)}
+      </select>
+      <span className="suave pequeno">De ella sale la rama de cada issue y a ella va el PR. Tiene que existir en el remoto (origin).</span>
+      {error && <span className="error pequeno">{error}</span>}
+    </div>
+  </>;
+}
+
 // Project properties window (PropertiesModal: sections on the left, their properties on the right).
-type ProjectSection = 'general' | 'conversation' | 'skills' | 'hosting';
+type ProjectSection = 'general' | 'conversation' | 'skills' | 'hosting' | 'issues';
 const PROJECT_SECTIONS: readonly PropertiesSection<ProjectSection>[] = [{ id: 'general', name: 'General', icon: 'carpeta' }, { id: 'conversation', name: 'Conversación', icon: 'comentario' },
-  { id: 'skills', name: 'Skills', icon: 'skill' }, { id: 'hosting', name: 'Alojamiento', icon: 'equipo' }];
+  { id: 'skills', name: 'Skills', icon: 'skill' }, { id: 'hosting', name: 'Alojamiento', icon: 'equipo' }, { id: 'issues', name: 'Issues', icon: 'flujo' }];
 const SELECCION: { id: SeleccionSkills; nombre: string; ayuda: string }[] = [
   { id: 'agente', nombre: 'Decide el agente', ayuda: 'Como siempre: el modelo lee las descripciones de las skills y decide él. pgocode no interviene.' },
   { id: 'sugerir', nombre: 'pgocode sugiere', ayuda: 'pgocode calcula qué skill encaja y lo muestra junto al mensaje, sin cambiar lo que se envía al agente. Sirve para ver si el agente acierta.' },
@@ -269,6 +330,7 @@ function PropiedadesProyecto({ p, login, alCerrar, alGuardar }: { p: Proyecto; l
       {section => <>
         {section === 'general' && <General p={p} a={a} alCambiar={cambia} />}
         {section === 'hosting' && <Alojamiento a={a} alCambiar={cambia} />}
+        {section === 'issues' && <IssueSettingsSection p={p} a={a} onChange={cambia} />}
         {section === 'skills' && <>
           <h3>Skills</h3>
           <fieldset className="opciones-detalle">
@@ -324,7 +386,7 @@ function Sesiones({ hostingDe, proyecto, lista, sesion, alElegirSesion, alCambia
               <Hosting tipo={s.hosting || hostingDe(proyecto.id) || s.tipo} t={13} enBlanco />
               <span className={'recorta' + (s.nombre ? '' : ' suave')}>{titulo(s)}</span>
               {hija && <span className="insignia-parte" title="Sesión hija: una parte de un reparto en paralelo">parte {s.parte}</span>}
-              {s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
+              {s.psf ? <PsfBadge st={s.psf} /> : s.rama && <span className="rama-sesion recorta"><Icono n="rama" t={11} />{s.rama}</span>}
             </button>
           )}
           <button className="icono puntos" onClick={e => { const ancla = e.currentTarget; setMenu(m => m?.id === s.id ? null : { id: s.id, ancla }); }}
@@ -432,3 +494,9 @@ export function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; 
   );
 }
 
+
+// PsfBadge: the phase of an automatic PSF session in the list (amber when it waits for a person).
+function PsfBadge({ st }: { st: PSF.PsfState }) {
+  const tone = st.phase === 'merged' ? 'done' : st.phase === 'error' || st.phase === 'blocked' ? 'failed' : PSF.isWaitingPhase(st.phase) ? 'waiting' : 'working';
+  return <span className={'psf-badge ' + tone} title={`Sesión automática PSF · rama ${st.branch}${st.pr ? ` · PR #${st.pr}` : ''}`}>PSF · {PSF.PHASE_LABEL[st.phase]}</span>;
+}

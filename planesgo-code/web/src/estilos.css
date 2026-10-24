@@ -71,17 +71,20 @@ textarea { resize: none; }
    si no, crecía con el nombre de una sesión hasta el 40 % y el chat se quedaba en 330–500 px. */
 .arnes:not(.sin-panel) .proyectos { max-width: min(22vw, 300px); }
 .arnes.sin-panel { grid-template-columns: auto minmax(0, 1fr); }
+/* Projects panel hidden (a button in the chat header shows it again). */
+.arnes.sin-proyectos { grid-template-columns: minmax(0, 1fr) minmax(340px, 38%); }
+.arnes.sin-proyectos.sin-panel { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 900px) {
-  .arnes, .arnes.sin-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; min-height: 100%; }
+  .arnes, .arnes.sin-panel, .arnes.sin-proyectos, .arnes.sin-proyectos.sin-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; min-height: 100%; }
   .proyectos { max-height: 40vh; }
 }
 
 /* Proyectos */
 /* El panel de proyectos se ajusta a lo más largo (proyectos y nombres de sesión), entre 248 px y el 40 % de la ventana. */
-.proyectos { width: max-content; min-width: 248px; max-width: 40vw; background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
+.proyectos { position: relative; width: max-content; min-width: 248px; max-width: 40vw; background: var(--panel); border-right: 1px solid var(--linea); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; padding-top: 10px; }
 .marca { font-weight: 700; font-size: 14px; padding: 14px 14px 10px; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
-.busca input { flex: 1; background: transparent; }
+.busca input { flex: 1 1 0; width: 0; min-width: 0; background: transparent; }
 .interruptor { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--suave); padding: 8px 14px 2px; }
 .lista { overflow: auto; padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 1px; }
 .proyectos .lista { display: flex; flex-direction: column; }
@@ -133,6 +136,7 @@ textarea { resize: none; }
 /* Artefactos */
 .artefactos { position: relative; border-left: 1px solid var(--linea); background: var(--panel); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
 .asa { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; }
+.asa-proyectos { left: auto; right: -4px; }
 .asa:hover, .asa:active { background: linear-gradient(to right, transparent 3px, var(--acento) 3px, var(--acento) 5px, transparent 5px); }
 .capa-arrastre { position: fixed; inset: 0; z-index: 2000; cursor: col-resize; }
 .subpestanas { margin-left: auto; display: inline-flex; gap: 2px; background: var(--hover); border-radius: 7px; padding: 2px; }
@@ -446,6 +450,7 @@ button.primario.danger { background: var(--error); }
 .opcion-detalle { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--linea); border-radius: 10px; padding: 9px 11px; cursor: pointer; }
 .opcion-detalle.elegida { border-color: var(--texto); background: var(--hover); }
 .opcion-detalle input { margin-top: 3px; width: auto; }
+.opcion-detalle input[type="checkbox"] { width: 14px; height: 14px; padding: 0; flex: none; accent-color: var(--acento); }
 .opcion-detalle > span { display: grid; gap: 2px; font-size: 13px; }
 .acciones { font-size: 12.5px; }
 .acciones > summary { display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; color: var(--suave); }
@@ -1074,3 +1079,45 @@ button.miga-item:hover { background: var(--hover); }
 /* Lista de proyectos: trabajando (gira) o con respuestas sin ver (punto azul). */
 .proyecto-trabaja { width: 11px; height: 11px; flex: none; }
 .proyecto-sin-leer { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--acento); }
+
+/* Automatic PSF session strip (PsfStrip.tsx): steps as dots on a line, under the messages, above the quick launch bar. */
+.psf-strip { min-width: 0; overflow: hidden; padding: 8px 4px 10px; margin-bottom: 6px; border-top: 1px solid var(--linea); border-bottom: 1px solid var(--linea); font-size: 12px; color: var(--suave); }
+.psf-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.psf-head .enlace { padding: 0 2px; font-size: 12px; }
+.psf-head .hueco { flex: 1; }
+.psf-btn { padding: 2px 8px; font-size: 12px; border: 1px solid var(--linea); }
+.psf-btn.primario { border-color: transparent; }
+.psf-steps { display: flex; list-style: none; margin: 0; padding: 0; }
+.psf-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; position: relative; text-align: center; }
+.psf-step:not(:last-child)::after { content: ""; position: absolute; top: 5px; left: calc(50% + 9px); right: calc(-50% + 9px); height: 1px; background: var(--linea); }
+.psf-step.done:not(:last-child)::after { background: #2e8b57; }
+.psf-dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--tenue); box-sizing: border-box; }
+.psf-step.done .psf-dot { background: #2e8b57; border-color: transparent; }
+.psf-step.running { color: var(--texto); }
+.psf-step.running .psf-dot { border: 2px solid var(--acento); animation: psf-pulse 1.2s ease-in-out infinite; }
+.psf-step.waiting { color: var(--warning); }
+.psf-step.waiting .psf-dot { background: var(--warning); border-color: transparent; }
+.psf-step.rejected, .psf-step.error { color: var(--error); }
+.psf-step.rejected .psf-dot, .psf-step.error .psf-dot { background: var(--error); border-color: transparent; }
+.psf-reviewers { margin-left: 5px; white-space: nowrap; }
+.psf-mini { display: inline-block; width: 6px; height: 6px; margin: 0 1px; border-radius: 50%; border: 1px solid var(--tenue); box-sizing: border-box; vertical-align: 1px; }
+.psf-mini.ok { background: #2e8b57; border-color: transparent; }
+.psf-mini.ko { background: var(--error); border-color: transparent; }
+.psf-mini.curso { border-color: var(--acento); animation: psf-pulse 1.2s ease-in-out infinite; }
+.psf-now { margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.psf-error { color: var(--error); }
+.psf-detail { margin-top: 8px; }
+.psf-detail p { margin: 0 0 6px; }
+.psf-detail summary { cursor: pointer; }
+.psf-detail pre { white-space: pre-wrap; margin: 4px 0 8px; max-height: 200px; overflow: auto; font-size: 12px; }
+@keyframes psf-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .psf-step.running .psf-dot, .psf-mini.curso { animation: none; } }
+/* Merge branch field of the project «Issues» section. */
+.psf-merge-field { display: grid; gap: 4px; margin-top: 14px; font-size: 13px; }
+.psf-merge-field select { justify-self: start; min-width: 240px; }
+/* Session list badge of an automatic session. */
+.psf-badge { font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--suave); white-space: nowrap; }
+.psf-badge.working { color: var(--acento); }
+.psf-badge.waiting { color: var(--warning); }
+.psf-badge.failed { color: var(--error); }
+.psf-badge.done { color: #2e8b57; }

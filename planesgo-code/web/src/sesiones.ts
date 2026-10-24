@@ -3,6 +3,7 @@
 import type { Mensaje } from './api';
 import type { Avisos } from './costes';
 import type { TipoHosting } from './ajustes';
+import type { PsfState } from './psf';
 
 export interface Sesion {
   id: string;
@@ -31,6 +32,8 @@ export interface Sesion {
   parte?: number;        // número de la parte que hace (desde 1)
   archivada?: boolean;   // archivada (p. ej. se quitó su copia de trabajo): fuera de la lista principal, con su conversación
   merged?: boolean;      // hija terminada y unida a la madre (su copia ya no existe): va plegada bajo la madre
+  automatic?: boolean;  // automatic PSF session (psf.ts): works on its own, without anyone opening it
+  psf?: PsfState;        // its state: issue, branch, PR, phase, iteration and verdicts
   corte?: number;        // «Continuar desde aquí» pendiente: el índice del mensaje desde el que sigue el agente (se aplica al enviar)
   creada: number;
   ultima: number;

@@ -21,7 +21,7 @@ interface PR {
   autor: string; revision: string; fusionable: string; checks: string; mas: number; menos: number; ficheros: number; commits: number;
   comentarios: number; issues: number[]; etiquetas: Etiqueta[]; creada: string; actualizada: string; fusionada?: string;
 }
-interface Estado { repo: string; url: string; defecto: string; tipos: string[]; etiquetas: Etiqueta[]; issues: Issue[]; prs: PR[]; abiertas: number; cerradas: number; prs_abiertas: number; leido: string }
+export interface Estado { repo: string; url: string; defecto: string; tipos: string[]; etiquetas: Etiqueta[]; issues: Issue[]; prs: PR[]; abiertas: number; cerradas: number; prs_abiertas: number; leido: string }
 type Fase = 'por-empezar' | 'desarrollo' | 'revision' | 'test' | 'cerrada';
 type Clase = Issue['clase'] | 'todas';
 
@@ -97,7 +97,8 @@ const Etiquetas = ({ l }: { l: Etiqueta[] }) => <>{l.map(e => (
 ))}</>;
 
 // Lo que se le pasa al chat para resolver una issue.
-export interface PeticionResolver { nombre: string; texto: string }
+// Resolving an issue: the automatic PSF session (psf/issue-<N> branch, PR, spec, Builder, review board and ready PR).
+export interface PeticionResolver { number: number; title: string; url: string; folder: string }
 
 export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: {
   proyecto: Proyecto; carpeta: string; rama: string; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
@@ -111,15 +112,11 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   const [resolviendo, setResolviendo] = useState<number | null>(null);
   const [errorAccion, setErrorAccion] = useState('');
 
-  // Resolver una issue: se lee su descripción y se pasa al chat (sesión nueva) para que el agente la resuelva.
-  const resolver = async (i: Issue) => {
+  // Resolve an issue: the automatic PSF session prepares and drives it (the backend reads the whole issue).
+  const resolver = (i: Issue) => {
     setResolviendo(i.numero);
-    setError('');
-    try {
-      const r = await get<{ repo: string; cuerpo: string }>(`/api/github/issue?proyecto=${proyecto.id}&carpeta=${encodeURIComponent(carpeta)}&numero=${i.numero}`);
-      const texto = `Resuelve la issue #${i.numero} de ${r.repo}: ${i.titulo}\n\n${r.cuerpo || '(sin descripción)'}\n\n${i.url}`;
-      alResolver({ nombre: `#${i.numero} ${i.titulo}`, texto });
-    } catch (x) { setError((x as Error).message); } finally { setResolviendo(null); }
+    alResolver({ number: i.numero, title: i.titulo, url: i.url, folder: carpeta });
+    setTimeout(() => setResolviendo(null), 1500);
   };
 
   const carga = (recargar = false) => {
@@ -276,7 +273,7 @@ function FilaIssue({ i, alAbrir, alResolver, resolviendo, alMenu }: { i: Issue; 
       {i.comentarios > 0 && <span className="gh-coment" title={`${i.comentarios} comentarios`}><Oct n="comentario" t={13} /> {i.comentarios}</span>}
     </button>
     {alResolver && (
-      <button className="gh-resolver" onClick={alResolver} disabled={resolviendo} title="Resolver: abre una sesión nueva y se la pide al agente" aria-label={'Resolver la issue #' + i.numero}>
+      <button className="gh-resolver" onClick={alResolver} disabled={resolviendo} title="Resolver con PSF: sesión automática con su rama psf/issue-N, PR en borrador, spec para aprobar, Builder con TDD y comité de 4 revisores; el merge lo confirmas tú" aria-label={'Resolver la issue #' + i.numero}>
         <Icono n="ejecutar" t={13} /> {resolviendo ? '…' : 'Resolver'}
       </button>
     )}
@@ -345,10 +342,11 @@ function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Is
 }
 
 // Nueva issue: título, descripción (Markdown) y etiquetas del repositorio (que dicen si es petición o mantenimiento).
-function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar }: {
-  estado: Estado; proyecto: number; carpeta: string; alCrear: (r: { numero: number; url: string }) => void; alCancelar: () => void;
+export function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar, initialTitle = '', className = 'gh-nueva' }: {
+  estado: Estado; proyecto: number; carpeta: string; alCrear: (r: { numero: number; url: string; titulo: string }) => void; alCancelar: () => void;
+  initialTitle?: string; className?: string;
 }) {
-  const [titulo, setTitulo] = useState('');
+  const [titulo, setTitulo] = useState(initialTitle);
   const [cuerpo, setCuerpo] = useState('');
   const [etiquetas, setEtiquetas] = useState<string[]>([]);
   const [enviando, setEnviando] = useState(false);
@@ -359,11 +357,11 @@ function NuevaIssue({ estado, proyecto, carpeta, alCrear, alCancelar }: {
     if (!titulo.trim() || enviando) return;
     setEnviando(true);
     setError('');
-    try { alCrear(await post<{ numero: number; url: string }>('/api/github/issue', { proyecto, carpeta, titulo, cuerpo, etiquetas })); }
+    try { alCrear({ ...(await post<{ numero: number; url: string }>('/api/github/issue', { proyecto, carpeta, titulo, cuerpo, etiquetas })), titulo: titulo.trim() }); }
     catch (x) { setError((x as Error).message); setEnviando(false); }
   };
   return (
-    <form className="gh-nueva" onSubmit={envia}>
+    <form className={className} onSubmit={envia}>
       <div className="gh-titulo"><Oct n="issue" color={VERDE} /> Nueva issue en <b>{estado.repo}</b></div>
       <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Título" autoFocus required maxLength={256} />
       <textarea value={cuerpo} onChange={e => setCuerpo(e.target.value)} placeholder="Descripción (Markdown): qué se pide, por qué, cómo comprobarlo…" rows={6} />

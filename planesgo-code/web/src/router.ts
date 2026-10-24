@@ -41,6 +41,7 @@
 // Pruebas: node --test src/router.test.ts (más de 60 mensajes con su ruta esperada).
 import * as AP from './aparte.ts';
 import { esAyuda } from './ayuda.ts';
+import { parseIssueCommand } from './issueCommand.ts';
 import * as DR from './direct.ts';
 import * as PL from './plan.ts';
 import * as RP from './reparto.ts';
@@ -115,6 +116,9 @@ export function route(inp: RouteInput): RouteDecision {
   if (inp.cutPending && inp.isAgent) base.push('cut');
   // 0. Ayuda: en la interfaz, sin agente.
   if (!inp.raw && esAyuda(t)) return { route: 'command', detail: 'help', executor: 'pgocode', engine: 'rules', reason: 'orden «/help»', modifiers: [], text: t };
+  // «/issue [title]»: the window to create a GitHub issue, without the agent.
+  const issueTitle = inp.raw ? null : parseIssueCommand(t);
+  if (issueTitle !== null) return { route: 'command', detail: 'issue', executor: 'pgocode', engine: 'rules', reason: 'orden «/issue»', modifiers: [], text: issueTitle };
   if (inp.raw) return agent(t, base, 'rules', 'envío interno de pgocode', true);
 
   // Lo que dicen las reglas de aparte.ts (prefijos «>», «?», «//», aprendidas, reglas con el agente ocupado).
@@ -277,6 +281,7 @@ export function tagText(d: RouteDecision, busy: boolean): string {
   switch (d.route) {
     case 'command': {
       if (d.detail === 'help') return '→ Ayuda de pgocode (0 tokens)';
+      if (d.detail === 'issue') return '→ Nueva issue en GitHub (0 tokens)';
       const p = d.plan!;
       const n = 'numero' in p ? ` ${p.numero}` : '';
       if (d.executor === 'pgocode') return `→ pgocode: ${PLAN_VERB[p.tipo]} el plan${n} (0 tokens)${busy ? ', al acabar el turno' : ''}`;

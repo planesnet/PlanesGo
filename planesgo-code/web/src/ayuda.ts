@@ -27,6 +27,7 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
     ] },
     { titulo: 'Órdenes', entradas: [
       { clave: '/help · /ayuda', que: 'Esta ayuda' },
+      { clave: '/issue [título]', que: 'Crear una issue en GitHub en el repositorio del proyecto (la resuelve la resolución automática o «Resolver» en Flujo)' },
       { clave: '/plan <petición>', que: 'Crear un plan antes de tocar nada' },
       { clave: '/plan N <cambios>', que: 'Revisar el plan N' },
       { clave: 'ejecuta el plan N', que: 'Ejecutarlo (también: descarta, reactiva o borra el plan N)' },

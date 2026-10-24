@@ -213,6 +213,13 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/github/issue", s.conSesion(s.githubCrea))
 	mux.HandleFunc("POST /api/github/accion", s.conSesion(s.githubAccion))
 	mux.HandleFunc("GET /api/github/issue", s.conSesion(s.githubIssue))
+	mux.HandleFunc("POST /api/psf/start", s.conSesion(s.psfStart))
+	mux.HandleFunc("POST /api/psf/spec", s.conSesion(s.psfSpec))
+	mux.HandleFunc("POST /api/psf/sync", s.conSesion(s.psfSync))
+	mux.HandleFunc("POST /api/psf/ready", s.conSesion(s.psfReady))
+	mux.HandleFunc("POST /api/psf/comment", s.conSesion(s.psfComment))
+	mux.HandleFunc("POST /api/psf/checks", s.conSesion(s.psfChecks))
+	mux.HandleFunc("POST /api/psf/merge", s.conSesion(s.psfMerge))
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
@@ -701,6 +708,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// TextoUsuario: lo que ha escrito el usuario, sin lo que añade pgocode (memoria de trabajo, notas): de ahí
 		// salen las frases de la memoria del proyecto. Sin él, el último mensaje.
 		TextoUsuario string `json:"texto_usuario"`
+		// NoFacts: pgocode wrote the message (e.g. the PSF prompts): no project-memory facts are taken from it
+		// (the commands the agent runs still are).
+		NoFacts bool `json:"no_facts"`
 		// CacheTTL: lo que dura la caché del prompt del agente («5m» o «1h», ver llm.Peticion.CacheTTL).
 		CacheTTL string `json:"cache_ttl"`
 	}
@@ -857,6 +867,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	userText := p.TextoUsuario
 	if userText == "" {
 		userText = withoutRelayMemory(p.Mensajes[len(p.Mensajes)-1].Texto)
+	}
+	if p.NoFacts {
+		userText = ""
 	}
 	if memRoot != "" {
 		last := len(pet.Mensajes) - 1

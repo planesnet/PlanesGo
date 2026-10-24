@@ -15,6 +15,8 @@ import Barra from './componentes/Barra';
 import DialogoSesion, { type SessionSection } from './componentes/DialogoSesion';
 import { OPEN_PROGRAM_SETTINGS } from './componentes/ProgramSettings';
 import { askConfirm, Dialogs, showMessage } from './componentes/Modal';
+import type { PeticionResolver } from './componentes/Flujo';
+import { canStartAutomatic, issuesToResolve, newPsfState, type WatchedIssue } from './psf';
 
 // El último proyecto de cada usuario se guarda en la app (y en la URL, ?proyecto=ID): al volver a entrar,
 // tras F5, cerrar la app o pulsar «Salir», se abre directamente.
@@ -59,6 +61,11 @@ export default function App() {
   // Ancho del panel derecho (0: el de por defecto, un 42 % de la ventana), recordado entre sesiones.
   const [anchoPanel, setAnchoPanel] = useState<number>(() => { try { return Number(localStorage.getItem('pgo:ancho-panel')) || 0; } catch { return 0; } });
   const cambiaAncho = (px: number) => { setAnchoPanel(px); try { localStorage.setItem('pgo:ancho-panel', String(px)); } catch { /* sin almacenamiento */ } };
+  // Projects panel: its width (0: fits its content) and whether it is hidden (both remembered).
+  const [projectsWidth, setProjectsWidth] = useState<number>(() => { try { return Number(localStorage.getItem('pgo:ancho-proyectos')) || 0; } catch { return 0; } });
+  const [projectsHidden, setProjectsHidden] = useState<boolean>(() => { try { return localStorage.getItem('pgo:proyectos-ocultos') === '1'; } catch { return false; } });
+  const resizeProjects = (px: number) => { setProjectsWidth(px); try { localStorage.setItem('pgo:ancho-proyectos', String(px)); } catch { /* no storage */ } };
+  const toggleProjects = () => setProjectsHidden(h => { try { localStorage.setItem('pgo:proyectos-ocultos', h ? '' : '1'); } catch { /* no storage */ } return !h; });
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [repo, setRepo] = useState<S.Repo | null>(null);
   const [sesiones, setSesiones] = useState<S.Sesion[]>([]);
@@ -183,7 +190,7 @@ export default function App() {
       if (!vigente) return;
       setRepo(r);
       setSesion(x => {
-        if (!x || x.proyecto !== proyecto.id || x.carpeta !== c || !usuario) return x;
+        if (!x || x.proyecto !== proyecto.id || x.carpeta !== c || !usuario || x.automatic) return x; // an automatic session keeps its psf/issue-<N> branch
         const rama = r.ramas.includes(x.rama) ? x.rama : (r.rama || '');
         if (rama === x.rama && x.tipo === r.tipo) return x;
         const n = { ...x, rama, tipo: r.tipo, sesionAgente: rama === x.rama ? x.sesionAgente : undefined };
@@ -247,10 +254,58 @@ export default function App() {
     setDialogo(null);
   }, [usuario, dialogo, proyecto?.id, sesion?.id]);
 
-  // Resolver una issue desde Flujo: sesión nueva en la misma rama; su petición se envía sola al crearla.
-  const resuelve = useCallback((p: { nombre: string; texto: string }) => {
-    nuevaSesion(sesion?.rama, p.nombre.length > 70 ? p.nombre.slice(0, 67) + '…' : p.nombre, p.texto);
-  }, [nuevaSesion, sesion?.rama]);
+  // Resolve an issue: an automatic PSF session (psf.ts), created without opening it, that works on its own in its
+  // psf/issue-<N> branch; Chat drives it (psfStarts). If the issue already has one, that one resumes. It can be in
+  // another project than the open one (automatic resolution): then it takes that project's settings and the agent
+  // of its latest session.
+  const [psfStarts, setPsfStarts] = useState<S.Sesion[]>([]);
+  const startPsfSession = (projectId: number, p: PeticionResolver, auto = false) => {
+    if (!usuario) return;
+    const active = projectId === proyectoId.current;
+    const list = active ? sesiones : S.lista(usuario.login, projectId);
+    const existing = list.find(s => s.automatic && s.psf?.issue === p.number && s.carpeta === p.folder && !s.archivada);
+    if (existing) { if (!auto) setPsfStarts(q => [...q, { ...existing }]); return; }
+    const settings = leeAjustes(usuario.login, projectId);
+    const latest = [...list].filter(s => !s.madre).sort((a, b) => (b.creada || 0) - (a.creada || 0))[0];
+    const agent = (active && sesion?.agente) || latest?.agente || agentePorDefecto();
+    const name = `⚡ #${p.number} ${p.title}`;
+    const base = S.nueva(projectId, p.folder, '', agent, name.length > 70 ? name.slice(0, 67) + '…' : name);
+    const psf = { ...newPsfState(p.number, p.title, p.url), base: settings.issues?.mergeBranch || undefined, autoStarted: auto || undefined };
+    const s: S.Sesion = { ...newSessionDefaults(base, { sessions: list, projectHosting: settings.hosting?.tipo,
+      model: rememberedModel(usuario.login, agent, proveedores.find(x => x.id === agent)?.modelos || []) }), rama: psf.branch, automatic: true, psf };
+    if (active && sesion && sesion.carpeta === p.folder && sesion.hosting) s.hosting = sesion.hosting;
+    if (!s.hosting) s.hosting = (active && repo?.tipo) || 'local';
+    const l = S.guarda(usuario.login, s);
+    if (active) setSesiones(l);
+    setPsfStarts(q => [...q, s]);
+  };
+  const startPsfRef = useRef(startPsfSession);
+  startPsfRef.current = startPsfSession;
+  const resuelve = useCallback((p: PeticionResolver) => { if (proyecto) startPsfRef.current(proyecto.id, p); }, [proyecto]);
+
+  // Automatic resolution (project «Issues» settings): every 5 minutes, while pgocode is open, the projects with it
+  // turned on are checked for new GitHub issues; the oldest new one starts its automatic session, one working
+  // session per project at a time (psf.ts: issuesToResolve, canStartAutomatic).
+  useEffect(() => {
+    if (!usuario) return;
+    let stopped = false;
+    const tick = async () => {
+      const projects = await get<Proyecto[]>('/api/proyectos').catch(() => [] as Proyecto[]);
+      for (const p of projects) {
+        const cfg = leeAjustes(usuario.login, p.id).issues;
+        const folder = p.carpetas[0];
+        if (stopped || !cfg?.autoResolve || !folder) continue;
+        const sessions = S.lista(usuario.login, p.id);
+        if (!canStartAutomatic(sessions)) continue;
+        const st = await get<{ issues: WatchedIssue[] }>(`/api/github?proyecto=${p.id}&carpeta=${encodeURIComponent(folder)}`).catch(() => null);
+        const next = st && issuesToResolve(st.issues, sessions, cfg.autoResolveSince || Date.now())[0];
+        if (next && !stopped) startPsfRef.current(p.id, { number: next.numero, title: next.titulo, url: next.url, folder }, true);
+      }
+    };
+    const first = setTimeout(tick, 30_000);
+    const every = setInterval(tick, 5 * 60_000);
+    return () => { stopped = true; clearTimeout(first); clearInterval(every); };
+  }, [usuario?.login]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const borraSesion = useCallback((s: S.Sesion) => {
     if (!usuario) return;
@@ -352,15 +407,15 @@ export default function App() {
     <div className="aplicacion">
     <Barra usuario={usuario} alSalir={salir} versionImputacion={versionImputacion}
       sesion={sesion ? { id: sesion.id, proyecto: sesion.proyecto, nombreProyecto: proyecto?.nombre, tareaId: sesion.tareaId, tarea: sesion.tarea } : undefined} />
-    <div className={'arnes' + (panel ? '' : ' sin-panel')}
-      style={panel && anchoPanel ? { gridTemplateColumns: `auto minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
-      <ErrorBoundary area="la lista de proyectos"><Proyectos usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
+    <div className={'arnes' + (panel ? '' : ' sin-panel') + (projectsHidden ? ' sin-proyectos' : '')}
+      style={panel && anchoPanel ? { gridTemplateColumns: `${projectsHidden ? '' : 'auto '}minmax(360px, 1fr) ${anchoPanel}px` } : undefined}>
+      {!projectsHidden && <ErrorBoundary area="la lista de proyectos"><Proyectos width={projectsWidth} onResize={resizeProjects} onHide={toggleProjects} usuario={usuario} actual={proyecto} inicial={proyectoGuardado(usuario.login)} alElegir={elige}
         repo={repo} proveedores={proveedores} sesiones={sesiones} sesion={sesion}
         alAjustes={(p, a) => { if (p.id === proyecto?.id) setAjustes(a); }}
         alElegirSesion={eligeSesionDe} alNuevaSesion={nuevaEn} alCambiarSesion={cambiaSesion} alBorrarSesion={borraSesion}
         onDuplicateSession={duplicateSession}
-        alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} /></ErrorBoundary>
-      <ErrorBoundary area="el chat" resetKey={sesionDelProyecto?.id}><Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
+        alAjustesSesion={s => setDialogo({ sesion: s, nueva: false })} /></ErrorBoundary>}
+      <ErrorBoundary area="el chat" resetKey={sesionDelProyecto?.id}><Chat versionProcesos={versionProcesos} alAbrirWeb={abreWeb} directorio={ajustes.directorio} seleccionSkills={ajustes.skills} hosting={ajustes.hosting?.tipo} detalle={ajustes.detalle} envioPendiente={envioPendiente} alEnviado={() => setEnvioPendiente(null)} onShowProjects={projectsHidden ? toggleProjects : undefined} psfStarts={psfStarts} onPsfStarted={ids => setPsfStarts(q => q.filter(x => !ids.includes(x.id)))} projectSettings={id => (usuario ? leeAjustes(usuario.login, id) : AJUSTES_DEFECTO)} proyecto={proyecto} sesion={sesionDelProyecto} repo={repo} proveedores={proveedores} panelAbierto={panel} alPanel={() => setPanel(p => !p)}
         alCambiarSesion={cambiaSesion} alNuevaSesion={rama => nuevaSesion(rama)} alAjustes={() => sesion && setDialogo({ sesion, nueva: false })} /></ErrorBoundary>
       {panel && <ErrorBoundary area="el panel" resetKey={sesionDelProyecto?.id}><Artefactos proyecto={proyecto} carpeta={sesion?.carpeta || proyecto?.carpetas[0] || ''} rama={sesion?.rama || ''} agente={sesion?.agente} sesiones={sesiones} sesion={sesionDelProyecto} directorio={ajustes.directorio} alAncho={cambiaAncho}
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} /></ErrorBoundary>}
