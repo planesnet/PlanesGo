@@ -15,6 +15,7 @@ import Barra from './componentes/Barra';
 import DialogoSesion, { type SessionSection } from './componentes/DialogoSesion';
 import { OPEN_PROGRAM_SETTINGS } from './componentes/ProgramSettings';
 import { askConfirm, Dialogs, showMessage } from './componentes/Modal';
+import { AnyDeskUnassigned } from './componentes/AnyDesk';
 import type { PeticionResolver } from './componentes/Flujo';
 import { canStartAutomatic, issuesToResolve, newPsfState, PSF_CHECK, SHOW_EVIDENCE, type WatchedIssue } from './psf';
 
@@ -447,6 +448,7 @@ export default function App() {
         pedidoWeb={pedidoWeb} versionProcesos={versionProcesos} alAbrir={abreWeb} alResolver={resuelve} /></ErrorBoundary>}
     {dialogo && <ErrorBoundary area="la ventana de la sesión"><DialogoSesion key={dialogo.sesion.id} sesion={dialogo.sesion} nueva={dialogo.nueva} login={usuario.login} inicial={dialogo.seccion}
       proveedores={proveedores} alCerrar={() => setDialogo(null)} alGuardar={guardaDialogo} /></ErrorBoundary>}
+    <AnyDeskUnassigned login={usuario.login} />
     <Dialogs />
     </div>
     </div>

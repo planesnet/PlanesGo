@@ -246,6 +246,7 @@ app.on('web-contents-created', (_, wc) => {
   }
 });
 
+ipcMain.handle('escritorio-remoto', () => { ventanaRdp(); });
 ipcMain.handle('abrir-fuera', (_, url) => { if (esWeb(url)) return shell.openExternal(url); throw new Error('solo http o https'); });
 // Diálogo de carpetas del sistema (carpeta de una sesión, directorio principal de un proyecto).
 ipcMain.handle('elegir-carpeta', async (e, inicial) => {

@@ -1,0 +1,27 @@
+ * * * * * * * * * * * * * * * * * *
+   info 2026-10-23 13:19:54.660      front   ctrl 4100 4198                     unix_app.frontend - Frontend startup.
+   info 2026-10-23 13:19:54.660      front   ctrl 4100 4198                     unix_app.frontend - Logging the frontend in.
+  error 2026-10-23 13:19:54.661      front   ctrl 4100 4198              base.signal.global.event - Cannot set the subsignal count to a smaller or equal value.
+warning 2026-10-23 13:19:54.679      front   ctrl 4100 4198                                   sif - Dropping out of date license response.
+   info 2026-10-23 13:19:54.950      front filetransfer 4100 4911                       base.task_queue - Waiting for commands.
+   info 2026-10-23 13:20:15.521      front   main 4100 4100                     unix_app.frontend - Sending a connection request for address 111222333.
+   info 2026-10-23 13:20:15.683      front   main 4100 4100                     unix_app.frontend - New Session
+   info 2026-10-23 13:20:15.683      front   ctrl 4100 4198                  app.frontend_session - Requesting session.
+   info 2026-10-23 13:20:16.873      front   wrk1 4100 4200                  app.frontend_session - Received wait for accept request.
+   info 2026-10-23 13:20:16.875      front   wrk0 4100 4199                  app.frontend_session - Remote OS: Windows
+   info 2026-10-23 13:20:20.612      front   ctrl 4100 4198                  app.frontend_session - Starting connect session.
+   info 2026-10-23 13:20:20.655      front   ctrl 4100 4198                  app.frontend_session - Enabling screen capturing.
+   info 2026-10-23 13:20:20.655      front   ctrl 4100 4198                  app.frontend_session - Session started.
+   info 2026-10-23 13:20:29.776      front   wrk1 4100 4200                  app.frontend_session - The socket was closed remotely.
+   info 2026-10-23 13:20:29.776      front   ctrl 4100 4198                  app.frontend_session - Stopping session.
+   info 2026-10-23 13:20:29.817      front   ctrl 4100 4198                  app.frontend_session - Session stopped.
+   info 2026-10-23 13:20:32.851      front   main 4100 4100                  app.frontend_session - The user has requested a connection quit.
+   info 2026-10-23 13:20:32.894      front   ctrl 4100 4198                     unix_app.frontend - Close Session
+   info 2026-10-23 13:20:36.730      front   main 4100 4100                     unix_app.frontend - Sending a connection request for address 111222333/dominio/usuario.
+   info 2026-10-23 13:20:36.877      front   ctrl 4100 4198                  app.frontend_session - Requesting session.
+   info 2026-10-23 13:20:39.866      front   ctrl 4100 4198                  app.frontend_session - Session started.
+   info 2026-10-23 17:48:00.782      front   main 4100 4100                  app.frontend_session - The user has requested a connection quit.
+   info 2026-10-23 17:48:00.863      front   ctrl 4100 4198                  app.frontend_session - Session stopped.
+   info 2026-10-23 17:48:02.628      front   ctrl 4100 4198                     unix_app.frontend - Close Session
+   info 2026-10-23 17:48:02.628      front   ctrl 4100 4198                     unix_app.frontend - Frontend shutdown.
+   info 2026-10-23 17:48:02.699      front   main 4100 4100                                  main - Exiting normally.

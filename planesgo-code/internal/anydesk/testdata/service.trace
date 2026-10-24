@@ -1,0 +1,6 @@
+   info 2026-09-21 09:50:02.498    service   main   3416   3416   77                      app.service - Received outgoing connection request for address 111222333 (direct).
+   info 2026-09-21 09:50:09.582    service   main   3416   3416   77                      app.session - 5: Entering processing loop.
+   info 2026-09-21 09:59:45.886    service   main   3416   3416   91                anynet.any_socket - Accepting from 444555666.
+   info 2026-09-21 09:59:48.551    service   main   3416   3416   90                      app.session - 5: Entering processing loop.
+   info 2026-09-21 10:11:38.642    service   main   3416   3416   90                      app.session - Session closed by remote side: desk_rt_ipc_error.
+   info 2026-09-21 10:11:38.642    service   main   3416   3416   90                      app.session - 5: Processing done.
