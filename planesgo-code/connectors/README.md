@@ -65,6 +65,23 @@ La ventana de Windows es la nativa de FreeRDP (SDL3), con solo seguridad moderna
 certificado aceptado la primera vez y aviso si cambia, y gráficos H.264 4:4:4. Mientras haya un escritorio abierto,
 pgocode no se actualiza. Las conexiones (sin contraseña) se guardan en el navegador de la app.
 
+### AnyDesk (misma ventana, pestaña «AnyDesk»)
+
+Sin la API REST de AnyDesk. La ventana pide el **proyecto** (obligatorio) y el **ID de AnyDesk** (cifras o un alias
+`equipo@ad`, validado en la web y en el backend) y abre el cliente instalado (`anydesk <ID>`, sin shell y sin nada de
+pgocode en su entorno); AnyDesk pide la contraseña él mismo. Código: `internal/anydesk` (lector de sus registros),
+`internal/servidor/anydesk.go` (lanza, sigue los registros e imputa) y `web/src/componentes/AnyDesk.tsx`.
+
+El inicio y el fin de cada sesión salen de los registros de AnyDesk, seguidos como `tail -F` (también cuando AnyDesk
+los recorta): en Linux `~/.anydesk/anydesk.trace` (y `/var/log/anydesk.trace` si se puede leer); en Windows
+`%AppData%\AnyDesk\ad.trace` y `%ProgramData%\AnyDesk\ad_svc.trace`. Salientes: `app.frontend_session - Session
+started.` / `Session stopped.` tras `Sending a connection request for address <ID>.`; entrantes: `app.backend_session
+- Incoming session request: <nombre> (<ID>)`, `Session started (ok).` / `Session stopped.`. Se imputa como RDP
+(sesión `anydesk-<id>`, cada 20 s con uso del teclado o el ratón; al acabar, se cierra). El proyecto de cada sesión:
+el de la conexión abierta desde pgocode, el último de ese equipo o, en las entrantes, el que se haya elegido para
+todas; si no hay, no se imputa y pgocode lo pide en un diálogo (en esta ventana y en la principal). Ajustes en
+`anydesk.json` de la carpeta de datos (sin secretos).
+
 ## Escritorio remoto para el agente: `rdp/rdp.py`
 
 ```sh

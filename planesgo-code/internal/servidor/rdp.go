@@ -11,9 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,12 +24,6 @@ import (
 // Remote desktop (pgocode --rdp): the native FreeRDP window (SDL3) on a connection of a project, opened from the
 // interface with the user's pgocode session. The time goes to the project with the imputation service, like the
 // rest of pgocode: activity while the session is connected and the keyboard or mouse are in use.
-
-const (
-	rdpBeat      = 20 * time.Second // activity reported to the imputation service
-	rdpFirstBeat = 10 * time.Second // connected this long before counting (a failed login logs nothing)
-	rdpIdleLimit = 10 * time.Minute // without keyboard or mouse: no more time
-)
 
 // rdpConn: an open remote desktop.
 type rdpConn struct {
@@ -184,22 +176,6 @@ func rdpExplain(log string, code int) string {
 	return fmt.Sprintf("La conexión terminó con un error (código %d).\n%s", code, strings.Join(lines, "\n"))
 }
 
-var idleRe = regexp.MustCompile(`(\d+)`)
-
-// rdpIdle: time without keyboard or mouse on this desktop (GNOME); ok false if unknown.
-func rdpIdle() (time.Duration, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "gdbus", "call", "--session", "--dest", "org.gnome.Mutter.IdleMonitor",
-		"--object-path", "/org/gnome/Mutter/IdleMonitor/Core", "--method", "org.gnome.Mutter.IdleMonitor.GetIdletime").Output()
-	m := idleRe.FindSubmatch(out)
-	if err != nil || m == nil {
-		return 0, false
-	}
-	ms, _ := strconv.ParseInt(string(m[1]), 10, 64)
-	return time.Duration(ms) * time.Millisecond, true
-}
-
 // rdpState: GET /api/rdp. Whether the client is installed and the open remote desktops.
 func (s *Servidor) rdpState(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	bin := rdpClient()
@@ -337,7 +313,7 @@ func (s *Servidor) rdpTitle(c *rdpConn, work imputacion.Trabajo) string {
 // rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use, and
 // shows the logged time in the window title.
 func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
-	t := time.NewTicker(rdpBeat)
+	t := time.NewTicker(remoteBeat)
 	defer t.Stop()
 	fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	for {
@@ -346,7 +322,7 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 			return
 		case <-t.C:
 		}
-		if time.Since(c.Started) < rdpFirstBeat {
+		if time.Since(c.Started) < remoteFirstBeat {
 			continue
 		}
 		s.escritorios.mu.Lock()
@@ -354,11 +330,8 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 			c.State = "conectado"
 		}
 		s.escritorios.mu.Unlock()
-		if idle, known := rdpIdle(); known && idle >= rdpIdleLimit {
-			continue // nobody at the keyboard: no time (the service closes the period after a while)
-		}
-		if s.Imputacion != nil {
-			s.Imputacion.Actividad(work)
+		if !s.remoteActivity(work, keyboardInUse()) {
+			continue
 		}
 		fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	}

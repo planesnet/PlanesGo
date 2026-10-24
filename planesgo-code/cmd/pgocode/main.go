@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/anydesk"
 	"planesgo-code/internal/bugreport"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
@@ -417,6 +418,9 @@ func main() {
 	}
 	s.Actualizador = act
 	s.DirRamas = filepath.Join(datos, "ramas")
+	// AnyDesk: its sessions (outgoing and incoming) are followed in its traces and their time is logged.
+	s.AnyDeskFile = filepath.Join(datos, "anydesk.json")
+	go s.WatchAnyDesk(ctx, anydesk.TraceFiles())
 	// Registro de las copias de trabajo que crea pgocode; al arrancar, git olvida las que se borraron a mano.
 	s.RegistroCopias = &repo.Registro{Fichero: filepath.Join(datos, "copias-trabajo.json")}
 	go s.PodaCopias(context.Background())

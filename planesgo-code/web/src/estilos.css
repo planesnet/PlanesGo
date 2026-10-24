@@ -69,6 +69,14 @@ textarea { resize: none; }
 .rdp-etiqueta { font-size: 12px; color: var(--suave); }
 .rdp-elegido { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 10px; border: 1px solid var(--linea); border-radius: 6px; background: var(--panel); text-align: left !important; }
 .rdp-elegido b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdp-formulario { display: grid; gap: 14px; }
+.rdp-tipo { margin: 0 auto; }
+.rdp-nota { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; color: var(--suave); }
+.rdp-nota b { font-weight: 600; color: var(--texto); }
+/* AnyDesk: el proyecto de una sesión que no lo tiene (entrante o abierta desde AnyDesk) */
+.modal.anydesk-asignar { width: min(460px, 100%); }
+.anydesk-asignar-cuerpo { display: grid; gap: 10px; }
+.anydesk-asignar-cuerpo p { margin: 0; }
 .busca-proyecto { border: 1px solid var(--linea); border-radius: 6px; padding: 6px 0 4px; background: var(--panel); }
 .busca-proyecto .busca { padding: 0 6px 4px; }
 .busca-proyecto .busca input { padding: 6px 8px; background: var(--superficie); }
