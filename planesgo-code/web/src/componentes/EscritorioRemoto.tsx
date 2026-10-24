@@ -100,7 +100,7 @@ function Formulario({ usuario }: { usuario: Usuario }) {
           <input autoComplete="off" value={c.usuario} onChange={e => setC(x => ({ ...x, usuario: e.target.value }))} placeholder="DOMINIO\usuario o usuario" required />
         </label>
         <label>Contraseña
-          <CampoClave value={contrasena} onChange={setContrasena} autoComplete="off" />
+          <CampoClave value={contrasena} onChange={setContrasena} autoComplete="new-password" />
         </label>
         <button className="primario" disabled={enviando || !c.proyecto}>{enviando ? 'Conectando…' : 'Conectar'}</button>
       </form>
