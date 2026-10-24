@@ -103,7 +103,7 @@ function Formulario({ usuario }: { usuario: Usuario }) {
           <input autoComplete="off" value={c.usuario} onChange={e => cambia({ usuario: e.target.value })} placeholder="DOMINIO\usuario o usuario" required />
         </label>
         <label>Contraseña de Windows
-          <input type="password" autoComplete="off" value={contrasena} onChange={e => setContrasena(e.target.value)} required />
+          <input type="password" autoComplete="new-password" value={contrasena} onChange={e => setContrasena(e.target.value)} required />
         </label>
         <fieldset className="rdp-opciones">
           {OPCIONES.map(([k, texto]) => (
@@ -120,7 +120,7 @@ function Formulario({ usuario }: { usuario: Usuario }) {
                 <span className={`rdp-estado ${a.estado}`} aria-hidden="true" />
                 <span><b>{a.nombre}</b> <span className="suave">{a.usuario}@{a.equipo} · {nombreProyecto(a.proyecto)}</span>
                   {a.error && <span className="error"> · {a.error}</span>}</span>
-                {a.estado !== 'terminado' && <button type="button" onClick={() => post('/api/rdp/desconectar', { id: a.id }).catch(() => {})}>Desconectar</button>}
+                {a.estado !== 'terminado' && <button type="button" className="boton-secundario peligro" onClick={() => post('/api/rdp/desconectar', { id: a.id }).catch(() => {})}>Desconectar</button>}
               </li>
             ))}
           </ul>

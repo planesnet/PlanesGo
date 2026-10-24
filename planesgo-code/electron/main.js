@@ -37,7 +37,10 @@ const TOKEN_ESCRITORIO = crypto.randomBytes(32).toString('hex');
 // Una sola instancia: «pgocode» o «pgocode --rdp» con la app ya abierta se lo pasan a la que está en marcha, que abre
 // su ventana (el escritorio remoto, con la misma sesión, o la principal). El backend y la sesión son los mismos.
 const quiereRdp = argv => argv.includes('--rdp');
-if (!app.requestSingleInstanceLock()) app.quit();
+// app.exit, not app.quit: quit waits for «ready», and by then the startup below would already be under way (a second
+// backend on the same port and its «ya está abierto» error box).
+const unica = app.requestSingleInstanceLock();
+if (!unica) app.exit(0);
 let principal = null;
 let rdp = null;
 
@@ -256,6 +259,7 @@ ipcMain.handle('elegir-carpeta', async (e, inicial) => {
 });
 
 app.whenReady().then(async () => {
+  if (!unica) return; // the running instance does it (second-instance)
   endurece(session.defaultSession);
   try {
     await arrancaBackend();
