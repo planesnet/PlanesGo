@@ -250,6 +250,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/psf/fetch", s.conSesion(s.psfFetch))
 	mux.HandleFunc("POST /api/psf/document", s.conSesion(s.psfDocument))
 	mux.HandleFunc("POST /api/psf/discard", s.conSesion(s.psfDiscard))
+	mux.HandleFunc("POST /api/psf/skill", s.conSesion(s.psfSkill))
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
 	mux.HandleFunc("POST "+pairPath, s.clientsPair)

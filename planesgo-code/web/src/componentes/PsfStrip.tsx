@@ -89,6 +89,8 @@ export default function PsfStrip({ state: st, busy, now, cost, onStop, onResume,
             <details key={r.role}>
               <summary>Reviewer-{r.name}: {reviews[r.role]!.verdict}</summary>
               <pre>{reviews[r.role]!.findings || '—'}</pre>
+              {reviews[r.role]!.improvements && <><p className="suave pequeno">Mejoras (no bloquean)</p><pre>{reviews[r.role]!.improvements}</pre></>}
+              {reviews[r.role]!.decisions && <><p className="suave pequeno">Decisiones para ti</p><pre>{reviews[r.role]!.decisions}</pre></>}
             </details>
           ))}
         </div>

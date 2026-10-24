@@ -10,6 +10,7 @@ import (
 	"planesgo-code/internal/github"
 	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
+	"planesgo-code/internal/sysskills"
 )
 
 // Automatic Planes Software Factory (PSF 1.0) session for a GitHub issue. The UI drives the phases, agents and
@@ -33,6 +34,8 @@ type psfRequest struct {
 	Step      string `json:"step"` // who made the change being synced (Builder, Supervisor): for its evidence
 	// Program: the project command whose screen is the evidence of the change (e.g. «go run ./cmd/tetris -auto»).
 	Program string `json:"program"`
+	// Skill: the system skill an agent of the session needs (/api/psf/skill).
+	Skill string `json:"skill"`
 }
 
 // psfFail answers an error and logs it with the step where it happened.
@@ -342,4 +345,24 @@ func truncate(t string, n int) string {
 		return t
 	}
 	return strings.ToValidUTF8(t[:n], "") + "\n\n… (recortado)"
+}
+
+// POST /api/psf/skill {…, skill}: a system skill (internal/sysskills) for an agent of the session: it is left in the
+// issue's worktree (out of git) so that the agent reads the chapters it needs, and comes back with their paths.
+func (s *Servidor) psfSkill(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	p, _, ok := s.psfRead(w, r, ses)
+	if !ok {
+		return
+	}
+	dir, ok := s.psfFolder(w, r, p)
+	if !ok {
+		return
+	}
+	sk, err := sysskills.Install(p.Skill, dir)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	excluyeDeGit(dir)
+	jsonOK(w, sk)
 }

@@ -12,7 +12,9 @@ export type SupervisorTask = 'conflict' | 'checks' | 'convergence';
 export type ReviewerRole = 'correctness' | 'security' | 'testing' | 'architecture';
 export type Verdict = 'APROBADO' | 'RECHAZADO';
 
-export interface Review { verdict?: Verdict; findings?: string; running?: boolean; action?: string; cost?: number }
+// Review: one reviewer's answer. findings: what blocks (to fix); improvements: what does not block; decisions: what is
+// for the person (scope, design).
+export interface Review { verdict?: Verdict; findings?: string; improvements?: string; decisions?: string; running?: boolean; action?: string; cost?: number }
 
 export interface PsfState {
   issue: number;
@@ -146,73 +148,133 @@ export function issueText(i: IssueDetail): string {
   return `Issue #${i.number}: ${i.title}${i.labels.length ? `\nEtiquetas: ${i.labels.join(', ')}` : ''}\n${i.url}\n\n${cut(i.body.trim() || '(sin descripción)', 12_000)}${cut(c, 8000)}`;
 }
 
+// ---- What each agent is told ----
+// The know-how of each role (how to write a spec, the Builder's rules, the reviewers' criteria) lives in pgocode's
+// system skills (internal/sysskills: SKILL.md and chapters, read only, apart from any user or project skill). The
+// server leaves the skill in the agent's folder and the prompt carries its essentials and the index of its chapters;
+// the agent reads only the chapters its task needs. What is left here is the protocol: what the agent works on, what
+// it may not touch and the format of its answer, which pgocode reads.
+
+// SystemSkill: a system skill as the server gives it (POST /api/psf/skill), installed in the agent's folder.
+export interface SystemSkill { name: string; description: string; body: string; chapters: { name: string; description: string; path: string }[] }
+
+// ROLE_SKILL: the system skill of each role.
+export const ROLE_SKILL = {
+  spec: 'psf-spec-writer', builder: 'psf-builder', supervisor: 'psf-supervisor',
+  correctness: 'psf-revisor-correccion', security: 'psf-revisor-seguridad', testing: 'psf-revisor-tests', architecture: 'psf-revisor-arquitectura',
+} as const;
+
+// skillBlock: the skill for the prompt: its essentials and, if it has chapters, where they are and when to read each.
+export function skillBlock(sk: SystemSkill): string {
+  const chapters = sk.chapters.length
+    ? `\n\nCapítulos de esta skill (léelos con tu herramienta de lectura de ficheros, solo los que toquen a tu tarea; la línea dice cuándo):\n` +
+      sk.chapters.map(c => `- ${c.path} — ${c.description}`).join('\n')
+    : '';
+  return `${sk.body.trim()}${chapters}`;
+}
+
 export const AMBIGUITY_MARK = 'BLOQUEADA POR AMBIGÜEDAD';
 
-// Spec Writer (phase 2): read-only; the answer is the spec (saved as a pgocode plan).
 // guidanceBlock: the person's instructions, first in priority.
 const guidanceBlock = (g?: string) => (g?.trim() ? `\n\nIndicaciones de la persona (tienen prioridad sobre todo lo demás):\n${g.trim()}` : '');
 
-export function specPrompt(i: IssueDetail, specPath: string, guidance?: string): string {
-  return `[PSF · Spec Writer] Eres el arquitecto de especificaciones técnicas de Planes Software Factory. Analiza el repositorio ` +
-    `(estructura, módulos, patrones, configuración, modelos de datos y tests) sin modificar ningún fichero ni ejecutar nada que ` +
-    `cambie el sistema (para leer, usa tus herramientas de lectura de ficheros y de búsqueda; si ejecutas órdenes, que sean solo ` +
-    `de lectura, como ls o grep). La fuente de verdad es el propio repositorio: no inventes convenciones y reutiliza lo que ya existe.\n\n` +
-    `Responde únicamente con la especificación en Markdown (se guardará en ${specPath}), con un título «#» y estas secciones:\n` +
-    `1. Objetivo y alcance (y lo que queda fuera)\n2. Contexto extraído del repositorio (patrones y helpers que se reutilizan)\n` +
-    `3. Archivos afectados (rutas exactas, a crear o modificar)\n4. Casos borde\n5. Plan de pruebas (TDD, con el framework que ya usa el repositorio)\n` +
-    `6. Checklist de criterios de aceptación (verificables uno a uno)\n\n` +
-    `Si la issue es contradictoria o le falta información vital que no se puede deducir del código, responde solo con una ` +
-    `línea «${AMBIGUITY_MARK}» seguida de las preguntas concretas.${guidanceBlock(guidance)}\n\n${issueText(i)}`;
+// Spec Writer (phase 2): read-only; the answer is the spec (saved as a pgocode plan).
+export function specPrompt(i: IssueDetail, specPath: string, skill: SystemSkill, guidance?: string): string {
+  return `[PSF · Spec Writer] Escribe la especificación técnica de esta issue. Analiza el repositorio sin modificar ningún ` +
+    `fichero ni ejecutar nada que cambie el sistema (para leer, usa tus herramientas de lectura de ficheros y de búsqueda; si ` +
+    `ejecutas órdenes, que sean solo de lectura, como ls o grep).\n\n${skillBlock(skill)}\n\n` +
+    `Responde únicamente con la especificación en Markdown (se guardará en ${specPath}). Si la issue es contradictoria o le ` +
+    `falta información vital que no se puede deducir del código, responde solo con una línea «${AMBIGUITY_MARK}» seguida de ` +
+    `las preguntas concretas.${guidanceBlock(guidance)}\n\n${issueText(i)}`;
 }
 
 export const isAmbiguous = (spec: string) => spec.trim().toUpperCase().startsWith(AMBIGUITY_MARK);
 
-// Builder (phase 3): TDD with the approved spec; in later rounds, the findings to fix.
-export function builderPrompt(i: Pick<IssueDetail, 'number' | 'title'>, spec: string, iteration: number, findings = '', guidance?: string): string {
-  const reglas = `Reglas: el código tiene que ser indistinguible del resto del repositorio (estilo, nombres, errores, arquitectura). ` +
-    `Ciclo TDD: primero los tests de la especificación (que fallen por la razón esperada), luego la implementación mínima y el refactor. ` +
-    `Ejecuta el linter, el chequeo de tipos y la suite de tests del repositorio: no termines con nada en rojo. Si el cambio altera ` +
-    `el comportamiento público o la configuración, actualiza la documentación del repositorio. No toques ${PSF_CONFIG.specsPath} ` +
-    `y no hagas push: pgocode commitea lo pendiente y lo sube al PR al acabar el turno. Termina con un resumen breve de lo hecho y del resultado de las pruebas.`;
+// Builder (phase 3): TDD with the approved spec; in later rounds, the findings to fix (the skill and the spec are
+// already in its conversation: they are not sent again).
+export function builderPrompt(i: Pick<IssueDetail, 'number' | 'title'>, spec: string, iteration: number, skill: SystemSkill | null, findings = '', guidance?: string): string {
+  const protocol = `No toques ${PSF_CONFIG.specsPath} ni ${SKILLS_DIR} y no hagas push: pgocode commitea lo pendiente y lo sube al PR al acabar el turno.`;
   if (iteration <= 1) {
-    return `[PSF · Builder] Implementa la issue #${i.number} «${i.title}» según esta especificación, aprobada por una persona.${guidanceBlock(guidance)}\n\n${reglas}\n\n` +
-      `Especificación aprobada:\n\n${spec.trim()}`;
+    return `[PSF · Builder] Implementa la issue #${i.number} «${i.title}» según esta especificación, aprobada por una persona.${guidanceBlock(guidance)}\n\n` +
+      `${skill ? skillBlock(skill) + '\n\n' : ''}${protocol}\n\nEspecificación aprobada:\n\n${spec.trim()}`;
   }
   const what = findings.trim()
     ? `El comité de revisión ha rechazado el cambio de la issue #${i.number}. Corrige exactamente estos hallazgos sin salirte de la especificación (ya la tienes de la vuelta anterior):\n\n${findings.trim()}`
     : `Vuelve sobre el cambio de la issue #${i.number} sin salirte de la especificación (ya la tienes de la vuelta anterior).`;
-  return `[PSF · Builder · iteración ${iteration}] ${what}${guidanceBlock(guidance)}\n\n${reglas}`;
+  return `[PSF · Builder · iteración ${iteration}] ${what}${guidanceBlock(guidance)}\n\n${protocol}`;
 }
 
-const MISSION: Record<ReviewerRole, string> = {
-  correctness: 'Correctitud y especificación. Audita que la diff cumpla el 100% de la especificación aprobada. Rechaza si hay requisitos omitidos o a medias (TODO), bugs lógicos, condiciones de carrera o casos borde de la spec sin manejar.',
-  security: 'Seguridad y permisos. Rechaza si hay inyecciones (SQL, XSS, órdenes), entradas sin validar, secretos o tokens en el código, datos sensibles en logs, escalada de privilegios o se rompe la autenticación/autorización existente.',
-  testing: 'Calidad de tests. Rechaza si los tests solo prueban mocks y no el comportamiento real, faltan tests de los caminos nuevos o de error, o se han borrado o desactivado (skip) tests existentes.',
-  architecture: 'Arquitectura y coherencia. Rechaza si duplica funciones o componentes que ya existen en el repositorio, hay sobreingeniería no pedida, se rompe la estructura o los patrones del repositorio o se añaden dependencias sin justificar.',
-};
+// SKILLS_DIR: where the server leaves the system skills in the agent's folder (internal/sysskills.Dir).
+export const SKILLS_DIR = '.pgocode/skills-sistema/';
+
+// projectCriteria: where a repository keeps what its reviewers have to know on top of the system skills (its threat
+// model, its own rules). They are the project's documents, not skills.
+export const PSF_CRITERIA = '.psf/criterios/';
 
 // Reviewer (phase 4): isolated and read-only; gets the issue, the spec and the diff, and answers with a verdict.
-export function reviewerPrompt(role: ReviewerRole, i: Pick<IssueDetail, 'number' | 'title'>, spec: string, diff: string, base: string, branch: string): string {
+// Only real, likely problems block (severity alta or media, confidence 8 or more); the rest are improvements that do
+// not cost a round, and what is a decision for the person (scope, design) is said apart.
+export function reviewerPrompt(role: ReviewerRole, i: Pick<IssueDetail, 'number' | 'title'>, skill: SystemSkill, spec: string, diff: string, base: string, branch: string): string {
   const name = REVIEWERS.find(r => r.role === role)!.name;
   return `[PSF · Reviewer-${name}] Eres uno de los 4 revisores independientes de Planes Software Factory. Revisa en solo lectura ` +
     `(no modifiques nada) el cambio de la issue #${i.number} «${i.title}»: la diff ${base}...${branch} de abajo frente a la ` +
-    `especificación aprobada. Puedes leer el repositorio completo para comprobar el contexto.\n\nTu misión: ${MISSION[role]}\n\n` +
+    `especificación aprobada. Puedes leer el repositorio completo para comprobar el contexto.\n\nTus criterios:\n\n${skillBlock(skill)}\n\n` +
+    `Antes de revisar, lee los criterios propios del proyecto si los hay (${PSF_CRITERIA}, y CLAUDE.md o AGENTS.md en la raíz y en ` +
+    `las carpetas de los ficheros cambiados): mandan sobre los generales.\n\n` +
     `No ejecutes tests, compilaciones ni git: el Builder ya los ha pasado en verde y la diff la tienes abajo; para el ` +
-    `contexto, lee los ficheros que necesites. Rechaza solo por problemas reales de tu misión, no por gustos. ` +
-    `Responde exactamente con este formato:\n` +
-    `VEREDICTO: APROBADO o VEREDICTO: RECHAZADO\nHALLAZGOS:\n- fichero:línea — problema y cómo corregirlo (o «ninguno»)\n\n` +
+    `contexto, lee los ficheros que necesites. Comprueba cada hallazgo leyendo el código antes de darlo, y puntúa: gravedad ` +
+    `(alta: explotable o rompe algo de verdad; media: necesita condiciones concretas pero el efecto es serio; baja: el resto) y ` +
+    `confianza de 1 a 10 en que es un problema real. RECHAZA solo si hay algún hallazgo de tu misión de gravedad alta o media con ` +
+    `confianza 8 o más; lo demás no bloquea: ponlo en MEJORAS. Lo que no es un fallo sino una decisión de alcance o de diseño ` +
+    `para la persona va en DECISIONES. No rechaces por gustos. Responde exactamente con este formato:\n` +
+    `VEREDICTO: APROBADO o VEREDICTO: RECHAZADO\nHALLAZGOS:\n- [alta|media] (confianza N) fichero:línea — problema, cómo se produce y cómo corregirlo (o «ninguno»)\n` +
+    `MEJORAS:\n- fichero:línea — mejora que no bloquea (o «ninguna»)\nDECISIONES:\n- decisión para la persona (o «ninguna»)\n\n` +
     `Especificación aprobada:\n\n${spec.trim()}\n\nDiff:\n\n\`\`\`diff\n${diff.trim() || '(vacía)'}\n\`\`\``;
 }
 
+// section: the lines of a reviewer's answer under one heading (until the next one), without «ninguno/ninguna».
+function section(text: string, name: string): string[] {
+  const m = new RegExp(`^\\W*${name}\\W*:?[ \\t]*$`, 'im').exec(text) || new RegExp(`${name}\\s*:`, 'i').exec(text);
+  if (!m) return [];
+  const rest = text.slice(m.index + m[0].length);
+  const next = /^\W*(?:VEREDICTO|HALLAZGOS|MEJORAS|DECISIONES)\b/im.exec(rest);
+  return (next ? rest.slice(0, next.index) : rest).split('\n').map(l => l.trimEnd())
+    .filter(l => l.trim() && !/^[-*\s]*(ningun[oa]s?|none)\.?$/i.test(l.trim()));
+}
+
+// rating: the severity and confidence of a finding («- [alta] (confianza 9) …»); null if it has none.
+export function rating(line: string): { severity: 'alta' | 'media' | 'baja'; confidence: number } | null {
+  const s = /\[?\b(alta|media|baja)\b\]?/i.exec(line), c = /confianza\D{0,3}(\d{1,2})/i.exec(line);
+  if (!s || !c) return null;
+  return { severity: s[1].toLowerCase() as 'alta' | 'media' | 'baja', confidence: Number(c[1]) };
+}
+
+// blocks: a rated finding that stops the change (severity alta or media, confidence 8 or more).
+const blocks = (r: NonNullable<ReturnType<typeof rating>>) => r.severity !== 'baja' && r.confidence >= 8;
+
 // parseVerdict: a reviewer's verdict. For safety, anything without a clear «VEREDICTO: APROBADO» (or with any
-// RECHAZADO) counts as a rejection.
-export function parseVerdict(text: string): { verdict: Verdict; findings: string } {
+// RECHAZADO) counts as a rejection. When the findings are rated, the rule decides, not the word: a rejection whose
+// findings are all low or uncertain is an approval (they go to the improvements), and an approval with a finding
+// that blocks is a rejection.
+export function parseVerdict(text: string): { verdict: Verdict; findings: string; improvements: string; decisions: string } {
   const re = /VEREDICTO\s*:?\s*[*_`[\s]*(APROBADO|RECHAZADO)\b(?!\s*\|)/gi;
   const all = [...text.matchAll(re)].map(m => m[1].toUpperCase());
+  if (!all.length) return { verdict: 'RECHAZADO', findings: 'El revisor no ha dado un veredicto con el formato pedido.\n\n' + cut(text.trim(), 4000), improvements: '', decisions: '' };
+  let verdict: Verdict = all.includes('RECHAZADO') ? 'RECHAZADO' : 'APROBADO';
+  const found = section(text, 'HALLAZGOS');
+  const improvements = section(text, 'MEJORAS');
+  const decisions = section(text, 'DECISIONES').join('\n');
+  const rated = found.filter(l => /^\s*[-*]/.test(l)).map(rating);
+  if (rated.length && rated.every(Boolean)) {
+    const blocking = found.filter(l => /^\s*[-*]/.test(l) && blocks(rating(l)!));
+    improvements.unshift(...found.filter(l => /^\s*[-*]/.test(l) && !blocks(rating(l)!)));
+    verdict = blocking.length ? 'RECHAZADO' : 'APROBADO';
+    return { verdict, findings: blocking.join('\n'), improvements: improvements.join('\n'), decisions };
+  }
+  // Not rated (an older format, or free text): the reviewer's word, with everything it found.
   const h = text.search(/HALLAZGOS\s*:?/i);
-  const findings = (h >= 0 ? text.slice(h).replace(/^HALLAZGOS\s*:?\s*/i, '') : text).trim();
-  if (!all.length) return { verdict: 'RECHAZADO', findings: 'El revisor no ha dado un veredicto con el formato pedido.\n\n' + cut(text.trim(), 4000) };
-  return { verdict: all.includes('RECHAZADO') ? 'RECHAZADO' : 'APROBADO', findings };
+  const findings = found.length ? found.join('\n') : (h >= 0 ? text.slice(h).replace(/^HALLAZGOS\s*:?\s*/i, '') : text).trim();
+  return { verdict, findings, improvements: improvements.join('\n'), decisions };
 }
 
 // conflictGuidance: what to tell the Builder when the PR conflicts with the base branch.
@@ -237,9 +299,18 @@ export function decide(reviews: Partial<Record<ReviewerRole, Review>>, iteration
 
 export const rejected = (reviews: Partial<Record<ReviewerRole, Review>>) => REVIEWERS.filter(r => reviews[r.role]?.verdict !== 'APROBADO').map(r => r.role);
 
-// findingsFor: the report for the Builder with what the rejecting reviewers found.
+// findingsFor: the report for the Builder with what the rejecting reviewers found, and the improvements of all.
 export function findingsFor(reviews: Partial<Record<ReviewerRole, Review>>): string {
-  return rejected(reviews).map(r => `## Reviewer-${REVIEWERS.find(x => x.role === r)!.name}\n${(reviews[r]?.findings || '').trim() || '(sin detalle)'}`).join('\n\n');
+  const blocking = rejected(reviews).map(r => `## Reviewer-${REVIEWERS.find(x => x.role === r)!.name}\n${(reviews[r]?.findings || '').trim() || '(sin detalle)'}`).join('\n\n');
+  const better = listed(reviews, 'improvements');
+  // The improvements ride along with a round that happens anyway (they never cost one of their own).
+  return blocking + (better ? `\n\n## Mejoras que no bloquean (aplícalas solo si son sencillas y no salen de la especificación)\n${better}` : '');
+}
+
+// listed: what every reviewer put under one of its non-blocking sections, by reviewer.
+export function listed(reviews: Partial<Record<ReviewerRole, Review>>, what: 'improvements' | 'decisions'): string {
+  return REVIEWERS.map(x => ({ x, t: (reviews[x.role]?.[what] || '').trim() })).filter(e => e.t)
+    .map(e => `- Reviewer-${e.x.name}:\n${e.t.split('\n').map(l => '  ' + l.trim()).join('\n')}`).join('\n');
 }
 
 // approverSummary: the audit summary (for the chat and the PR).
@@ -249,8 +320,10 @@ export function approverSummary(s: Pick<PsfState, 'iteration' | 'maxIterations' 
   const que = outcome === 'ready' ? 'Los 4 revisores aprueban: el PR pasa a «Ready». El merge lo confirma una persona.'
     : outcome === 'retry' ? `Hay rechazos: vuelve al Builder (iteración ${s.iteration + 1}/${s.maxIterations}).`
     : `Sin acuerdo tras ${s.maxIterations} iteraciones: se para sin merge y queda para revisión humana.`;
-  const detalle = outcome === 'ready' ? '' : '\n\n' + findingsFor(r);
-  return `### PSF · Approver (iteración ${s.iteration}/${s.maxIterations})\n\n${lineas}\n\n${que}${detalle}`;
+  const better = listed(r, 'improvements'), decisions = listed(r, 'decisions');
+  const detalle = outcome === 'ready' ? (better ? `\n\n**Mejoras propuestas (no bloquean):**\n${better}` : '') : '\n\n' + findingsFor(r);
+  const persona = decisions ? `\n\n**Decisiones para la persona:**\n${decisions}` : '';
+  return `### PSF · Approver (iteración ${s.iteration}/${s.maxIterations})\n\n${lineas}\n\n${que}${detalle}${persona}`;
 }
 
 // bestModel: the Supervisor's model: the most capable one of the agent (otherwise the first of its list, which
@@ -265,22 +338,15 @@ export function bestModel(models: readonly string[] | null | undefined, fallback
 }
 
 // supervisorPrompt: the Supervisor steps in on what the usual flow cannot solve by itself.
-export function supervisorPrompt(task: SupervisorTask, i: Pick<IssueDetail, 'number' | 'title'>, spec: string, base: string, detail: string): string {
-  const reglas = `Reglas: respeta la especificación aprobada y el estilo del repositorio; ejecuta el linter, el chequeo de tipos y la ` +
-    `suite de tests: no termines con nada en rojo. Haz tú los commits que necesites y no hagas push: pgocode lo sube al PR. ` +
-    `Termina con un resumen breve de qué has hecho y por qué.`;
+export function supervisorPrompt(task: SupervisorTask, i: Pick<IssueDetail, 'number' | 'title'>, skill: SystemSkill, spec: string, base: string, detail: string): string {
   const what = task === 'conflict'
     ? `El PR choca con ${base}. pgocode ya ha traído origin/${base} (no hagas git fetch: puede que no tengas red). ` +
-      `Integra origin/${base} en la rama (git merge origin/${base}), resuelve los conflictos ` +
-      `conservando lo que ya hay en ${base} y lo de esta issue, y haz el commit del merge.`
+      `Intégralo en la rama con git merge origin/${base}.`
     : task === 'checks'
-      ? `Los checks de GitHub del PR fallan (${detail.trim() || 'sin detalle'}). Reprodúcelos en local con las órdenes del repositorio, ` +
-        `encuentra la causa y corrígela.`
-      : `El comité de revisión no se pone de acuerdo tras varias iteraciones. Actúa como árbitro: separa los hallazgos válidos ` +
-        `(según la especificación y el repositorio) de los que no lo son, corrige los válidos y explica en tu resumen por qué ` +
-        `descartas el resto.\n\nHallazgos pendientes:\n\n${detail.trim()}`;
-  return `[PSF · Supervisor] Eres el supervisor de Planes Software Factory para la issue #${i.number} «${i.title}»: intervienes ` +
-    `cuando el flujo normal se atasca. ${what}\n\n${reglas}\n\nEspecificación aprobada:\n\n${spec.trim()}`;
+      ? `Los checks de GitHub del PR fallan (${detail.trim() || 'sin detalle'}).`
+      : `El comité de revisión no se pone de acuerdo tras varias iteraciones.\n\nHallazgos pendientes:\n\n${detail.trim()}`;
+  return `[PSF · Supervisor] Intervienes en la issue #${i.number} «${i.title}». ${what}\n\n${skillBlock(skill)}\n\n` +
+    `No toques ${PSF_CONFIG.specsPath} ni ${SKILLS_DIR} y no hagas push: pgocode lo sube al PR.\n\nEspecificación aprobada:\n\n${spec.trim()}`;
 }
 
 // cheapModel: the reviewers' model: the cheapest in the agent's list (otherwise the default one).

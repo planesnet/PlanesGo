@@ -1406,6 +1406,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   const psfBody = (id: string, extra: Record<string, unknown> = {}) => psfBodyOf(sesionesRef.current[id], extra);
+  // psfSkill: a system skill for an agent of the session, left in its folder (the agent reads the chapters it needs).
+  const psfSkill = (id: string, skill: string) => post<PSF.SystemSkill>('/api/psf/skill', psfBody(id, { skill }));
   const psfBodyOf = (s: Sesion, extra: Record<string, unknown> = {}) => {
     const st = s.psf!;
     return { project: s.proyecto, folder: s.carpeta, issue: st.issue, session: s.id, pr: st.pr || 0, base: st.base || '', title: st.title, iteration: st.iteration,
@@ -1494,7 +1496,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     // fresh agent session; then it stops with an error that can be resumed.
     let txt = '';
     for (let attempt = 1; attempt <= 2 && !txt; attempt++) {
-      const last = await psfTurn(id, PSF.specPrompt(issue, st.specPath, st.guidance), `PSF · Spec Writer: especificación de la issue #${st.issue}${attempt > 1 ? ' (otro intento)' : ''}`, 'lectura', '', 'Spec Writer');
+      const last = await psfTurn(id, PSF.specPrompt(issue, st.specPath, await psfSkill(id, PSF.ROLE_SKILL.spec), st.guidance), `PSF · Spec Writer: especificación de la issue #${st.issue}${attempt > 1 ? ' (otro intento)' : ''}`, 'lectura', '', 'Spec Writer');
       const t = PL.textoDelPlan(last).trim();
       if (t && !PSF.gaveUp(t)) txt = t;
       else psfLog(sesionesRef.current[id], 'spec-fallo', { intento: attempt, texto: t.slice(0, 300) });
@@ -1554,7 +1556,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const who = (st.rejectedBy || []).map(r => 'Reviewer-' + PSF.REVIEWERS.find(x => x.role === r)!.name).join(', ');
     const findings = it > 1 && st.rejectedBy?.length ? PSF.findingsFor(st.reviews || {}) : '';
     if (it > 1) await post('/api/psf/fetch', psfBody(id)).catch(() => {}); // the latest base, in case it has to merge it
-    await psfTurn(id, PSF.builderPrompt({ number: st.issue, title: st.title }, spec, it, findings, st.guidance),
+    await psfTurn(id, PSF.builderPrompt({ number: st.issue, title: st.title }, spec, it, it <= 1 ? await psfSkill(id, PSF.ROLE_SKILL.builder) : null, findings, st.guidance),
       it <= 1 ? 'PSF · Builder: implementa la spec aprobada (TDD)'
         : `PSF · Builder · iteración ${it}/${st.maxIterations}: ${who ? 'corrige lo de ' + who : st.guidance ? 'sigue tus indicaciones' : 'otra vuelta'}`,
       'auto', it <= 1 ? '' : undefined, 'Builder');
@@ -1575,6 +1577,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const spec = await psfSpecText(id);
     const diff = psfDiffs.current[id] ?? (await post<PsfSyncResult>('/api/psf/sync', psfBody(id, { text: PSF.commitMessage(st.issue, st.iteration) }))).diff;
     const modelo = PSF.cheapModel(prov.modelos, s.modelo || prov.por_defecto);
+    const skills = Object.fromEntries(await Promise.all(PSF.REVIEWERS.map(async r => [r.role, await psfSkill(id, PSF.ROLE_SKILL[r.role])]))) as Record<PSF.ReviewerRole, PSF.SystemSkill>;
     // Verdicts already given in this round are kept (a resumed review only runs the reviewers that are missing).
     const reviews: Partial<Record<PSF.ReviewerRole, PSF.Review>> = Object.fromEntries(Object.entries(st.reviews || {}).filter(([, v]) => v?.verdict));
     const pending = PSF.REVIEWERS.filter(r => !reviews[r.role]);
@@ -1592,7 +1595,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       try {
         await chat({ proyecto: s.proyecto, proveedor: prov.id, modelo, carpeta: s.carpeta, rama: s.rama, permisos: 'lectura', sesion_agente: '', esfuerzo: '',
           sesion: id, titulo: s.nombre, autorizadas: s.autorizadas || [], mcp: [], idioma: navigator.language, podar: false, no_facts: true, summary: `PSF · Reviewer-${name}: revisión de la issue #${st.issue}`,
-          mensajes: [{ rol: 'user', texto: PSF.reviewerPrompt(role, { number: st.issue, title: st.title }, spec, diff, st.base || 'master', st.branch) }] },
+          mensajes: [{ rol: 'user', texto: PSF.reviewerPrompt(role, { number: st.issue, title: st.title }, skills[role], spec, diff, st.base || 'master', st.branch) }] },
         e => {
           if (e.texto) texto += e.texto;
           if (e.herramienta?.estado === 'curso') { const h = e.herramienta; setPsfActions(x => ({ ...x, [id]: { ...x[id], [role]: h.resumen || h.nombre } })); }
@@ -1607,7 +1610,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       if ((error && !texto.trim()) || timedOut) { psfLog(sesionesRef.current[id], 'revisor-fallo', { revisor: role, modelo, error }); failures.push(`Reviewer-${name}: ${error}`); return; }
       if (PSF.gaveUp(texto)) { psfLog(sesionesRef.current[id], 'revisor-fallo', { revisor: role, modelo, texto: texto.slice(0, 500) }); failures.push(`Reviewer-${name}: el agente ha acabado sin responder${texto.trim() ? ' — ' + texto.trim().replace(/^_\(|\)_$/g, '') : ''}`); return; }
       reviews[role] = { ...PSF.parseVerdict(texto), cost: c };
-      psfLog(sesionesRef.current[id], 'veredicto', { revisor: role, veredicto: reviews[role]!.verdict, hallazgos: reviews[role]!.findings, coste: c, modelo });
+      psfLog(sesionesRef.current[id], 'veredicto', { revisor: role, veredicto: reviews[role]!.verdict, hallazgos: reviews[role]!.findings, mejoras: reviews[role]!.improvements, decisiones: reviews[role]!.decisions, coste: c, modelo });
       psfUpdate(id, { reviews: { ...sesionesRef.current[id].psf!.reviews, [role]: reviews[role] } });
     }));
     psfUpdate(id, { reviewCost: (st.reviewCost || 0) + cost });
@@ -1733,7 +1736,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     psfLog(s, 'supervisor', { tarea: st.supervisorTask, modelo, esfuerzo: esfuerzo || '', detalle: st.supervisorDetail || '' });
     await post('/api/psf/fetch', psfBody(id)).catch(() => {});
     try {
-      await psfTurn(id, PSF.supervisorPrompt(st.supervisorTask || 'conflict', { number: st.issue, title: st.title }, spec, st.base || 'master', st.supervisorDetail || ''),
+      await psfTurn(id, PSF.supervisorPrompt(st.supervisorTask || 'conflict', { number: st.issue, title: st.title }, await psfSkill(id, PSF.ROLE_SKILL.supervisor), spec, st.base || 'master', st.supervisorDetail || ''),
         `PSF · Supervisor (${modelo}): ${({ conflict: 'resuelve los conflictos', checks: 'arregla los checks', convergence: 'arbitra los hallazgos' } as const)[st.supervisorTask || 'conflict']}`,
         'auto', '', 'Supervisor', { modelo, ...(esfuerzo ? { esfuerzo } : {}) });
     } finally {
