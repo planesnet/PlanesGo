@@ -1,0 +1,79 @@
+pgocode: el título de la ventana del cliente SDL3 se cambia por la entrada estándar (una línea por título)
+si PGO_TITULO_ENTRADA=1; pgocode muestra ahí el tiempo imputado. Se aplica con: patch -p1 -d freerdp-<versión>
+
+--- a/client/SDL/SDL3/sdl_freerdp.cpp
++++ b/client/SDL/SDL3/sdl_freerdp.cpp
+@@ -20,6 +20,8 @@
+ #include <iostream>
+ #include <memory>
+ #include <mutex>
++#include <string>
++#include <thread>
+ 
+ #include <freerdp/config.h>
+ 
+@@ -158,6 +160,53 @@
+ 	std::ignore = sdl_push_quit();
+ }
+ 
++/* pgocode: with PGO_TITULO_ENTRADA=1 the window title can be changed through standard input, one line per
++ * title (pgocode shows the logged time there). The reading starts once there is a window, after the
++ * credentials were read from the same input; the title is applied from this (the SDL video) thread. */
++static std::mutex pgoTitleLock;
++static std::string pgoTitle;
++static bool pgoTitleNew = false;
++static bool pgoTitleStarted = false;
++
++static void pgo_title_reader()
++{
++	char line[512] = {};
++	while (fgets(line, sizeof(line), stdin))
++	{
++		line[strcspn(line, "\r\n")] = '\0';
++		std::scoped_lock lock(pgoTitleLock);
++		pgoTitle = line;
++		pgoTitleNew = true;
++	}
++}
++
++static void pgo_title_apply()
++{
++	static const bool enabled = [] {
++		const char* v = getenv("PGO_TITULO_ENTRADA");
++		return v && strcmp(v, "1") == 0;
++	}();
++	if (!enabled)
++		return;
++	int count = 0;
++	SDL_Window** windows = SDL_GetWindows(&count);
++	if (!pgoTitleStarted && windows && count > 0)
++	{
++		pgoTitleStarted = true;
++		std::thread(pgo_title_reader).detach();
++	}
++	std::string title;
++	{
++		std::scoped_lock lock(pgoTitleLock);
++		if (pgoTitleNew)
++			title = pgoTitle;
++		pgoTitleNew = false;
++	}
++	for (int i = 0; !title.empty() && windows && i < count; i++)
++		SDL_SetWindowTitle(windows[i], title.c_str());
++	SDL_free(static_cast<void*>(windows));
++}
++
+ [[nodiscard]] static int sdl_run(SdlContext* sdl)
+ {
+ 	int rc = -1;
+@@ -168,8 +217,10 @@
+ 		while (!sdl->shallAbort())
+ 		{
+ 			SDL_Event windowEvent = {};
++			pgo_title_apply();
+ 			while (!sdl->shallAbort() && SDL_WaitEventTimeout(nullptr, 1000))
+ 			{
++				pgo_title_apply();
+ 				/* Only poll standard SDL events and SDL_EVENT_USERS meant to create
+ 				 * dialogs. do not process the dialog return value events here.
+ 				 */

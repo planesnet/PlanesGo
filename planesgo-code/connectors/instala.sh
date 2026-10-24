@@ -1,7 +1,8 @@
 #!/bin/sh
 # Instala sin root lo que necesitan los conectores (Linux):
 #  - FreeRDP compilado desde la última versión publicada (SDL3 para la persona, X11 para el agente), con solo lo
-#    moderno: H.264 por ffmpeg, PulseAudio, CUPS, FUSE y Kerberos. Código verificado con su SHA-256.
+#    moderno: H.264 por ffmpeg, PulseAudio, CUPS, FUSE y Kerberos. Código verificado con su SHA-256 y con los
+#    parches de connectors/freerdp (el título de la ventana con el tiempo imputado).
 #  - Xvfb, xdotool y el servidor RDP de prueba (freerdp-shadow-cli): paquetes de Ubuntu desempaquetados.
 #  - pywinrm (PowerShell remoto) en un venv.
 # Todo va en ~/.local/opt/rdp-agente. Se puede repetir: lo ya hecho no se rehace.
@@ -9,6 +10,9 @@ set -eu
 FREERDP_VERSION=3.32.2
 FREERDP_SHA256=e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c
 D="$HOME/.local/opt/rdp-agente"
+HERE=$(cd "$(dirname "$0")" && pwd)
+# Parches propios de FreeRDP (connectors/freerdp/*.patch): su huella va junto al binario; si cambian, se recompila.
+PATCHES=$(cat "$HERE"/freerdp/*.patch 2>/dev/null | sha256sum | cut -d' ' -f1)
 B="$D/build"
 S="$B/sysroot"
 P="$D/freerdp-$FREERDP_VERSION"
@@ -21,7 +25,8 @@ apt-get download xvfb xdotool libxdo3 freerdp-shadow-x11 libfreerdp-shadow3-3 li
 for f in *.deb; do dpkg -x "$f" "$D/root"; done
 
 # 2. FreeRDP desde el código fuente
-if [ ! -x "$P/bin/sdl-freerdp" ]; then
+# Se compila una vez y se guarda: solo se recompila con otra versión de FreeRDP o con otros parches.
+if [ ! -x "$P/bin/sdl-freerdp" ] || [ "$(cat "$P/.parches" 2>/dev/null)" != "$PATCHES" ]; then
   # Cabeceras que no trae el sistema (las de ffmpeg, OpenSSL, X11 y Kerberos ya están)
   cd "$B/debs"
   apt-get download libsdl3-dev libsdl3-ttf-dev libsdl3-image-dev libsdl3-ttf0 libsdl3-image0 libwayland-dev \
@@ -44,6 +49,7 @@ if [ ! -x "$P/bin/sdl-freerdp" ]; then
   [ -f "$tgz" ] || curl -fsSLO "https://pub.freerdp.com/releases/$tgz"
   echo "$FREERDP_SHA256  $tgz" | sha256sum -c -
   rm -rf "freerdp-$FREERDP_VERSION" build && tar xzf "$tgz"
+  for p in "$HERE"/freerdp/*.patch; do [ -f "$p" ] && patch -p1 -d "freerdp-$FREERDP_VERSION" < "$p"; done
   PKG_CONFIG_PATH="$S/usr/lib/x86_64-linux-gnu/pkgconfig:$S/usr/share/pkgconfig" cmake -S "freerdp-$FREERDP_VERSION" -B build \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$P" -DCMAKE_PREFIX_PATH="$S/usr" -DBUILD_TESTING=OFF \
     -DWITH_SERVER=OFF -DWITH_SHADOW=OFF -DWITH_PROXY=OFF -DWITH_SAMPLE=OFF -DWITH_MANPAGES=OFF \
@@ -56,6 +62,7 @@ if [ ! -x "$P/bin/sdl-freerdp" ]; then
   cmake --build build -j"$(nproc)"
   cmake --install build
   cp -a "$L"/libSDL3_ttf.so.0* "$L"/libSDL3_image.so.0* "$P/lib/"  # el binario solo busca en su lib/
+  echo "$PATCHES" > "$P/.parches"
 fi
 ln -sfn "$P" "$D/freerdp"
 

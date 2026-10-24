@@ -60,13 +60,11 @@ textarea { resize: none; }
 .tarjeta-acceso label { display: grid; gap: 4px; font-size: 12px; color: var(--suave); }
 .tarjeta-acceso input { width: 100%; padding: 8px 10px; }
 .tarjeta-acceso button.primario { padding: 8px; }
-/* Escritorio remoto (pgocode --rdp): la tarjeta del acceso con las horas de hoy y el proyecto */
+/* Escritorio remoto (pgocode --rdp): la tarjeta del acceso con el proyecto (las horas, en el título de la ventana) */
 .rdp .tarjeta-acceso { width: min(420px, 100%); }
 .rdp-cabecera { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .rdp-cabecera h1 { text-align: left; font-size: 19px; white-space: nowrap; }
-.rdp-horas { position: relative; display: flex; justify-content: center; max-width: 100%; }
 .rdp-version { display: block; font-size: 11px; font-weight: 400; color: var(--suave); }
-.rdp-horas .panel-imputa { right: auto; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); }
 .rdp-proyecto { display: grid; gap: 4px; }
 .rdp-etiqueta { font-size: 12px; color: var(--suave); }
 .rdp-elegido { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 10px; border: 1px solid var(--linea); border-radius: 6px; background: var(--panel); text-align: left !important; }

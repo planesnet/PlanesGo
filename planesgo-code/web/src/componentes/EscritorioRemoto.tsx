@@ -1,14 +1,13 @@
 // Escritorio remoto (pgocode --rdp): la ventana de pgocode para entrar por escritorio remoto en cualquier equipo
 // Windows. Usa la sesión de pgocode (la misma app y el mismo backend); si no hay, el acceso de siempre. El proyecto
 // es obligatorio: si la conexión ya lo tiene, se muestra; si no, el buscador de la barra de proyectos. El tiempo se
-// imputa en él con el servicio de pgocode, y arriba se ven las horas como en la barra de pgocode. La ventana de
-// Windows la abre el backend (FreeRDP) con todo permitido (portapapeles, carpeta «Intercambio», sonido, micrófono e
-// impresoras) y se cierra desde ella misma. La contraseña va a FreeRDP y no se guarda; las conexiones, sin
+// imputa en él con el servicio de pgocode y se ve en el título de la ventana de Windows, que abre el backend
+// (FreeRDP) con todo permitido (portapapeles, carpeta «Intercambio», sonido, micrófono e impresoras) y se cierra
+// desde ella misma. La contraseña va a FreeRDP y no se guarda; las conexiones, sin
 // contraseña, en este navegador.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { escuchaAvisos, get, post, type Proyecto, type Usuario } from '../api';
 import Acceso, { CampoClave } from './Acceso';
-import Imputacion, { type SesionMarcador } from './Imputacion';
 import { Dialogs, showMessage } from './Modal';
 import { BuscaProyecto } from './Proyectos';
 
@@ -34,8 +33,6 @@ function Formulario({ usuario }: { usuario: Usuario }) {
   const [cambiaProyecto, setCambiaProyecto] = useState(false);
   const [contrasena, setContrasena] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const [version, setVersion] = useState(0); // horas de hoy: se recargan con el aviso «imputacion»
-  const [activa, setActiva] = useState<SesionMarcador>();
   const mias = useRef(new Set<string>()); // las conexiones abiertas desde esta ventana (para avisar de sus errores)
   const [versionApp, setVersionApp] = useState('');
 
@@ -47,13 +44,11 @@ function Formulario({ usuario }: { usuario: Usuario }) {
   useEffect(() => { get<Proyecto[]>('/api/proyectos').then(setProyectos).catch(() => {}); }, []);
   useEffect(() => {
     const carga = () => get<{ conexiones: Abierta[] }>('/api/rdp').then(r => {
-      const viva = r.conexiones.find(a => mias.current.has(a.id) && a.estado !== 'terminado');
-      setActiva(viva ? { id: 'rdp-' + viva.id, proyecto: viva.proyecto } : undefined);
       for (const a of r.conexiones) {
         if (a.estado === 'terminado' && mias.current.delete(a.id) && a.error) showMessage(a.error, { level: 'error', title: 'Escritorio remoto' });
       }
     }).catch(() => {});
-    const fuera = escuchaAvisos(a => { if (a.tipo === 'rdp') carga(); else if (a.tipo === 'imputacion') setVersion(v => v + 1); });
+    const fuera = escuchaAvisos(a => { if (a.tipo === 'rdp') carga(); });
     const t = setInterval(carga, 5000); // por si se pierde un aviso
     return () => { clearInterval(t); fuera(); };
   }, []);
@@ -91,7 +86,6 @@ function Formulario({ usuario }: { usuario: Usuario }) {
           <img className="logo" src="/logo.svg" alt="" width="40" height="40" />
           <h1>Escritorio <span>remoto</span>{versionApp && <small className="rdp-version">Planes Go Code {versionApp}</small>}</h1>
         </header>
-        <div className="rdp-horas"><Imputacion version={version} sesion={activa} /></div>
         <div className="rdp-proyecto">
           <span className="rdp-etiqueta">Proyecto</span>
           {conoceProyecto

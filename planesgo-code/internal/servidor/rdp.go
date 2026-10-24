@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,15 +35,16 @@ const (
 
 // rdpConn: an open remote desktop.
 type rdpConn struct {
-	ID       string    `json:"id"`
-	Project  int       `json:"proyecto"`
-	Name     string    `json:"nombre"`
-	Host     string    `json:"equipo"`
-	User     string    `json:"usuario"`
-	Started  time.Time `json:"inicio"`
-	State    string    `json:"estado"` // conectando, conectado, terminado
-	Error    string    `json:"error,omitempty"`
-	closed   bool      // the person disconnected it from pgocode: not an error
+	ID       string         `json:"id"`
+	Project  int            `json:"proyecto"`
+	Name     string         `json:"nombre"`
+	Host     string         `json:"equipo"`
+	User     string         `json:"usuario"`
+	Started  time.Time      `json:"inicio"`
+	State    string         `json:"estado"` // conectando, conectado, terminado
+	Error    string         `json:"error,omitempty"`
+	closed   bool           // the person disconnected it from pgocode: not an error
+	title    io.WriteCloser // FreeRDP's input after the password: one line per window title (connectors/freerdp)
 	cancel   context.CancelFunc
 	finished chan struct{}
 }
@@ -250,7 +252,9 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	c.cancel = cancel
 	cmd := exec.CommandContext(ctx, bin, rdpArgs(p.Name, p.Host, p.User)...)
 	proceso.GrupoPropio(cmd)
-	cmd.Env = proceso.CleanEnviron() // nothing of pgocode's (tokens, desktop secret) reaches FreeRDP
+	// Nothing of pgocode's (tokens, desktop secret) reaches FreeRDP; PGO_TITULO_ENTRADA: its title is updated
+	// through its input (the patch in connectors/freerdp) with the logged time.
+	cmd.Env = append(proceso.CleanEnviron(), "PGO_TITULO_ENTRADA=1")
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	stdin, err := cmd.StdinPipe()
@@ -263,8 +267,8 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		return
 	}
 	stdin.Write([]byte(p.Password + "\n"))
-	stdin.Close()
 	p.Password = ""
+	c.title = stdin
 	s.escritorios.mu.Lock()
 	if s.escritorios.conns == nil {
 		s.escritorios.conns = map[string]*rdpConn{}
@@ -290,6 +294,7 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		}
 		s.escritorios.mu.Unlock()
 		close(c.finished)
+		c.title.Close()
 		cancel()
 		if s.Imputacion != nil {
 			s.Imputacion.Cierra(work.Sesion, "escritorio remoto cerrado")
@@ -302,10 +307,39 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	jsonOK(w, snap)
 }
 
-// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use.
+// rdpTitle: the window title with the logged time, as pgocode's bar shows it: this session, the project today and
+// everything today.
+func (s *Servidor) rdpTitle(c *rdpConn, work imputacion.Trabajo) string {
+	title := c.Name
+	if work.NombreProy != "" {
+		title += " · " + work.NombreProy
+	}
+	if s.Imputacion == nil {
+		return title
+	}
+	hoy, abiertos := s.Imputacion.Estado()
+	var session, project, total float64
+	for _, a := range abiertos {
+		if a.Sesion == work.Sesion {
+			session = a.Horas
+		}
+	}
+	for _, l := range hoy {
+		total += l.Horas
+		if l.Proyecto == c.Project {
+			project += l.Horas
+		}
+	}
+	hm := func(h float64) string { m := int(h*60 + 0.5); return fmt.Sprintf("%d:%02d", m/60, m%60) }
+	return fmt.Sprintf("%s · sesión %s · proyecto hoy %s · total hoy %s", title, hm(session), hm(project), hm(total))
+}
+
+// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use, and
+// shows the logged time in the window title.
 func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 	t := time.NewTicker(rdpBeat)
 	defer t.Stop()
+	fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	for {
 		select {
 		case <-c.finished:
@@ -326,6 +360,7 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 		if s.Imputacion != nil {
 			s.Imputacion.Actividad(work)
 		}
+		fmt.Fprintln(c.title, s.rdpTitle(c, work))
 	}
 }
 
