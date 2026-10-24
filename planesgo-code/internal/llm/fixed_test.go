@@ -26,7 +26,7 @@ func TestClaudeSettings(t *testing.T) {
 		t.Error("odoo-19 no debería tener ajuste")
 	}
 	// Fijo entre llamadas: no rompe el prefijo en caché.
-	if claudeSettings() != claudeSettings() {
+	if first, second := claudeSettings(), claudeSettings(); first != second {
 		t.Error("claudeSettings cambia entre llamadas")
 	}
 	cl := Agentes()[0].(*Agente)

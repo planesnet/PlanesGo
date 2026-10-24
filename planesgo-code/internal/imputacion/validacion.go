@@ -317,10 +317,7 @@ func Valida(r io.Reader, hoy bool) (Informe, error) {
 	sort.Slice(humanos, func(i, j int) bool { return humanos[i].ini.Before(humanos[j].ini) })
 	porUsuario := map[int][]Tramo{}
 	for _, b := range humanos {
-		var antes []Tramo
-		for _, x := range porUsuario[b.uid] {
-			antes = append(antes, x)
-		}
+		antes := append([]Tramo(nil), porUsuario[b.uid]...)
 		sol := solape(antes, b.ini, b.fin)
 		if sol >= 60 && solapados[b.sesion]+60 < sol {
 			av(&suceso{T: b.ini, Sesion: b.sesion}, "aviso", "solape", "%s de tiempo humano de la sesión %s ya contado en otra sesión a la vez (%s–%s): se cuenta dos veces",

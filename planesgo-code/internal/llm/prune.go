@@ -154,17 +154,6 @@ func (p *ocPart) filePath() string {
 	return ""
 }
 
-// label: cómo se nombra la pieza en la línea que la sustituye (el fichero relativo, la orden…).
-func (p *ocPart) label() string {
-	if p.v.State.Title != "" && (p.v.Tool == "read" || p.v.Tool == "edit" || p.v.Tool == "write") {
-		return p.v.State.Title
-	}
-	if f := p.filePath(); f != "" {
-		return filepath.Base(f)
-	}
-	return recortaLinea(resumen(p.v.State.Input), 80)
-}
-
 func recortaLinea(s string, n int) string {
 	s = primeraLinea(s)
 	if r := []rune(s); len(r) > n {
