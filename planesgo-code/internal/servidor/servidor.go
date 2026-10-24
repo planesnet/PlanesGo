@@ -140,6 +140,9 @@ type Servidor struct {
 	PermitirNavegador bool
 	// escritorios: los escritorios remotos abiertos (rdp.go).
 	escritorios rdpSessions
+	// sqls: las conexiones con SQL Server de las sesiones de trabajo (sqlconn.go); SQLAudit: su registro de auditoría.
+	sqls     sqlConns
+	SQLAudit string
 	// memPending: las sesiones del agente que reciben otra vez la memoria del proyecto (memory.go).
 	memPending memoryPending
 
@@ -235,6 +238,12 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
 	mux.HandleFunc("GET /api/rdp", s.conSesion(s.rdpState))
+	mux.HandleFunc("GET /api/sql", s.conSesion(s.sqlState))
+	mux.HandleFunc("POST /api/sql/connect", s.conSesion(s.sqlConnect))
+	mux.HandleFunc("POST /api/sql/disconnect", s.conSesion(s.sqlDisconnect))
+	mux.HandleFunc("POST /api/sql/run", s.conSesion(s.sqlRunUI))
+	mux.HandleFunc("POST /api/sql/mode", s.conSesion(s.sqlMode))
+	mux.HandleFunc("POST /api/sql/database", s.conSesion(s.sqlDatabase))
 	mux.HandleFunc("POST /api/rdp/conectar", s.conSesion(s.rdpConnect))
 	mux.HandleFunc("POST /api/rdp/desconectar", s.conSesion(s.rdpDisconnect))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))

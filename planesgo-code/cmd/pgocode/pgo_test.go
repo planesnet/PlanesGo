@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,5 +81,38 @@ func TestTrimmedOutput(t *testing.T) {
 	}
 	if got := trimmedOutput(l[:3], 50, "", outputTotalMax); !strings.HasPrefix(got, "[… 47 líneas antes]\n") {
 		t.Fatalf("sin registro: %.80q", got)
+	}
+}
+
+func TestSQLArgs(t *testing.T) {
+	b, err := sqlArgs([]string{"SELECT 1", "--filas", "50", "--escribir"})
+	if err != nil || b["sql"] != "SELECT 1" || b["n"] != 50 || b["escribir"] != true {
+		t.Errorf("%v %v", b, err)
+	}
+	f := filepath.Join(t.TempDir(), "q.sql")
+	os.WriteFile(f, []byte("SELECT 2"), 0o644)
+	if b, err := sqlArgs([]string{"-f", f}); err != nil || b["sql"] != "SELECT 2" {
+		t.Errorf("-f: %v %v", b, err)
+	}
+	for _, a := range [][]string{{}, {"a", "b"}, {"SELECT 1", "--filas", "x"}, {"--otra"}} {
+		if _, err := sqlArgs(a); err == nil {
+			t.Errorf("%v must fail", a)
+		}
+	}
+}
+
+func TestSQLText(t *testing.T) {
+	var r sqlResult
+	json.Unmarshal([]byte(`{"sets":[{"columns":["id","nombre"],"rows":[[1,"Ana\tLópez"],[2,null]],"truncated":true}],"affected":2,"rolled_back":true}`), &r)
+	got := sqlText(r)
+	want := "id\tnombre\n1\tAna López\n2\tNULL\n(2 filas; hay más: usa --filas o filtra la consulta)\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+	if got := sqlText(sqlResult{Affected: 3, RolledBack: true}); got != "3 filas afectadas, deshecho (solo lectura)\n" {
+		t.Errorf("update: %q", got)
+	}
+	if got := sqlText(sqlResult{}); got != "hecho, sin resultados\n" {
+		t.Errorf("nothing: %q", got)
 	}
 }

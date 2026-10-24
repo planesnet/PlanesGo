@@ -31,6 +31,13 @@ del navegador de pgocode; nunca lee páginas, no busca ni lista):
                                    PDF y demás se guardan en .pgocode/salidas (te da la ruta); recorta a 40000 (--max)
   pgo gmail leer <enlace del correo> [--max N]
                                    el mensaje original (.eml): texto sin lo citado y adjuntos (nombre, tipo, tamaño)
+
+SQL Server de la sesión (la conexión la define la persona en las propiedades de la sesión; tú no ves la contraseña):
+  pgo sql "<orden T-SQL>" [--filas N] [--escribir]
+  pgo sql -f <fichero.sql> [--filas N] [--escribir]
+                                   resultados en texto separado por tabuladores (200 filas por resultado; --filas
+                                   hasta 5000). Solo lectura: lo que cambie la orden se deshace al acabar. --escribir
+                                   solo vale si la persona ha permitido los cambios en esa conexión
 `
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
@@ -168,6 +175,19 @@ func pgo(args []string) int {
 			return falla(err)
 		}
 		fmt.Println("abierto en el navegador de pgocode")
+	case "sql":
+		body, err := sqlArgs(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgo sql: %v\n", err)
+			return 2
+		}
+		raw, err := llama("POST", "sql", body, nil)
+		if err != nil {
+			return falla(err)
+		}
+		var r sqlResult
+		json.Unmarshal(raw, &r)
+		fmt.Print(sqlText(r))
 	case "drive", "gmail":
 		q, err := googleQuery(args[0], args[1:])
 		if err != nil {
@@ -238,6 +258,105 @@ func googleQuery(service string, args []string) (url.Values, error) {
 	}
 	q.Set("ref", pos[0])
 	return q, nil
+}
+
+// sqlArgs: el cuerpo de «pgo sql "<orden>" | -f <fichero> [--filas N] [--escribir]».
+func sqlArgs(args []string) (map[string]any, error) {
+	body := map[string]any{}
+	var batch string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--escribir":
+			body["escribir"] = true
+		case a == "--filas" || a == "-f":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("falta el valor de %s", a)
+			}
+			i++
+			if a == "-f" {
+				b, err := os.ReadFile(args[i])
+				if err != nil {
+					return nil, err
+				}
+				batch = string(b)
+				continue
+			}
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("--filas tiene que ser un número")
+			}
+			body["n"] = n
+		case strings.HasPrefix(a, "--"):
+			return nil, fmt.Errorf("opción desconocida %s", a)
+		default:
+			if batch != "" {
+				return nil, fmt.Errorf("una sola orden (entre comillas) o -f <fichero>")
+			}
+			batch = a
+		}
+	}
+	if strings.TrimSpace(batch) == "" {
+		return nil, fmt.Errorf("falta la orden: pgo sql \"SELECT …\" o pgo sql -f <fichero.sql>")
+	}
+	body["sql"] = batch
+	return body, nil
+}
+
+// sqlResult: la respuesta de /api/pgo/sql.
+type sqlResult struct {
+	Sets []struct {
+		Columns   []string
+		Rows      [][]any
+		Truncated bool
+	}
+	Affected   int64
+	RolledBack bool `json:"rolled_back"`
+	Ms         int64
+}
+
+// sqlText: los resultados en texto (columnas separadas por tabuladores; cada valor en una línea), lo justo para el
+// agente.
+func sqlText(r sqlResult) string {
+	var b strings.Builder
+	cell := func(v any) string {
+		if v == nil {
+			return "NULL"
+		}
+		t := strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(fmt.Sprint(v))
+		if rs := []rune(t); len(rs) > outputLineMax {
+			t = string(rs[:outputLineMax]) + "…"
+		}
+		return t
+	}
+	for i, s := range r.Sets {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.Join(s.Columns, "\t") + "\n")
+		for _, row := range s.Rows {
+			c := make([]string, len(row))
+			for j, v := range row {
+				c[j] = cell(v)
+			}
+			b.WriteString(strings.Join(c, "\t") + "\n")
+		}
+		fmt.Fprintf(&b, "(%d filas", len(s.Rows))
+		if s.Truncated {
+			b.WriteString("; hay más: usa --filas o filtra la consulta")
+		}
+		b.WriteString(")\n")
+	}
+	// With result sets, @@ROWCOUNT is the rows read by the last SELECT: only said for batches without results.
+	switch {
+	case len(r.Sets) > 0:
+	case r.Affected > 0 && r.RolledBack:
+		fmt.Fprintf(&b, "%d filas afectadas, deshecho (solo lectura)\n", r.Affected)
+	case r.Affected > 0:
+		fmt.Fprintf(&b, "%d filas afectadas\n", r.Affected)
+	default:
+		b.WriteString("hecho, sin resultados\n")
+	}
+	return b.String()
 }
 
 // salidaProceso: la respuesta de /api/pgo/salida.

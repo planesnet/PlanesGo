@@ -392,6 +392,8 @@ func main() {
 	// Los fallos del propio pgocode, como issues de PlanesGo (las sesiones automáticas PSF las pueden resolver): las
 	// excepciones de la interfaz, los pánicos de las peticiones y los cierres por pánico (el runtime los deja en
 	// cierre.log y se informan al arrancar la vez siguiente).
+	// Auditoría de SQL Server: cada orden que llega a las conexiones de las sesiones (la orden, no los datos).
+	s.SQLAudit = filepath.Join(datos, "sql-auditoria.jsonl")
 	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
 	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
 		s.Errores.Repo = v
@@ -439,6 +441,7 @@ func main() {
 		defer close(apagado)
 		<-ctx.Done()
 		log.Print("cerrando Planes Go Code…")
+		s.CloseConnections()
 		cancelaBase()
 		s.Procesos.ParaTodos() // los programas lanzados se cierran con la app
 		// Al actualizarse, los cronómetros siguen en Odoo y la versión nueva los retoma; al salir de verdad, se cierran.

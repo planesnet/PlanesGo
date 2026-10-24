@@ -383,6 +383,8 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		Orden    string `json:"orden"`
 		URL      string `json:"url"`
 		N        int    `json:"n"`
+		SQL      string `json:"sql"`
+		Escribir bool   `json:"escribir"`
 	}
 	if r.Method == http.MethodPost {
 		if err := lee(r, &p); err != nil {
@@ -456,6 +458,8 @@ func (s *Servidor) pgo(w http.ResponseWriter, r *http.Request) {
 		}
 		x, _ := s.Procesos.Busca(p.Nombre)
 		jsonOK(w, map[string]any{"lineas": l, "total": total, "registro": x.Registro})
+	case "sql":
+		s.sqlRun(w, r.Context(), "agente", "agente", p.Proyecto, g.session, p.SQL, p.N, p.Escribir)
 	case "abrir":
 		if !urlWeb(p.URL) {
 			jsonError(w, http.StatusBadRequest, "URL no válida (http o https)")

@@ -94,6 +94,8 @@ var agentEndpoints = map[string]string{
 	// Google en solo lectura y por enlace: descargas a través del navegador integrado (internal/gbrowser).
 	"drive-leer": http.MethodGet,
 	"gmail-leer": http.MethodGet,
+	// SQL Server de la sesión del agente (sqlconn.go): solo lectura salvo que la conexión permita cambios.
+	"sql": http.MethodPost,
 }
 
 // agentEndpointAllowed: la orden está en la lista blanca con ese método.

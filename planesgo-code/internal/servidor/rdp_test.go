@@ -118,3 +118,39 @@ func TestRdpConnect(t *testing.T) {
 		t.Fatalf("el escritorio no se da por terminado: %s", state)
 	}
 }
+
+// When pgocode closes, the remote desktops close with it (nobody would count their time any more), without an error.
+func TestRdpClosedOnShutdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FreeRDP simulado con sh")
+	}
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	fake := filepath.Join(dir, "sdl-freerdp")
+	os.WriteFile(fake, []byte("#!/bin/sh\nread pw\nexec sleep 60\n"), 0o755)
+	t.Setenv("PGO_FREERDP", fake)
+	s := &Servidor{Puerto: "7801", PermitirNavegador: true, Sesiones: sesiones.NuevoAlmacen(), Indice: proyectos.NuevoIndice(nil)}
+	h := s.Handler()
+	ses, _ := s.Sesiones.Crea(1, "t", "t", "x")
+	ses.MarcaProyecto(590, time.Now().Add(time.Hour))
+	r := httptest.NewRequest("POST", "/api/rdp/conectar", strings.NewReader(`{"proyecto":590,"equipo":"h","usuario":"u","contrasena":"x"}`))
+	r.Host = "127.0.0.1:7801"
+	r.Header.Set("X-PGO", "1")
+	r.AddCookie(&http.Cookie{Name: cookie, Value: ses.Token})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || s.escritorios.open() != 1 {
+		t.Fatalf("conectar: %d %s", w.Code, w.Body)
+	}
+	s.CloseConnections()
+	if s.escritorios.open() != 0 {
+		t.Fatal("pgocode closing must close the remote desktop")
+	}
+	s.escritorios.mu.Lock()
+	defer s.escritorios.mu.Unlock()
+	for _, c := range s.escritorios.conns {
+		if c.Error != "" {
+			t.Errorf("closed by pgocode is not an error: %q", c.Error)
+		}
+	}
+}

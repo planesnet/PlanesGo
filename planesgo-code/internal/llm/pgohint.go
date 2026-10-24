@@ -32,13 +32,22 @@ var gmailWords = regexp.MustCompile(`(?i)\bgmail\b|\bcorreos?\b|\be-?mails?\b|\b
 // usuario: se quita antes de buscar gmailWords.
 var mailNoise = regexp.MustCompile(`(?i)\b(?:campos?|field|columnas?|column|atributos?|propiedad|variables?|par[aá]metros?|validaci[oó]n|valida[rd]?|formato|tipo|plantillas?)\s+(?:(?:el|la|los|las|un|una|de|del|de\s+la)\s+)?(?:correo(?:\s+electr[oó]nico)?|e-?mail)\b|[\w)\]]\.e-?mail\b|\be-?mail\s*[(:=]`)
 
+// sqlHint: el uso de «pgo sql» (el SQL Server de la sesión, si la persona ha definido su conexión).
+const sqlHint = "(pgocode: para consultar SQL Server usa la orden de terminal «pgo» con la conexión de esta sesión (la define la persona; tú no ves la contraseña): " +
+	"`pgo sql \"<T-SQL>\" [--filas N]` o `pgo sql -f <fichero.sql>` (resultados separados por tabuladores; solo lectura: lo que cambie se deshace; " +
+	"`--escribir` solo si la persona ha permitido cambios). Si dice que la sesión no tiene conexión, pídesela al usuario.)"
+
+// sqlWords: el mensaje habla de SQL Server, de una base de datos o de Sage.
+var sqlWords = regexp.MustCompile(`(?i)\bsql\b|\bt-sql\b|\bmssql\b|\bsage\b|\bbases?\s+de\s+datos\b|\bconsultas?\s+sql\b`)
+
 var (
 	pgoWord = regexp.MustCompile(`(?i)\bpgo\b`)
 	pgoVerb = regexp.MustCompile(`(?i)\bpgo\s+(?:ejecutar|parar|procesos|salida|abrir)\b|\b(?:ejecut|arranc|lanz|levant|parar|det[eé]n|salida|abr[eií]|procesos?|programas?|servidor)`)
 )
 
 // pgoHintFor: la línea de uso de «pgo» si el mensaje la menciona (ejecutar, parar, salida, abrir…) y la de
-// «pgo drive» si habla de Google Drive, Docs o Sheets y la de «pgo gmail» si habla del correo; "" si nada. Las órdenes («/pgo …», la skill de imputación)
+// «pgo drive» si habla de Google Drive, Docs o Sheets, la de «pgo gmail» si habla del correo y la de «pgo sql» si habla
+// de SQL Server, bases de datos o Sage; "" si nada. Las órdenes («/pgo …», la skill de imputación)
 // no cuentan.
 func pgoHintFor(text string) string {
 	t := strings.TrimSpace(text)
@@ -54,6 +63,9 @@ func pgoHintFor(text string) string {
 	}
 	if gmailWords.MatchString(mailNoise.ReplaceAllString(t, " ")) {
 		hs = append(hs, gmailHint)
+	}
+	if sqlWords.MatchString(t) {
+		hs = append(hs, sqlHint)
 	}
 	return strings.Join(hs, "\n")
 }

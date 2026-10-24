@@ -99,6 +99,14 @@ textarea { resize: none; }
 .marca { font-weight: 700; font-size: 14px; padding: 14px 14px 10px; }
 .busca { display: flex; gap: 4px; padding: 0 10px; align-items: center; }
 .busca input { flex: 1 1 0; width: 0; min-width: 0; background: transparent; }
+/* Switch.tsx: an on/off control. */
+.switch { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; background: none; border: 0; color: var(--texto); font-size: 13px; cursor: pointer; text-align: left; }
+.switch:disabled { opacity: .6; cursor: default; }
+.switch-track { position: relative; width: 32px; height: 18px; flex: none; border-radius: 9px; background: var(--tenue); transition: background .15s; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--superficie); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.switch[aria-checked="true"] .switch-track { background: var(--acento); }
+.switch[aria-checked="true"] .switch-thumb { transform: translateX(14px); }
+.switch:focus-visible .switch-track { outline: 2px solid var(--enfoque); outline-offset: 2px; }
 .interruptor { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--suave); padding: 8px 14px 2px; }
 .lista { overflow: auto; padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 1px; }
 .proyectos .lista { display: flex; flex-direction: column; }

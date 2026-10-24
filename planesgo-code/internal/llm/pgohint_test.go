@@ -54,3 +54,16 @@ func TestPgoHint(t *testing.T) {
 		t.Error("hasPgo")
 	}
 }
+
+func TestSQLHint(t *testing.T) {
+	for _, m := range []string{"saca los clientes de Sage", "haz una consulta SQL de las facturas", "¿qué tablas tiene la base de datos?", "mira en SQL Server"} {
+		if !strings.Contains(pgoHintFor(m), "pgo sql") {
+			t.Errorf("%q: sin la pista de pgo sql", m)
+		}
+	}
+	for _, m := range []string{"arregla el test de fechas", "sagaz idea"} {
+		if strings.Contains(pgoHintFor(m), "pgo sql") {
+			t.Errorf("%q: pista de pgo sql de más", m)
+		}
+	}
+}

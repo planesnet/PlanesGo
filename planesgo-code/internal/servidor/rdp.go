@@ -52,6 +52,26 @@ type rdpSessions struct {
 	conns map[string]*rdpConn
 }
 
+// closeAll closes every open remote desktop (pgocode is closing: nobody would count its time any more).
+func (r *rdpSessions) closeAll() {
+	r.mu.Lock()
+	var l []*rdpConn
+	for _, c := range r.conns {
+		if c.State != "terminado" {
+			c.closed = true
+			l = append(l, c)
+		}
+	}
+	r.mu.Unlock()
+	for _, c := range l {
+		c.cancel()
+		select {
+		case <-c.finished: // its period is closed by the goroutine that waits for FreeRDP
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
 func (r *rdpSessions) open() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
