@@ -5,16 +5,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"planesgo-code/internal/freerdp"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/proceso"
 	"planesgo-code/internal/sesiones"
@@ -76,127 +74,22 @@ func (r *rdpSessions) open() int {
 	return n
 }
 
-// rdpClient: the FreeRDP client (PGO_FREERDP, or the one connectors/instala.sh builds).
-func rdpClient() string {
-	if p := os.Getenv("PGO_FREERDP"); p != "" {
-		return p
-	}
-	if runtime.GOOS == "windows" {
-		p, _ := exec.LookPath("sdl-freerdp.exe")
-		return p
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "opt", "rdp-agente", "freerdp", "bin", "sdl-freerdp")
-}
-
-// rdpExchange: the shared folder (in Windows, «Intercambio»).
-func rdpExchange() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "pgocode-connectors", "intercambio")
-}
-
-// rdpUser splits «DOMINIO\usuario» (or just «usuario»).
-func rdpUser(s string) (user, domain string) {
-	if d, u, ok := strings.Cut(strings.TrimSpace(s), `\`); ok {
-		return strings.TrimSpace(u), strings.TrimSpace(d)
-	}
-	return strings.TrimSpace(s), ""
-}
-
-// rdpArgs: modern settings only, no fallbacks for old servers (a development tool, not a product). Everything is
-// allowed (clipboard, the shared folder «Intercambio», sound, microphone and this computer's printers) and the
-// person decides what to use; full screen whenever wanted (Ctrl+Alt+Intro in the window).
+// rdpArgs: the person's window on top of the shared secure settings. Everything is allowed (clipboard, the shared
+// folder «Intercambio», sound, microphone and this computer's printers) and the person decides what to use; full
+// screen whenever wanted (Ctrl+Alt+Intro in the window).
 func rdpArgs(name, host, login string) []string {
-	user, domain := rdpUser(login)
-	a := []string{"/v:" + host, "/u:" + user, "/from-stdin:force", "/title:" + name,
-		"/sec:nla",        // network level authentication only
-		"/tls:seclevel:2", // no old TLS versions or weak keys
-		"/cert:tofu",      // trust on first use; warn if the certificate changes
-		"/gfx:AVC444",     // RDP 8+ graphics with H.264 4:4:4
-		"/network:auto", "+auto-reconnect", "/auto-reconnect-max-retries:20", "+dynamic-resolution", "/log-level:ERROR",
+	a := append(freerdp.SecureArgs(host, login), "/title:"+name,
+		"+auto-reconnect", "/auto-reconnect-max-retries:20", "+dynamic-resolution", "/log-level:ERROR",
 		// Without grabbing the keyboard: GNOME asks every time for permission to inhibit its shortcuts. Alt+Tab and
 		// the Windows key stay on this desktop.
-		"-grab-keyboard"}
-	if domain != "" {
-		a = append(a, "/d:"+domain)
-	}
-	a = append(a, "/size:85%", "+clipboard", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer")
-	if os.MkdirAll(rdpExchange(), 0o755) == nil {
-		a = append(a, "/drive:Intercambio,"+rdpExchange())
-	}
-	return a
-}
-
-// rdpMessages: FreeRDP's ERRCONNECT_* codes (in its log) and what to tell the person.
-var rdpMessages = []struct {
-	codes []string
-	text  string
-}{
-	{[]string{"LOGON_FAILURE", "WRONG_PASSWORD", "AUTHENTICATION_FAILED", "NO_OR_MISSING_CREDENTIALS"}, "Usuario o contraseña incorrectos."},
-	{[]string{"PASSWORD_EXPIRED", "PASSWORD_CERTAINLY_EXPIRED", "PASSWORD_MUST_CHANGE"}, "La contraseña ha caducado o hay que cambiarla: cámbiala desde Windows."},
-	{[]string{"ACCOUNT_LOCKED_OUT"}, "La cuenta está bloqueada (demasiados intentos fallidos)."},
-	{[]string{"ACCOUNT_DISABLED", "ACCOUNT_EXPIRED", "ACCOUNT_RESTRICTION"}, "La cuenta está deshabilitada, caducada o restringida."},
-	{[]string{"ACCESS_DENIED", "INSUFFICIENT_PRIVILEGES", "LOGON_TYPE_NOT_GRANTED"}, "Este usuario no tiene permiso para entrar por escritorio remoto en ese equipo."},
-	{[]string{"DNS_ERROR", "DNS_NAME_NOT_FOUND"}, "No se encuentra el equipo: revisa el nombre."},
-	{[]string{"CONNECT_FAILED", "CONNECT_TRANSPORT_FAILED", "TARGET_BOOTING"}, "No se puede llegar al equipo: revisa el nombre o la IP y que el escritorio remoto esté activo."},
-	{[]string{"TLS_CONNECT_FAILED", "SECURITY_NEGO_CONNECT_FAILED", "HYBRID_REQUIRED_BY_SERVER"}, "No se ha podido negociar la seguridad de la conexión con el servidor."},
-	{[]string{"KDC_UNREACHABLE"}, "No se llega al controlador de dominio (Kerberos)."},
-}
-
-// rdpEnded: why Windows ended the session (FreeRDP's ERRINFO_*): "" when the person closed or signed out.
-var rdpEnded = []struct {
-	code, text string
-}{
-	{"RPC_INITIATED_DISCONNECT", ""}, {"RPC_INITIATED_LOGOFF", ""}, {"LOGOFF_BY_USER", ""}, // also *_BY_USER
-	{"DISCONNECTED_BY_OTHER_CONNECTION", "Se ha abierto esta misma sesión de Windows desde otra conexión."},
-	{"IDLE_TIMEOUT", "Windows ha cerrado la sesión por inactividad."},
-	{"LOGON_TIMEOUT", "Windows ha cerrado la sesión porque no se completó el inicio de sesión a tiempo."},
-	{"SERVER_DENIED_CONNECTION", "El servidor ha rechazado la conexión."},
-	{"SERVER_INSUFFICIENT_PRIVILEGES", "Este usuario no tiene permiso para entrar por escritorio remoto en ese equipo."},
-}
-
-// rdpExplain: why the session ended ("" if it ended normally: closed by the person or by Windows).
-func rdpExplain(log string, code int) string {
-	t := strings.ToUpper(log)
-	if strings.Contains(t, "ERRCONNECT_CONNECT_CANCELLED") {
-		return ""
-	}
-	for _, e := range rdpEnded {
-		if strings.Contains(t, "ERRINFO_"+e.code) {
-			return e.text
-		}
-	}
-	if strings.Contains(t, "CERTIFICATE") && (strings.Contains(t, "CHANGED") || strings.Contains(t, "MISMATCH")) {
-		return "El certificado del servidor ha cambiado desde la última conexión. Puede ser normal (se renovó) o un intento de suplantación: compruébalo con quien administra el servidor."
-	}
-	for _, m := range rdpMessages {
-		for _, c := range m.codes {
-			if strings.Contains(t, "ERRCONNECT_"+c) {
-				return m.text
-			}
-		}
-	}
-	switch code {
-	case 0, 1, 2, 12, 13: // closed normally, logoff or disconnect
-		return ""
-	}
-	var lines []string
-	for _, l := range strings.Split(strings.TrimSpace(log), "\n") {
-		// Kerberos is tried first and, without a reachable KDC for the domain, NTLM follows: not the error
-		// fusermount3: copying files through the clipboard needs FUSE (text works without it)
-		if l != "" && !strings.Contains(l, "sspi.Kerberos") && !strings.Contains(l, "default realm") && !strings.Contains(l, "fusermount") {
-			lines = append(lines, l)
-		}
-	}
-	if len(lines) > 6 {
-		lines = lines[len(lines)-6:]
-	}
-	return fmt.Sprintf("La conexión terminó con un error (código %d).\n%s", code, strings.Join(lines, "\n"))
+		"-grab-keyboard",
+		"/size:85%", "+clipboard", "/sound:sys:pulse", "/microphone:sys:pulse", "/printer")
+	return append(a, freerdp.DriveArgs()...)
 }
 
 // rdpState: GET /api/rdp. Whether the client is installed and the open remote desktops.
 func (s *Servidor) rdpState(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	bin := rdpClient()
+	bin := freerdp.SDLClient()
 	_, err := os.Stat(bin)
 	s.escritorios.mu.Lock()
 	l := []rdpConn{}
@@ -226,14 +119,14 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		return
 	}
 	p.Host, p.User, p.Name = strings.TrimSpace(p.Host), strings.TrimSpace(p.User), strings.TrimSpace(p.Name)
-	if u, _ := rdpUser(p.User); p.Host == "" || u == "" || strings.ContainsAny(p.Host+p.User, " \n\r") {
-		jsonError(w, http.StatusBadRequest, "hacen falta el equipo y el usuario (DOMINIO\\usuario o usuario, sin espacios)")
+	if err := freerdp.ValidateTarget(p.Host, p.User); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if p.Name == "" {
 		p.Name = p.Host
 	}
-	bin := rdpClient()
+	bin := freerdp.SDLClient()
 	if _, err := os.Stat(bin); bin == "" || err != nil {
 		jsonError(w, http.StatusServiceUnavailable, "falta FreeRDP: ejecuta connectors/instala.sh")
 		return
@@ -258,8 +151,7 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		jsonError(w, http.StatusInternalServerError, "no arranca FreeRDP: "+err.Error())
 		return
 	}
-	stdin.Write([]byte(p.Password + "\n"))
-	stdin.Close()
+	freerdp.SendPassword(stdin, p.Password)
 	p.Password = ""
 	s.escritorios.mu.Lock()
 	if s.escritorios.conns == nil {
@@ -282,7 +174,7 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		s.escritorios.mu.Lock()
 		c.State = "terminado"
 		if !c.closed {
-			c.Error = rdpExplain(log.String(), code)
+			c.Error = freerdp.Explain(log.String(), code)
 		}
 		s.escritorios.mu.Unlock()
 		close(c.finished)
