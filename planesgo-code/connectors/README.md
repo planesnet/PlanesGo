@@ -5,8 +5,6 @@ Conectores de pgocode para entrar en servidores remotos, la persona y el agente.
 ```
 connectors/
 ├── instala.sh        instala sin root lo que necesitan (Linux)
-├── rdp/
-│   └── rdp.py        escritorio remoto para el agente (pantalla virtual: capturas, ratón, teclado, vídeo)
 └── winrm/
     └── ps.py         PowerShell remoto: órdenes, ficheros y auditoría
 ```
@@ -15,7 +13,8 @@ Pendientes: `ssh/` (túnel para RDP, SQL Server, ficheros y WinRM) y otros cuand
 
 Solo protocolos estándar y sus versiones modernas: RDP con FreeRDP (sin VNC), sin compatibilidad con servidores
 antiguos. Las contraseñas las escribe siempre la persona (en un diálogo o en un terminal); los conectores no las
-reciben ni las guardan.
+reciben ni las guardan. Los dos escritorios remotos (el de la persona y el del agente) son parte de pgocode, en Go;
+aquí solo queda lo que instalan y el PowerShell remoto.
 
 Por ahora son **solo para Linux** (Xvfb, xdotool, zenity, paquetes de Ubuntu). pgocode tiene que funcionar también
 en Windows: allí el cliente de la persona sería el de Windows (`mstsc` con un fichero `.rdp`) y el resto necesita
@@ -47,7 +46,8 @@ código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer
 Es parte de pgocode, no de esta carpeta: `pgocode --rdp` abre la app en modo escritorio remoto (con pgocode ya abierto,
 la misma instancia y la misma sesión; si no, el acceso de siempre). Código: `electron/main.js` (instancia única y
 ventana), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo de pgocode) e
-`internal/servidor/rdp.go` (abre FreeRDP e imputa). La ventana pide:
+`internal/servidor/rdp.go` (abre FreeRDP e imputa; lo común con el escritorio del agente, en `internal/freerdp`). La
+ventana pide:
 
 1. **Proyecto** (obligatorio), con el buscador de la barra de proyectos: el tiempo se imputa en él con el servicio
    de imputación de pgocode, mientras la sesión está conectada y hay uso del teclado o el ratón (inactividad de
@@ -81,30 +81,46 @@ el de la conexión abierta desde pgocode, el último de ese equipo o, en las ent
 todas; si no hay, no se imputa y pgocode lo pide en un diálogo (en esta ventana y en la principal). Ajustes en
 `anydesk.json` de la carpeta de datos (sin secretos).
 
-## Escritorio remoto para el agente: `rdp/rdp.py`
+## Escritorio del agente: propiedades de la sesión y `pgo escritorio`
+
+Es parte de pgocode (en Go), como la conexión con SQL Server de la sesión: un servicio del backend, porque la pantalla
+virtual corre donde corren los agentes. Código: `internal/agentdesktop` (pantalla virtual, FreeRDP, capturas, ratón,
+teclado y vídeo), `internal/freerdp` (lo común con el escritorio de la persona: ajustes de seguridad, contraseña por
+la entrada, errores), `internal/servidor/agentdesktop.go` (la conexión de cada sesión, la orden del agente y la
+auditoría), `cmd/pgocode/pgo_desktop.go` (`pgo escritorio`) y `web/src/componentes/AgentDesktopSettings.tsx`.
+
+1. La persona abre las propiedades de la sesión → **Escritorio del agente**: equipo (y `:puerto` si no es el 3389),
+   usuario (`DOMINIO\usuario` o `usuario`), contraseña, tamaño (1600x900 por defecto) y **Teclado Unicode**
+   (activado por defecto), y pulsa **Iniciar**. Ahí ve el estado, la carpeta de intercambio y el vídeo, y lo para.
+2. Los agentes de **esa** sesión lo usan (los de otras sesiones, no):
 
 ```sh
-connectors/rdp/rdp.py inicia --host 192.168.125.229 --usuario 'DOMINIO\usuario'   # pide la contraseña ahí
-connectors/rdp/rdp.py captura f.png --escala 0.6
-connectors/rdp/rdp.py clic 300 150 [--doble|--derecho]     # coordenadas de la última captura
-connectors/rdp/rdp.py escribe "texto"
-connectors/rdp/rdp.py tecla ctrl+s Return
-connectors/rdp/rdp.py tamaño 1920x1080                     # cambia el tamaño en caliente
-connectors/rdp/rdp.py graba inicio | graba fin             # vídeo en …/pgocode-connectors/intercambio/grabaciones
-connectors/rdp/rdp.py estado | para
+pgo escritorio captura [--escala 0.6]        # en .pgocode/salidas de su carpeta; devuelve la ruta para leerla
+pgo escritorio clic 300 150 [--doble|--derecho]   # coordenadas de la última captura (con su escala)
+pgo escritorio mueve X Y | arrastra X1 Y1 X2 Y2 | rueda arriba|abajo [N]
+pgo escritorio escribe "texto"
+pgo escritorio tecla ctrl+s Return              # nombres de xdotool
+pgo escritorio tamaño 1920x1080                 # cambia el tamaño en caliente
+pgo escritorio graba inicio | graba fin         # vídeo en …/pgocode-connectors/intercambio/grabaciones
+pgo escritorio estado
 ```
 
-- **Seguridad**: la misma que el cliente (NLA, `seclevel:2`, AVC444). La contraseña se lee de la entrada estándar
-  antes de conectar (en un terminal, sin eco).
-- **Tamaño**: con `--tamaño auto` (por defecto) toma la resolución del servidor si el puente WinRM está arrancado;
-  si no, 1600x900. La pantalla virtual es un lienzo fijo de 3840x2160 y lo que cambia es la ventana de FreeRDP,
-  que con resolución dinámica pide al servidor que ajuste su sesión; capturas y vídeo se recortan a ella.
-- **Teclado**: `--teclado unicode` (por defecto) manda el texto como Unicode por la tubería de FreeRDP: acentos, ñ
-  y € llegan tal cual sea cual sea la distribución de teclado del servidor (Windows lo admite).
-  `--teclado teclas` manda códigos de tecla: solo ASCII fiable.
-- **Comunicaciones**: la carpeta de intercambio aparece en el servidor como `\\tsclient\intercambio` y el
-  portapapeles de texto se comparte.
-- `--acepta-certificado` es solo para servidores de prueba.
+- **Seguridad**: la misma que el cliente de la persona (NLA, `seclevel:2`, certificado aceptado la primera vez y
+  aviso si cambia, AVC444). La contraseña va del backend a la entrada estándar de FreeRDP, que se cierra después:
+  nunca en argumentos, registros ni ficheros; se pierde al parar. La pantalla virtual (Xvfb) solo escucha por su
+  socket local y con una cookie X propia (otro usuario del equipo no puede mirarla). Cada orden de los agentes va a
+  `escritorio-auditoria.jsonl` de la carpeta de datos de pgocode (de `escribe`, solo cuántos caracteres).
+- **Pantalla**: un lienzo fijo de 3840x2160 en una pantalla virtual libre; lo que cambia es la ventana de FreeRDP,
+  que con resolución dinámica pide al servidor que ajuste su sesión; capturas (ImageMagick `import`) y vídeo
+  (`ffmpeg`) se recortan a ella.
+- **Teclado**: Unicode manda el texto por la tubería de FreeRDP (acentos, ñ y € llegan tal cual sea cual sea la
+  distribución de teclado de Windows); sin él, `xdotool type` (solo ASCII fiable).
+- **Comunicaciones**: la carpeta de intercambio aparece en Windows como `\\tsclient\Intercambio` y el portapapeles
+  de texto se comparte.
+- La cookie X y la tubería del teclado van en `$XDG_RUNTIME_DIR/rdp-agente` (sin `XDG_RUNTIME_DIR` no arranca: nada
+  de `/tmp`; si la carpeta no es propia con permisos 700, se niega a usarla). Al cerrar pgocode se para todo y,
+  mientras haya uno abierto, pgocode no se actualiza.
+- Solo Linux (Xvfb, X11): en Windows y macOS dice que no está disponible.
 
 ## PowerShell remoto: `winrm/ps.py`
 
@@ -123,21 +139,26 @@ Por defecto va por HTTP (5985), donde NTLM cifra cada mensaje. Con `--https` va 
 certificado del servidor (`--ca` para una CA propia); hay que activarlo antes en Windows (un listener HTTPS de
 WinRM con su certificado). El servidor de Sage (192.168.125.229) no lo tiene abierto.
 
-`rdp.py` y `ps.py` guardan su estado, la tubería del teclado y el socket del puente en `$XDG_RUNTIME_DIR/rdp-agente`.
-Sin `XDG_RUNTIME_DIR` no arrancan (nada de `/tmp`, donde otro usuario podría crear antes la carpeta), y si la carpeta
-no es propia con permisos 700 se niegan a usarla.
+`ps.py` guarda el socket del puente en `$XDG_RUNTIME_DIR/rdp-agente`. Sin `XDG_RUNTIME_DIR` no arranca (nada de
+`/tmp`, donde otro usuario podría crear antes la carpeta), y si la carpeta no es propia con permisos 700 se niega a
+usarla.
 
 ## Probado
 
-Contra servidores RDP locales de prueba (`freerdp-shadow-cli` en 127.0.0.1:3390 sobre otra pantalla virtual, con y
-sin NLA):
+Contra servidores RDP locales de prueba (`freerdp-shadow-cli` sobre otra pantalla virtual, con NLA):
 
 - `pgocode --rdp`: conexión real al servidor de Sage (192.168.125.229) con imputación en su proyecto; pruebas de
   `internal/servidor/rdp_test.go` (proyecto obligatorio, contraseña solo por la entrada de FreeRDP, opciones,
   usuario con dominio y mensajes de error).
-- `rdp/rdp.py` con FreeRDP 3.32.2 y NLA: conexión, contraseña incorrecta rechazada, captura, clic, escritura y
-  teclas (modo `teclas`), cambio de tamaño en caliente y grabación.
+- Escritorio del agente, con FreeRDP 3.32.2: `go test -tags integracion ./internal/agentdesktop/` arranca
+  `freerdp-shadow-cli` en 127.0.0.1:3392 (pantalla :83, usuario de un fichero SAM con una contraseña aleatoria) y el
+  escritorio del agente en :84: contraseña incorrecta rechazada con su motivo, conexión, captura escalada, el ratón
+  llega al servidor en las coordenadas de la captura, clic, doble clic derecho, arrastre, rueda, teclas, texto por
+  la tubería Unicode, cambio de tamaño en caliente, grabación y parada sin dejar nada. Además, pruebas con programas
+  simulados (`internal/agentdesktop`, `internal/servidor/agentdesktop_test.go`): argumentos, contraseña solo por la
+  entrada, escalado, validación, auditoría sin secretos y que el agente de otra sesión no puede usarlo.
 
 Sin probar todavía, porque necesitan el Windows real: la ventana SDL3 en el escritorio, que se vean las impresoras
-y se oiga el sonido, el modo `unicode`, la resolución automática y `winrm/ps.py`. El paso de `instala.sh` que
-compila FreeRDP reproduce lo hecho a mano, pero no se ha ejecutado desde cero.
+y se oiga el sonido, que el texto Unicode llegue a Windows tal cual (el servidor de prueba no lo muestra) y
+`winrm/ps.py`. El paso de `instala.sh` que compila FreeRDP reproduce lo hecho a mano, pero no se ha ejecutado desde
+cero.

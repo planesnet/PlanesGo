@@ -40,6 +40,14 @@ const sqlHint = "(pgocode: para consultar SQL Server usa la orden de terminal «
 // sqlWords: el mensaje habla de SQL Server, de una base de datos o de Sage.
 var sqlWords = regexp.MustCompile(`(?i)\bsql\b|\bt-sql\b|\bmssql\b|\bsage\b|\bbases?\s+de\s+datos\b|\bconsultas?\s+sql\b`)
 
+// desktopHint: how to use «pgo escritorio» (the session's agent desktop, if the person has started it).
+const desktopHint = "(pgocode: para manejar el escritorio remoto (Windows por RDP) usa la orden de terminal «pgo» con el escritorio del agente de esta sesión (lo inicia la persona; tú no ves la contraseña): " +
+	"`pgo escritorio captura [--escala 0.6]` (te da la ruta de la imagen: léela), `pgo escritorio clic X Y [--doble|--derecho]`, `mueve X Y`, `arrastra X1 Y1 X2 Y2` (coordenadas de la última captura), " +
+	"`rueda arriba|abajo [N]`, `escribe \"texto\"`, `tecla ctrl+s Return`, `tamaño 1920x1080`, `graba inicio|fin`, `estado`. Si dice que la sesión no tiene escritorio, pídeselo al usuario.)"
+
+// desktopWords: the message is about a remote desktop, RDP or the screen of a Windows computer.
+var desktopWords = regexp.MustCompile(`(?is)\bescritorio\s+(?:remoto|del\s+agente)\b|\brdp\b|\bwindows\b.*\b(?:pantalla|captura|ventana|clic)|\b(?:pantalla|captura|clic)\b.*\bwindows\b`)
+
 var (
 	pgoWord = regexp.MustCompile(`(?i)\bpgo\b`)
 	pgoVerb = regexp.MustCompile(`(?i)\bpgo\s+(?:ejecutar|parar|procesos|salida|abrir)\b|\b(?:ejecut|arranc|lanz|levant|parar|det[eé]n|salida|abr[eií]|procesos?|programas?|servidor)`)
@@ -47,7 +55,7 @@ var (
 
 // pgoHintFor: la línea de uso de «pgo» si el mensaje la menciona (ejecutar, parar, salida, abrir…) y la de
 // «pgo drive» si habla de Google Drive, Docs o Sheets, la de «pgo gmail» si habla del correo y la de «pgo sql» si habla
-// de SQL Server, bases de datos o Sage; "" si nada. Las órdenes («/pgo …», la skill de imputación)
+// de SQL Server, bases de datos o Sage y la de «pgo escritorio» si habla de un escritorio remoto o de la pantalla de Windows; "" si nada. Las órdenes («/pgo …», la skill de imputación)
 // no cuentan.
 func pgoHintFor(text string) string {
 	t := strings.TrimSpace(text)
@@ -66,6 +74,9 @@ func pgoHintFor(text string) string {
 	}
 	if sqlWords.MatchString(t) {
 		hs = append(hs, sqlHint)
+	}
+	if desktopWords.MatchString(t) {
+		hs = append(hs, desktopHint)
 	}
 	return strings.Join(hs, "\n")
 }

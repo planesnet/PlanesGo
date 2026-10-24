@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/agentdesktop"
 	"planesgo-code/internal/bugreport"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
@@ -141,8 +142,13 @@ type Servidor struct {
 	// escritorios: los escritorios remotos abiertos (rdp.go).
 	escritorios rdpSessions
 	// sqls: las conexiones con SQL Server de las sesiones de trabajo (sqlconn.go); SQLAudit: su registro de auditoría.
-	sqls     sqlConns
+	sqls     sessionConns[*sqlConn]
 	SQLAudit string
+	// agentDesktops: the agents' desktops of the work sessions (agentdesktop.go); AgentDesktopAudit: the log of their
+	// orders; agentDesktopOptions replaces the programs and folders in the tests.
+	agentDesktops       sessionConns[*agentDesktop]
+	AgentDesktopAudit   string
+	agentDesktopOptions func() (agentdesktop.Options, error)
 	// anydesk: the AnyDesk sessions seen in its traces (anydesk.go); AnyDeskFile: its settings (default project and
 	// the project of each remote computer).
 	anydesk     anydeskSessions
@@ -247,6 +253,9 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sql/run", s.conSesion(s.sqlRunUI))
 	mux.HandleFunc("POST /api/sql/mode", s.conSesion(s.sqlMode))
 	mux.HandleFunc("POST /api/sql/database", s.conSesion(s.sqlDatabase))
+	mux.HandleFunc("GET /api/agent-desktop", s.conSesion(s.agentDesktopState))
+	mux.HandleFunc("POST /api/agent-desktop/start", s.conSesion(s.agentDesktopStart))
+	mux.HandleFunc("POST /api/agent-desktop/stop", s.conSesion(s.agentDesktopStop))
 	mux.HandleFunc("POST /api/rdp/conectar", s.conSesion(s.rdpConnect))
 	mux.HandleFunc("POST /api/rdp/desconectar", s.conSesion(s.rdpDisconnect))
 	mux.HandleFunc("GET /api/anydesk", s.conSesion(s.anydeskState))
@@ -544,6 +553,8 @@ func (s *Servidor) TrabajoEnCurso() string {
 		return "hay un escritorio remoto abierto"
 	case s.anydesk.open() > 0:
 		return "hay una sesión de AnyDesk abierta"
+	case s.agentDesktopsRunning() > 0:
+		return "hay un escritorio del agente abierto"
 	}
 	return ""
 }

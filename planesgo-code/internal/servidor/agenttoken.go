@@ -96,6 +96,8 @@ var agentEndpoints = map[string]string{
 	"gmail-leer": http.MethodGet,
 	// SQL Server de la sesión del agente (sqlconn.go): solo lectura salvo que la conexión permita cambios.
 	"sql": http.MethodPost,
+	// Escritorio del agente de su sesión (agentdesktop.go): capturas, ratón y teclado.
+	"escritorio": http.MethodPost,
 }
 
 // agentEndpointAllowed: la orden está en la lista blanca con ese método.

@@ -3,7 +3,8 @@
 #  - FreeRDP compilado desde la última versión publicada (SDL3 para la persona, X11 para el agente), con solo lo
 #    moderno: H.264 por ffmpeg, PulseAudio, CUPS, FUSE y Kerberos. Código verificado con su SHA-256 y con los
 #    parches de connectors/freerdp, si los hay.
-#  - Xvfb, xdotool y el servidor RDP de prueba (freerdp-shadow-cli): paquetes de Ubuntu desempaquetados.
+#  - Xvfb y xdotool (el escritorio del agente de pgocode) y el servidor RDP de prueba (freerdp-shadow-cli): paquetes
+#    de Ubuntu desempaquetados. Las capturas y el vídeo usan import (ImageMagick) y ffmpeg del sistema.
 #  - pywinrm (PowerShell remoto) en un venv.
 # Todo va en ~/.local/opt/rdp-agente. Se puede repetir: lo ya hecho no se rehace.
 set -eu

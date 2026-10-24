@@ -38,7 +38,8 @@ SQL Server de la sesión (la conexión la define la persona en las propiedades d
                                    resultados en texto separado por tabuladores (200 filas por resultado; --filas
                                    hasta 5000). Solo lectura: lo que cambie la orden se deshace al acabar. --escribir
                                    solo vale si la persona ha permitido los cambios en esa conexión
-`
+
+` + desktopHelp
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
 func pgo(args []string) int {
@@ -188,6 +189,21 @@ func pgo(args []string) int {
 		var r sqlResult
 		json.Unmarshal(raw, &r)
 		fmt.Print(sqlText(r))
+	case "escritorio":
+		dir, _ := os.Getwd() // las capturas van a su .pgocode/salidas
+		body, err := desktopArgs(args[1:], dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgo escritorio: %v\n", err)
+			fmt.Fprint(os.Stderr, desktopHelp)
+			return 2
+		}
+		raw, err := llama("POST", "escritorio", body, nil)
+		if err != nil {
+			return falla(err)
+		}
+		var r struct{ Text string }
+		json.Unmarshal(raw, &r)
+		fmt.Println(strings.TrimRight(r.Text, "\n"))
 	case "drive", "gmail":
 		q, err := googleQuery(args[0], args[1:])
 		if err != nil {

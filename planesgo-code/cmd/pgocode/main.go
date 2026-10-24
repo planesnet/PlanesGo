@@ -403,6 +403,8 @@ func main() {
 	// cierre.log y se informan al arrancar la vez siguiente).
 	// Auditoría de SQL Server: cada orden que llega a las conexiones de las sesiones (la orden, no los datos).
 	s.SQLAudit = filepath.Join(datos, "sql-auditoria.jsonl")
+	// Y la del escritorio del agente: cada orden de los agentes (nunca el texto que escriben).
+	s.AgentDesktopAudit = filepath.Join(datos, "escritorio-auditoria.jsonl")
 	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
 	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
 		s.Errores.Repo = v

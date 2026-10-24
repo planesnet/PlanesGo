@@ -67,3 +67,16 @@ func TestSQLHint(t *testing.T) {
 		}
 	}
 }
+
+func TestDesktopHint(t *testing.T) {
+	for _, m := range []string{"entra por el escritorio remoto y abre Sage", "conéctate por RDP al servidor", "haz una captura de la pantalla de Windows", "en Windows, haz clic en Aceptar"} {
+		if !strings.Contains(pgoHintFor(m), "pgo escritorio") {
+			t.Errorf("%q: sin la pista del escritorio", m)
+		}
+	}
+	for _, m := range []string{"compila para Windows", "arregla la captura de pantalla de la web", "/pgo escritorio"} {
+		if strings.Contains(pgoHintFor(m), "pgo escritorio") {
+			t.Errorf("%q: no debería llevar la pista del escritorio", m)
+		}
+	}
+}
