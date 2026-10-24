@@ -48,7 +48,17 @@ paquete de la app incluye `connectors/`). En desarrollo, también con `python3 -
 1. Lista de conexiones guardadas o «Nueva conexión…» (nombre, equipo `nombre o IP[:puerto]`, usuario, dominio).
 2. Opciones de esa conexión (se recuerdan): portapapeles (texto y ficheros), impresoras de este equipo (todas las
    de CUPS), sonido, micrófono, carpeta compartida (en Windows, «Intercambio») y pantalla completa.
-3. Contraseña en su propio diálogo: pasa del diálogo a FreeRDP por una tubería; no se guarda en ningún sitio.
+3. **Proyecto de Odoo al que se imputa el tiempo (obligatorio)**: se ofrece el último de la conexión o se busca
+   por nombre. Sin proyecto no se conecta.
+4. Contraseña en su propio diálogo: pasa del diálogo a FreeRDP por una tubería; no se guarda en ningún sitio.
+
+**Imputación.** El cliente es independiente: no necesita pgocode abierto, ni git, ni carpeta de proyecto. El tiempo
+va a Odoo por PlanesGo con `pgo-mcp` (el token de PlanesGo de este equipo), como las sesiones de Claude Code o
+Antigravity fuera de pgocode: antes de conectar se comprueba que PlanesGo admite imputar en ese proyecto
+(`--check`); con la sesión conectada y uso del teclado o el ratón (inactividad de GNOME), un latido cada 30 s
+(`--beat`, tarea «Escritorio remoto», tipo Desarrollo); tras 10 minutos sin uso se cierra el parte (`--stop`) y,
+al volver, se abre otro; al terminar se cierra. Si un latido falla, avisa sin cortar la sesión. Dentro de pgocode
+no se lanza así (allí imputa pgocode: `pgo-mcp` está bloqueado).
 
 Solo seguridad moderna: NLA (`/sec:nla`), nivel 2 de OpenSSL (`/tls:seclevel:2`), certificado aceptado la primera
 vez y aviso si cambia (`/cert:tofu`). Gráficos H.264 4:4:4 (`/gfx:AVC444`). La ventana se puede redimensionar y

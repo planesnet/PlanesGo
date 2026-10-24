@@ -7,13 +7,22 @@ se pide en su propio diálogo y pasa del diálogo a FreeRDP por una tubería: es
 
 La ventana se puede redimensionar y la sesión de Windows se adapta a su tamaño. Ctrl+Alt+Intro: pantalla completa.
 Las conexiones (sin contraseña) se guardan en ~/.config/pgocode-connectors/conexiones.json.
+
+Imputación: toda conexión exige un proyecto de Odoo, que se pide al conectar (se recuerda el último). Se lanza de
+forma independiente (pgocode --rdp), sin sesión de pgocode, git ni carpeta de proyecto: el tiempo va a Odoo por
+PlanesGo con pgo-mcp (su token en este equipo). Mientras la sesión está conectada y hay uso del teclado o el ratón
+(inactividad de GNOME), un latido cada 30 s; tras 10 minutos sin uso se cierra el parte y, al volver, se abre otro.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import uuid
 
 # FreeRDP built from source by instala.sh (latest upstream release; SDL3 client: native Wayland, HiDPI)
 FREERDP = os.path.expanduser("~/.local/opt/rdp-agente/freerdp")
@@ -22,6 +31,16 @@ CONFIG = os.path.expanduser("~/.config/pgocode-connectors/conexiones.json")
 SHARED = os.path.expanduser("~/.local/share/pgocode-connectors/intercambio")
 TITLE = "Escritorio remoto"
 NEW = "➕ Nueva conexión…"
+OTHER = "🔎 Otro proyecto…"
+
+# Time logging through PlanesGo (pgo-mcp). PGO_MCP overrides the binary (tests).
+PGO_MCP = os.environ.get("PGO_MCP") or shutil.which("pgo-mcp") or os.path.expanduser("~/.local/bin/pgo-mcp")
+WORK_DIR = os.path.expanduser("~/.local/share/pgocode-connectors")  # pgo-mcp wants a folder; no project folder needed
+TASK = "Escritorio remoto"
+TASK_TYPE = "Desarrollo"
+BEAT_EVERY = 30         # seconds between heartbeats
+FIRST_BEAT_AFTER = 10   # seconds connected before the first one (a failed login logs nothing)
+IDLE_LIMIT = 10 * 60    # seconds without keyboard or mouse: the part is closed
 
 # (key, label, on by default)
 OPTIONS = [
@@ -101,6 +120,111 @@ def options(c):
     return c
 
 
+def pgo_mcp(*args, timeout=30):
+    """Runs pgo-mcp; returns (ok, output)."""
+    try:
+        r = subprocess.run([PGO_MCP, *args], capture_output=True, text=True, timeout=timeout)
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+
+
+def search_projects(text):
+    """[(id, name)] of the Odoo projects matching text (pgo-mcp prints «N. [id] name»)."""
+    ok, out = pgo_mcp("--project", text)
+    found = [(int(m[1]), m[2].strip()) for m in re.finditer(r"^\s*\d+\.\s*\[(\d+)\]\s*(.+)$", out, re.M)]
+    return found, (None if ok or found else out)
+
+
+def choose_project(c):
+    """The Odoo project to log the time to (mandatory). The connection's last one is offered first."""
+    cur = c.get("proyecto")
+    if cur:
+        pick = zenity("--list", "--width=520", "--height=260", "--text=Proyecto de Odoo al que se imputa el tiempo:",
+                      "--column=ID", "--column=Proyecto", str(cur["id"]), cur["nombre"], "", OTHER)
+        if pick is None:
+            return None
+        if pick.split("|")[0] == str(cur["id"]):
+            return c
+    text = zenity("--entry", "--width=420", "--text=Proyecto de Odoo al que se imputa el tiempo (busca por nombre):",
+                  f"--entry-text={cur['nombre'] if cur else ''}")
+    if text is None:
+        return None
+    if not text.strip():
+        return choose_project(c)
+    found, err = search_projects(text.strip())
+    if not found:
+        error(f"No se ha podido buscar en PlanesGo:\n{err}" if err else f"Ningún proyecto coincide con «{text}».")
+        return choose_project(c)
+    rows = [x for pid, name in found for x in (str(pid), name)]
+    pick = zenity("--list", "--width=520", "--height=360", f"--text=Proyectos que coinciden con «{text}»:",
+                  "--column=ID", "--column=Proyecto", *rows)
+    if pick is None:
+        return choose_project(c)
+    pid = int(pick.split("|")[0])
+    c["proyecto"] = {"id": pid, "nombre": dict(found)[pid]}
+    return c
+
+
+def idle_seconds():
+    """Seconds without keyboard or mouse on this desktop (GNOME); None if unknown."""
+    try:
+        r = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.IdleMonitor",
+                            "--object-path", "/org/gnome/Mutter/IdleMonitor/Core",
+                            "--method", "org.gnome.Mutter.IdleMonitor.GetIdletime"],
+                           capture_output=True, text=True, timeout=5)
+        m = re.search(r"(\d+)", r.stdout)
+        return int(m[1]) / 1000 if r.returncode == 0 and m else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+class TimeLog(threading.Thread):
+    """Logs the remote desktop time to the connection's project while FreeRDP is connected and in use."""
+
+    def __init__(self, c, rdp):
+        super().__init__(daemon=True)
+        self.rdp = rdp
+        self.open = False
+        self.warned = False
+        self.done = threading.Event()
+        self.base = ["--project-id", str(c["proyecto"]["id"]), "--path", WORK_DIR, "--task", TASK,
+                     "--type", TASK_TYPE, "--model", TITLE, "--session-id", "rdp-" + uuid.uuid4().hex[:12],
+                     "--desc", f"Escritorio remoto en {c['nombre']} ({c['equipo']}) como {c['usuario']}"]
+
+    def warn(self, out):
+        if not self.warned:  # once; does not block the session
+            self.warned = True
+            subprocess.Popen(["zenity", f"--title={TITLE}", "--warning", "--no-markup", "--width=420",
+                              f"--text=No se está imputando el tiempo en Odoo:\n{out}"])
+
+    def run(self):
+        start = time.monotonic()
+        while not self.done.wait(BEAT_EVERY if self.open else min(5, BEAT_EVERY)):
+            if self.rdp.poll() is not None or time.monotonic() - start < FIRST_BEAT_AFTER:
+                continue
+            idle = idle_seconds()
+            if idle is None or idle < IDLE_LIMIT:
+                ok, out = pgo_mcp("--beat", *self.base)
+                self.open = self.open or ok
+                if not ok:
+                    self.warn(out)
+            elif self.open:
+                self.close()
+
+    def close(self):
+        if self.open:
+            ok, out = pgo_mcp("--stop", *self.base)
+            self.open = not ok
+            if not ok:
+                self.warn(out)
+
+    def finish(self):
+        self.done.set()
+        self.join(timeout=5)
+        self.close()
+
+
 def freerdp_args(c):
     """Modern settings only: no fallbacks for old servers (this is a development tool, not a product)."""
     o = c["opciones"]
@@ -172,7 +296,10 @@ def connect(c):
             rdp.terminate()
             rdp.wait()
             return
+        timelog = TimeLog(c, rdp)
+        timelog.start()
         code = rdp.wait()
+        timelog.finish()
         log.seek(0)
         text = log.read()
     # 0: closed normally; 1/2/12/13: the user or Windows ended the session (logoff, disconnect); cancelled: the
@@ -186,12 +313,26 @@ def main():
         sys.exit("falta zenity")
     if not os.access(CLIENT, os.X_OK):
         sys.exit("falta FreeRDP: ejecuta connectors/instala.sh")
+    if os.environ.get("PGO_EJECUCION") or os.environ.get("PLANESGO_GESTOR") == "pgocode":
+        error("Dentro de pgocode la imputación la hace pgocode: abre el escritorio remoto con «pgocode --rdp».")
+        return
+    if not os.access(PGO_MCP, os.X_OK):
+        error("Falta pgo-mcp (PlanesGo): sin él no se puede imputar el tiempo y no se conecta.")
+        return
     conns = load()
     c = choose(conns)
     if c is None:
         return
     c = options(c)
     if c is None:
+        return
+    c = choose_project(c)  # mandatory: the time always goes to an Odoo project
+    if c is None:
+        return
+    os.makedirs(WORK_DIR, exist_ok=True)
+    ok, out = pgo_mcp("--check", "--project-id", str(c["proyecto"]["id"]), "--path", WORK_DIR, "--task", TASK)
+    if not ok:
+        error(f"PlanesGo no acepta imputar en ese proyecto, así que no se conecta:\n{out}")
         return
     conns = [x for x in conns if x["nombre"] != c["nombre"]] + [c]
     save(sorted(conns, key=lambda x: x["nombre"].lower()))
