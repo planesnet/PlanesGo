@@ -30,8 +30,9 @@ connectors/instala.sh
 Todo va en `~/.local/opt/rdp-agente`, sin `sudo` (no funciona dentro de la app):
 
 - **FreeRDP** compilado desde la última versión publicada (`FREERDP_VERSION` y su SHA-256 en el script) y, si los hay,
-  los parches de `freerdp/*.patch`. Se compila una vez: solo se recompila si cambian la versión o los parches (su huella se
-  guarda junto al binario):
+  los parches de `freerdp/*.patch`. Se compila una vez: solo se recompila si cambian la versión o los parches. Cada
+  compilación va en su carpeta (`freerdp-<versión>-<huella de los parches>`) y el enlace `freerdp` se cambia al final,
+  de golpe: los escritorios abiertos siguen con la suya y las carpetas viejas se borran cuando nadie las usa:
   cliente SDL3 para la persona (Wayland nativo), cliente X11 para el agente, H.264 (AVC444) por ffmpeg, sonido por
   PulseAudio/PipeWire, impresoras CUPS, portapapeles con ficheros (FUSE) y Kerberos. Sin ALSA ni OSS, servidor,
   proxy, tarjetas inteligentes ni USB.
