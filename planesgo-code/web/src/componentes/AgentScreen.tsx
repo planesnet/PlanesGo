@@ -9,12 +9,17 @@ import { Modal } from './Modal';
 
 const FRAME_MS = 400;
 const TYPE_MS = 120; // characters typed close together go in one order
+const MAX_KEY = 'pgo:pantalla-agente:maximizada';
+const readMax = () => { try { return localStorage.getItem(MAX_KEY) === '1'; } catch { return false; } };
 
 export default function AgentScreen({ project, session, onClose }: { project: number; session: string; onClose: () => void }) {
   const [src, setSrc] = useState('');
   const [size, setSize] = useState<[number, number]>([0, 0]);
   const [error, setError] = useState('');
   const [held, setHeld] = useState(false);
+  // The window is resized from its corner, or fills the app's window (remembered in this browser).
+  const [max, setMax] = useState(readMax);
+  const toggleMax = () => setMax(m => { try { localStorage.setItem(MAX_KEY, m ? '0' : '1'); } catch { /* no storage */ } return !m; });
   const img = useRef<HTMLImageElement>(null);
   const pending = useRef('');
   const timer = useRef(0);
@@ -91,12 +96,14 @@ export default function AgentScreen({ project, session, onClose }: { project: nu
   const giveBack = () => post('/api/agent-desktop/hold', { project, session, hold: false }).then(() => setHeld(false)).catch(() => {});
 
   return (
-    <Modal title="Pantalla del agente" className="dialog pantalla-agente" onClose={onClose}
+    <Modal title="Pantalla del agente" className={'pantalla-agente' + (max ? ' maximizada' : '')} onClose={onClose}
       footer={<>
         <span className="suave pequeno">{held
           ? 'La estás usando tú: el agente espera (hasta que la sueltes, cierres o pasen 2 minutos sin usarla). Lo que escribes no se guarda en ningún sitio.'
           : 'Haz clic en la imagen y escribe: el ratón y el teclado van a Windows. Mientras la uses, el agente espera.'}</span>
+        {src && error && <span className="aviso-txt pequeno" role="alert">{error}</span>}
         <span className="hueco" />
+        <button type="button" onClick={toggleMax} title={max ? 'Volver al tamaño anterior' : 'Ocupar toda la ventana'}>{max ? 'Restaurar' : 'Maximizar'}</button>
         {held && <button type="button" onClick={giveBack}>Devolvérsela al agente</button>}
         <button type="button" className="primario" onClick={onClose}>Cerrar</button>
       </>}>
@@ -105,7 +112,6 @@ export default function AgentScreen({ project, session, onClose }: { project: nu
           ? <img ref={img} src={src} alt="Pantalla del escritorio del agente" draggable={false}
               onMouseDown={onDown} onMouseUp={onUp} onDoubleClick={onDouble} onContextMenu={onRight} onWheel={onWheel} />
           : <p className="suave">{error || 'Cargando la pantalla…'}</p>}
-        {src && error && <div className="aviso-txt pequeno" role="alert">{error}</div>}
       </div>
     </Modal>
   );

@@ -1173,9 +1173,14 @@ button.miga-item:hover { background: var(--hover); }
 .lista-clientes li { align-items: center; gap: 8px; min-width: 0; }
 .fila-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } /* two fields per row (Escritorio del agente) */
 @media (max-width: 560px) { .fila-dos { grid-template-columns: 1fr; } }
-/* Pantalla del agente: the agent desktop's screen, live, used with the person's mouse and keyboard. */
-.pantalla-agente { width: min(96vw, 1700px); max-width: none; }
-.pantalla-agente-cuerpo { outline: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* Pantalla del agente: the agent desktop's screen, live, used with the person's mouse and keyboard. The window is
+   resized from its corner (or maximized); the picture keeps its proportions and fills what there is. */
+.modal.pantalla-agente { width: min(1280px, calc(100vw - 48px)); height: min(860px, calc(100vh - 48px)); min-width: 420px; min-height: 320px;
+  max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); resize: both; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+.modal.pantalla-agente > * { flex: none; }
+.modal.pantalla-agente.maximizada { width: calc(100vw - 16px); height: calc(100vh - 16px); resize: none; }
+.modal.pantalla-agente > .pantalla-agente-cuerpo { flex: 1; min-height: 0; }
+.pantalla-agente-cuerpo { outline: none; display: grid; place-items: center; overflow: hidden; }
 .pantalla-agente-cuerpo:focus-visible { box-shadow: 0 0 0 2px var(--acento); }
-.pantalla-agente-cuerpo img { max-width: 100%; max-height: 76vh; cursor: crosshair; user-select: none; border: 1px solid var(--linea); }
+.pantalla-agente-cuerpo img { max-width: 100%; max-height: 100%; cursor: crosshair; user-select: none; border: 1px solid var(--linea); }
 .menu-lanzador .menu-sep { height: 1px; margin: 4px 6px; background: var(--linea); }
