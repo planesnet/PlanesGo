@@ -404,6 +404,8 @@ func main() {
 	// Audit logs of the sessions' SQL Server and WinRM connections: every order (the order, not its data or output).
 	s.SQLAudit = filepath.Join(datos, "sql-auditoria.jsonl")
 	s.WinRMAudit = filepath.Join(datos, "winrm-audit.jsonl")
+	// And the agent desktop's: every order of the agents (never the text they type).
+	s.AgentDesktopAudit = filepath.Join(datos, "escritorio-auditoria.jsonl")
 	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
 	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
 		s.Errores.Repo = v

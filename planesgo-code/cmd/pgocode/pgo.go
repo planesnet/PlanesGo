@@ -50,7 +50,7 @@ de la sesión; tú no ves la contraseña):
   pgo ps baja <ruta remota> <fichero local>
   pgo ps sube <fichero local> <ruta remota> --escribir
                                    copia un fichero (hasta 4 MiB); subir solo con los cambios permitidos
-`
+` + desktopHelp
 
 // pgo es la orden que usan los agentes dentro de pgocode (el ejecutable enlazado como «pgo»).
 func pgo(args []string) int {
@@ -214,6 +214,21 @@ func pgo(args []string) int {
 			return falla(err)
 		}
 		return psOutput(req, raw)
+	case "escritorio":
+		dir, _ := os.Getwd() // las capturas van a su .pgocode/salidas
+		body, err := desktopArgs(args[1:], dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pgo escritorio: %v\n", err)
+			fmt.Fprint(os.Stderr, desktopHelp)
+			return 2
+		}
+		raw, err := llama("POST", "escritorio", body, nil)
+		if err != nil {
+			return falla(err)
+		}
+		var r struct{ Text string }
+		json.Unmarshal(raw, &r)
+		fmt.Println(strings.TrimRight(r.Text, "\n"))
 	case "drive", "gmail":
 		q, err := googleQuery(args[0], args[1:])
 		if err != nil {

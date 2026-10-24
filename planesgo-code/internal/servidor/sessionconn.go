@@ -99,9 +99,10 @@ func (c *sessionConns[C]) closeAll() {
 }
 
 // CloseConnections closes, on shutdown, what pgocode keeps open towards other servers: the remote desktops (their
-// time would not be counted any more) and the SQL Server and WinRM connections of the sessions.
+// time would not be counted any more), the agents' desktops and the SQL Server and WinRM connections of the sessions.
 func (s *Servidor) CloseConnections() {
 	s.escritorios.closeAll()
+	s.agentDesktops.closeAll()
 	s.sqls.closeAll()
 	s.winrms.closeAll()
 }
@@ -149,4 +150,15 @@ func appendAudit(path, what string, e map[string]any) {
 	}
 	f.Write(append(b, '\n'))
 	f.Close()
+}
+
+// all: the open connections.
+func (c *sessionConns[C]) all() []*sessionConn[C] {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	l := make([]*sessionConn[C], 0, len(c.m))
+	for _, x := range c.m {
+		l = append(l, x)
+	}
+	return l
 }

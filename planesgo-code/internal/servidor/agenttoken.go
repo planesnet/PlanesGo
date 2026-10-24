@@ -101,6 +101,8 @@ var agentEndpoints = map[string]string{
 	"ps":          http.MethodPost,
 	"ps-download": http.MethodPost,
 	"ps-upload":   http.MethodPost,
+	// The desktop of the agent's session (agentdesktop.go): screenshots, mouse and keyboard.
+	"escritorio": http.MethodPost,
 }
 
 // agentEndpointAllowed: la orden está en la lista blanca con ese método.

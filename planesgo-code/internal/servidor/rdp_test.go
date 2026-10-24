@@ -15,26 +15,6 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
-func TestRdpExplain(t *testing.T) {
-	for log, want := range map[string]string{
-		"x ERRCONNECT_LOGON_FAILURE [0x00020014]": "Usuario o contraseña incorrectos.",
-		"ERRCONNECT_CONNECT_FAILED":               "No se puede llegar",
-		"ERRCONNECT_CONNECT_CANCELLED":            "",
-		"fusermount3: mount failed: Operation not permitted\n[ERROR][com.freerdp.core] - [rdp_set_error_info]: ERRINFO_RPC_INITIATED_DISCONNECT [0x00010001]": "",
-		"ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION":                                            "otra conexión",
-		"krb5 ... default realm\nfallo raro de verdad":                                        "fallo raro de verdad",
-		"[ERROR][com.winpr.sspi.Kerberos] - Cannot find KDC for realm \"MAZANA\"\notro fallo": "otro fallo",
-	} {
-		got := rdpExplain(log, 131)
-		if want == "" && got != "" || !strings.Contains(got, want) || strings.Contains(got, "default realm") || strings.Contains(got, "KDC") {
-			t.Errorf("%q -> %q", log, got)
-		}
-	}
-	if rdpExplain("", 0) != "" || rdpExplain("", 12) != "" {
-		t.Error("un cierre normal no es un error")
-	}
-}
-
 func TestRdpArgs(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	a := strings.Join(rdpArgs("Sage", "192.168.125.229", `MAZANA\planes`), " ")

@@ -49,6 +49,14 @@ const psHint = "(pgocode: para PowerShell en el equipo Windows remoto usa la ord
 // compilar para Windows no es usarlo en remoto).
 var psWords = regexp.MustCompile(`(?i)\bpowershell\b|\bpwsh\b|\bwinrm\b|\bwinrs\b|\.ps1\b|\b(?:servidor|servidores|equipo|equipos|m[aá]quina|m[aá]quinas)\s+(?:de\s+)?windows\b|\bwindows\s+(?:remoto|server)\b|\bremot[oa]\s+(?:de\s+)?windows\b`)
 
+// desktopHint: how to use «pgo escritorio» (the session's agent desktop, if the person has started it).
+const desktopHint = "(pgocode: para manejar el escritorio remoto (Windows por RDP) usa la orden de terminal «pgo» con el escritorio del agente de esta sesión (lo inicia la persona; tú no ves la contraseña): " +
+	"`pgo escritorio captura [--escala 0.6]` (te da la ruta de la imagen: léela), `pgo escritorio clic X Y [--doble|--derecho]`, `mueve X Y`, `arrastra X1 Y1 X2 Y2` (coordenadas de la última captura), " +
+	"`rueda arriba|abajo [N]`, `escribe \"texto\"`, `tecla ctrl+s Return`, `tamaño 1920x1080`, `graba inicio|fin`, `estado`. Si dice que la sesión no tiene escritorio, pídeselo al usuario.)"
+
+// desktopWords: the message is about a remote desktop, RDP or the screen of a Windows computer.
+var desktopWords = regexp.MustCompile(`(?is)\bescritorio\s+(?:remoto|del\s+agente)\b|\brdp\b|\bwindows\b.*\b(?:pantalla|captura|ventana|clic)|\b(?:pantalla|captura|clic)\b.*\bwindows\b`)
+
 var (
 	pgoWord = regexp.MustCompile(`(?i)\bpgo\b`)
 	pgoVerb = regexp.MustCompile(`(?i)\bpgo\s+(?:ejecutar|parar|procesos|salida|abrir)\b|\b(?:ejecut|arranc|lanz|levant|parar|det[eé]n|salida|abr[eií]|procesos?|programas?|servidor)`)
@@ -56,7 +64,8 @@ var (
 
 // pgoHintFor: la línea de uso de «pgo» si el mensaje la menciona (ejecutar, parar, salida, abrir…) y la de
 // «pgo drive» si habla de Google Drive, Docs o Sheets, la de «pgo gmail» si habla del correo, la de «pgo sql» si habla
-// de SQL Server, bases de datos o Sage y la de «pgo ps» si habla de PowerShell, WinRM o un Windows remoto; "" si nada. Las órdenes («/pgo …», la skill de imputación)
+// de SQL Server, bases de datos o Sage, la de «pgo ps» si habla de PowerShell, WinRM o un Windows remoto y la de
+// «pgo escritorio» si habla de un escritorio remoto o de la pantalla de Windows; "" si nada. Las órdenes («/pgo …», la skill de imputación)
 // no cuentan.
 func pgoHintFor(text string) string {
 	t := strings.TrimSpace(text)
@@ -78,6 +87,9 @@ func pgoHintFor(text string) string {
 	}
 	if psWords.MatchString(t) {
 		hs = append(hs, psHint)
+	}
+	if desktopWords.MatchString(t) {
+		hs = append(hs, desktopHint)
 	}
 	return strings.Join(hs, "\n")
 }
