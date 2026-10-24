@@ -1,17 +1,16 @@
 package servidor
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"planesgo-code/internal/repo"
 	"planesgo-code/internal/sesiones"
 )
 
@@ -27,25 +26,7 @@ func dirAdjuntos(carpeta, sesion string) string {
 }
 
 // excluyeDeGit añade «.pgocode/» a .git/info/exclude del repositorio de la carpeta (también en copias de trabajo).
-func excluyeDeGit(carpeta string) {
-	out, err := exec.Command("git", "-C", carpeta, "rev-parse", "--git-common-dir").Output()
-	if err != nil {
-		return
-	}
-	dir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(carpeta, dir)
-	}
-	f := filepath.Join(dir, "info", "exclude")
-	if b, _ := os.ReadFile(f); strings.Contains(string(b), "\n.pgocode/") || strings.HasPrefix(string(b), ".pgocode/") {
-		return
-	}
-	os.MkdirAll(filepath.Dir(f), 0o755)
-	if fh, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintln(fh, ".pgocode/")
-		fh.Close()
-	}
-}
+func excluyeDeGit(carpeta string) { repo.ExcludeLocally(carpeta, ".pgocode/") }
 
 // adjunto recibe un fichero (multipart, campo «fichero») y lo guarda en la carpeta de la sesión.
 func (s *Servidor) adjunto(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {

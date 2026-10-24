@@ -98,9 +98,11 @@ paquete: web
 # apps solo instalan lo firmado con la clave pública que llevan (internal/actualizacion/actualizacion.go).
 PUBLICAR_EN ?= https://planesgo.autopyme.com/admin/pgocode/publicar
 PGO_CLAVE_FIRMA ?= $(HOME)/.config/pgocode/pgocode-update-signing-key.pem
+# Token del servidor de actualizaciones (fichero 600, fuera del repositorio).
+PGO_TOKEN_FICHERO ?= $(HOME)/.config/pgocode/publicar-token
 publicar: arbol-limpio verifica paquete
-	@tok="$${PLANESGO_TOKEN:-$$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.planesgo_auth.json"))).get("antigravity_token",""))' 2>/dev/null)}"; \
-	[ -n "$$tok" ] || { echo "Falta el token de PlanesGo (PLANESGO_TOKEN o ~/.planesgo_auth.json)"; exit 1; }; \
+	@tok="$${PGO_TOKEN_PUBLICAR:-$$(cat "$(PGO_TOKEN_FICHERO)" 2>/dev/null)}"; \
+	[ -n "$$tok" ] || { echo "Falta el token de publicación (PGO_TOKEN_PUBLICAR o $(PGO_TOKEN_FICHERO))"; exit 1; }; \
 	firma=$$(go run ./cmd/firmar-version -clave "$(PGO_CLAVE_FIRMA)" $(DIST)/version.json) || { \
 		echo "No se pudo firmar la versión (clave: $(PGO_CLAVE_FIRMA); ver «make clave-firma»)"; exit 1; }; \
 	curl -fsS -H "X-Antigravity-Token: $$tok" -F version=$(VERSION) -F electron=$(ELECTRON_VER) -F "firma=$$firma" \

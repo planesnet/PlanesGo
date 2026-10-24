@@ -402,7 +402,7 @@ func sesionPerdida(err error) bool {
 
 func (a *Agente) chat(ctx context.Context, p Peticion, emite func(Evento)) error {
 	if p.Carpeta == "" {
-		return errors.New("este proyecto no tiene carpeta local: falta un .planesgo.json con su odoo_project_id")
+		return errors.New("este proyecto no tiene carpeta local: falta un .pgo.json con su odoo_project_id")
 	}
 	if len(p.Mensajes) == 0 {
 		return errors.New("no hay mensaje")

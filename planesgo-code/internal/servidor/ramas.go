@@ -12,7 +12,7 @@ import (
 	"planesgo-code/internal/sesiones"
 )
 
-// repoProyectoDir: la carpeta del repositorio principal del proyecto (la primera con git: con .planesgo.json o
+// repoProyectoDir: la carpeta del repositorio principal del proyecto (la primera con git: con .pgo.json o
 // registrada), de la que salen las copias de trabajo de cada rama.
 func (s *Servidor) repoProyectoDir(r *http.Request, proyecto int) string {
 	for _, c := range append(s.Indice.Carpetas(false)[proyecto], s.Indice.Registradas(proyecto)...) {

@@ -1,13 +1,12 @@
 // Package proyectos encuentra las carpetas locales de cada proyecto de Odoo.
 //
-// Una carpeta pertenece a un proyecto si tiene un .planesgo.json con su odoo_project_id (el mismo vínculo que usa
-// PlanesGo para imputar horas). Un proyecto puede tener varias carpetas.
+// Una carpeta pertenece a un proyecto si tiene un .pgo.json con su odoo_project_id (link.go; antes .planesgo.json,
+// que se sigue leyendo). Un proyecto puede tener varias carpetas.
 package proyectos
 
 import (
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,7 +27,7 @@ type Indice struct {
 	Vida   time.Duration
 
 	// Registro: carpetas que el usuario ha elegido para un proyecto (p. ej. la de la rama de una sesión), guardadas
-	// en este fichero. Cuentan como del proyecto igual que las que tienen .planesgo.json.
+	// en este fichero. Cuentan como del proyecto igual que las que tienen .pgo.json.
 	Registro string
 
 	mu          sync.Mutex
@@ -67,7 +66,7 @@ func (x *Indice) Carpetas(forzar bool) map[int][]string {
 	return c
 }
 
-// Pertenece dice si la carpeta es una de las del proyecto (con .planesgo.json o registrada por el usuario).
+// Pertenece dice si la carpeta es una de las del proyecto (con .pgo.json o registrada por el usuario).
 func (x *Indice) Pertenece(proyecto int, carpeta string) bool {
 	for _, c := range x.Carpetas(false)[proyecto] {
 		if c == carpeta {
@@ -134,38 +133,10 @@ func (x *Indice) Registra(proyecto int, carpeta string) error {
 
 func busca(raices []string) map[int][]string {
 	m := map[int][]string{}
-	for _, r := range raices {
-		r = filepath.Clean(r)
-		base := strings.Count(r, string(filepath.Separator))
-		filepath.WalkDir(r, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				if d != nil && d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				// Sin las carpetas ocultas (.git, .pgocode, .claude con las copias de los subagentes…).
-				if p != r && (saltar[d.Name()] || strings.HasPrefix(d.Name(), ".") || strings.Count(p, string(filepath.Separator))-base > Profundidad) {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.Name() != ".planesgo.json" {
-				return nil
-			}
-			b, err := os.ReadFile(p)
-			if err != nil {
-				return nil
-			}
-			var cfg struct {
-				ID int `json:"odoo_project_id"`
-			}
-			if json.Unmarshal(b, &cfg) == nil && cfg.ID > 0 {
-				m[cfg.ID] = append(m[cfg.ID], filepath.Dir(p))
-			}
-			return nil
-		})
+	for _, dir := range linkDirs(raices, LinkFile, legacyLinkFile) {
+		if l, ok := ReadLink(dir); ok {
+			m[l.ProjectID] = append(m[l.ProjectID], dir)
+		}
 	}
 	for _, l := range m {
 		sort.Strings(l)

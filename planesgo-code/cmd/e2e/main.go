@@ -277,7 +277,7 @@ func (e *entorno) ejecuta() {
 		}
 	}
 	cfg := fmt.Sprintf(`{"odoo_project_id": %d, "odoo_project_name": "PRUEBA PGOCODE"}`+"\n", proyecto)
-	if err := os.WriteFile(filepath.Join(repo, ".planesgo.json"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".pgo.json"), []byte(cfg), 0o644); err != nil {
 		falla("%v", err)
 	}
 	ejecutaGit(repo, "init", "-q")

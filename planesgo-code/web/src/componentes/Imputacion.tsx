@@ -28,7 +28,7 @@ interface Validacion {
 }
 const hhmm = (h: number) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
 
-interface Estado { hoy: Linea[]; abiertos: Abierto[]; gestor_pgocode: boolean }
+interface Estado { hoy: Linea[]; abiertos: Abierto[] }
 
 const BLOQUE = { h: 15, m: 5 }; // redondeo hacia arriba en Odoo (minutos)
 const hm = (h: number) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
@@ -72,12 +72,6 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
     try { const r = await post<{ mensaje: string }>('/api/imputacion/unificar', {}); setUnificado(r.mensaje); }
     catch (x) { setUnificado('⚠ ' + (x as Error).message); }
     finally { setUnificando(false); carga(); }
-  };
-
-  const cambiaGestor = async (pgocode: boolean) => {
-    setE(x => x && { ...x, gestor_pgocode: pgocode });
-    await post('/api/imputacion/gestor', { pgocode }).catch(() => {});
-    carga();
   };
 
   // Horas de una línea ahora mismo: lo calculado + lo que ha crecido desde entonces.
@@ -231,11 +225,6 @@ export default function Imputacion({ version, sesion }: { version: number; sesio
               )}
             </>}
           </div>
-          <label className="gestor">
-            <input type="checkbox" checked={e.gestor_pgocode} onChange={ev => cambiaGestor(ev.target.checked)} />
-            <span><b>Dormir también las sesiones externas</b>
-              <span className="suave pequeno">Las sesiones de pgocode las imputa siempre pgocode. Las que abras fuera de pgocode en este equipo (Claude Code en terminal, Antigravity, OpenCode Desktop) imputan por su cuenta; márcalo solo si quieres que dejen de hacerlo.</span></span>
-          </label>
         </div>
       )}
     </div>

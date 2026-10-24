@@ -466,7 +466,6 @@ func (c *recoge) fin() resultadoTurno {
 
 // limpiaEntorno: el del usuario sin lo que pone una sesión de Claude Code, pgocode o PlanesGo (si se lanza desde
 // una, cambiaría lo que cargan los agentes), en el propio proceso: lo heredan los agentes en los dos modos.
-// PLANESGO_GESTOR=pgocode: los hooks de PlanesGo se duermen (no imputan nada), en los dos modos por igual.
 func limpiaEntorno() {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
@@ -475,7 +474,6 @@ func limpiaEntorno() {
 			os.Unsetenv(k)
 		}
 	}
-	os.Setenv("PLANESGO_GESTOR", "pgocode")
 }
 
 func ejecutaGit(dir string, args ...string) error {

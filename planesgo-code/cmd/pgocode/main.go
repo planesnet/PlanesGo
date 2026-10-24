@@ -203,7 +203,7 @@ func main() {
 	odooDB := flag.String("db", entorno("ODOO_DB", "ap113"), "base de datos de Odoo")
 	// PlanesGo también escribe en Odoo (su API de imputación): sus hosts, como el de Odoo, se deniegan a los agentes.
 	planesgoURL := flag.String("planesgo", entorno("PLANESGO_URL", "https://planesgo.autopyme.com"), "servidor de PlanesGo (escribe en Odoo: denegado a los agentes)")
-	raices := flag.String("raices", entorno("PGO_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.planesgo.json), separadas por comas")
+	raices := flag.String("raices", entorno("PGO_RAICES", "~/cowork"), "carpetas donde buscar proyectos (.pgo.json), separadas por comas")
 	studioAddr := flag.String("studio", entorno("PGO_STUDIO_ADDR", "127.0.0.1:7802"), "dirección del Studio TV local (vacío para no arrancarlo)")
 	urlAct := flag.String("actualizaciones", entorno("PGO_ACTUALIZACIONES", "https://planesgo.autopyme.com/install/pgocode"), "dónde se publican las actualizaciones (vacío: sin autoactualización)")
 	dirGrab := flag.String("grabaciones", entorno("PGO_GRABACIONES", "~/.local/share/pgocode/grabaciones"), "carpeta de las grabaciones del Studio TV local")
@@ -322,6 +322,14 @@ func main() {
 	// Programas del proyecto en local y la orden «pgo» para los agentes: ~/.local/share/pgocode/bin/pgo enlaza
 	// con este ejecutable; los agentes la reciben en su PATH con un token propio de esta ejecución.
 	s.Indice.Registro = filepath.Join(filepath.Dir(*dirGrab), "carpetas-proyectos.json")
+	// Los vínculos de PlanesGo (.planesgo.json) se copian a .pgo.json (fuera de git), en segundo plano. Los antiguos
+	// se quedan mientras haya versiones de pgocode que solo los leen (las anteriores a la 0.5.9); una versión
+	// posterior los quitará (MigrateLinks con removeOld) donde no estén en git.
+	go func() {
+		if _, kept := proyectos.MigrateLinks(rs, false); len(kept) > 0 {
+			log.Printf("vínculos de proyecto: %d carpetas con .pgo.json (los .planesgo.json se conservan de momento)", len(kept))
+		}
+	}()
 	// La IA local (embeddings del hilo de limpieza y del selector): la del equipo o un servidor de la red.
 	selector.SetLocalAIFile(filepath.Join(filepath.Dir(*dirGrab), "ia-local.json"))
 	s.Selector = &selector.Selector{Fichero: filepath.Join(filepath.Dir(*dirGrab), "skills-embeddings.json")}
@@ -329,8 +337,8 @@ func main() {
 	// Blindaje del Odoo de PlanesNet (docs/odoo-blindaje.md): los agentes no pueden llegar a Odoo ni a PlanesGo, ni
 	// leer los ficheros de datos de pgocode, ni lanzar los clientes de imputación de PlanesGo.
 	llm.SetAgentGuard(llm.DefaultAgentGuard(*odooURL, *planesgoURL, filepath.Dir(*dirGrab)))
-	// Imputación directa en Odoo. PlanesGo se duerme solo en los agentes que lanza pgocode (PLANESGO_GESTOR);
-	// las sesiones de los agentes fuera de pgocode siguen imputando por su cuenta en el mismo equipo.
+	// Imputación directa en Odoo: la del trabajo hecho en pgocode (sus agentes, sus programas y los escritorios
+	// remotos).
 	s.Imputacion = &imputacion.Gestor{Odoo: s.Odoo, Aviso: func() { s.Eventos.Emite(map[string]string{"tipo": "imputacion"}) },
 		FicheroEstado: filepath.Join(filepath.Dir(*dirGrab), "imputacion-dia.json"), Diario: filepath.Join(filepath.Dir(*dirGrab), "imputacion.log"),
 		// Registro detallado de tiempos (un JSONL por día) para validar la imputación: Imputación → Validar.

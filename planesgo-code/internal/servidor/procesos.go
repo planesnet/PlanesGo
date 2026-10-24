@@ -333,10 +333,9 @@ func (s *Servidor) entornoAgente(proyecto int, token string) []string {
 }
 
 // entornoPrograma: lo que reciben los programas que se lanzan (sin token: un programa o sus dependencias no
-// pueden dar órdenes a pgocode). PLANESGO_GESTOR: PlanesGo (hooks, plugins y planesgo-mcp) se queda dormido,
-// porque imputa pgocode directamente en Odoo.
+// pueden dar órdenes a pgocode).
 func (s *Servidor) entornoPrograma(proyecto int) []string {
-	e := []string{"PGO_API=http://127.0.0.1:" + s.Puerto, "PGO_PROYECTO=" + strconv.Itoa(proyecto), "PLANESGO_GESTOR=pgocode"}
+	e := []string{"PGO_API=http://127.0.0.1:" + s.Puerto, "PGO_PROYECTO=" + strconv.Itoa(proyecto)}
 	if s.DirBin != "" {
 		e = append(e, "PATH="+s.DirBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
