@@ -103,22 +103,27 @@ function pide(metodo, ruta, cuerpo) {
 }
 
 // Token del cliente, cifrado con el almacén del sistema (safeStorage) en los datos de esta app, solo para este usuario.
+// Con la API asíncrona (la síncrona desaparece en Electron 46), que también descifra lo cifrado con la síncrona. Si
+// la clave del almacén ha cambiado, se vuelve a cifrar; si no se puede descifrar, se empareja de nuevo.
 const ficheroToken = () => path.join(app.getPath('userData'), 'cliente.json');
-function leeToken() {
+async function leeToken() {
   try {
     const j = JSON.parse(fs.readFileSync(ficheroToken(), 'utf8'));
-    return j.cifrado ? safeStorage.decryptString(Buffer.from(j.cifrado, 'base64')) : (j.token || '');
+    if (!j.cifrado) return j.token || '';
+    const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(j.cifrado, 'base64'));
+    if (shouldReEncrypt && result) await guardaToken(result);
+    return result || '';
   } catch { return ''; }
 }
-function guardaToken(t) {
-  const j = safeStorage.isEncryptionAvailable() ? { cifrado: safeStorage.encryptString(t).toString('base64') } : { token: t };
+async function guardaToken(t) {
+  const j = await safeStorage.isAsyncEncryptionAvailable() ? { cifrado: (await safeStorage.encryptStringAsync(t)).toString('base64') } : { token: t };
   fs.writeFileSync(ficheroToken(), JSON.stringify(j), { mode: 0o600 });
 }
 
 // emparejado: este cliente con un token que el servidor reconoce; si no lo tiene (o lo han revocado), se empareja con
 // el secreto que el servidor deja en su carpeta de datos (solo lo puede leer este usuario del sistema).
 async function emparejado() {
-  tokenCliente = leeToken();
+  tokenCliente = await leeToken();
   if (tokenCliente) {
     try { await pide('GET', '/api/clientes/yo'); return; } catch (e) { if (e.status !== 401 && e.status !== 403) throw e; }
   }
@@ -128,7 +133,7 @@ async function emparejado() {
   tokenCliente = '';
   const r = await pide('POST', '/api/clientes/emparejar', { secret: secreto, name: os.hostname() + ' · ' + os.userInfo().username });
   tokenCliente = r.token;
-  guardaToken(tokenCliente);
+  await guardaToken(tokenCliente);
 }
 
 // La versión de los ficheros de esta app (VERSION del paquete; "" en desarrollo).
@@ -247,7 +252,7 @@ function menuContextual(p, w) {
   if (p.isEditable) m.push({ role: 'paste', label: 'Pegar', enabled: p.editFlags.canPaste });
   if (p.linkURL && esWeb(p.linkURL)) {
     if (m.length) m.push({ type: 'separator' });
-    m.push({ label: 'Copiar el enlace', click: () => clipboard.writeText(p.linkURL) });
+    m.push({ label: 'Copiar el enlace', click: () => clipboard.writeText(p.linkURL).catch(() => { /* sin portapapeles */ }) });
     m.push({ label: 'Abrir el enlace en el navegador', click: () => shell.openExternal(p.linkURL) });
   }
   if (m.length) m.push({ type: 'separator' });

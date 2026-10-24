@@ -119,8 +119,9 @@ clave-firma:
 # Instala en ~/.local/share/pgocode lo que hay en este repositorio (versión de desarrollo: sin autoactualización).
 # Para instalar la versión publicada (con autoactualización):
 #   curl -fsSL https://planesgo.autopyme.com/install/pgocode/instalar.sh | sh
+# Desde Electron 42, npm ci no descarga el motor (sin postinstall): lo trae su install.js, con las huellas del paquete.
 instalar: paquete
-	cd electron && npm ci --no-fund --no-audit
+	cd electron && npm ci --no-fund --no-audit && node node_modules/electron/install.js
 	PGO_LOCAL=$(CURDIR)/$(DIST) PGO_ELECTRON_LOCAL=$(CURDIR)/electron/node_modules/electron/dist PGO_DESARROLLO=1 sh linux/instalar.sh
 
 # Ubuntu 24.04+: perfil de AppArmor para que el motor (~/.local/share/pgocode/motor/pgocode) pueda usar su sandbox.
