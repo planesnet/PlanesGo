@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/bugreport"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/imputacion"
@@ -387,6 +388,16 @@ func main() {
 		if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "VERSION")); err == nil {
 			s.Version = strings.TrimSpace(string(b))
 		}
+	}
+	// Los fallos del propio pgocode, como issues de PlanesGo (las sesiones automáticas PSF las pueden resolver): las
+	// excepciones de la interfaz, los pánicos de las peticiones y los cierres por pánico (el runtime los deja en
+	// cierre.log y se informan al arrancar la vez siguiente).
+	s.Errores = bugreport.New(datos, s.Version, &s.GitHub, bugreport.NewMaps(s.Web, "planesgo-code/web/dist/assets"))
+	if v := os.Getenv("PGO_ERRORES_REPO"); v != "" && s.Version == "dev" { // pruebas: otro repositorio
+		s.Errores.Repo = v
+	}
+	if err := s.Errores.WatchCrashes(filepath.Join(datos, "cierre.log")); err != nil {
+		log.Printf("cierres: %v", err)
 	}
 	act := actualizacion.Nuevo(*urlAct, filepath.Dir(exe), filepath.Join(datos, "actualizacion"), s.Version)
 	act.Electron = os.Getenv("PGO_ELECTRON")

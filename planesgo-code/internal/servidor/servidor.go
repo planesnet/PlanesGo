@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
+	"planesgo-code/internal/bugreport"
 	"planesgo-code/internal/depuracion"
 	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/github"
@@ -113,6 +114,8 @@ type Servidor struct {
 	Imputacion *imputacion.Gestor
 	// GitHub: issues y pull requests del repositorio (con la sesión de «gh» del usuario).
 	GitHub github.Lector
+	// Errores: los fallos del propio pgocode, como issues de PlanesGo (errores.go); nil: no se informa.
+	Errores *bugreport.Reporter
 	// Google: Drive, Docs, Sheets, Slides y Gmail en solo lectura a través del navegador integrado (nil: no disponible).
 	Google *gbrowser.Reader
 	// TokenAgente: no vacío, los agentes reciben la orden «pgo» con un token propio de su sesión y turno (PGO_TOKEN,
@@ -188,6 +191,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actualizacion/pausa", s.conSesion(s.pausaActualizacion))
 	mux.HandleFunc("POST /api/actividad", s.conSesion(s.marcaActividad))
 	mux.HandleFunc("POST /api/diagnostico", s.conSesion(s.diagnostico))
+	mux.HandleFunc("GET /api/errores", s.conSesion(s.errorReports))
+	mux.HandleFunc("POST /api/errores", s.conSesion(s.errorReportsSave))
 	mux.HandleFunc("GET /api/proyectos", s.conSesion(s.proyectos))
 	mux.HandleFunc("GET /api/proveedores", s.conSesion(s.proveedores))
 	mux.HandleFunc("GET /api/agentes/mcp", s.conSesion(s.servidoresMCP))
@@ -249,7 +254,7 @@ func (s *Servidor) Handler() http.Handler {
 	if s.Web != nil {
 		mux.Handle("GET /", s.estaticos())
 	}
-	return s.cabeceras(mux)
+	return s.cabeceras(s.recovers(mux))
 }
 
 // desdeEscritorio dice si la petición viene de la app de escritorio (o si se permite el navegador).
@@ -1479,7 +1484,8 @@ func idTurno() string {
 	return hex.EncodeToString(b)
 }
 
-// diagnostico: un error de la interfaz (excepción o promesa sin atender) va al registro de depuración.
+// diagnostico: un error de la interfaz (excepción o promesa sin atender) va al registro de depuración y, si es un
+// fallo de pgocode, a su issue de GitHub (errores.go).
 func (s *Servidor) diagnostico(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	var p struct {
 		Mensaje string `json:"mensaje"`
@@ -1491,5 +1497,7 @@ func (s *Servidor) diagnostico(w http.ResponseWriter, r *http.Request, ses *sesi
 		return
 	}
 	depuracion.Log("interfaz", "%s %s: %s\n%s", s.Version, recortaTexto(p.URL, 200), recortaTexto(p.Mensaje, 500), recortaTexto(p.Pila, 2000))
+	where, _, _ := strings.Cut(p.URL, "?") // the screen, not its parameters
+	s.Errores.Report(bugreport.Report{Source: bugreport.FromInterface, Message: recortaTexto(p.Mensaje, 500), Stack: recortaTexto(p.Pila, 4000), Where: where})
 	w.WriteHeader(http.StatusNoContent)
 }

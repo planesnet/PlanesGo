@@ -6,5 +6,7 @@ export default defineConfig({
   plugins: [react()],
   // El backend solo acepta Host y Origin locales en su puerto (defensa contra DNS rebinding).
   server: { proxy: { '/api': { target: 'http://127.0.0.1:7801', changeOrigin: true, headers: { origin: 'http://127.0.0.1:7801' } } } },
-  build: { outDir: 'dist', emptyOutDir: true },
+  // Hidden source maps (not referenced from the code, without the sources): the backend turns the frames of an
+  // interface failure into file and line for its GitHub issue (internal/bugreport).
+  build: { outDir: 'dist', emptyOutDir: true, sourcemap: 'hidden', rollupOptions: { output: { sourcemapExcludeSources: true } } },
 });
