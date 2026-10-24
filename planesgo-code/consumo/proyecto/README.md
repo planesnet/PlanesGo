@@ -1,6 +1,10 @@
 # facturacion-demo
 
-Pequeña librería de facturación: clientes, productos, líneas, impuestos (IVA, IRPF, recargo de equivalencia),
+Pequeña librería de facturación en Go: clientes, productos, líneas, impuestos (IVA, IRPF, recargo de equivalencia),
 totales, numeración y exportación.
 
-Pruebas: `python3 -m unittest discover -s tests`
+- `facturacion/`: clientes, productos, líneas, redondeo, fechas, numeración, validación y configuración.
+- `facturacion/impuestos/`: IVA, recargo de equivalencia y retenciones de IRPF.
+- `facturacion/factura/`: totales, exportación a CSV e informes.
+
+Pruebas: `go test ./...`
