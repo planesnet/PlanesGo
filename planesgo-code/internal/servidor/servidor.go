@@ -220,6 +220,10 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /api/psf/comment", s.conSesion(s.psfComment))
 	mux.HandleFunc("POST /api/psf/checks", s.conSesion(s.psfChecks))
 	mux.HandleFunc("POST /api/psf/merge", s.conSesion(s.psfMerge))
+	mux.HandleFunc("POST /api/psf/event", s.conSesion(s.psfEvent))
+	mux.HandleFunc("POST /api/psf/fetch", s.conSesion(s.psfFetch))
+	mux.HandleFunc("POST /api/psf/document", s.conSesion(s.psfDocument))
+	mux.HandleFunc("POST /api/psf/discard", s.conSesion(s.psfDiscard))
 	mux.HandleFunc("GET /api/escritorio/google/trabajo", s.googleTrabajo)
 	mux.HandleFunc("POST /api/escritorio/google/resultado", s.googleResultado)
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
@@ -711,6 +715,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		// NoFacts: pgocode wrote the message (e.g. the PSF prompts): no project-memory facts are taken from it
 		// (the commands the agent runs still are).
 		NoFacts bool `json:"no_facts"`
+		// Summary: what the conversation shows for a message pgocode wrote (e.g. «PSF · Builder: …»); it describes
+		// the time entry instead of the whole prompt.
+		Summary string `json:"summary"`
 		// CacheTTL: lo que dura la caché del prompt del agente («5m» o «1h», ver llm.Peticion.CacheTTL).
 		CacheTTL string `json:"cache_ttl"`
 	}
@@ -781,6 +788,8 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	}
 	adjuntos := adjuntosValidos(p.Carpeta, p.Adjuntos)
 	autorizadas := carpetasAutorizadas(p.Autorizadas)
+	// Evidence goes to the session folder, not to the branch worktree (which may be removed after a merge).
+	evidenceFolder := p.Carpeta
 	// La memoria del proyecto, la del repositorio de la carpeta (antes de pasar a la copia de la rama: la comparten).
 	memRoot := ""
 	if info.Tipo == "agente" && p.Carpeta != "" && p.Aparte == "" {
@@ -807,6 +816,9 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		pedido := ""
 		if len(p.Mensajes) > 0 && p.Aparte == "" { // una pregunta aparte no cambia la descripción de la línea
 			pedido = p.Mensajes[len(p.Mensajes)-1].Texto
+		}
+		if p.Summary != "" {
+			pedido = p.Summary
 		}
 		fin := s.Imputacion.Empieza(imputacion.Trabajo{Sesion: sesionImp, Titulo: p.Titulo, Proyecto: p.Proyecto, NombreProy: nombre,
 			TareaID: p.TareaID, Tarea: p.Tarea, UID: ses.UID, OdooSesion: ses.OdooSesion,
@@ -855,11 +867,15 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 	inicioTurno := time.Now()
 	vivosTurno := 0 // procesos de este agente que siguen vivos al acabar (en segundo plano)
 	if s.Imputacion != nil {
-		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos})
+		pide := map[string]any{"turno": turno, "proveedor": p.Proveedor, "modelo": p.Modelo, "permisos": p.Permisos}
+		if p.Summary != "" {
+			pide["resumen"] = p.Summary // e.g. «PSF · Reviewer-Security: …»: which role of an automatic session it is
+		}
+		s.Imputacion.AnotaAgente(sesionImp, "agente-pide", pide)
 	}
 	pet := llm.Peticion{Modelo: p.Modelo, Sistema: sistema, Mensajes: p.Mensajes,
 		Carpeta: p.Carpeta, SesionAgente: p.SesionAgente, Permisos: p.Permisos, Esfuerzo: p.Esfuerzo, Adjuntos: adjuntos, Entorno: s.entornoAgente(p.Proyecto, tokenAgente), Autorizadas: autorizadas, MCP: p.MCP, Idioma: idioma,
-		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0",
+		Paralelo:  os.Getenv("PGOCODE_PARALELO") != "0" && !p.NoFacts, // a prompt written by pgocode (PSF) gets no subagent hint
 		CompactAt: p.Compactar, LastContext: p.ContextoPrevio, Prune: modoPoda(p.Podar), CacheTTL: p.CacheTTL,
 		AlInyectar: s.alInyectar(ses, p.Sesion, sesionImp, turno), Traza: "sesión " + sesionImp + " · turno " + turno,
 		Corte: p.Corte, Traspaso: p.Traspaso}
@@ -897,6 +913,11 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 		}
 		if e.Uso != nil && s.Imputacion != nil {
 			s.Imputacion.SumaUso(sesionImp, e.Uso.Entrada, e.Uso.Salida, e.Uso.Coste)
+			// Supervision: the context of the call and its cache (the tokens alone do not say how full it is).
+			if u := e.Uso; u.Contexto > 0 || u.CacheLeida > 0 || u.Llamadas > 0 {
+				s.Imputacion.AnotaAgente(sesionImp, "contexto", map[string]any{"turno": turno, "modelo": p.Modelo, "contexto": u.Contexto,
+					"cache_leida": u.CacheLeida, "cache_escrita": u.CacheEscrita, "llamadas": u.Llamadas, "segundos": u.Segundos, "resumen": p.Summary})
+			}
 		}
 		// Capturas de la herramienta: a disco, como evidencias; por el chat, solo sus rutas.
 		if e.Vivos != nil {
@@ -908,7 +929,7 @@ func (s *Servidor) chat(w http.ResponseWriter, r *http.Request, ses *sesiones.Se
 			s.Imputacion.AnotaAgente(sesionImp, "ruta-modificador", map[string]any{"turno": turno, "modificador": "subagents", "motivo": e.Subagentes})
 		}
 		if h := e.Herramienta; h != nil && len(h.Imagenes) > 0 {
-			guardaCapturas(p.Carpeta, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)
+			guardaCapturas(evidenceFolder, Captura{Sesion: sesionImp, Titulo: p.Titulo, Agente: p.Proveedor, Rama: p.Rama}, h)
 		}
 		if h := e.Herramienta; h != nil && s.Imputacion != nil {
 			c := map[string]any{"turno": turno, "id": h.ID, "nombre": h.Nombre, "estado": h.Estado}

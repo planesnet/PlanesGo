@@ -97,6 +97,9 @@ export function ordenaConHijas(l: Sesion[], abiertas: ReadonlySet<string> = new 
 // ARCHIVE_SESSIONS: evento para archivar sesiones ({proyecto, ids}); lo atiende App.tsx (que guarda la lista).
 export const ARCHIVE_SESSIONS = 'pgo:archiva-sesiones';
 
+// OPEN_SESSION: event to open a session of the open project ({detail: id}); App.tsx handles it.
+export const OPEN_SESSION = 'pgo:abre-sesion';
+
 export const titulo = (s: Sesion) => s.nombre || 'Sesión nueva';
 
 // identificador: lo que hace falta para encontrar una sesión en los registros (tiempos/*.jsonl y depuracion.log,

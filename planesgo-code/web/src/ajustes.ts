@@ -47,6 +47,7 @@ export interface IssueSettings {
   autoResolveSince?: number; // only issues created after this moment (when autoResolve was turned on)
   autoMerge?: boolean;       // with the 4 reviewers approving and green GitHub checks, the PR merges without asking
   mergeBranch?: string;      // branch the PRs merge into ('' or missing: the repository default)
+  program?: string;          // command whose screen is photographed after each Builder round (the evidence), e.g. «go run ./cmd/tetris -auto»
 }
 
 export interface AjustesProyecto { detalle: Detalle; hosting?: Hosting; skills: SeleccionSkills; directorio?: string; issues?: IssueSettings }

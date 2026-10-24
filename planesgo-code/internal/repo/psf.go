@@ -99,6 +99,20 @@ func PreparePSFBranch(ctx context.Context, folder string, issue int, target, bas
 	return ws, nil
 }
 
+// FetchPSFBase brings the latest origin/<base> into the repository (worktrees share it), so an agent without network
+// (e.g. in a sandbox) can merge it to solve a conflict.
+func FetchPSFBase(ctx context.Context, folder, base string) error {
+	if base == "" || !ramaValida.MatchString(base) || strings.Contains(base, "..") || strings.HasPrefix(base, "-") {
+		return errors.New("rama base no válida")
+	}
+	mainDir, err := RepoPrincipal(ctx, folder)
+	if err != nil {
+		return err
+	}
+	_, err = gitSlow(ctx, mainDir, "fetch", "--quiet", "origin", base)
+	return err
+}
+
 // pushBranch pushes the branch when it has commits the remote lacks (or is not on the remote yet).
 func pushBranch(ctx context.Context, dir, branch string) error {
 	if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err == nil {
@@ -184,4 +198,30 @@ func WritePSFSpec(ctx context.Context, dir, branch string, issue int, text strin
 		}
 	}
 	return pushBranch(ctx, dir, branch)
+}
+
+// RemovePSFWorktree removes the worktree of an issue branch once its PR is merged (git worktree remove, never
+// forced). Its work is already on the base branch (squash merge), so the commits no remote has any more are not
+// lost; it refuses with uncommitted changes or stashes. The local branch is kept (deleting it would need -D).
+// It returns the removed folder («» if there was no worktree for the branch).
+func RemovePSFWorktree(ctx context.Context, folder string, issue int) (string, error) {
+	dir, ok := Copias(ctx, folder)[PSFBranch(issue)]
+	if !ok {
+		return "", nil
+	}
+	e, err := EstadoCopia(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	if !e.Worktree {
+		return "", ErrNoEsCopia
+	}
+	if e.Cambios > 0 || e.Stash > 0 {
+		return "", fmt.Errorf("la copia tiene trabajo sin guardar (%s): no se quita", e.Pendiente())
+	}
+	Prune(ctx, e.Principal)
+	if out, err := gitSalida(ctx, e.Principal, "worktree", "remove", "--", e.Carpeta); err != nil {
+		return "", fmt.Errorf("git no ha quitado la copia: %s", out)
+	}
+	return e.Carpeta, nil
 }

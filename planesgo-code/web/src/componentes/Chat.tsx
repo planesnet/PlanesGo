@@ -1,7 +1,7 @@
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { chat, get, post, preparaHija, proponeReparto, subeAdjunto, uneHija, type Adjunto, type Eleccion, type Herramienta, type Mensaje, type Parte, type Proveedor, type Proyecto, type SkillPgo, type Uso } from '../api';
 import type { AjustesProyecto, Detalle, SeleccionSkills } from '../ajustes';
-import { conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
+import { ARCHIVE_SESSIONS, conversacion, guardaConversacion, nombreDe, titulo, type Repo, type Sesion } from '../sesiones';
 import * as C from '../cola';
 import * as PL from '../plan';
 import * as T from '../tareas';
@@ -99,7 +99,9 @@ const CLAVE_SIEMPRE_AL_TURNO = 'pgo:siempreAlTurno';
 const claveAprendidas = (proyecto: number) => 'pgo:aparte:' + proyecto;
 const claveGastoAparte = (sesion: string) => 'pgo:aparte-gasto:' + sesion;
 
-export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle, envioPendiente, alEnviado, psfStarts, onPsfStarted, projectSettings, onShowProjects, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjustes, seleccionSkills, hosting, detalle: detalleProyecto, envioPendiente, alEnviado, psfStarts, onPsfStarted, projectSettings, onShowProjects, proyecto, sesion, repo, proveedores, panelAbierto, alPanel, alCambiarSesion, alNuevaSesion }: Props) {
+  // Automatic PSF sessions are always shown concise, whatever the project says.
+  const detalle: Detalle = sesion?.automatic ? 'conciso' : detalleProyecto;
   const [texto, setTexto] = useState('');
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   // Turnos en curso por sesión: cada sesión lleva el suyo y sigue aunque se cambie de sesión o de proyecto (al
@@ -942,7 +944,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         sesion: ses.id, titulo: ses.nombre, adjuntos: [...pendiente.attachments, ...listos].map(a => a.ruta), autorizadas: ses.autorizadas || [], mcp: ses.mcp || [], tarea_id: ses.tareaId || 0, tarea: ses.tarea || '',
         idioma: navigator.language, compactar: politica.compactAt, contexto_previo: lastContext(previos), podar: politica.prune,
         // Lo que ha escrito el usuario (sin memoria de trabajo ni notas de pgocode): de ahí saca la memoria del proyecto.
-        texto_usuario: t, ...(opc.noFacts ? { no_facts: true } : {}),
+        texto_usuario: t, ...(opc.noFacts ? { no_facts: true } : {}), ...(opc.visible && opc.generado ? { summary: opc.visible } : {}),
         // Claude Code: el TTL de la caché de la sesión según el ritmo de sus turnos (cacheStatus.ts).
         ...(ses.agente === 'claude-code' ? { cache_ttl: CS.chooseClaudeTTL(previos) } : {}),
         // Los agentes llevan su propio historial: solo el último mensaje (con la skill indicada, si pgocode la eligió).
@@ -1390,6 +1392,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   function psfUpdate(id: string, patch: Partial<PSF.PsfState>): Sesion {
     const s = sesionesRef.current[id];
     const n = { ...s, psf: { ...s.psf!, ...patch } };
+    if (patch.phase && patch.phase !== s.psf?.phase) psfLog(n, 'fase', { de: s.psf?.phase, a: patch.phase, ...(patch.error ? { error: patch.error } : {}), ...(patch.blockedReason ? { motivo: patch.blockedReason } : {}) });
     sesionesRef.current[id] = n;
     alCambiarSesion(n);
     return n;
@@ -1402,9 +1405,15 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     guardaConversacion(id, m);
   }
 
-  const psfBody = (id: string, extra: Record<string, unknown> = {}) => {
-    const s = sesionesRef.current[id], st = s.psf!;
-    return { project: s.proyecto, folder: s.carpeta, issue: st.issue, session: id, pr: st.pr || 0, base: st.base || '', title: st.title, ...extra };
+  const psfBody = (id: string, extra: Record<string, unknown> = {}) => psfBodyOf(sesionesRef.current[id], extra);
+  const psfBodyOf = (s: Sesion, extra: Record<string, unknown> = {}) => {
+    const st = s.psf!;
+    return { project: s.proyecto, folder: s.carpeta, issue: st.issue, session: s.id, pr: st.pr || 0, base: st.base || '', title: st.title, iteration: st.iteration,
+      program: projectSettings(s.proyecto).issues?.program || '', ...extra };
+  };
+  // psfLog: what the interface decides goes to the pgocode log (tiempos/*.jsonl), next to the server steps.
+  const psfLog = (s: Sesion, event: string, data: Record<string, unknown> = {}) => {
+    if (s?.psf) post('/api/psf/event', psfBodyOf(s, { event, data })).catch(() => {});
   };
 
   async function psfStartCall(id: string): Promise<PsfStartResult> {
@@ -1422,8 +1431,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   // psfTurn: an agent turn of the session with a prompt written by pgocode (the chat shows only «visible»).
-  async function psfTurn(id: string, prompt: string, visible: string, permisos: string, sesionAgente: string | undefined, role: string): Promise<Mensaje> {
-    const r = await envia(prompt, [], { sesion: sesionesRef.current[id], crudo: true, permisos, visible, generado: true, noFacts: true, sinReparto: true, sinDirecto: true, sinRelevo: true,
+  async function psfTurn(id: string, prompt: string, visible: string, permisos: string, sesionAgente: string | undefined, role: string, override?: Partial<Sesion>): Promise<Mensaje> {
+    const r = await envia(prompt, [], { sesion: { ...sesionesRef.current[id], ...override }, crudo: true, permisos, visible, generado: true, noFacts: true, sinReparto: true, sinDirecto: true, sinRelevo: true,
       decision: { route: 'agent', executor: 'agent', engine: 'rules', reason: 'sesión automática de PSF', modifiers: [], text: '', detail: 'psf:' + role },
       ...(sesionAgente !== undefined ? { sesionAgente } : {}) });
     if (!r) throw new Error('la sesión estaba ocupada y no se ha podido lanzar el ' + role);
@@ -1444,6 +1453,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         if (st.phase === 'start') await psfPhaseStart(id);
         else if (st.phase === 'spec') await psfPhaseSpec(id);
         else if (st.phase === 'builder') await psfPhaseBuilder(id);
+        else if (st.phase === 'supervisor') await psfPhaseSupervisor(id);
         else if (st.phase === 'review') await psfPhaseReview(id, ac.signal);
         else if (st.phase === 'approver') await psfPhaseApprover(id);
         else if (st.phase === 'ready' && !st.autoMergeHeld && projectSettings(sesionesRef.current[id].proyecto).issues?.autoMerge) await psfAutoMerge(id, ac.signal);
@@ -1463,6 +1473,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   }
 
   function stopPsf(id: string) {
+    psfLog(sesionesRef.current[id], 'parada', { fase: sesionesRef.current[id]?.psf?.phase });
     psfRuns.current[id]?.abort();
     enCursosRef.current[id]?.abort();
   }
@@ -1479,9 +1490,17 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   async function psfPhaseSpec(id: string) {
     const issue = psfIssues.current[id] || (await psfStartCall(id)).issue;
     const st = sesionesRef.current[id].psf!;
-    const last = await psfTurn(id, PSF.specPrompt(issue, st.specPath), `PSF · Spec Writer: especificación de la issue #${st.issue}`, 'lectura', '', 'Spec Writer');
-    const txt = PL.textoDelPlan(last).trim();
-    if (!txt) throw new Error('el Spec Writer no ha devuelto la especificación');
+    // The agent may give up (its read-only mode did not let it run a command): that is not a spec. One more try in a
+    // fresh agent session; then it stops with an error that can be resumed.
+    let txt = '';
+    for (let attempt = 1; attempt <= 2 && !txt; attempt++) {
+      const last = await psfTurn(id, PSF.specPrompt(issue, st.specPath, st.guidance), `PSF · Spec Writer: especificación de la issue #${st.issue}${attempt > 1 ? ' (otro intento)' : ''}`, 'lectura', '', 'Spec Writer');
+      const t = PL.textoDelPlan(last).trim();
+      if (t && !PSF.gaveUp(t)) txt = t;
+      else psfLog(sesionesRef.current[id], 'spec-fallo', { intento: attempt, texto: t.slice(0, 300) });
+    }
+    if (st.guidance) psfUpdate(id, { guidance: undefined });
+    if (!txt) throw new Error('el Spec Writer no ha llegado a escribir la especificación (dos intentos)');
     if (PSF.isAmbiguous(txt)) {
       await post('/api/psf/comment', psfBody(id, { text: '### PSF · Spec Writer: la issue es ambigua\n\n' + txt })).catch(() => {});
       psfUpdate(id, { phase: 'blocked', blockedReason: 'ambiguity', endedAt: Date.now() });
@@ -1489,6 +1508,11 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
       return;
     }
     const s = sesionesRef.current[id];
+    // Earlier specs of this session still waiting (a redone spec) are discarded: only the new one can be approved.
+    for (const old of (await listaPlanes(s.proyecto, psfDir(s.proyecto)).catch(() => [] as Plan[])).filter(x => x.sesion === id && x.estado === 'borrador')) {
+      await guardaPlan(s.proyecto, psfDir(s.proyecto), { ruta: old.ruta, estado: 'descartado' }).catch(() => {});
+      marcaPlan(old.ruta, 'descartado', old.titulo, s);
+    }
     const p = await guardaPlan(s.proyecto, psfDir(s.proyecto), { titulo: `Spec · #${st.issue} ${st.title}`, sesion: id, agente: s.agente, texto: txt, estado: 'borrador' });
     const m = conversacion(id);
     const k = m.length - 1;
@@ -1528,9 +1552,13 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const spec = await psfSpecText(id);
     const it = Math.max(1, st.iteration);
     const who = (st.rejectedBy || []).map(r => 'Reviewer-' + PSF.REVIEWERS.find(x => x.role === r)!.name).join(', ');
-    await psfTurn(id, PSF.builderPrompt({ number: st.issue, title: st.title }, spec, it, it > 1 ? PSF.findingsFor(st.reviews || {}) : ''),
-      it <= 1 ? 'PSF · Builder: implementa la spec aprobada (TDD)' : `PSF · Builder · iteración ${it}/${st.maxIterations}: corrige lo de ${who || 'los revisores'}`,
+    const findings = it > 1 && st.rejectedBy?.length ? PSF.findingsFor(st.reviews || {}) : '';
+    if (it > 1) await post('/api/psf/fetch', psfBody(id)).catch(() => {}); // the latest base, in case it has to merge it
+    await psfTurn(id, PSF.builderPrompt({ number: st.issue, title: st.title }, spec, it, findings, st.guidance),
+      it <= 1 ? 'PSF · Builder: implementa la spec aprobada (TDD)'
+        : `PSF · Builder · iteración ${it}/${st.maxIterations}: ${who ? 'corrige lo de ' + who : st.guidance ? 'sigue tus indicaciones' : 'otra vuelta'}`,
       'auto', it <= 1 ? '' : undefined, 'Builder');
+    if (st.guidance) psfUpdate(id, { guidance: undefined });
     const r = await post<PsfSyncResult>('/api/psf/sync', psfBody(id, { text: PSF.commitMessage(st.issue, it) }));
     if (!r.files?.length) throw new Error('el Builder no ha dejado ningún cambio en la rama');
     psfDiffs.current[id] = r.diff;
@@ -1555,23 +1583,31 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     let cost = 0;
     await Promise.all(pending.map(async ({ role, name }) => {
       let texto = '', error = '', c = 0;
+      // Each reviewer has 15 minutes: a hung one fails (and is resumed) instead of holding the session for ever.
+      const own = new AbortController();
+      let timedOut = false;
+      const limit = setTimeout(() => { timedOut = true; error = 'no ha terminado en 15 minutos'; own.abort(); }, 15 * 60_000);
+      const follow = () => own.abort();
+      signal.addEventListener('abort', follow, { once: true });
       try {
         await chat({ proyecto: s.proyecto, proveedor: prov.id, modelo, carpeta: s.carpeta, rama: s.rama, permisos: 'lectura', sesion_agente: '', esfuerzo: '',
-          sesion: id, titulo: s.nombre, autorizadas: s.autorizadas || [], mcp: [], idioma: navigator.language, podar: false, no_facts: true,
+          sesion: id, titulo: s.nombre, autorizadas: s.autorizadas || [], mcp: [], idioma: navigator.language, podar: false, no_facts: true, summary: `PSF · Reviewer-${name}: revisión de la issue #${st.issue}`,
           mensajes: [{ rol: 'user', texto: PSF.reviewerPrompt(role, { number: st.issue, title: st.title }, spec, diff, st.base || 'master', st.branch) }] },
         e => {
           if (e.texto) texto += e.texto;
           if (e.herramienta?.estado === 'curso') { const h = e.herramienta; setPsfActions(x => ({ ...x, [id]: { ...x[id], [role]: h.resumen || h.nombre } })); }
           if (e.uso?.coste) c += e.uso.coste;
           if (e.error) error = e.error;
-        }, signal);
-      } catch (e) { if (!signal.aborted) error = (e as Error).message; }
+        }, own.signal);
+      } catch (e) { if (!signal.aborted && !error) error = (e as Error).message; }
+      finally { clearTimeout(limit); signal.removeEventListener('abort', follow); }
       if (signal.aborted) return;
       cost += c;
       setPsfActions(x => ({ ...x, [id]: { ...x[id], [role]: undefined } }));
-      if (error && !texto.trim()) { failures.push(`Reviewer-${name}: ${error}`); return; }
-      if (PSF.gaveUp(texto)) { failures.push(`Reviewer-${name}: el agente ha acabado sin responder${texto.trim() ? ' — ' + texto.trim().replace(/^_\(|\)_$/g, '') : ''}`); return; }
+      if ((error && !texto.trim()) || timedOut) { psfLog(sesionesRef.current[id], 'revisor-fallo', { revisor: role, modelo, error }); failures.push(`Reviewer-${name}: ${error}`); return; }
+      if (PSF.gaveUp(texto)) { psfLog(sesionesRef.current[id], 'revisor-fallo', { revisor: role, modelo, texto: texto.slice(0, 500) }); failures.push(`Reviewer-${name}: el agente ha acabado sin responder${texto.trim() ? ' — ' + texto.trim().replace(/^_\(|\)_$/g, '') : ''}`); return; }
       reviews[role] = { ...PSF.parseVerdict(texto), cost: c };
+      psfLog(sesionesRef.current[id], 'veredicto', { revisor: role, veredicto: reviews[role]!.verdict, hallazgos: reviews[role]!.findings, coste: c, modelo });
       psfUpdate(id, { reviews: { ...sesionesRef.current[id].psf!.reviews, [role]: reviews[role] } });
     }));
     psfUpdate(id, { reviewCost: (st.reviewCost || 0) + cost });
@@ -1586,17 +1622,26 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const reviews = st.reviews || {};
     const outcome = PSF.decide(reviews, st.iteration, st.maxIterations);
     const summary = PSF.approverSummary(st, outcome);
+    psfLog(sesionesRef.current[id], 'approver', { decision: outcome, rechazos: PSF.rejected(reviews), iteracion: st.iteration, max: st.maxIterations });
     psfNote(id, summary);
     if (outcome === 'retry') {
       psfUpdate(id, { phase: 'builder', iteration: st.iteration + 1, rejectedBy: PSF.rejected(reviews) });
       return;
     }
+    if (outcome === 'blocked' && psfSupervise(id, 'convergence', PSF.findingsFor(reviews))) return;
     if (outcome === 'blocked') {
       await post('/api/psf/comment', psfBody(id, { text: summary + '\n\n**needs-human-review:** el comité no converge; se para sin merge.' })).catch(() => {});
       psfUpdate(id, { phase: 'blocked', blockedReason: 'convergence', rejectedBy: PSF.rejected(reviews), endedAt: Date.now() });
       return;
     }
     await post('/api/psf/ready', psfBody(id, { text: summary }));
+    // Documentation of the session by the local AI (no paid tokens): to the PR, the pictures and the log.
+    const spec = await psfSpecText(id).catch(() => '');
+    post<{ engine: string }>('/api/psf/document', psfBody(id, { text: [`Issue #${st.issue}: ${st.title}`, `Iteraciones del Builder: ${st.iteration}`,
+      st.supervisorRuns ? `Intervino el Supervisor (${st.supervisorTask})` : '', summary, 'Especificación aprobada (extracto):\n' + spec.slice(0, 3000),
+      'Diff (extracto):\n' + (psfDiffs.current[id] || '').slice(0, 5000)].filter(Boolean).join('\n\n') }))
+      .then(r => psfNote(id, `**PSF · Documentación** publicada en el PR (${r.engine === 'plantilla' ? 'plantilla' : 'IA local ' + r.engine}, sin tokens de pago).`))
+      .catch(() => {});
     psfUpdate(id, { phase: 'ready', endedAt: Date.now() });
     psfNote(id, projectSettings(sesionesRef.current[id].proyecto).issues?.autoMerge
       ? `**PSF · PR listo.** [PR #${st.pr}](${st.prUrl}) en «Ready». Confirmación automática: se fusiona en cuanto los checks de GitHub estén en verde.`
@@ -1613,11 +1658,14 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         : c.checks === 'PENDING' ? 'Los checks de GitHub aún no han terminado: espera y vuelve a intentarlo.' : `Hay checks fallando: ${c.failing.join(', ')}.`;
       if (c.checks === 'PENDING' || c.checks === 'FAILURE') { psfNote(id, '**PSF · Merge:** ' + checks); return; }
       if (!(await askConfirm(<>¿Fusionar el PR #{st.pr} en <b>{st.base}</b> (squash) y borrar la rama {st.branch}? {checks} La issue #{st.issue} se cerrará.</>, { okText: 'Fusionar' }))) return;
-      await post('/api/psf/merge', psfBody(id));
-      psfUpdate(id, { phase: 'merged', endedAt: Date.now() });
-      psfNote(id, `**PSF · Fusionado.** [PR #${st.pr}](${st.prUrl}) unido a \`${st.base}\`; la issue #${st.issue} se cierra con él.`);
+      const r = await post<{ worktree_removed?: string }>('/api/psf/merge', psfBody(id));
+      psfMerged(id, `**PSF · Fusionado.** [PR #${st.pr}](${st.prUrl}) unido a \`${st.base}\`; la issue #${st.issue} se cierra con él.`, Boolean(r.worktree_removed));
     } catch (e) {
-      psfNote(id, '⚠ **PSF · Merge:** ' + (e as Error).message);
+      const msg = (e as Error).message;
+      const reason = /conflicto/i.test(msg) ? 'conflict' : /check/i.test(msg) ? 'checks' : 'other';
+      psfLog(sesionesRef.current[id], 'merge-parado', { motivo: reason, detalle: msg, manual: true });
+      psfUpdate(id, { autoMergeHeld: true, heldReason: reason });
+      psfNote(id, '⚠ **PSF · Merge:** ' + msg + '. Escribe en la franja cómo seguir y pulsa «Otra iteración».');
     }
   }
 
@@ -1625,13 +1673,18 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
   // green; with failing checks or conflicts it gives up and a person decides.
   async function psfAutoMerge(id: string, signal: AbortSignal) {
     const st = sesionesRef.current[id].psf!;
-    const hold = (why: string) => { psfUpdate(id, { autoMergeHeld: true }); psfNote(id, `**PSF · Confirmación automática parada:** ${why}. El merge queda para ti («Fusionar» en la franja).`); };
+    const hold = (why: string, reason: PSF.PsfState['heldReason'] = 'other') => {
+      psfLog(sesionesRef.current[id], 'merge-parado', { motivo: reason, detalle: why });
+      if ((reason === 'conflict' || reason === 'checks') && psfSupervise(id, reason, why)) return;
+      psfUpdate(id, { autoMergeHeld: true, heldReason: reason });
+      psfNote(id, `**PSF · Confirmación automática parada:** ${why}. Decide en la franja: «Fusionar» si ya está resuelto, o escribe cómo seguir y pulsa «Otra iteración».`);
+    };
     for (let i = 0; i < 120; i++) {
       const c = await post<{ checks: string; failing: string[]; mergeable: string; state: string }>('/api/psf/checks', psfBody(id));
-      if (c.state === 'MERGED') { psfUpdate(id, { phase: 'merged', endedAt: Date.now() }); return; }
+      if (c.state === 'MERGED') { psfMerged(id, `**PSF · Fusionado** desde GitHub: [PR #${st.pr}](${st.prUrl}).`, false); return; }
       if (c.state !== 'OPEN') return hold('el PR ya no está abierto');
-      if (c.checks === 'FAILURE') return hold(`hay checks fallando (${c.failing.join(', ')})`);
-      if (c.mergeable === 'CONFLICTING') return hold('el PR tiene conflictos con la rama base');
+      if (c.checks === 'FAILURE') return hold(`hay checks fallando (${c.failing.join(', ')})`, 'checks');
+      if (c.mergeable === 'CONFLICTING') return hold('el PR tiene conflictos con la rama base', 'conflict');
       if (c.checks === 'PENDING') {
         setPsfInfo(x => ({ ...x, [id]: 'esperando a los checks de GitHub para la confirmación automática' }));
         await new Promise<void>((done, fail) => {
@@ -1641,22 +1694,103 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
         continue;
       }
       setPsfInfo(x => { const { [id]: _, ...r } = x; return r; });
-      try { await post('/api/psf/merge', psfBody(id)); } catch (e) { return hold((e as Error).message); }
-      psfUpdate(id, { phase: 'merged', endedAt: Date.now() });
-      psfNote(id, `**PSF · Fusionado automáticamente.** Los 4 revisores aprobaron y los checks están en verde: [PR #${st.pr}](${st.prUrl}) unido a \`${st.base}\`; la issue #${st.issue} se cierra con él.`);
+      let r: { worktree_removed?: string };
+      try { r = await post<{ worktree_removed?: string }>('/api/psf/merge', psfBody(id)); } catch (e) { return hold((e as Error).message); }
+      psfMerged(id, `**PSF · Fusionado automáticamente.** Los 4 revisores aprobaron y los checks están en verde: [PR #${st.pr}](${st.prUrl}) unido a \`${st.base}\`; la issue #${st.issue} se cierra con él.`, Boolean(r.worktree_removed));
       return;
     }
     hold('los checks de GitHub llevan más de una hora sin terminar');
   }
 
+  // psfMerged: the PR is merged: the session ends and goes to the archive (its worktree, if the server removed it,
+  // is gone too; the conversation stays).
+  function psfMerged(id: string, note: string, worktreeRemoved: boolean) {
+    const s = psfUpdate(id, { phase: 'merged', endedAt: Date.now() });
+    psfNote(id, note + (worktreeRemoved ? ' Copia de trabajo quitada y sesión archivada.' : ' Sesión archivada.'));
+    window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto: s.proyecto, ids: [id] } }));
+  }
+
+  // psfSupervise: the Supervisor steps in (once per session) instead of stopping for a person. false: it already did.
+  function psfSupervise(id: string, task: PSF.SupervisorTask, detail: string): boolean {
+    const st = sesionesRef.current[id]?.psf;
+    if (!st || (st.supervisorRuns || 0) >= 1) return false;
+    psfUpdate(id, { phase: 'supervisor', supervisorTask: task, supervisorDetail: detail, supervisorRuns: (st.supervisorRuns || 0) + 1,
+      autoMergeHeld: undefined, heldReason: undefined, blockedReason: undefined, endedAt: undefined });
+    psfNote(id, `**PSF · Supervisor.** ${({ conflict: 'El PR choca con la rama base', checks: 'Los checks de GitHub fallan', convergence: 'El comité no se pone de acuerdo' } as const)[task]}: interviene el Supervisor con el modelo más capaz; después, el comité revisa otra vez.`);
+    return true;
+  }
+
+  // The Supervisor: a fresh agent session with the most capable model and maximum effort; the session keeps its own
+  // model, effort and agent session afterwards. Its change goes through the whole committee again.
+  async function psfPhaseSupervisor(id: string) {
+    const s = sesionesRef.current[id], st = s.psf!;
+    const prov = proveedores.find(p => p.id === s.agente);
+    if (!prov?.disponible) throw new Error('el agente de la sesión no está disponible');
+    const spec = await psfSpecText(id);
+    const modelo = PSF.bestModel(prov.modelos, s.modelo || prov.por_defecto);
+    const esfuerzo = prov.esfuerzos?.includes('max') ? 'max' : prov.esfuerzos?.slice(-1)[0];
+    const keep = { modelo: s.modelo, esfuerzo: s.esfuerzo, sesionAgente: s.sesionAgente };
+    psfLog(s, 'supervisor', { tarea: st.supervisorTask, modelo, esfuerzo: esfuerzo || '', detalle: st.supervisorDetail || '' });
+    await post('/api/psf/fetch', psfBody(id)).catch(() => {});
+    try {
+      await psfTurn(id, PSF.supervisorPrompt(st.supervisorTask || 'conflict', { number: st.issue, title: st.title }, spec, st.base || 'master', st.supervisorDetail || ''),
+        `PSF · Supervisor (${modelo}): ${({ conflict: 'resuelve los conflictos', checks: 'arregla los checks', convergence: 'arbitra los hallazgos' } as const)[st.supervisorTask || 'conflict']}`,
+        'auto', '', 'Supervisor', { modelo, ...(esfuerzo ? { esfuerzo } : {}) });
+    } finally {
+      const cur = sesionesRef.current[id];
+      const back = { ...cur, ...keep };
+      sesionesRef.current[id] = back;
+      alCambiarSesion(back);
+    }
+    const it = st.iteration + 1;
+    const r = await post<PsfSyncResult>('/api/psf/sync', psfBody(id, { iteration: it, step: 'Supervisor', text: `fix(issue-${st.issue}): supervisor resolves ${st.supervisorTask || 'conflict'}` }));
+    psfDiffs.current[id] = r.diff;
+    psfUpdate(id, { phase: 'review', iteration: it, maxIterations: Math.max(st.maxIterations, it), reviews: {}, rejectedBy: undefined });
+    psfNote(id, `**PSF · Supervisor.** Hecho y subido al [PR #${st.pr}](${st.prUrl}); vuelve a revisar el comité.`);
+  }
+
+  // The person gives the issue up: why to the PR, PR and issue closed, worktree removed and the session archived.
+  async function psfDiscard(id: string, why: string) {
+    const s = sesionesRef.current[id], st = s?.psf;
+    if (!st || psfRuns.current[id]) return;
+    if (!(await askConfirm(<>¿Descartar la issue #{st.issue}? Se cierra como «no se hará», su PR #{st.pr} se cierra sin fusionar y se borra la rama {st.branch}.{why.trim() ? ' El motivo va al PR.' : ''}</>, { okText: 'Descartar', danger: true }))) return;
+    try {
+      const r = await post<{ worktree_removed?: string }>('/api/psf/discard', psfBody(id, { text: why.trim() }));
+      psfUpdate(id, { phase: 'discarded', endedAt: Date.now() });
+      psfNote(id, `**PSF · Issue descartada.**${why.trim() ? ' Motivo: ' + why.trim() : ''} PR #${st.pr} cerrado sin fusionar${r.worktree_removed ? ', copia quitada' : ''} y sesión archivada.`);
+      window.dispatchEvent(new CustomEvent(ARCHIVE_SESSIONS, { detail: { proyecto: s.proyecto, ids: [id] } }));
+    } catch (e) {
+      psfNote(id, '⚠ **PSF · Descartar:** ' + (e as Error).message);
+    }
+  }
+
   // After a block: another round for the Builder (convergence) or a new spec (ambiguity).
-  function psfRetry(id: string) {
+  // psfRetry: the person's decision after a block, an error or a stopped merge, with what they wrote (it goes, first
+  // in priority, to the next Spec Writer or Builder turn). A conflict without instructions gets the usual ones.
+  function psfRetry(id: string, text = '') {
     const st = sesionesRef.current[id]?.psf;
     if (!st) return;
-    if (st.blockedReason === 'ambiguity') { delete psfIssues.current[id]; psfUpdate(id, { phase: 'spec', blockedReason: undefined, endedAt: undefined }); }
-    else psfUpdate(id, { phase: 'builder', iteration: st.iteration + 1, maxIterations: Math.max(st.maxIterations, st.iteration + 1), blockedReason: undefined, endedAt: undefined });
+    let guidance = text.trim() || undefined;
+    if (guidance) psfNote(id, `**PSF · Tu decisión:** ${guidance}`);
+    psfLog(sesionesRef.current[id], 'decision', { fase: st.phase, motivo: st.blockedReason || st.heldReason || st.error, indicaciones: guidance || '' });
+    if (st.phase === 'error') { if (guidance) psfUpdate(id, { guidance }); } // without new instructions, the pending ones stay
+    else if (st.phase === 'blocked' && st.blockedReason === 'ambiguity') {
+      delete psfIssues.current[id];
+      psfUpdate(id, { phase: 'spec', blockedReason: undefined, endedAt: undefined, guidance });
+    } else {
+      if (!guidance && st.heldReason === 'conflict') guidance = PSF.conflictGuidance(st.base || 'master');
+      psfUpdate(id, { phase: 'builder', iteration: st.iteration + 1, maxIterations: Math.max(st.maxIterations, st.iteration + 1), blockedReason: undefined,
+        autoMergeHeld: undefined, heldReason: undefined, rejectedBy: st.phase === 'blocked' ? st.rejectedBy : undefined, endedAt: undefined, guidance });
+    }
     runPsf(id);
   }
+
+  // psfCost: what the session has spent: money when the agent reports it; tokens otherwise (e.g. Antigravity, by
+  // subscription, only reports tokens).
+  const psfCost = (s: Sesion) => {
+    const g = CO.gasto(mensajes), coste = g.coste + (s.psf?.reviewCost || 0);
+    return coste > 0 ? CO.dinero(coste) : `${CO.tokens(g.entrada + g.salida)} tokens`;
+  };
 
   // psfNow: what is working right now in the open automatic session (reviewers, or the agent turn).
   const psfNow = (() => {
@@ -1666,7 +1800,7 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
     const r = PSF.REVIEWERS.filter(x => psfBusy[sesion.id] && revs[x.role]?.running && !revs[x.role]?.verdict).map(x => `${x.name} · ${acts[x.role] || 'empezando'}`);
     if (r.length) return r.join(' — ');
     if (!enCurso) return '';
-    const role = sesion.psf.phase === 'spec' ? 'Spec Writer' : sesion.psf.phase === 'builder' ? 'Builder' : 'Agente';
+    const role = ({ spec: 'Spec Writer', builder: 'Builder', supervisor: 'Supervisor' } as Partial<Record<PSF.PsfPhase, string>>)[sesion.psf.phase] || 'Agente';
     return `${role} · ${currentAction(mensajes[mensajes.length - 1], Date.now() - (ultimoEvento.current[sesion.id] || Date.now()))}`;
   })();
 
@@ -1958,8 +2092,8 @@ export default function Chat({ directorio, versionProcesos, alAbrirWeb, alAjuste
               </ol>
             )}
             {/* Automatic PSF session: its strip, under the messages and right above the quick launch bar. */}
-            {sesion.psf && <PsfStrip state={sesion.psf} busy={Boolean(psfBusy[sesion.id])} now={psfNow} cost={CO.dinero(CO.gasto(mensajes).coste + (sesion.psf.reviewCost || 0))}
-              onStop={() => stopPsf(sesion.id)} onResume={() => runPsf(sesion.id)} onMerge={() => psfMerge(sesion.id)} onRetry={() => psfRetry(sesion.id)} />}
+            {sesion.psf && <PsfStrip state={sesion.psf} busy={Boolean(psfBusy[sesion.id])} now={psfNow} cost={psfCost(sesion)}
+              onStop={() => stopPsf(sesion.id)} onResume={() => runPsf(sesion.id)} onMerge={() => psfMerge(sesion.id)} onRetry={text => psfRetry(sesion.id, text)} onDiscard={why => psfDiscard(sesion.id, why)} />}
             {/* Barra de prueba (debajo de la cola): lanzar lo que se está desarrollando (web o programa) en la rama de la sesión. */}
             <Lanzador proyecto={proyecto} carpeta={sesion.carpeta} version={versionProcesos} alAbrirWeb={alAbrirWeb} propuesta={propuesta} />
             {adjuntos.length > 0 && (

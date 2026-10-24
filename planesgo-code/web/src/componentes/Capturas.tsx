@@ -76,15 +76,21 @@ const fecha = (t: string) => new Date(t).toLocaleString('es-ES', { dateStyle: 's
 const dia = (t: string) => new Date(t).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 
 // Galería de la TV: las capturas del proyecto, por día y sesión.
-export function Galeria({ proyecto }: { proyecto: number }) {
-  const [l, setL] = useState<Captura[] | null>(null);
+// Galeria: the project's captures; with a session open, only that session's (e.g. the pictures of an automatic PSF
+// session), with a switch to see the whole project.
+export function Galeria({ proyecto, session }: { proyecto: number; session?: string }) {
+  const [todas, setL] = useState<Captura[] | null>(null);
+  const [all, setAll] = useState(false);
+  const l = todas && session && !all ? todas.filter(c => c.sesion === session) : todas;
   const [error, setError] = useState('');
   const [visor, setVisor] = useState<number | null>(null);
   const carga = () => get<Captura[]>(`/api/evidencias?proyecto=${proyecto}`).then(setL).catch(e => setError(e.message));
   useEffect(() => { carga(); }, [proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <p className="error relleno">{error}</p>;
   if (!l) return <p className="suave relleno">Cargando capturas…</p>;
-  if (!l.length) return <p className="suave relleno">Aún no hay capturas. Aparecen aquí las imágenes que devuelven los agentes al probar (capturas del navegador…).</p>;
+  if (!l.length) return <p className="suave relleno">{session && !all
+    ? <>Esta sesión aún no tiene capturas. <button className="enlace pequeno" onClick={() => setAll(true)}>Ver las de todo el proyecto</button></>
+    : 'Aún no hay capturas. Aparecen aquí las imágenes que devuelven los agentes al probar (capturas del navegador…) y las fotos del programa que sacan las sesiones automáticas PSF.'}</p>;
   const grupos: { clave: string; dia: string; titulo: string; capturas: { c: Captura; i: number }[] }[] = [];
   l.forEach((c, i) => {
     const clave = c.t.slice(0, 10) + '|' + c.sesion;
@@ -94,7 +100,8 @@ export function Galeria({ proyecto }: { proyecto: number }) {
   });
   return (
     <div className="galeria-capturas">
-      <div className="galeria-cabecera"><span className="suave pequeno">{l.length} capturas</span>
+      <div className="galeria-cabecera"><span className="suave pequeno">{l.length} capturas{session ? (all ? ' del proyecto' : ' de esta sesión') : ''}</span>
+        {session && <button className="enlace pequeno" onClick={() => setAll(a => !a)}>{all ? 'Solo esta sesión' : 'Todo el proyecto'}</button>}
         <button className="icono" onClick={carga} title="Volver a cargar" aria-label="Volver a cargar"><Icono n="recargar" t={14} /></button></div>
       {grupos.map(g => (
         <section key={g.clave}>

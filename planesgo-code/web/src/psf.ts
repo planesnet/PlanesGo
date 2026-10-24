@@ -5,7 +5,10 @@
 // Phases: start (ingestion, branch and PR) → spec (Spec Writer) → approval (waits for a person) → builder → review
 // (4 reviewers in parallel) → approver → ready (PR ready; a person confirms the merge) → merged. blocked: no
 // agreement after the iterations, or an ambiguous issue; error: something failed (it can be resumed).
-export type PsfPhase = 'start' | 'spec' | 'approval' | 'builder' | 'review' | 'approver' | 'ready' | 'merged' | 'blocked' | 'error';
+// supervisor: the most capable model steps in on a conflict, failing checks or a committee with no agreement, and
+// the change goes to the committee again.
+export type PsfPhase = 'start' | 'spec' | 'approval' | 'builder' | 'supervisor' | 'review' | 'approver' | 'ready' | 'merged' | 'discarded' | 'blocked' | 'error';
+export type SupervisorTask = 'conflict' | 'checks' | 'convergence';
 export type ReviewerRole = 'correctness' | 'security' | 'testing' | 'architecture';
 export type Verdict = 'APROBADO' | 'RECHAZADO';
 
@@ -35,6 +38,11 @@ export interface PsfState {
   reviewCost?: number;    // what the reviewers spent (they run outside the conversation)
   autoStarted?: boolean;  // started by the project's automatic resolution (not by a person)
   autoMergeHeld?: boolean; // automatic merge gave up (failing checks, conflicts…): a person decides
+  heldReason?: 'conflict' | 'checks' | 'other'; // why it gave up (a conflict suggests what to tell the Builder)
+  guidance?: string;       // what the person wrote to unblock it: goes with the next Spec Writer or Builder turn
+  supervisorRuns?: number; // times the Supervisor stepped in (one per session: then a person decides)
+  supervisorTask?: SupervisorTask;
+  supervisorDetail?: string; // what it has to solve (failing checks, the pending findings…)
 }
 
 export const PSF_CONFIG = { specsPath: '.psf/specs/', branchPrefix: 'psf/issue-', maxIterations: 3, diffForReviewers: 60_000 } as const;
@@ -63,10 +71,10 @@ export const STEPS: { step: PsfStep; label: string }[] = [
   { step: 'builder', label: 'Builder' },
   { step: 'review', label: 'Revisión' },
   { step: 'approver', label: 'Approver' },
-  { step: 'ready', label: 'Ready' },
+  { step: 'ready', label: 'Merge' },
 ];
 
-const PHASE_STEP: Record<PsfPhase, number> = { start: 0, spec: 1, approval: 2, builder: 3, review: 4, approver: 5, ready: 6, merged: 7, blocked: 5, error: 0 };
+const PHASE_STEP: Record<PsfPhase, number> = { start: 0, spec: 1, approval: 2, builder: 3, supervisor: 3, review: 4, approver: 5, ready: 6, merged: 7, discarded: 6, blocked: 5, error: 0 };
 
 // stepOf: the strip step the session is at (blocked: the Approver; error: where it failed).
 export function stepOf(s: PsfState): number {
@@ -82,20 +90,48 @@ export function stepStatus(s: PsfState, step: PsfStep): StepStatus {
   if (i > cur) return 'pending';
   switch (s.phase) {
     case 'approval': case 'ready': return 'waiting';
-    case 'blocked': return 'rejected';
+    case 'blocked': case 'discarded': return 'rejected';
     case 'error': return 'error';
     default: return 'running';
   }
 }
 
+// statusText: where the session is, in words (the strip's tooltip: the strip itself stays visual).
+export function statusText(s: PsfState, busy: boolean): string {
+  const approved = REVIEWERS.filter(r => s.reviews?.[r.role]?.verdict === 'APROBADO').length;
+  const idle = !busy && isWorkingPhase(s.phase) ? ' · parada: «Reanudar» sigue desde aquí' : '';
+  switch (s.phase) {
+    case 'start': return 'Preparando la rama y el PR' + idle;
+    case 'spec': return 'El Spec Writer escribe la especificación' + idle;
+    case 'approval': return 'Espera tu aprobación de la spec: «Ejecutar» en la tarjeta del plan';
+    case 'builder': return `El Builder implementa la spec (iteración ${Math.max(1, s.iteration)}/${s.maxIterations})` + idle;
+    case 'supervisor': return 'El Supervisor resuelve el bloqueo (' + ({ conflict: 'conflictos', checks: 'checks fallando', convergence: 'comité sin acuerdo' } as const)[s.supervisorTask || 'conflict'] + ')' + idle;
+    case 'review': return `Comité de revisión: ${approved} de 4 aprobados` + idle;
+    case 'approver': return 'El Approver decide' + idle;
+    case 'ready':
+      if (!s.autoMergeHeld) return 'PR listo: falta el merge';
+      return s.heldReason === 'conflict' ? 'Merge parado: el PR tiene conflictos con ' + (s.base || 'la rama base')
+        : s.heldReason === 'checks' ? 'Merge parado: hay checks de GitHub fallando' : 'Merge parado: decide cómo seguir';
+    case 'merged': return `Fusionado en ${s.base || 'la rama base'}`;
+    case 'discarded': return 'Descartada: la issue se cerró como «no se hará» y el PR, sin fusionar';
+    case 'blocked': return s.blockedReason === 'ambiguity' ? 'Bloqueada: la issue es ambigua (las preguntas están en el PR)'
+      : `Bloqueada: el comité no se pone de acuerdo tras ${s.iteration} iteraciones`;
+    case 'error': return 'Parada: ' + (s.error || 'ha fallado algo');
+  }
+}
+
+// decisionLabel: the button that applies the person's decision.
+export const decisionLabel = (s: Pick<PsfState, 'phase' | 'blockedReason'>) =>
+  s.phase === 'error' ? 'Reanudar' : s.phase === 'blocked' && s.blockedReason === 'ambiguity' ? 'Rehacer la spec' : 'Otra iteración';
+
 // The session works on its own in this phase (if nothing is running, it was left halfway: it can be resumed).
-export const isWorkingPhase = (p: PsfPhase) => p === 'start' || p === 'spec' || p === 'builder' || p === 'review' || p === 'approver';
+export const isWorkingPhase = (p: PsfPhase) => p === 'start' || p === 'spec' || p === 'builder' || p === 'supervisor' || p === 'review' || p === 'approver';
 // Waits for a person (amber badge).
 export const isWaitingPhase = (p: PsfPhase) => p === 'approval' || p === 'ready' || p === 'blocked';
 
 export const PHASE_LABEL: Record<PsfPhase, string> = {
-  start: 'preparando', spec: 'spec', approval: 'aprobar spec', builder: 'builder', review: 'revisión', approver: 'approver',
-  ready: 'listo para merge', merged: 'fusionado', blocked: 'bloqueada', error: 'error',
+  start: 'preparando', spec: 'spec', approval: 'aprobar', builder: 'builder', supervisor: 'supervisor', review: 'revisión', approver: 'approver',
+  ready: 'merge', merged: 'fusionado', discarded: 'descartada', blocked: 'bloqueada', error: 'error',
 };
 
 // ---- Prompts ----
@@ -113,33 +149,39 @@ export function issueText(i: IssueDetail): string {
 export const AMBIGUITY_MARK = 'BLOQUEADA POR AMBIGÜEDAD';
 
 // Spec Writer (phase 2): read-only; the answer is the spec (saved as a pgocode plan).
-export function specPrompt(i: IssueDetail, specPath: string): string {
+// guidanceBlock: the person's instructions, first in priority.
+const guidanceBlock = (g?: string) => (g?.trim() ? `\n\nIndicaciones de la persona (tienen prioridad sobre todo lo demás):\n${g.trim()}` : '');
+
+export function specPrompt(i: IssueDetail, specPath: string, guidance?: string): string {
   return `[PSF · Spec Writer] Eres el arquitecto de especificaciones técnicas de Planes Software Factory. Analiza el repositorio ` +
     `(estructura, módulos, patrones, configuración, modelos de datos y tests) sin modificar ningún fichero ni ejecutar nada que ` +
-    `cambie el sistema. La fuente de verdad es el propio repositorio: no inventes convenciones y reutiliza lo que ya existe.\n\n` +
+    `cambie el sistema (para leer, usa tus herramientas de lectura de ficheros y de búsqueda; si ejecutas órdenes, que sean solo ` +
+    `de lectura, como ls o grep). La fuente de verdad es el propio repositorio: no inventes convenciones y reutiliza lo que ya existe.\n\n` +
     `Responde únicamente con la especificación en Markdown (se guardará en ${specPath}), con un título «#» y estas secciones:\n` +
     `1. Objetivo y alcance (y lo que queda fuera)\n2. Contexto extraído del repositorio (patrones y helpers que se reutilizan)\n` +
     `3. Archivos afectados (rutas exactas, a crear o modificar)\n4. Casos borde\n5. Plan de pruebas (TDD, con el framework que ya usa el repositorio)\n` +
     `6. Checklist de criterios de aceptación (verificables uno a uno)\n\n` +
     `Si la issue es contradictoria o le falta información vital que no se puede deducir del código, responde solo con una ` +
-    `línea «${AMBIGUITY_MARK}» seguida de las preguntas concretas.\n\n${issueText(i)}`;
+    `línea «${AMBIGUITY_MARK}» seguida de las preguntas concretas.${guidanceBlock(guidance)}\n\n${issueText(i)}`;
 }
 
 export const isAmbiguous = (spec: string) => spec.trim().toUpperCase().startsWith(AMBIGUITY_MARK);
 
 // Builder (phase 3): TDD with the approved spec; in later rounds, the findings to fix.
-export function builderPrompt(i: Pick<IssueDetail, 'number' | 'title'>, spec: string, iteration: number, findings = ''): string {
+export function builderPrompt(i: Pick<IssueDetail, 'number' | 'title'>, spec: string, iteration: number, findings = '', guidance?: string): string {
   const reglas = `Reglas: el código tiene que ser indistinguible del resto del repositorio (estilo, nombres, errores, arquitectura). ` +
     `Ciclo TDD: primero los tests de la especificación (que fallen por la razón esperada), luego la implementación mínima y el refactor. ` +
     `Ejecuta el linter, el chequeo de tipos y la suite de tests del repositorio: no termines con nada en rojo. Si el cambio altera ` +
     `el comportamiento público o la configuración, actualiza la documentación del repositorio. No toques ${PSF_CONFIG.specsPath} ` +
     `y no hagas push: pgocode commitea lo pendiente y lo sube al PR al acabar el turno. Termina con un resumen breve de lo hecho y del resultado de las pruebas.`;
   if (iteration <= 1) {
-    return `[PSF · Builder] Implementa la issue #${i.number} «${i.title}» según esta especificación, aprobada por una persona.\n\n${reglas}\n\n` +
+    return `[PSF · Builder] Implementa la issue #${i.number} «${i.title}» según esta especificación, aprobada por una persona.${guidanceBlock(guidance)}\n\n${reglas}\n\n` +
       `Especificación aprobada:\n\n${spec.trim()}`;
   }
-  return `[PSF · Builder · iteración ${iteration}] El comité de revisión ha rechazado el cambio de la issue #${i.number}. ` +
-    `Corrige exactamente estos hallazgos sin salirte de la especificación (ya la tienes de la vuelta anterior):\n\n${findings.trim()}\n\n${reglas}`;
+  const what = findings.trim()
+    ? `El comité de revisión ha rechazado el cambio de la issue #${i.number}. Corrige exactamente estos hallazgos sin salirte de la especificación (ya la tienes de la vuelta anterior):\n\n${findings.trim()}`
+    : `Vuelve sobre el cambio de la issue #${i.number} sin salirte de la especificación (ya la tienes de la vuelta anterior).`;
+  return `[PSF · Builder · iteración ${iteration}] ${what}${guidanceBlock(guidance)}\n\n${reglas}`;
 }
 
 const MISSION: Record<ReviewerRole, string> = {
@@ -173,6 +215,15 @@ export function parseVerdict(text: string): { verdict: Verdict; findings: string
   return { verdict: all.includes('RECHAZADO') ? 'RECHAZADO' : 'APROBADO', findings };
 }
 
+// conflictGuidance: what to tell the Builder when the PR conflicts with the base branch.
+export const conflictGuidance = (base: string) =>
+  `El PR tiene conflictos con ${base}. pgocode ya ha traído origin/${base} (no hagas git fetch: puede que no tengas red). ` +
+  `Integra origin/${base} en la rama (git merge origin/${base}), resuelve los ` +
+  `conflictos conservando lo que ya hay en ${base} y lo de esta issue, y deja tests y linter en verde. Haz tú el commit del merge.`;
+
+// needsDecision: the session is stopped and a person has to say how to go on (the strip shows where to write it).
+export const needsDecision = (s: Pick<PsfState, 'phase' | 'autoMergeHeld'>) => s.phase === 'blocked' || s.phase === 'error' || (s.phase === 'ready' && Boolean(s.autoMergeHeld));
+
 // gaveUp: the reviewer's agent ended without an answer (e.g. its mode did not let it run a command): that is a
 // failed run, not a verdict, so it must not cost a Builder round (it is resumed instead).
 export const gaveUp = (text: string) => !/VEREDICTO/i.test(text) && (!text.trim() || /ha acabado sin responder/i.test(text));
@@ -202,6 +253,36 @@ export function approverSummary(s: Pick<PsfState, 'iteration' | 'maxIterations' 
   return `### PSF · Approver (iteración ${s.iteration}/${s.maxIterations})\n\n${lineas}\n\n${que}${detalle}`;
 }
 
+// bestModel: the Supervisor's model: the most capable one of the agent (otherwise the first of its list, which
+// starts with the best, or the default one).
+export function bestModel(models: readonly string[] | null | undefined, fallback: string): string {
+  const l = models || [];
+  for (const k of ['opus', 'argon-high', 'pro-high', 'pro']) {
+    const m = l.find(x => x.toLowerCase().includes(k));
+    if (m) return m;
+  }
+  return l[0] || fallback;
+}
+
+// supervisorPrompt: the Supervisor steps in on what the usual flow cannot solve by itself.
+export function supervisorPrompt(task: SupervisorTask, i: Pick<IssueDetail, 'number' | 'title'>, spec: string, base: string, detail: string): string {
+  const reglas = `Reglas: respeta la especificación aprobada y el estilo del repositorio; ejecuta el linter, el chequeo de tipos y la ` +
+    `suite de tests: no termines con nada en rojo. Haz tú los commits que necesites y no hagas push: pgocode lo sube al PR. ` +
+    `Termina con un resumen breve de qué has hecho y por qué.`;
+  const what = task === 'conflict'
+    ? `El PR choca con ${base}. pgocode ya ha traído origin/${base} (no hagas git fetch: puede que no tengas red). ` +
+      `Integra origin/${base} en la rama (git merge origin/${base}), resuelve los conflictos ` +
+      `conservando lo que ya hay en ${base} y lo de esta issue, y haz el commit del merge.`
+    : task === 'checks'
+      ? `Los checks de GitHub del PR fallan (${detail.trim() || 'sin detalle'}). Reprodúcelos en local con las órdenes del repositorio, ` +
+        `encuentra la causa y corrígela.`
+      : `El comité de revisión no se pone de acuerdo tras varias iteraciones. Actúa como árbitro: separa los hallazgos válidos ` +
+        `(según la especificación y el repositorio) de los que no lo son, corrige los válidos y explica en tu resumen por qué ` +
+        `descartas el resto.\n\nHallazgos pendientes:\n\n${detail.trim()}`;
+  return `[PSF · Supervisor] Eres el supervisor de Planes Software Factory para la issue #${i.number} «${i.title}»: intervienes ` +
+    `cuando el flujo normal se atasca. ${what}\n\n${reglas}\n\nEspecificación aprobada:\n\n${spec.trim()}`;
+}
+
 // cheapModel: the reviewers' model: the cheapest in the agent's list (otherwise the default one).
 export function cheapModel(models: readonly string[] | null | undefined, fallback: string): string {
   const l = models || [];
@@ -221,7 +302,14 @@ export function elapsed(s: Pick<PsfState, 'startedAt' | 'endedAt'>, now = Date.n
   return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
 }
 
+// SHOW_EVIDENCE: event that opens the side panel on the TV with the open session's pictures (the strip's «Fotos»).
+export const SHOW_EVIDENCE = 'pgo:ver-fotos';
+
 // ---- Automatic resolution of new issues (project «Issues» settings) ----
+
+// PSF_CHECK: event that asks for an immediate check of new issues (after creating one with «/issue», or when the
+// automatic resolution is turned on), instead of waiting for the next 5-minute round.
+export const PSF_CHECK = 'pgo:psf-check';
 
 export interface WatchedIssue { numero: number; titulo: string; url: string; estado: string; fase: string; creada: string; prs: unknown[] }
 interface SessionLike { psf?: Pick<PsfState, 'issue' | 'phase'>; archivada?: boolean }

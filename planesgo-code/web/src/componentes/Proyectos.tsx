@@ -279,14 +279,19 @@ function IssueSettingsSection({ p, a, onChange }: { p: Proyecto; a: AjustesProye
     <legend>Sesiones automáticas PSF</legend>
     <p className="suave pequeno">Sesiones automáticas de Planes Software Factory (PSF) para las issues de GitHub del repositorio del proyecto: rama <code>psf/issue-N</code>, PR en borrador, spec, Builder con TDD y comité de 4 revisores.</p>
     <label className={'opcion-detalle' + (s.autoResolve ? ' elegida' : '')}>
-      <input type="checkbox" checked={Boolean(s.autoResolve)} onChange={e => set({ autoResolve: e.target.checked, autoResolveSince: e.target.checked ? Date.now() : undefined })} />
-      <span><b>Resolución automática</b><span className="suave pequeno">Cada issue nueva que aparezca en GitHub (abierta y sin PR) arranca sola su sesión automática. Solo las creadas desde que se activa, una a la vez por proyecto, y mientras pgocode está abierto (lo mira cada 5 minutos). La spec sigue esperando tu aprobación.</span></span>
+      <input type="checkbox" checked={Boolean(s.autoResolve)} onChange={e => { set({ autoResolve: e.target.checked, autoResolveSince: e.target.checked ? Date.now() : undefined }); if (e.target.checked) window.dispatchEvent(new Event(PSF.PSF_CHECK)); }} />
+      <span><b>Resolución automática</b><span className="suave pequeno">Cada issue nueva que aparezca en GitHub (abierta y sin PR) arranca sola su sesión automática. Solo las creadas desde que se activa, una a la vez por proyecto, y mientras pgocode está abierto (lo mira cada 5 minutos y al crear una issue con /issue). La spec sigue esperando tu aprobación.</span></span>
     </label>
     <label className={'opcion-detalle' + (s.autoMerge ? ' elegida' : '')}>
       <input type="checkbox" checked={Boolean(s.autoMerge)} onChange={e => set({ autoMerge: e.target.checked })} />
       <span><b>Confirmación automática</b><span className="suave pequeno">Si los 4 revisores aprueban y los checks de GitHub están en verde, el PR se fusiona sin preguntar (squash). Con checks en curso, espera a que terminen; si alguno falla, se queda para que lo decidas tú.</span></span>
     </label>
     </fieldset>
+    <div className="psf-merge-field">
+      <label htmlFor="psf-program">Programa para las fotos (evidencias)</label>
+      <input id="psf-program" defaultValue={s.program || ''} placeholder="go run ./cmd/tetris -auto" onBlur={e => set({ program: e.target.value.trim() || undefined })} />
+      <span className="suave pequeno">Tras cada vuelta del Builder, pgocode arranca esta orden en la rama de la issue, en un terminal, y saca tres fotos de la pantalla (a los 3, 6 y 10 s). Se ven en la TV de la sesión. Vacío: sin fotos.</span>
+    </div>
     <div className="psf-merge-field">
       <label htmlFor="psf-merge-branch">Rama en la que se fusionan los PR</label>
       <select id="psf-merge-branch" value={merge} onChange={e => set({ mergeBranch: e.target.value || undefined })} disabled={!branches}>
@@ -497,6 +502,6 @@ export function MenuSesion({ ancla, opciones, alCerrar }: { ancla: HTMLElement; 
 
 // PsfBadge: the phase of an automatic PSF session in the list (amber when it waits for a person).
 function PsfBadge({ st }: { st: PSF.PsfState }) {
-  const tone = st.phase === 'merged' ? 'done' : st.phase === 'error' || st.phase === 'blocked' ? 'failed' : PSF.isWaitingPhase(st.phase) ? 'waiting' : 'working';
-  return <span className={'psf-badge ' + tone} title={`Sesión automática PSF · rama ${st.branch}${st.pr ? ` · PR #${st.pr}` : ''}`}>PSF · {PSF.PHASE_LABEL[st.phase]}</span>;
+  const tone = st.phase === 'merged' ? 'done' : st.phase === 'discarded' ? '' : st.phase === 'error' || st.phase === 'blocked' ? 'failed' : PSF.isWaitingPhase(st.phase) ? 'waiting' : 'working';
+  return <span className={'psf-badge ' + tone} title={`Sesión automática PSF · issue #${st.issue}${st.pr ? ` → PR #${st.pr}` : ''} · ${PSF.statusText(st, false)}`}>{PSF.PHASE_LABEL[st.phase]}</span>;
 }

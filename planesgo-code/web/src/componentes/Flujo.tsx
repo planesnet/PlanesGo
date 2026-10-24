@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { get, listaCopias, post, quitaCopia, type Proyecto } from '../api';
-import * as C from '../copias';
+import { get, post, type Proyecto } from '../api';
 import Icono from './Icono';
 import { MenuSesion, type Opcion } from './Proyectos';
 import { askConfirm } from './Modal';
@@ -38,7 +37,7 @@ const CLASES: { id: Clase; nombre: string }[] = [
 ];
 
 // Colores de GitHub (Primer).
-const VERDE = '#1a7f37', MORADO = '#8250df', ROJO = '#d1242f', GRIS = '#59636e', AMBAR = '#9a6700';
+const VERDE = '#1a7f37', MORADO = '#8250df', ROJO = '#d1242f', GRIS = '#59636e';
 
 // Iconos al estilo de los Octicons (16×16, relleno).
 function Oct({ n, color, t = 16 }: { n: 'issue' | 'issue-cerrada' | 'pr' | 'pr-borrador' | 'pr-fusionada' | 'pr-cerrada' | 'check' | 'x' | 'punto' | 'rama' | 'comentario' | 'github'; color?: string; t?: number }) {
@@ -78,20 +77,6 @@ const iconoPR = (p: { estado: string; borrador: boolean }) =>
   p.estado === 'MERGED' ? <Oct n="pr-fusionada" color={MORADO} /> : p.estado === 'CLOSED' ? <Oct n="pr-cerrada" color={ROJO} />
     : p.borrador ? <Oct n="pr-borrador" color={GRIS} /> : <Oct n="pr" color={VERDE} />;
 
-function Checks({ estado }: { estado: string }) {
-  if (!estado) return null;
-  const [n, c, t] = estado === 'SUCCESS' ? ['check', VERDE, 'Checks correctos'] as const
-    : estado === 'FAILURE' || estado === 'ERROR' ? ['x', ROJO, 'Checks fallidos'] as const : ['punto', AMBAR, 'Checks en curso'] as const;
-  return <span className="gh-chip" title={t}><Oct n={n} color={c} t={13} /> {t.replace('Checks ', '')}</span>;
-}
-
-function Revision({ r }: { r: string }) {
-  if (r === 'APPROVED') return <span className="gh-chip" style={{ color: VERDE }}><Oct n="check" t={13} /> Aprobada</span>;
-  if (r === 'CHANGES_REQUESTED') return <span className="gh-chip" style={{ color: ROJO }}><Oct n="x" t={13} /> Cambios pedidos</span>;
-  if (r === 'REVIEW_REQUIRED') return <span className="gh-chip" style={{ color: AMBAR }}><Oct n="punto" t={13} /> Revisión pendiente</span>;
-  return <span className="gh-chip suave">Sin revisión</span>;
-}
-
 const Etiquetas = ({ l }: { l: Etiqueta[] }) => <>{l.map(e => (
   <span key={e.nombre} className="gh-etiqueta" style={{ background: '#' + e.color, color: sobre(e.color) }}>{e.nombre}</span>
 ))}</>;
@@ -100,8 +85,8 @@ const Etiquetas = ({ l }: { l: Etiqueta[] }) => <>{l.map(e => (
 // Resolving an issue: the automatic PSF session (psf/issue-<N> branch, PR, spec, Builder, review board and ready PR).
 export interface PeticionResolver { number: number; title: string; url: string; folder: string }
 
-export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: {
-  proyecto: Proyecto; carpeta: string; rama: string; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
+export default function Flujo({ proyecto, carpeta, alAbrir, alResolver }: {
+  proyecto: Proyecto; carpeta: string; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
   const [e, setE] = useState<Estado | null>(null);
   const [error, setError] = useState('');
@@ -128,20 +113,6 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   };
   useEffect(() => { setE(null); carga(); }, [proyecto.id, carpeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Copias de trabajo locales por rama: una PR fusionada cuya rama tiene copia ofrece limpiar rama y copia.
-  const [copias, setCopias] = useState<C.Copia[]>([]);
-  const cargaCopias = () => { listaCopias(proyecto.id).then(setCopias).catch(() => setCopias([])); };
-  useEffect(() => { if (e) cargaCopias(); }, [e]); // eslint-disable-line react-hooks/exhaustive-deps
-  const copiaDe = (rama: string) => copias.find(c => c.rama === rama && c.worktree);
-  const limpia = async (c: C.Copia) => {
-    if (!(await askConfirm(C.explicaQuitar(c, true) + '\n\n¿Limpiar rama y copia?', { okText: 'Limpiar', danger: true }))) return;
-    setErrorAccion('');
-    try {
-      const r = await quitaCopia(proyecto.id, c.carpeta, true);
-      if (r.aviso) setErrorAccion(r.aviso);
-    } catch (err) { setErrorAccion((err as Error).message); } finally { cargaCopias(); }
-  };
-
   // Acciones de GitHub sobre una issue o PR (menú ⋮ de cada fila): cerrar, «no se hará», reabrir, borrar.
   const [menu, setMenu] = useState<{ tipo: 'issue' | 'pr'; numero: number; estado: string; ancla: HTMLElement } | null>(null);
   const accion = async (tipo: 'issue' | 'pr', numero: number, que: string) => {
@@ -167,11 +138,6 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
   const abiertas = useMemo(() => (e?.issues || []).filter(i => i.estado === 'OPEN'), [e]);
   const cuenta = (c: Clase) => c === 'todas' ? abiertas.length : abiertas.filter(i => i.clase === c).length;
   const visibles = (e?.issues || []).filter(i => clase === 'todas' || i.clase === clase);
-  const deRama = (e?.prs || []).filter(p => p.rama === rama && p.estado === 'OPEN');
-  const aRama = (e?.prs || []).filter(p => p.base === rama && p.estado === 'OPEN');
-  const prsAbiertas = (e?.prs || []).filter(p => p.estado === 'OPEN' && p.rama !== rama);
-  const prsHechas = (e?.prs || []).filter(p => p.estado !== 'OPEN');
-  const porNumero = new Map((e?.issues || []).map(i => [i.numero, i]));
 
   if (!carpeta) return <p className="suave relleno">La sesión no tiene carpeta local con repositorio.</p>;
 
@@ -193,23 +159,10 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
       {e && creando && <NuevaIssue estado={e} proyecto={proyecto.id} carpeta={carpeta} alCancelar={() => setCreando(false)}
         alCrear={r => { setCreando(false); setCreada(r); carga(true); }} />}
       {e && <>
-        {/* La rama de la sesión y su pull request */}
-        <section className="gh-tarjeta">
-          <div className="gh-titulo"><Oct n="rama" color={GRIS} /> <code className="gh-rama">{rama || '—'}</code>
-            {rama === e.defecto && <span className="gh-chip suave">rama por defecto</span>}</div>
-          {deRama.length === 0 && aRama.length === 0 && <p className="suave pequeno">Ninguna pull request abierta desde esta rama ni hacia ella.</p>}
-          {deRama.map(p => <TarjetaPR key={p.numero} p={p} porNumero={porNumero} alAbrir={alAbrir} />)}
-          {aRama.length > 0 && <>
-            <p className="titulo-lista">Entran en esta rama</p>
-            {aRama.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
-          </>}
-        </section>
-
         {/* Resumen y barra del flujo */}
         <div className="gh-resumen">
           <span><Oct n="issue" color={VERDE} t={14} /> <b>{e.abiertas}</b> abiertas</span>
           <span><Oct n="issue-cerrada" color={MORADO} t={14} /> <b>{e.cerradas}</b> cerradas</span>
-          <span><Oct n="pr" color={VERDE} t={14} /> <b>{e.prs_abiertas}</b> PR abiertas</span>
         </div>
         <div className="gh-barra" role="img" aria-label="Issues abiertas por fase">
           {FASES.filter(f => f.id !== 'cerrada').map(f => {
@@ -238,19 +191,6 @@ export default function Flujo({ proyecto, carpeta, rama, alAbrir, alResolver }: 
           );
         })}
 
-        {/* Pull requests */}
-        {prsAbiertas.length > 0 && <details className="gh-fase" open>
-          <summary><Oct n="pr" color={VERDE} t={14} /> Pull requests abiertas <span className="gh-cuenta">{prsAbiertas.length}</span></summary>
-          {prsAbiertas.map(p => <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)} />)}
-        </details>}
-        {prsHechas.length > 0 && <details className="gh-fase">
-          <summary><Oct n="pr-fusionada" color={MORADO} t={14} /> Pull requests recientes <span className="gh-cuenta">{prsHechas.length}</span></summary>
-          {prsHechas.map(p => {
-            const c = p.estado === 'MERGED' ? copiaDe(p.rama) : undefined;
-            return <FilaPR key={p.numero} p={p} alAbrir={alAbrir} alMenu={p.estado === 'MERGED' ? undefined : abreMenu('pr', p.numero, p.estado)}
-              copia={c} alLimpiar={c ? () => limpia(c) : undefined} />;
-          })}
-        </details>}
       </>}
     </div>
   );
@@ -282,62 +222,12 @@ function FilaIssue({ i, alAbrir, alResolver, resolviendo, alMenu }: { i: Issue; 
   );
 }
 
-function FilaPR({ p, alAbrir, alMenu, copia, alLimpiar }: { p: PR; alAbrir: (u: string) => void; alMenu?: (ancla: HTMLElement) => void; copia?: C.Copia; alLimpiar?: () => void }) {
-  return (
-    <div className="gh-fila-caja">
-    <button className="gh-fila" onClick={() => alAbrir(p.url)} title={p.titulo}>
-      {iconoPR(p)}
-      <span className="gh-cuerpo">
-        <span className="gh-texto">{p.titulo} <Etiquetas l={p.etiquetas} /></span>
-        <span className="gh-meta">#{p.numero} · <code>{p.rama}</code> → <code>{p.base}</code> · {p.estado === 'MERGED' ? 'fusionada ' + hace(p.fusionada) : hace(p.actualizada)} · {p.autor}</span>
-      </span>
-      {p.estado === 'OPEN' && p.checks && <Checks estado={p.checks} />}
-      <span className="gh-diff"><b style={{ color: VERDE }}>+{p.mas}</b> <b style={{ color: ROJO }}>−{p.menos}</b></span>
-    </button>
-    {alLimpiar && copia && (
-      <button className="gh-limpiar" onClick={alLimpiar} disabled={!copia.se_puede_quitar}
-        title={copia.se_puede_quitar ? `Quita la copia local ${copia.carpeta} y la rama «${p.rama}» (ya fusionada)` : `La copia ${copia.carpeta} tiene trabajo sin guardar: ${copia.pendiente || copia.error || ''}`}>
-        Limpiar rama y copia
-      </button>
-    )}
-    {alMenu && <BotonMenu titulo={'Más acciones de la pull request #' + p.numero} alAbrir={alMenu} />}
-    </div>
-  );
-}
-
 // Botón ⋮ de una fila: abre el menú de acciones de GitHub.
 function BotonMenu({ titulo, alAbrir }: { titulo: string; alAbrir: (ancla: HTMLElement) => void }) {
   return (
     <button className="icono puntos gh-menu" onClick={e => alAbrir(e.currentTarget)} title={titulo} aria-label={titulo} aria-haspopup="menu">
       <Icono n="puntos" t={15} />
     </button>
-  );
-}
-
-function TarjetaPR({ p, porNumero, alAbrir }: { p: PR; porNumero: Map<number, Issue>; alAbrir: (u: string) => void }) {
-  const total = p.mas + p.menos || 1;
-  return (
-    <div className="gh-pr">
-      <button className="gh-fila" onClick={() => alAbrir(p.url)}>
-        {iconoPR(p)}
-        <span className="gh-cuerpo">
-          <span className="gh-texto"><b>{p.titulo}</b> <span className="suave">#{p.numero}</span></span>
-          <span className="gh-meta">{p.borrador ? 'Borrador' : 'Abierta'} · quiere fusionar {p.commits} {p.commits === 1 ? 'commit' : 'commits'} en <code>{p.base}</code> desde <code>{p.rama}</code></span>
-        </span>
-      </button>
-      <div className="gh-chips">
-        <Checks estado={p.checks} />
-        <Revision r={p.revision} />
-        {p.fusionable === 'CONFLICTING' ? <span className="gh-chip" style={{ color: ROJO }}><Oct n="x" t={13} /> Conflictos</span>
-          : p.fusionable === 'MERGEABLE' ? <span className="gh-chip" style={{ color: VERDE }}><Oct n="check" t={13} /> Sin conflictos</span> : null}
-        <span className="gh-chip"><b style={{ color: VERDE }}>+{p.mas.toLocaleString()}</b>&nbsp;<b style={{ color: ROJO }}>−{p.menos.toLocaleString()}</b>&nbsp;· {p.ficheros} {p.ficheros === 1 ? 'fichero' : 'ficheros'}</span>
-      </div>
-      <div className="gh-diffbarra" title={`+${p.mas} −${p.menos}`}><span style={{ width: `${(p.mas / total) * 100}%` }} /></div>
-      {p.issues.length > 0 && <div className="gh-cierra">Cierra: {p.issues.map(n => {
-        const i = porNumero.get(n);
-        return <span key={n} className="gh-mini">{i?.estado === 'CLOSED' ? <Oct n="issue-cerrada" color={MORADO} t={13} /> : <Oct n="issue" color={VERDE} t={13} />}#{n}{i ? ' ' + i.titulo : ''}</span>;
-      })}</div>}
-    </div>
   );
 }
 

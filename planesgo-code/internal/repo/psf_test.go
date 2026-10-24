@@ -94,4 +94,19 @@ func TestPreparePSFBranch(t *testing.T) {
 	if _, err := PreparePSFBranch(ctx, user, 9, "no-such-branch", branches); err == nil {
 		t.Error("a target branch missing on the remote must fail")
 	}
+
+	// After the merge the worktree goes away; with uncommitted work it stays.
+	os.WriteFile(filepath.Join(ws8.Carpeta, "pending.txt"), []byte("x"), 0o644)
+	if _, err := RemovePSFWorktree(ctx, user, 8); err == nil {
+		t.Error("a worktree with uncommitted work must not be removed")
+	}
+	if dir, err := RemovePSFWorktree(ctx, user, 7); err != nil || dir != ws.Carpeta {
+		t.Fatalf("remove: %q %v", dir, err)
+	}
+	if _, err := os.Stat(ws.Carpeta); !os.IsNotExist(err) || Copias(ctx, user)["psf/issue-7"] != "" {
+		t.Error("the worktree is still there")
+	}
+	if dir, err := RemovePSFWorktree(ctx, user, 7); err != nil || dir != "" {
+		t.Errorf("no worktree any more: %q %v", dir, err)
+	}
 }

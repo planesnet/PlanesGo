@@ -335,12 +335,13 @@ func main() {
 		// Registro detallado de tiempos (un JSONL por día) para validar la imputación: Imputación → Validar.
 		Tiempos: &imputacion.Registro{Dir: filepath.Join(filepath.Dir(*dirGrab), "tiempos"), Version: version}}
 	// La sesión de Odoo no se guarda con los partes (la leería un agente): la da la sesión de pgocode del usuario,
-	// que solo está en memoria (o, durante una actualización, en sesiones-reinicio.json, que se borra al leerlo).
+	// que solo está en memoria (o, entre un cierre y el arranque siguiente, en sesiones-reinicio.json, que se borra al
+	// leerlo y solo vale 5 minutos).
 	ficheroSesiones := filepath.Join(filepath.Dir(*dirGrab), "sesiones-reinicio.json")
 	if n, err := s.Sesiones.Carga(ficheroSesiones, 5*time.Minute); err != nil {
 		log.Printf("sesiones tras la actualización: %v", err)
 	} else if n > 0 {
-		log.Printf("sesiones recuperadas tras la actualización: %d", n)
+		log.Printf("sesiones recuperadas tras el reinicio: %d", n)
 	}
 	s.Imputacion.SesionOdoo = s.Sesiones.OdooSesionDe
 	// Recupera los partes de una ejecución anterior (cierre inesperado) y pone en marcha el cierre por espera.
@@ -434,6 +435,11 @@ func main() {
 			s.Imputacion.Suspende()
 		} else {
 			s.Imputacion.CierraTodo()
+			// A quick restart (within the 5 minutes Carga accepts) does not ask for the password again; the file is
+			// deleted as soon as it is read, and agents cannot read the data folder.
+			if err := s.Sesiones.Guarda(ficheroSesiones); err != nil {
+				log.Printf("no se pudo guardar la sesión para el reinicio: %v", err)
+			}
 		}
 		if estudio != nil {
 			estudio.Cierra() // cierra bien los vídeos que se estén grabando

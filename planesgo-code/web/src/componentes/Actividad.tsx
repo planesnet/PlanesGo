@@ -3,11 +3,11 @@ import { COPIES_CHANGED, listaCopias, quitaCopia, type Proyecto } from '../api';
 import * as AP from '../activityPanel';
 import * as RP from '../reparto';
 import * as C from '../copias';
-import { ARCHIVE_SESSIONS, conversacion, titulo, type Sesion } from '../sesiones';
+import { ARCHIVE_SESSIONS, conversacion, OPEN_SESSION, titulo, type Sesion } from '../sesiones';
+import * as PSF from '../psf';
 import * as LA from '../liveActivity';
 import * as TS from '../todoSync';
 import TodoSyncList, { todoCount } from './TodoSyncList';
-import * as R from '../router';
 import Icono from './Icono';
 import { EditorPlan, Estado as EstadoPlan, listaPlanes, PLANS_CHANGED, type Plan } from './Planes';
 import Programas from './Programas';
@@ -45,15 +45,6 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   }, [pulso]);
   const trabajando = Boolean(snap?.trabajando);
 
-  // Enrutador de intenciones (router.ts): cuántos mensajes de la sesión han ido a cada sitio.
-  const [rutas, setRutas] = useState<R.RouteTally>({});
-  useEffect(() => {
-    setRutas(sesion ? R.readTally(sesion.id) : {});
-    const aviso = (e: Event) => { const d = (e as CustomEvent<{ sesion: string }>).detail; if (sesion && d.sesion === sesion.id) setRutas(R.readTally(sesion.id)); };
-    window.addEventListener('pgo:ruta', aviso);
-    return () => window.removeEventListener('pgo:ruta', aviso);
-  }, [sesion?.id]);
-
   const todo = snap?.todo;
   const listas = LA.liveLists(snap, ahora);
   // Subtareas en paralelo: las sesiones hijas de esta (reparto de pgocode), con el estado real de cada una y de su unión.
@@ -67,7 +58,12 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
   const terminados = [...listas.subagentsDone, ...listas.backgroundDone, ...hijas.filter(h => h.dot === 'ok')];
 
   // Planes del proyecto.
-  const [planes, setPlanes] = useState<Plan[] | null>(null);
+  const [todosPlanes, setPlanes] = useState<Plan[] | null>(null);
+  // Plans of sessions that are over (archived, or an automatic PSF session already merged) do not show: they are done
+  // and would only clutter the panel (they are still in the archived session).
+  const terminadas = new Set(sesiones.filter(s => s.archivada || s.psf?.phase === 'merged' || s.psf?.phase === 'discarded').map(s => s.id));
+  const planes = todosPlanes && todosPlanes.filter(p => !p.sesion || !terminadas.has(p.sesion));
+  const enCurso = sesiones.filter(s => s.psf && !s.archivada && s.psf.phase !== 'merged' && s.psf.phase !== 'discarded').sort((a, b) => a.psf!.issue - b.psf!.issue);
   const [plan, setPlan] = useState<string | null>(null);
   const cargaPlanes = () => listaPlanes(proyecto.id, directorio).then(setPlanes).catch(() => setPlanes([]));
   useEffect(() => {
@@ -96,6 +92,22 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
         )}
       </section>
 
+      {/* Automatic PSF sessions still running or waiting for a person (the finished ones are archived). */}
+      {enCurso.length > 0 && (
+        <section>
+          <h4>Issues en curso <span className="gh-cuenta">{enCurso.length}</span></h4>
+          <ul className="psf-running">
+            {enCurso.map(s => (
+              <li key={s.id}><button onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SESSION, { detail: s.id }))} title={PSF.statusText(s.psf!, false)}
+                className={sesion?.id === s.id ? 'activa' : ''}>
+                <span className="recorta"><b>#{s.psf!.issue}</b> {s.psf!.title}</span>
+                <span className={'psf-badge ' + (s.psf!.phase === 'error' || s.psf!.phase === 'blocked' ? 'failed' : PSF.isWaitingPhase(s.psf!.phase) ? 'waiting' : 'working')}>{PSF.PHASE_LABEL[s.psf!.phase]}</span>
+              </button></li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Solo los programas en marcha (los guardados, plegados): se definen en Propiedades de la sesión → Programas. */}
       <Programas proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} asSection />
 
@@ -116,9 +128,6 @@ export default function Actividad({ proyecto, carpeta, sesion, sesiones = [], di
 
       <CopiasTrabajo proyecto={proyecto.id} sesiones={sesiones} />
 
-      {sesion && Object.keys(rutas).length > 0 && (
-        <p className="act-pie suave pequeno" title="Enrutador: quién hace qué con cada mensaje: pgocode (0 tokens), una pregunta aparte, un reparto o el agente. Más en /help.">{R.summary(rutas)}</p>
-      )}
       <ConceptGuide />
 
       {plan && <EditorPlan proyecto={proyecto.id} directorio={directorio} ruta={plan} ocupado={trabajando}

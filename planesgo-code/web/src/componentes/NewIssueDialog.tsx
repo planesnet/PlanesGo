@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { get, type Proyecto } from '../api';
 import { NuevaIssue, type Estado } from './Flujo';
 import { Modal } from './Modal';
+import { PSF_CHECK } from '../psf';
 
 // Window of the «/issue [title]» command: creates a GitHub issue in the repository of the current project (the same
 // form as Flujo, with the repository labels). It only creates it: with the project's automatic resolution on,
@@ -31,13 +32,13 @@ export default function NewIssueDialog({ project, folder, initialTitle, autoReso
           <div className="new-issue-done">
             <p>Issue <button className="enlace" onClick={() => openOutside(created.url)}>#{created.numero}</button> creada en <b>{state.repo}</b>.</p>
             <p className="suave pequeno">{autoResolve
-              ? 'La resolución automática del proyecto está activada: pgocode la recogerá de GitHub en su próxima revisión (cada 5 minutos) y arrancará su sesión automática.'
+              ? 'La resolución automática del proyecto está activada: pgocode la recoge de GitHub ahora mismo y arranca su sesión automática (si ya hay otra trabajando en el proyecto, cuando acabe).'
               : 'Para resolverla con una sesión automática PSF, pulsa «Resolver» en la pestaña Flujo (o activa la resolución automática en las propiedades del proyecto, sección Issues).'}</p>
             <div className="fila-config"><span className="hueco" /><button className="primario" onClick={onClose}>Cerrar</button></div>
           </div>
         ) : (
           <NuevaIssue estado={state} proyecto={project.id} carpeta={folder} initialTitle={initialTitle} className="gh-nueva new-issue-form"
-            alCancelar={onClose} alCrear={setCreated} />
+            alCancelar={onClose} alCrear={r => { setCreated(r); if (autoResolve) window.dispatchEvent(new Event(PSF_CHECK)); }} />
         )}
     </Modal>
   );

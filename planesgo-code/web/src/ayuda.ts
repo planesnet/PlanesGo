@@ -48,7 +48,6 @@ export function secciones(o: { alTurno: boolean; inyecta: boolean }): Seccion[] 
       { clave: 'Aparte', que: 'Estado: pgocode (0 tokens) · con contexto: una copia de la sesión del agente · suelta: la IA local del equipo (si no está, un modelo barato)' },
       { clave: 'Etiqueta y distintivo', que: 'La etiqueta encima del cuadro dice adónde irá; al pasar el ratón, quién lo hace, quién lo ha decidido y por qué. Cada mensaje enviado lleva su ruta' },
       { clave: 'Reparto', que: 'Una petición con varias partes independientes (una lista de 3 o más) se puede repartir en subtareas en paralelo: cada una en su sesión y su copia de trabajo; al acabar se unen a tu rama' },
-      { clave: 'Actividad', que: 'Cuántos mensajes de la sesión han ido a cada sitio y cuántos sin tokens de pago' },
     ] },
     { titulo: 'Contexto del agente', entradas: [
       { clave: 'Hilo de limpieza', que: 'El indicador del contexto: cuánto ocupa la conversación del agente y lo que ya no hace falta. Antes de cada turno pgocode retira lo que no está vigente (lecturas superadas, salidas largas…) y lo repone si vuelve a hacer falta' },

@@ -191,6 +191,23 @@ func (l *Lector) MarkReady(ctx context.Context, repo string, pr int) error {
 	return err
 }
 
+// Discard closes the PR without merging (and deletes its remote branch) and closes the issue as «not planned».
+func (l *Lector) Discard(ctx context.Context, repo string, pr, issue int) error {
+	if err := checkRef(repo, pr); err != nil {
+		return err
+	}
+	if _, err := gh(ctx, "", "pr", "close", fmt.Sprint(pr), "-R", repo, "--delete-branch"); err != nil {
+		return err
+	}
+	if issue > 0 {
+		if _, err := gh(ctx, "", "issue", "close", fmt.Sprint(issue), "-R", repo, "--reason", "not planned"); err != nil {
+			return err
+		}
+	}
+	l.forget(repo)
+	return nil
+}
+
 // PRChecks: the PR checks status and whether it can be merged.
 type PRChecks struct {
 	State     string   `json:"state"`     // OPEN | MERGED | CLOSED

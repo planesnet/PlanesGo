@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -20,14 +21,24 @@ import (
 const maxPSFDiff = 60_000
 
 type psfRequest struct {
-	Project int    `json:"project"`
-	Folder  string `json:"folder"`
-	Issue   int    `json:"issue"`
-	Session string `json:"session"`
-	PR      int    `json:"pr"`
-	Base    string `json:"base"`
-	Title   string `json:"title"`
-	Text    string `json:"text"`
+	Project   int    `json:"project"`
+	Folder    string `json:"folder"`
+	Issue     int    `json:"issue"`
+	Session   string `json:"session"`
+	PR        int    `json:"pr"`
+	Base      string `json:"base"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	Iteration int    `json:"iteration"`
+	Step      string `json:"step"` // who made the change being synced (Builder, Supervisor): for its evidence
+	// Program: the project command whose screen is the evidence of the change (e.g. «go run ./cmd/tetris -auto»).
+	Program string `json:"program"`
+}
+
+// psfFail answers an error and logs it with the step where it happened.
+func (s *Servidor) psfFail(w http.ResponseWriter, p psfRequest, step string, code int, err error) {
+	s.psfLog(p, "error", map[string]any{"paso": step, "error": err.Error()})
+	jsonError(w, code, err.Error())
 }
 
 // psfRead decodes the request and checks project, folder and GitHub repository.
@@ -68,7 +79,7 @@ func (s *Servidor) psfStart(w http.ResponseWriter, r *http.Request, ses *sesione
 	}
 	issue, err := s.GitHub.IssueDetail(r.Context(), name, p.Issue)
 	if err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "issue", http.StatusBadGateway, err)
 		return
 	}
 	if issue.State != "OPEN" {
@@ -85,7 +96,7 @@ func (s *Servidor) psfStart(w http.ResponseWriter, r *http.Request, ses *sesione
 	ws, err := repo.PreparePSFBranch(r.Context(), p.Folder, p.Issue, p.Base, s.DirRamas) // Base: the project's merge branch («» = default)
 	lock.Unlock()
 	if err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "rama", http.StatusBadGateway, err)
 		return
 	}
 	ws.Sesion, ws.Proyecto = p.Session, p.Project
@@ -94,9 +105,12 @@ func (s *Servidor) psfStart(w http.ResponseWriter, r *http.Request, ses *sesione
 	pr, err := s.GitHub.CreateDraftPR(r.Context(), name, ws.Base, ws.Rama, psfDraftTitle(p.Issue, issue.Title),
 		github.PSFBody(p.Issue, issue.Title, spec, 1))
 	if err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "pr", http.StatusBadGateway, err)
 		return
 	}
+	p.PR = pr.Number
+	s.psfLog(p, "inicio", map[string]any{"repo": name, "base": ws.Base, "carpeta": ws.Carpeta, "pr_url": pr.URL, "titulo": issue.Title,
+		"etiquetas": issue.Labels, "comentarios": len(issue.Comments), "rama_nueva": ws.RamaNueva})
 	log.Printf("psf: issue #%d of %s on %s, PR #%d (%s)", p.Issue, name, ws.Rama, pr.Number, ses.Login)
 	jsonOK(w, map[string]any{"repo": name, "issue": issue, "branch": ws.Rama, "base": ws.Base, "folder": ws.Carpeta,
 		"pr": pr.Number, "pr_url": pr.URL, "spec_path": spec})
@@ -117,15 +131,16 @@ func (s *Servidor) psfSpec(w http.ResponseWriter, r *http.Request, ses *sesiones
 		return
 	}
 	if err := repo.WritePSFSpec(r.Context(), dir, repo.PSFBranch(p.Issue), p.Issue, p.Text); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "spec", http.StatusBadGateway, err)
 		return
 	}
 	body := "## Especificación aprobada (PSF · Spec Writer)\n\n" + truncate(p.Text, 60_000)
 	if err := s.GitHub.CommentPR(r.Context(), name, p.PR, body); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "spec-comentario", http.StatusBadGateway, err)
 		return
 	}
 	s.psfChecklist(r, name, p, 2)
+	s.psfLog(p, "spec-aprobada", map[string]any{"caracteres": len(p.Text)})
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
@@ -149,10 +164,36 @@ func (s *Servidor) psfSync(w http.ResponseWriter, r *http.Request, ses *sesiones
 	}
 	res, err := repo.SyncPSF(r.Context(), dir, repo.PSFBranch(p.Issue), p.Base, msg, maxPSFDiff)
 	if err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "sync", http.StatusBadGateway, err)
 		return
 	}
+	s.psfLog(p, "sync", map[string]any{"ficheros": res.Files, "commits": res.Commits, "commit_pgocode": res.Committed, "diff": res.DiffSize, "mensaje": msg})
+	if len(res.Files) > 0 && strings.TrimSpace(p.Program) != "" {
+		round := "Builder"
+		if p.Step == "Supervisor" {
+			round = "Supervisor"
+		}
+		if p.Iteration > 0 {
+			round = fmt.Sprintf("%s · iteración %d", round, p.Iteration)
+		}
+		go s.psfProgramPictures(p, dir, round) // in the background: the agent flow does not wait for the pictures
+	}
 	jsonOK(w, res)
+}
+
+// psfFetch: before another Builder or Supervisor round, the latest base branch from the remote (the agent may have
+// no network to fetch it).
+func (s *Servidor) psfFetch(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	p, _, ok := s.psfRead(w, r, ses)
+	if !ok {
+		return
+	}
+	if err := repo.FetchPSFBase(r.Context(), p.Folder, p.Base); err != nil {
+		s.psfFail(w, p, "fetch", http.StatusBadGateway, err)
+		return
+	}
+	s.psfLog(p, "fetch", map[string]any{"base": p.Base})
+	jsonOK(w, map[string]bool{"ok": true})
 }
 
 // psfReady: phase 5, with all 4 reviewers approving. Posts the audit summary and marks the PR ready.
@@ -179,9 +220,10 @@ func (s *Servidor) psfReady(w http.ResponseWriter, r *http.Request, ses *sesione
 		}
 	}
 	if err := s.GitHub.MarkReady(r.Context(), name, p.PR); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "ready", http.StatusBadGateway, err)
 		return
 	}
+	s.psfLog(p, "ready", nil)
 	log.Printf("psf: PR #%d of %s ready for merge (%s)", p.PR, name, ses.Login)
 	jsonOK(w, map[string]bool{"ok": true})
 }
@@ -197,9 +239,10 @@ func (s *Servidor) psfComment(w http.ResponseWriter, r *http.Request, ses *sesio
 		return
 	}
 	if err := s.GitHub.CommentPR(r.Context(), name, p.PR, truncate(p.Text, 60_000)); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "comentario", http.StatusBadGateway, err)
 		return
 	}
+	s.psfLog(p, "comentario", map[string]any{"caracteres": len(p.Text)})
 	jsonOK(w, map[string]bool{"ok": true})
 }
 
@@ -225,11 +268,57 @@ func (s *Servidor) psfMerge(w http.ResponseWriter, r *http.Request, ses *sesione
 	}
 	s.psfChecklist(r, name, p, 5)
 	if err := s.GitHub.Merge(r.Context(), name, p.PR); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		s.psfFail(w, p, "merge", http.StatusBadGateway, err)
 		return
 	}
 	log.Printf("psf: PR #%d of %s merged by %s", p.PR, name, ses.Login)
-	jsonOK(w, map[string]bool{"ok": true})
+	// Merged: the issue worktree is no longer needed (its work is on the base branch).
+	removed := ""
+	if p.Issue > 0 {
+		dir, err := repo.RemovePSFWorktree(r.Context(), p.Folder, p.Issue)
+		if err != nil {
+			log.Printf("psf: worktree of issue #%d: %v", p.Issue, err)
+		} else if dir != "" {
+			removed = dir
+			if err := s.RegistroCopias.Quita(dir); err != nil {
+				log.Printf("psf: worktree registry: %v", err)
+			}
+		}
+	}
+	s.psfLog(p, "merge", map[string]any{"copia_quitada": removed})
+	jsonOK(w, map[string]any{"ok": true, "worktree_removed": removed})
+}
+
+// psfDiscard: a person gives up the issue (it cannot or must not be done): why, on the PR; the PR closed with its
+// branch, the issue closed as «not planned» and the worktree removed.
+func (s *Servidor) psfDiscard(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
+	p, name, ok := s.psfRead(w, r, ses)
+	if !ok {
+		return
+	}
+	if p.PR <= 0 {
+		jsonError(w, http.StatusBadRequest, "falta el PR")
+		return
+	}
+	why := strings.TrimSpace(p.Text)
+	if why == "" {
+		why = "Sin motivo indicado."
+	}
+	if err := s.GitHub.CommentPR(r.Context(), name, p.PR, "### PSF · Issue descartada\n\n"+truncate(why, 20_000)); err != nil {
+		s.psfFail(w, p, "descarte", http.StatusBadGateway, err)
+		return
+	}
+	if err := s.GitHub.Discard(r.Context(), name, p.PR, p.Issue); err != nil {
+		s.psfFail(w, p, "descarte", http.StatusBadGateway, err)
+		return
+	}
+	removed := ""
+	if dir, err := repo.RemovePSFWorktree(r.Context(), p.Folder, p.Issue); err == nil && dir != "" {
+		removed = dir
+		s.RegistroCopias.Quita(dir)
+	}
+	s.psfLog(p, "descartada", map[string]any{"motivo": why, "copia_quitada": removed})
+	jsonOK(w, map[string]any{"ok": true, "worktree_removed": removed})
 }
 
 // psfChecklist updates the PR checklist (a failure is only logged: it never stops the process).

@@ -102,3 +102,41 @@ test('un revisor que no llega a responder es un fallo, no un rechazo', () => {
   assert.ok(!P.gaveUp('VEREDICTO: APROBADO\nHALLAZGOS:\n- ninguno'));
   assert.match(P.reviewerPrompt('testing', { number: 1, title: 'T' }, 'S', 'D', 'master', 'psf/issue-1'), /No ejecutes tests, compilaciones ni git/);
 });
+
+test('indicaciones de la persona para desbloquear', () => {
+  const b = P.builderPrompt({ number: 4, title: 'T' }, '# Spec', 2, '', 'Usa el paquete existente');
+  assert.match(b, /Vuelve sobre el cambio/);
+  assert.match(b, /Indicaciones de la persona[\s\S]*Usa el paquete existente/);
+  assert.doesNotMatch(P.builderPrompt({ number: 4, title: 'T' }, '# Spec', 1), /Indicaciones de la persona/);
+  assert.match(P.specPrompt(issue, 'x.md', 'Que sea solo para Linux'), /Que sea solo para Linux/);
+  assert.match(P.conflictGuidance('master'), /git merge origin\/master/);
+  assert.ok(P.needsDecision({ phase: 'blocked' }));
+  assert.ok(P.needsDecision({ phase: 'ready', autoMergeHeld: true }));
+  assert.ok(!P.needsDecision({ phase: 'ready' }));
+});
+
+test('línea de estado de la franja', () => {
+  assert.equal(P.stepStatus({ ...P.newPsfState(1, 'T'), phase: 'discarded' }, 'ready'), 'rejected');
+  assert.ok(!P.needsDecision({ phase: 'discarded' }) && !P.isWorkingPhase('discarded'));
+  const s = P.newPsfState(4, 'T');
+  assert.match(P.statusText({ ...s, phase: 'review', reviews: { security: { verdict: 'APROBADO' } } }, true), /1 de 4 aprobados/);
+  assert.match(P.statusText({ ...s, phase: 'builder', iteration: 2 }, false), /iteración 2\/3\) · parada/);
+  assert.match(P.statusText({ ...s, phase: 'ready', autoMergeHeld: true, heldReason: 'conflict', base: 'master' }, false), /conflictos con master/);
+  assert.match(P.statusText({ ...s, phase: 'merged', base: 'master' }, false), /Fusionado en master/);
+  assert.equal(P.decisionLabel({ phase: 'blocked', blockedReason: 'ambiguity' }), 'Rehacer la spec');
+  assert.equal(P.decisionLabel({ phase: 'ready' }), 'Otra iteración');
+  assert.equal(P.stepStatus({ ...s, phase: 'merged' }, 'ready'), 'done');
+});
+
+test('supervisor: modelo más capaz y su encargo', () => {
+  assert.equal(P.bestModel(['opus', 'sonnet', 'haiku'], 'x'), 'opus');
+  assert.equal(P.bestModel(['gemini-4-argon-high', 'gemini-3.8-flash-high', 'gemini-3.1-pro-high'], 'x'), 'gemini-4-argon-high');
+  assert.equal(P.bestModel(['a', 'b'], 'x'), 'a');
+  assert.equal(P.bestModel([], 'x'), 'x');
+  assert.match(P.supervisorPrompt('conflict', { number: 4, title: 'T' }, '# S', 'master', ''), /git merge origin\/master/);
+  assert.match(P.supervisorPrompt('convergence', { number: 4, title: 'T' }, '# S', 'master', '- a.go:1 falta test'), /árbitro[\s\S]*falta test/);
+  assert.match(P.supervisorPrompt('checks', { number: 4, title: 'T' }, '# S', 'master', 'test'), /checks de GitHub del PR fallan \(test\)/);
+  const s = { ...P.newPsfState(4, 'T'), phase: 'supervisor' as const, supervisorTask: 'conflict' as const };
+  assert.equal(P.stepStatus(s, 'builder'), 'running');
+  assert.match(P.statusText(s, true), /Supervisor resuelve el bloqueo \(conflictos\)/);
+});

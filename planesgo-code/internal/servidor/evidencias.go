@@ -43,6 +43,10 @@ func dirEvidencias(carpeta, sesion string) string {
 
 var extImagen = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 
+// extEvidencia: what can be served as evidence: the agents' images plus the SVG pictures pgocode draws itself (PSF;
+// an agent's SVG is never stored). They are served with a CSP that blocks scripts.
+var extEvidencia = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg"}
+
 // guardaCapturas guarda las imágenes de una herramienta y las cambia por sus rutas (h.Capturas).
 func guardaCapturas(carpeta string, c Captura, h *llm.Herramienta) {
 	if len(h.Imagenes) == 0 || carpeta == "" || c.Sesion == "" {
@@ -83,12 +87,46 @@ func guardaCapturas(carpeta string, c Captura, h *llm.Herramienta) {
 	h.Imagenes = nil
 }
 
+// saveEvidence stores one image made by pgocode (e.g. PSF) as an evidence of the session, like the agents' ones.
+func saveEvidence(folder string, c Captura, name, ext string, data []byte) (string, error) {
+	if folder == "" || c.Sesion == "" || len(data) > maxCaptura {
+		return "", fmt.Errorf("evidencia no válida")
+	}
+	dir := dirEvidencias(folder, c.Sesion)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	excluyeDeGit(folder)
+	muEvidencias.Lock()
+	defer muEvidencias.Unlock()
+	now := time.Now()
+	name = strings.Trim(nombreSeguro.ReplaceAllString(name, "_"), "_ ")
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	// Nanoseconds in the name: several pictures saved in the same millisecond (the program shots) must not overwrite
+	// each other.
+	f := filepath.Join(dir, fmt.Sprintf("%s-%09d-%s%s", now.Format("20060102-150405"), now.Nanosecond(), name, ext))
+	if err := os.WriteFile(f, data, 0o600); err != nil {
+		return "", err
+	}
+	idx, err := os.OpenFile(filepath.Join(dir, "indice.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	defer idx.Close()
+	c.Ruta, c.T = f, now.Format(time.RFC3339)
+	b, _ := json.Marshal(c)
+	_, err = idx.Write(append(b, '\n'))
+	return f, err
+}
+
 // rutaEvidencia: una ruta vale si es una imagen dentro de .pgocode/evidencias de una carpeta del proyecto.
 func (s *Servidor) rutaEvidencia(proyecto int, ruta string) (string, bool) {
 	r := filepath.Clean(ruta)
 	marca := string(filepath.Separator) + filepath.Join(".pgocode", "evidencias") + string(filepath.Separator)
 	i := strings.Index(r, marca)
-	if !filepath.IsAbs(r) || i < 0 || extImagen[mimeDe(r)] == "" || strings.Contains(r[i+len(marca):], "..") {
+	if !filepath.IsAbs(r) || i < 0 || extEvidencia[mimeDe(r)] == "" || strings.Contains(r[i+len(marca):], "..") {
 		return "", false
 	}
 	// Ni la evidencia ni la carpeta .pgocode pueden ser enlaces que lleven fuera del proyecto.
@@ -103,7 +141,7 @@ func sinSalir(base, ruta string) bool {
 }
 
 func mimeDe(f string) string {
-	for m, e := range extImagen {
+	for m, e := range extEvidencia {
 		if strings.EqualFold(filepath.Ext(f), e) {
 			return m
 		}
@@ -125,6 +163,8 @@ func (s *Servidor) evidencia(w http.ResponseWriter, r *http.Request, ses *sesion
 	}
 	w.Header().Set("Content-Type", mimeDe(ruta))
 	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, ruta)
 }
 

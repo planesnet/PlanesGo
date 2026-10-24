@@ -10,6 +10,7 @@ import Flujo, { type PeticionResolver } from './Flujo';
 import Skills from './Skills';
 import type { Sesion } from '../sesiones';
 import Icono from './Icono';
+import { SHOW_EVIDENCE } from '../psf';
 
 type Pestana = 'actividad' | 'flujo' | 'studio' | 'programas' | 'skills' | 'navegador';
 type VistaTV = 'pruebas' | 'directo' | 'capturas';
@@ -17,8 +18,8 @@ type VistaTV = 'pruebas' | 'directo' | 'capturas';
 const ANCHO_MIN = 320;
 
 // Panel derecho: TV (pruebas de la campaña y directo) y navegador. Se redimensiona arrastrando su borde izquierdo.
-export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, sesion, directorio, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
-  proyecto: Proyecto | null; carpeta: string; rama: string; agente?: string; sesiones: Sesion[]; alAncho: (px: number) => void;
+export default function Artefactos({ proyecto, carpeta, agente, sesiones, sesion, directorio, alAncho, pedidoWeb, versionProcesos, alAbrir, alResolver }: {
+  proyecto: Proyecto | null; carpeta: string; agente?: string; sesiones: Sesion[]; alAncho: (px: number) => void;
   sesion?: Sesion | null; directorio?: string;
   pedidoWeb: PedidoWeb | null; versionProcesos: number; alAbrir: (url: string) => void; alResolver: (p: PeticionResolver) => void;
 }) {
@@ -28,6 +29,15 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
   const [vista, setVista] = useState<VistaTV>(() => {
     try { return (localStorage.getItem('pgo:vista-tv') as VistaTV) || 'pruebas'; } catch { return 'pruebas'; }
   });
+  // An automatic PSF session opens the TV on its pictures (evidence); the others, on the view chosen last time.
+  const [vistaAuto, setVistaAuto] = useState<VistaTV>('capturas');
+  const vistaTV = sesion?.psf ? vistaAuto : vista;
+  const cambiaVista = (v: VistaTV) => (sesion?.psf ? setVistaAuto(v) : eligeVista(v));
+  useEffect(() => {
+    const ver = () => { setPestana('studio'); setVistaAuto('capturas'); };
+    window.addEventListener(SHOW_EVIDENCE, ver);
+    return () => window.removeEventListener(SHOW_EVIDENCE, ver);
+  }, []);
   const [arrastrando, setArrastrando] = useState(false);
 
   const eligeVista = (v: VistaTV) => { setVista(v); try { localStorage.setItem('pgo:vista-tv', v); } catch { /* sin almacenamiento */ } };
@@ -62,24 +72,25 @@ export default function Artefactos({ proyecto, carpeta, rama, agente, sesiones, 
         <button role="tab" aria-selected={pestana === 'programas'} onClick={() => setPestana('programas')} title="Programas en local"><Icono n="terminal" t={16} /> Programas</button>
         <button role="tab" aria-selected={pestana === 'skills'} onClick={() => setPestana('skills')} title="Skills instaladas y su uso"><Icono n="skill" t={16} /> Skills</button>
         <button role="tab" aria-selected={pestana === 'navegador'} onClick={() => setPestana('navegador')} title="Navegador"><Icono n="web" t={16} /> Web</button>
-        {pestana === 'studio' && proyecto && (
-          <span className="subpestanas">
-            <button aria-pressed={vista === 'pruebas'} onClick={() => eligeVista('pruebas')}>Pruebas</button>
-            <button aria-pressed={vista === 'directo'} onClick={() => eligeVista('directo')}>Directo</button>
-            <button aria-pressed={vista === 'capturas'} onClick={() => eligeVista('capturas')} title="Capturas de evidencia que devuelven los agentes al probar">Capturas</button>
-          </span>
-        )}
       </div>
       <div className="contenido-artefacto">
         {!proyecto
           ? <p className="suave relleno">Elige un proyecto.</p>
           : <>
-            {pestana === 'studio' && (vista === 'pruebas'
-              ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => eligeVista('directo')} />
-              : vista === 'capturas' ? <Galeria key={proyecto.id} proyecto={proyecto.id} />
+            {/* The TV views, always visible inside it (in the tab bar they were cut off on a narrow panel). */}
+            {pestana === 'studio' && (
+              <div className="subpestanas tv-vistas" role="tablist" aria-label="Vistas de Studio TV">
+                <button role="tab" aria-selected={vistaTV === 'capturas'} onClick={() => cambiaVista('capturas')} title="Fotos y capturas de evidencia de la sesión (agentes y sesiones automáticas PSF)">Capturas</button>
+                <button role="tab" aria-selected={vistaTV === 'pruebas'} onClick={() => cambiaVista('pruebas')}>Pruebas</button>
+                <button role="tab" aria-selected={vistaTV === 'directo'} onClick={() => cambiaVista('directo')}>Directo</button>
+              </div>
+            )}
+            {pestana === 'studio' && (vistaTV === 'pruebas'
+              ? <Pruebas key={proyecto.id} proyecto={proyecto} alVerDirecto={() => cambiaVista('directo')} />
+              : vistaTV === 'capturas' ? <Galeria key={proyecto.id + ':' + (sesion?.id || '')} proyecto={proyecto.id} session={sesion?.id} />
                 : <StudioTV key={proyecto.id} proyecto={proyecto} />)}
             {pestana === 'actividad' && <Actividad sesiones={sesiones} key={proyecto.id} proyecto={proyecto} carpeta={carpeta} sesion={sesion} directorio={directorio} versionProcesos={versionProcesos} alAbrir={alAbrir} />}
-            {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} rama={rama} alAbrir={alAbrir} alResolver={alResolver} />}
+            {pestana === 'flujo' && <Flujo key={proyecto.id} proyecto={proyecto} carpeta={carpeta} alAbrir={alAbrir} alResolver={alResolver} />}
             {pestana === 'skills' && <Skills key={proyecto.id} proyecto={proyecto} carpeta={carpeta} agente={agente} sesiones={sesiones} />}
             {pestana === 'programas' && <Programas key={proyecto.id} proyecto={proyecto} carpeta={carpeta} version={versionProcesos} alAbrir={alAbrir} />}
             {/* El navegador sigue montado al cambiar de pestaña: no se pierden sus pestañas ni lo que cargaban. */}

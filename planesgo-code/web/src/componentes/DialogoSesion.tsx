@@ -70,7 +70,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
     if (!s.carpeta) { setLocal(null); return; }
     let vale = true;
     get<NonNullable<typeof local>>(`/api/proyecto/info-carpeta?proyecto=${s.proyecto}&carpeta=${encodeURIComponent(s.carpeta)}`)
-      .then(i => { if (!vale) return; setLocal(i); if (carpetaElegida && i.git && i.rama) cambia({ rama: i.rama }); })
+      .then(i => { if (!vale) return; setLocal(i); if (carpetaElegida && i.git && i.rama && s.carpeta !== sesion.carpeta && !sesion.automatic) cambia({ rama: i.rama }); }) // only when another folder is chosen
       .catch(() => { if (vale) setLocal(null); });
     return () => { vale = false; };
   }, [s.carpeta, s.proyecto]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -108,6 +108,15 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
     }
     setGuardando(true);
     setError('');
+    // An automatic PSF session keeps its branch and folder (its worktree belongs to the PSF flow): only the rest
+    // of its properties change.
+    if (sesion.automatic) {
+      try {
+        const repo = await get<Repo>(`/api/proyecto/repo?proyecto=${s.proyecto}&carpeta=${encodeURIComponent(sesion.carpeta)}`);
+        alGuardar({ ...s, rama: sesion.rama, carpeta: sesion.carpeta, sesionAgente: s.agente !== sesion.agente ? undefined : s.sesionAgente }, repo);
+      } catch (e) { setError((e as Error).message); setGuardando(false); }
+      return;
+    }
     try {
       const repo = await post<Repo>('/api/proyecto/preparar', { proyecto: s.proyecto, sesion: s.id, rama, carpeta: s.carpeta, remoto: pideRemoto ? remoto.trim() : '' });
       window.dispatchEvent(new Event(COPIES_CHANGED));
@@ -138,12 +147,13 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
           <h3>General</h3>
           <label>Rama del repositorio{(local?.repositorio || info?.repositorio) && <span className="suave"> · {local?.git ? local.repositorio : info?.repositorio}</span>}
             <span className="con-icono"><Icono n="rama" t={15} />
+              {sesion.automatic ? <code title="Sesión automática PSF: su rama y su carpeta las lleva el flujo">{sesion.rama}</code> :
               <select value={s.rama} onChange={e => { cambia({ rama: e.target.value }); }} autoFocus={nueva}>
                 <option value="" disabled>Elige la rama…</option>
                 {s.rama && s.rama !== NUEVA && !ramas.includes(s.rama) && <option value={s.rama}>{s.rama}</option>}
                 {ramas.map(r => <option key={r} value={r}>{r}</option>)}
                 <option value={NUEVA}>Rama nueva…</option>
-              </select>
+              </select>}
             </span>
             {s.rama === NUEVA && <input value={ramaNueva} onChange={e => setRamaNueva(e.target.value)} placeholder="Nombre de la rama nueva (sale de la rama actual del repositorio)" />}
           </label>
@@ -168,7 +178,7 @@ export default function DialogoSesion({ sesion, nueva, login, proveedores, inici
             <span className="etiqueta-campo">Carpeta local de la rama</span>
             <div className="carpeta-elegida">
               <code className="recorta" title={s.carpeta}>{s.carpeta || '—'}</code>
-              <button type="button" className="boton-secundario" onClick={elegir}><Icono n="carpeta" t={14} /> Elegir…</button>
+              {!sesion.automatic && <button type="button" className="boton-secundario" onClick={elegir}><Icono n="carpeta" t={14} /> Elegir…</button>}
             </div>
             {conRepo && <span className="suave pequeno">Repositorio de la carpeta: <b>{local!.repositorio}</b>{local!.rama ? <> · rama <b>{local!.rama}</b></> : null}</span>}
             {pideRemoto && (
