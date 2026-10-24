@@ -10,9 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"planesgo-code/internal/proceso"
 )
 
 // Pictures of the program itself (the evidence of an automatic PSF session): the project's command (e.g.
@@ -309,7 +310,7 @@ func captureProgram(ctx context.Context, dir, command string, moments []float64)
 	cmd := exec.CommandContext(ctx, "script", "-qfec", inner, "/dev/null")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor", fmt.Sprintf("COLUMNS=%d", termCols), fmt.Sprintf("LINES=%d", termRows))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	proceso.GrupoPropio(cmd)
 	stdin, _ := cmd.StdinPipe() // kept open: the program waits for keys that never come
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -321,7 +322,7 @@ func captureProgram(ctx context.Context, dir, command string, moments []float64)
 	}
 	stop := func() {
 		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			proceso.SenalGrupo(cmd.Process.Pid, true)
 		}
 		stdin.Close()
 	}
