@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"planesgo-code/internal/actualizacion"
-	"planesgo-code/internal/anydesk"
 	"planesgo-code/internal/bugreport"
 	"planesgo-code/internal/clients"
 	"planesgo-code/internal/depuracion"
+	"planesgo-code/internal/desktop"
 	"planesgo-code/internal/gbrowser"
 	"planesgo-code/internal/imputacion"
 	"planesgo-code/internal/llm"
@@ -200,6 +200,11 @@ func main() {
 	// Enlazado como «pgo»: la orden de los agentes para ejecutar programas del proyecto.
 	if filepath.Base(os.Args[0]) == "pgo" {
 		os.Exit(pgo(os.Args[1:]))
+	}
+	// «pgocode-backend cliente»: the desktop helper of a client app (internal/desktop), started by it as its child;
+	// nothing of the server.
+	if len(os.Args) > 1 && os.Args[1] == "cliente" {
+		os.Exit(desktop.Main())
 	}
 	ampliaPath()
 	nuevasShell := entornoShell()
@@ -441,9 +446,10 @@ func main() {
 	}
 	s.Actualizador = act
 	s.DirRamas = filepath.Join(datos, "ramas")
-	// AnyDesk: its sessions (outgoing and incoming) are followed in its traces and their time is logged.
+	// Remote sessions (RDP and AnyDesk) run in the clients; here, their time (closed if a client stops beating) and
+	// the AnyDesk settings.
 	s.AnyDeskFile = filepath.Join(datos, "anydesk.json")
-	go s.WatchAnyDesk(ctx, anydesk.TraceFiles())
+	go s.WatchRemoteSessions(ctx)
 	// Registro de las copias de trabajo que crea pgocode; al arrancar, git olvida las que se borraron a mano.
 	s.RegistroCopias = &repo.Registro{Fichero: filepath.Join(datos, "copias-trabajo.json")}
 	go s.PodaCopias(context.Background())

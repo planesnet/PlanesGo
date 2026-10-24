@@ -8,8 +8,8 @@ import (
 	"syscall"
 )
 
-// DetachedEnv: set by whoever starts the server on its own (the desktop app); the server then starts afresh
-// without what it inherited (StartClean).
+// DetachedEnv: set by the desktop app when it starts the server on its own, or its desktop helper; the process then
+// starts afresh without what it inherited (StartClean).
 const DetachedEnv = "PGO_DESACOPLADO"
 
 // StartClean: a process started by another program can inherit its open files and sockets (Chromium leaves some

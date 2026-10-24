@@ -151,8 +151,9 @@ func (s *Servidor) subfolder(w http.ResponseWriter, r *http.Request, ses *sesion
 }
 
 // proyectoSubcarpeta: POST /api/proyecto/subcarpeta {proyecto, carpeta, accion}: the ⋮ menu of a subfolder.
-// cambios (what it has), abrir (in the file manager), subir (push its branch), pr (its pull request), descartar
-// (remove it even with work; the branch stays) and olvidar (a subfolder whose folder no longer exists).
+// cambios (what it has), subir (push its branch), pr (its pull request), descartar (remove it even with work; the
+// branch stays) and olvidar (a subfolder whose folder no longer exists). «Abrir la carpeta» is done by the client app
+// (Electron), on the person's computer.
 func (s *Servidor) proyectoSubcarpeta(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
 	var p struct {
 		Proyecto int    `json:"proyecto"`
@@ -179,12 +180,6 @@ func (s *Servidor) proyectoSubcarpeta(w http.ResponseWriter, r *http.Request, se
 			return
 		}
 		jsonOK(w, map[string]string{"texto": txt})
-	case "abrir":
-		if err := openWithSystem(c); err != nil {
-			jsonError(w, http.StatusInternalServerError, "no se pudo abrir la carpeta: "+err.Error())
-			return
-		}
-		jsonOK(w, map[string]bool{"ok": true})
 	case "subir":
 		if err := repo.PushWorktree(r.Context(), c); err != nil {
 			jsonError(w, http.StatusBadGateway, err.Error())

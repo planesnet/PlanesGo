@@ -2,14 +2,15 @@
 // (RDP) o por AnyDesk. Usa la sesión de pgocode (la misma app y el mismo backend); si no hay, el acceso de siempre. El
 // proyecto es obligatorio: si la conexión ya lo tiene, se muestra; si no, el buscador de la barra de proyectos. El
 // tiempo se imputa en él con el servicio de pgocode.
-//  - RDP: la ventana de Windows la abre el backend (FreeRDP) con todo permitido (portapapeles, carpeta
-//    «Intercambio», sonido, micrófono e impresoras), lleva en su título el tiempo imputado y se cierra desde ella
-//    misma. La contraseña va a FreeRDP y no se guarda.
+//  - RDP: la ventana de Windows la abre el ayudante de escritorio de la app (FreeRDP, en este equipo) con todo
+//    permitido (portapapeles, carpeta «Intercambio», sonido, micrófono e impresoras) y se cierra desde ella misma.
+//    La contraseña va de esta ventana al ayudante y de él a FreeRDP: no pasa por el servidor ni se guarda.
 //  - AnyDesk (AnyDesk.tsx): se abre el cliente instalado, que pide él la contraseña; las sesiones entrantes, o sin
 //    proyecto, lo piden en un diálogo.
-// Las conexiones, sin contraseña, se recuerdan en este navegador. Nada debajo de «Conectar».
+// Las conexiones, sin contraseña, se recuerdan en este navegador. Nada debajo de «Conectar». Los visores solo están en
+// la app de escritorio: en el navegador, un aviso.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { escuchaAvisos, get, post, type Proyecto, type Usuario } from '../api';
+import { escuchaAvisos, get, remoteOrder, remoteSessions, VIEWERS_ONLY_DESKTOP, type Proyecto, type Usuario } from '../api';
 import Acceso, { CampoClave } from './Acceso';
 import { AnyDeskForm, AnyDeskUnassigned, useAnyDesk } from './AnyDesk';
 import { Dialogs, showMessage } from './Modal';
@@ -17,7 +18,6 @@ import ProjectField from './ProjectField';
 import { readSaved, remember, writeSaved } from '../remoteConnections';
 
 interface Conexion { equipo: string; usuario: string; proyecto: number }
-interface Abierta { id: string; proyecto: number; estado: 'conectando' | 'conectado' | 'terminado'; error?: string }
 type Kind = 'rdp' | 'anydesk';
 
 const KIND_KEY = 'pgo:escritorio:tipo';
@@ -58,6 +58,7 @@ function Ventana({ usuario }: { usuario: Usuario }) {
         {kind === 'rdp'
           ? <FormularioRdp usuario={usuario} proyectos={proyectos} />
           : <AnyDeskForm user={usuario} projects={proyectos} state={anydesk} reload={reloadAnyDesk} />}
+        {!window.psf?.remoto && <p className="rdp-nota" role="note">{VIEWERS_ONLY_DESKTOP}</p>}
       </div>
       <AnyDeskUnassigned login={usuario.login} projects={proyectos} />
       <Dialogs />
@@ -73,14 +74,18 @@ function FormularioRdp({ usuario, proyectos }: { usuario: Usuario; proyectos: Pr
   const mias = useRef(new Set<string>()); // las conexiones abiertas desde esta ventana (para avisar de sus errores)
 
   useEffect(() => {
-    const carga = () => get<{ conexiones: Abierta[] }>('/api/rdp').then(r => {
-      for (const a of r.conexiones) {
-        if (a.estado === 'terminado' && mias.current.delete(a.id) && a.error) showMessage(a.error, { level: 'error', title: 'Escritorio remoto' });
-      }
+    // Por qué terminó una conexión abierta desde esta ventana: lo dice el ayudante al momento y el servidor en su
+    // lista (por si se pierde el aviso).
+    const avisa = (id: string, error?: string) => {
+      if (mias.current.delete(id) && error) showMessage(error, { level: 'error', title: 'Escritorio remoto' });
+    };
+    const carga = () => remoteSessions().then(l => {
+      for (const a of l) if (a.state === 'ended') avisa(a.id, a.error);
     }).catch(() => {});
-    const fuera = escuchaAvisos(a => { if (a.tipo === 'rdp') carga(); });
-    const t = setInterval(carga, 5000); // por si se pierde un aviso
-    return () => { clearInterval(t); fuera(); };
+    const fuera = escuchaAvisos(a => { if (a.tipo === 'remoto') carga(); });
+    const sinAyudante = window.psf?.alRemoto?.(ev => { if (ev.event === 'state' && ev.id) avisa(ev.id, ev.error); });
+    const t = setInterval(carga, 5000);
+    return () => { clearInterval(t); fuera(); sinAyudante?.(); };
   }, []);
 
   const cambiaEquipo = (equipo: string) => {
@@ -93,7 +98,7 @@ function FormularioRdp({ usuario, proyectos }: { usuario: Usuario; proyectos: Pr
     if (!c.proyecto) return;
     setEnviando(true);
     try {
-      const r = await post<{ id: string }>('/api/rdp/conectar', { proyecto: c.proyecto, nombre: c.equipo, equipo: c.equipo, usuario: c.usuario, contrasena });
+      const r = await remoteOrder({ op: 'rdp', project: c.proyecto, name: c.equipo, host: c.equipo, user: c.usuario, password: contrasena });
       mias.current.add(r.id);
       const l = remember(conexiones, c, (a, b) => a.equipo === b.equipo);
       setConexiones(l);
@@ -119,7 +124,7 @@ function FormularioRdp({ usuario, proyectos }: { usuario: Usuario; proyectos: Pr
       <label>Contraseña
         <CampoClave value={contrasena} onChange={setContrasena} autoComplete="new-password" />
       </label>
-      <button className="primario" disabled={enviando || !c.proyecto}>{enviando ? 'Conectando…' : 'Conectar'}</button>
+      <button className="primario" disabled={enviando || !c.proyecto || !window.psf?.remoto}>{enviando ? 'Conectando…' : 'Conectar'}</button>
     </form>
   );
 }

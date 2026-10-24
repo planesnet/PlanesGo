@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { COPIES_CHANGED, listaCopias, quitaCopia, subfolderAction, type Proyecto } from '../api';
+import { COPIES_CHANGED, listaCopias, openFolder, openOutside, quitaCopia, subfolderAction, type Proyecto } from '../api';
 import * as AP from '../activityPanel';
 import * as RP from '../reparto';
 import * as C from '../copias';
@@ -239,7 +239,7 @@ function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Ses
         else window.dispatchEvent(new CustomEvent(NEW_SESSION_ON_BRANCH, { detail: c.rama }));
         return;
       case 'abrir':
-        return conCopia(c, async () => { await subfolderAction(proyecto, c.carpeta, 'abrir'); });
+        return conCopia(c, () => openFolder(c.carpeta));
       case 'cambios':
         return conCopia(c, async () => {
           const r = await subfolderAction<{ texto: string }>(proyecto, c.carpeta, 'cambios');
@@ -251,7 +251,7 @@ function CopiasTrabajo({ proyecto, sesiones }: { proyecto: number; sesiones: Ses
       case 'pr':
         return conCopia(c, async () => {
           const r = await subfolderAction<{ url: string }>(proyecto, c.carpeta, 'pr');
-          if (window.psf) await window.psf.abrirFuera(r.url); else window.open(r.url, '_blank', 'noopener');
+          await openOutside(r.url);
         });
       case 'quitar':
         if (!(await askConfirm(C.explicaQuitar(c, true, usuarios) + '\n\n¿Continuar?', { danger: true, okText: usuarios.length ? 'Quitar y archivar' : 'Quitar' }))) return;

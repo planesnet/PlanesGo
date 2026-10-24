@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { get, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
+import { get, openOutside, post, type ConfigPrograma, type Proceso, type Proyecto } from '../api';
 import * as L from '../lanzador';
 import Icono from './Icono';
 
@@ -121,8 +121,7 @@ export default function Lanzador({ proyecto, carpeta, version, propuesta, alAbri
     setUrl(n);
     if (destino === 'sistema') {
       try {
-        if (window.psf) await window.psf.abrirFuera(n);
-        else await post('/api/abrir', { proyecto: proyecto.id, url: n });
+        await openOutside(n);
       } catch (e) { setError((e as Error).message); }
     } else {
       alAbrirWeb(n, { dispositivo: p.dispositivo, orientacion: p.orientacion });

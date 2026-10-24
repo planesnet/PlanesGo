@@ -4,6 +4,7 @@ import type { Copia } from './copias';
 import type { Propuesta } from './reparto';
 import type { PruneReport, Vigencia } from './prune';
 import type { RouteStamp } from './router';
+import { ipcError } from './remoteConnections';
 // Cliente de la API del backend Go. Toda escritura lleva X-PGO (defensa CSRF) y la cookie de sesión.
 
 export interface Usuario { nombre: string; login: string; odoo?: string; version?: string }
@@ -65,7 +66,7 @@ export const post = <T,>(ruta: string, cuerpo: unknown, signal?: AbortSignal) =>
 export interface EventoChat { texto?: string; pensamiento?: string; herramienta?: Herramienta; tarea?: Tarea; uso?: Uso; vivo?: Uso; sesion_agente?: string; punto?: string; error?: string; fin?: boolean; poda?: PruneReport; via?: string; subagentes?: string; memoria?: { tokens: number; motivo: string } } // via: quién respondió una pregunta aparte (copia, modelo, local/<modelo>); subagentes: pgocode los ha sugerido (el porqué); memoria: el mensaje lleva la memoria del proyecto (sus tokens y por qué)
 
 // Avisos del backend: cambios en los programas y URL que abrir en el navegador integrado.
-export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'rdp' } | { tipo: 'anydesk' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
+export type Aviso = { tipo: 'procesos' } | { tipo: 'imputacion' } | { tipo: 'remoto' } | { tipo: 'abrir'; url: string; proyecto: number; proceso?: string };
 export function escuchaAvisos(cada: (a: Aviso) => void): () => void {
   const es = new EventSource('/api/eventos');
   es.onmessage = e => { try { cada(JSON.parse(e.data)); } catch { /* aviso incompleto */ } };
@@ -108,9 +109,49 @@ export async function chat(cuerpo: unknown, cada: (e: EventoChat) => void, seña
 
 // Puente con Electron (preload): solo existe dentro de la app de escritorio.
 declare global {
-  interface Window { psf?: { escritorio: true; abrirFuera: (url: string) => Promise<void>; elegirCarpeta?: (inicial?: string) => Promise<string | null>; escritorioRemoto?: () => Promise<void>; alActividad?: (cb: () => void) => () => void } }
+  interface Window {
+    psf?: {
+      escritorio: true; abrirFuera: (url: string) => Promise<void>; elegirCarpeta?: (inicial?: string) => Promise<string | null>;
+      escritorioRemoto?: () => Promise<void>; alActividad?: (cb: () => void) => () => void;
+      remoto?: (orden: RemoteOrder) => Promise<{ id: string }>; visores?: () => Promise<Viewers>;
+      alRemoto?: (cb: (ev: RemoteEvent) => void) => () => void; abrirRuta?: (ruta: string) => Promise<void>;
+    }
+  }
 }
 export const enEscritorio = () => Boolean(window.psf?.escritorio);
+
+// Remote viewers (RDP and AnyDesk): they run in the desktop app (its desktop helper); the server only keeps their
+// sessions and their time (GET /api/remote/sessions).
+export type RemoteOrder =
+  | { op: 'rdp'; project: number; name: string; host: string; user: string; password: string }
+  | { op: 'anydesk'; project: number; peer: string }
+  | { op: 'disconnect'; id: string };
+export interface Viewers { rdp: boolean; anydesk: boolean }
+export interface RemoteEvent { event: 'state' | 'error'; id?: string; kind?: string; state?: string; error?: string }
+export interface RemoteSession {
+  id: string; kind: 'rdp' | 'anydesk'; direction: 'outgoing' | 'incoming'; project: number; project_name?: string;
+  name?: string; host?: string; user?: string; peer?: string; peer_name?: string; started: string;
+  state: 'connecting' | 'connected' | 'ended'; error?: string;
+}
+export const VIEWERS_ONLY_DESKTOP = 'El escritorio remoto (RDP) y AnyDesk solo se abren desde la aplicación de escritorio de Planes Go Code.';
+export const remoteSessions = () => get<RemoteSession[]>('/api/remote/sessions');
+// remoteOrder: an order to the desktop helper (an error outside the desktop app).
+export function remoteOrder(o: RemoteOrder): Promise<{ id: string }> {
+  if (!window.psf?.remoto) return Promise.reject(new Error(VIEWERS_ONLY_DESKTOP));
+  return window.psf.remoto(o).catch(e => { throw ipcError(e); });
+}
+
+// openOutside: a web address in the system's browser (in the browser, a new tab: it already is the system's).
+export function openOutside(url: string): Promise<void> {
+  if (window.psf) return window.psf.abrirFuera(url);
+  window.open(url, '_blank', 'noopener');
+  return Promise.resolve();
+}
+// openFolder: a folder of this computer in its file manager (only the desktop app can).
+export function openFolder(path: string): Promise<void> {
+  if (!window.psf?.abrirRuta) return Promise.reject(new Error('Abrir la carpeta solo se puede desde la aplicación de escritorio: ' + path));
+  return window.psf.abrirRuta(path).catch(e => { throw ipcError(e); });
+}
 
 // Copias de trabajo (git worktree) del proyecto y quitar una sin perder nada.
 export const listaCopias = (proyecto: number) => get<{ copias: Copia[] }>(`/api/proyecto/copias?proyecto=${proyecto}`).then(r => r.copias);
@@ -123,7 +164,8 @@ export const proponeReparto = (proyecto: number, carpeta: string, rama: string, 
 // COPIES_CHANGED: aviso de que han cambiado las copias de trabajo (Actividad → Copias de trabajo se recarga).
 export const COPIES_CHANGED = 'pgo:copias';
 
-// subfolderAction: an action of the ⋮ menu of a subfolder (git worktree): cambios, abrir, subir, pr, descartar, olvidar.
+// subfolderAction: an action of the ⋮ menu of a subfolder (git worktree) on the server: cambios, subir, pr, descartar,
+// olvidar («abrir» is openFolder, in the desktop app).
 export const subfolderAction = <T = { ok: boolean },>(proyecto: number, carpeta: string, accion: string) =>
   post<T>('/api/proyecto/subcarpeta', { proyecto, carpeta, accion });
 const avisaCopias = <T,>(r: T) => { window.dispatchEvent(new Event(COPIES_CHANGED)); return r; };

@@ -21,9 +21,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -141,8 +139,10 @@ type Servidor struct {
 	// PermitirNavegador abre Planes Go Code también al navegador (parámetro -navegador): sin él, y sin TokenEscritorio,
 	// no se atiende ninguna petición.
 	PermitirNavegador bool
-	// escritorios: los escritorios remotos abiertos (rdp.go).
-	escritorios rdpSessions
+	// remote: the remote sessions (RDP and AnyDesk) the clients report (remotesessions.go); clientUser: the user
+	// session last seen from each client.
+	remote     remoteSessions
+	clientUser clientUsers
 	// sqls: las conexiones con SQL Server de las sesiones de trabajo (sqlconn.go); SQLAudit: su registro de auditoría.
 	sqls     sqlConns
 	SQLAudit string
@@ -154,8 +154,8 @@ type Servidor struct {
 	agentDesktops       sessionConns[*agentdesktop.Desktop]
 	AgentDesktopAudit   string
 	agentDesktopOptions func() (agentdesktop.Options, error)
-	// anydesk: the AnyDesk sessions seen in its traces (anydesk.go); AnyDeskFile: its settings (default project and
-	// the project of each remote computer).
+	// anydesk, AnyDeskFile: the AnyDesk settings (anydesk.go: default project and the project of each remote
+	// computer).
 	anydesk     anydeskSessions
 	AnyDeskFile string
 	// memPending: las sesiones del agente que reciben otra vez la memoria del proyecto (memory.go).
@@ -229,7 +229,6 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/planes/leer", s.conSesion(s.planesLee))
 	mux.HandleFunc("POST /api/planes", s.conSesion(s.planesGuarda))
 	mux.HandleFunc("POST /api/planes/borrar", s.conSesion(s.planesBorra))
-	mux.HandleFunc("POST /api/abrir", s.conSesion(s.abrir))
 	mux.HandleFunc("GET /api/eventos", s.conSesion(s.eventos))
 	mux.HandleFunc("GET /api/skills", s.conSesion(s.skillsInventario))
 	mux.HandleFunc("GET /api/skills/texto", s.conSesion(s.skillsTexto))
@@ -255,7 +254,6 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/clientes/yo", s.clientsMe)
 	mux.HandleFunc("GET /api/clientes", s.conSesion(s.clientsList))
 	mux.HandleFunc("POST /api/clientes/revocar", s.conSesion(s.clientsRevoke))
-	mux.HandleFunc("GET /api/rdp", s.conSesion(s.rdpState))
 	mux.HandleFunc("GET /api/sql", s.conSesion(s.sqlState))
 	mux.HandleFunc("POST /api/sql/connect", s.conSesion(s.sqlConnect))
 	mux.HandleFunc("POST /api/sql/disconnect", s.conSesion(s.sqlDisconnect))
@@ -270,10 +268,13 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /api/agent-desktop", s.conSesion(s.agentDesktopState))
 	mux.HandleFunc("POST /api/agent-desktop/start", s.conSesion(s.agentDesktopStart))
 	mux.HandleFunc("POST /api/agent-desktop/stop", s.conSesion(s.agentDesktopStop))
-	mux.HandleFunc("POST /api/rdp/conectar", s.conSesion(s.rdpConnect))
-	mux.HandleFunc("POST /api/rdp/desconectar", s.conSesion(s.rdpDisconnect))
+	// Remote sessions: reported by the clients' desktop helper (its token, no user session) and listed for the
+	// interface (remotesessions.go).
+	mux.HandleFunc("GET /api/remote/sessions", s.conSesion(s.remoteList))
+	mux.HandleFunc("POST /api/remote/sessions", s.remoteCreate)
+	mux.HandleFunc("POST /api/remote/sessions/{id}/beat", s.remoteBeatHandler)
+	mux.HandleFunc("POST /api/remote/sessions/{id}/end", s.remoteEnd)
 	mux.HandleFunc("GET /api/anydesk", s.conSesion(s.anydeskState))
-	mux.HandleFunc("POST /api/anydesk/connect", s.conSesion(s.anydeskConnect))
 	mux.HandleFunc("POST /api/anydesk/assign", s.conSesion(s.anydeskAssign))
 	mux.HandleFunc("POST /api/anydesk/default", s.conSesion(s.anydeskDefault))
 	mux.HandleFunc("GET /api/procesos", s.conSesion(s.procesosLista))
@@ -439,6 +440,7 @@ func (s *Servidor) conSesion(f manejador) http.HandlerFunc {
 			jsonError(w, http.StatusUnauthorized, "la sesión ha caducado: vuelve a entrar")
 			return
 		}
+		s.noteClientUser(r, ses)
 		if antigua {
 			s.poneCookieSesion(w, r, ses.Token, int(sesiones.Duracion.Seconds()))
 			http.SetCookie(w, &http.Cookie{Name: cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
@@ -561,10 +563,8 @@ func (s *Servidor) TrabajoEnCurso() string {
 		return "hay un programa en marcha"
 	case s.EstudioOcupado != nil && s.EstudioOcupado():
 		return "el Studio TV está emitiendo o grabando"
-	case s.escritorios.open() > 0:
-		return "hay un escritorio remoto abierto"
-	case s.anydesk.open() > 0:
-		return "hay una sesión de AnyDesk abierta"
+	case s.remote.logging() > 0:
+		return "hay una sesión de escritorio remoto o de AnyDesk abierta"
 	case s.agentDesktopsRunning() > 0:
 		return "hay un escritorio del agente abierto"
 	}
@@ -1133,49 +1133,6 @@ func modoPoda(podar *bool) string {
 		return llm.PruneOff
 	}
 	return llm.PruneAuto
-}
-
-// abrir abre una URL en el navegador del sistema (el arnés corre en el equipo del usuario).
-func (s *Servidor) abrir(w http.ResponseWriter, r *http.Request, ses *sesiones.Sesion) {
-	var p struct {
-		Proyecto int    `json:"proyecto"`
-		URL      string `json:"url"`
-	}
-	if err := lee(r, &p); err != nil {
-		jsonError(w, http.StatusBadRequest, "petición no válida")
-		return
-	}
-	if _, ok := s.proyecto(w, r, ses, p.Proyecto); !ok {
-		return
-	}
-	u, err := url.Parse(p.URL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		jsonError(w, http.StatusBadRequest, "solo se abren direcciones http o https")
-		return
-	}
-	if err := openWithSystem(u.String()); err != nil {
-		jsonError(w, http.StatusInternalServerError, "no se pudo abrir el navegador: "+err.Error())
-		return
-	}
-	jsonOK(w, map[string]bool{"ok": true})
-}
-
-// openWithSystem opens an already validated web address or local folder with the system's default program.
-func openWithSystem(target string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", target)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
-	default:
-		cmd = exec.Command("xdg-open", target)
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go cmd.Wait()
-	return nil
 }
 
 // studioConexion devuelve la conexión de Studio TV del proyecto y los datos del estudio local.

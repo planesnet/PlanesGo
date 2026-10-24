@@ -1,12 +1,13 @@
 // Planes Go Code escritorio (el cliente): usa el servidor pgocode de este equipo (lo arranca si no está en marcha; sigue
 // funcionando aunque se cierre la ventana) y muestra su interfaz. Se empareja con él una vez y entra con su token.
 // El panel de navegador usa <webview>, que puede cargar cualquier web (un iframe no).
-const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, powerMonitor, safeStorage, session, shell } = require('electron');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const readline = require('node:readline');
 const googleReader = require('./googleReader');
 
 const ADDR = process.env.PGO_ADDR || '127.0.0.1:7801';
@@ -143,6 +144,72 @@ function vigilaServidor(version) {
   }, 20000);
 }
 
+// El ayudante de escritorio (el mismo binario, «pgocode-backend cliente»; internal/desktop): abre los visores (RDP con
+// FreeRDP y AnyDesk) en este equipo y le cuenta al servidor sus sesiones, que solo lleva el tiempo. Es hijo de esta app
+// (muere con ella: al cerrarse su entrada cierra sus ventanas de RDP). Recibe la dirección del servidor y el token del
+// cliente por entorno (nunca como argumentos) y habla en líneas JSON: órdenes por su entrada y eventos por su salida.
+let ayudante = null;
+let saliendo = false;
+let ordenes = 0;
+const pendientes = new Map();
+let visores = { rdp: false, anydesk: false };
+
+function aTodas(canal, datos) {
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(canal, datos);
+}
+
+function lanzaAyudante() {
+  const bin = binario();
+  if (!bin) return;
+  const p = spawn(bin, ['cliente'], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true,
+    env: { ...process.env, PGO_SERVIDOR: URL_ARNES, PGO_TOKEN_CLIENTE: tokenCliente, PGO_DESACOPLADO: '1' } });
+  ayudante = p;
+  p.stdin.on('error', () => { /* se ha cerrado: lo dice «exit» */ });
+  readline.createInterface({ input: p.stdout }).on('line', linea => {
+    let ev;
+    try { ev = JSON.parse(linea); } catch { return; }
+    if (ev.event === 'ready') visores = ev.available || visores;
+    else if (ev.event === 'reply' && pendientes.has(ev.req)) {
+      const { ok, mal, espera } = pendientes.get(ev.req);
+      pendientes.delete(ev.req);
+      clearTimeout(espera);
+      if (ev.error) mal(new Error(ev.error)); else ok({ id: ev.id || '' });
+    } else if (ev.event === 'state' || ev.event === 'error') {
+      if (ev.error) console.error('[pgocode] ' + (ev.kind || 'remoto') + ': ' + ev.error);
+      aTodas('pgo:remoto', ev);
+    }
+  });
+  p.on('exit', codigo => {
+    if (ayudante === p) ayudante = null;
+    for (const { mal, espera } of pendientes.values()) { clearTimeout(espera); mal(new Error('el ayudante de escritorio se ha cerrado')); }
+    pendientes.clear();
+    if (!saliendo) {
+      console.error('[pgocode] el ayudante de escritorio ha terminado (' + codigo + '): se vuelve a arrancar');
+      setTimeout(() => { if (!saliendo && !ayudante) lanzaAyudante(); }, 2000);
+    }
+  });
+}
+
+function aAyudante(orden) {
+  if (ayudante && ayudante.stdin.writable) ayudante.stdin.write(JSON.stringify(orden) + '\n');
+}
+
+// pideAyudante: una orden con respuesta (la contraseña de RDP solo pasa por aquí, hacia FreeRDP).
+function pideAyudante(orden) {
+  if (!ayudante) return Promise.reject(new Error('El ayudante de escritorio no está en marcha: vuelve a abrir Planes Go Code'));
+  return new Promise((ok, mal) => {
+    const req = String(++ordenes);
+    const espera = setTimeout(() => { pendientes.delete(req); mal(new Error('el ayudante de escritorio no responde')); }, 30000);
+    pendientes.set(req, { ok, mal, espera });
+    aAyudante({ ...orden, req });
+  });
+}
+
+// La inactividad del teclado y el ratón de este equipo (Linux, Windows y macOS): el ayudante solo imputa el tiempo
+// de una sesión remota con alguien delante.
+setInterval(() => { if (ayudante) aAyudante({ op: 'idle', idle_seconds: powerMonitor.getSystemIdleTime() }); }, 5000);
+app.on('will-quit', () => { saliendo = true; if (ayudante) ayudante.stdin.end(); });
+
 const esWeb = u => { try { return ['http:', 'https:'].includes(new URL(u).protocol); } catch { return false; } };
 // Comparación por origen exacto (no por prefijo: «…:78010» o «…:7801@otra.com» no son el arnés).
 const ORIGEN_ARNES = new URL(URL_ARNES).origin;
@@ -223,7 +290,7 @@ function ventana() {
 }
 
 // Ventana del escritorio remoto (pgocode --rdp): la interfaz de pgocode en modo escritorio remoto, con la sesión de
-// esta app. La ventana de Windows la abre el backend (FreeRDP).
+// esta app. La ventana de Windows (FreeRDP) y AnyDesk los abre el ayudante de escritorio.
 function ventanaRdp() {
   if (rdp) { if (rdp.isMinimized()) rdp.restore(); rdp.focus(); return; }
   rdp = new BrowserWindow({
@@ -273,7 +340,37 @@ app.on('web-contents-created', (_, wc) => {
   }
 });
 
+// Solo la interfaz del arnés (las ventanas con preload; los <webview> no lo tienen) puede usar estos canales.
+const deArnes = e => esArnes(e.senderFrame ? e.senderFrame.url : '');
+const texto = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : '');
+
 ipcMain.handle('escritorio-remoto', () => { ventanaRdp(); });
+// Los visores, a través del ayudante: conectar por RDP o AnyDesk, desconectar y qué hay instalado en este equipo.
+ipcMain.handle('remoto', (e, o) => {
+  if (!deArnes(e) || !o || typeof o !== 'object') throw new Error('orden no válida');
+  const proyecto = Number.isInteger(o.project) ? o.project : 0;
+  switch (o.op) {
+    case 'rdp':
+      return pideAyudante({ op: 'rdp', project: proyecto, name: texto(o.name), host: texto(o.host), user: texto(o.user), password: texto(o.password, 1024) });
+    case 'anydesk':
+      return pideAyudante({ op: 'anydesk', project: proyecto, peer: texto(o.peer) });
+    case 'disconnect':
+      return pideAyudante({ op: 'disconnect', id: texto(o.id, 64) });
+    default:
+      throw new Error('orden no válida');
+  }
+});
+ipcMain.handle('visores', e => { if (!deArnes(e)) throw new Error('no permitido'); return visores; });
+// Abrir una carpeta de este equipo en el gestor de archivos (p. ej. «Abrir la carpeta» de una subcarpeta). Solo
+// carpetas que existen: un fichero podría ser un programa, y abrirlo sería ejecutarlo.
+ipcMain.handle('abrir-ruta', async (e, ruta) => {
+  if (!deArnes(e) || typeof ruta !== 'string' || !path.isAbsolute(ruta)) throw new Error('ruta no válida');
+  let st;
+  try { st = fs.statSync(ruta); } catch { throw new Error('La carpeta ' + ruta + ' no existe'); }
+  if (!st.isDirectory()) throw new Error('Solo se abren carpetas');
+  const error = await shell.openPath(ruta);
+  if (error) throw new Error(error);
+});
 ipcMain.handle('abrir-fuera', (_, url) => { if (esWeb(url)) return shell.openExternal(url); throw new Error('solo http o https'); });
 // Diálogo de carpetas del sistema (carpeta de una sesión, directorio principal de un proyecto).
 ipcMain.handle('elegir-carpeta', async (e, inicial) => {
@@ -295,6 +392,7 @@ app.whenReady().then(async () => {
     // La cookie solo existe en la sesión de esta ventana (los <webview> usan otras particiones).
     await session.defaultSession.cookies.set({ url: URL_ARNES, name: 'pgo_escritorio', value: tokenCliente, httpOnly: true, sameSite: 'strict' });
     vigilaServidor((await pide('GET', '/api/version')).version);
+    lanzaAyudante();
     if (quiereRdp(process.argv)) ventanaRdp(); else ventana();
     // Descargas de Google que pide el backend (pgo drive leer, pgo gmail leer), con la sesión del panel Web.
     const reader = googleReader.createReader({ BrowserWindow, userData: app.getPath('userData'), tmpDir: app.getPath('temp'),

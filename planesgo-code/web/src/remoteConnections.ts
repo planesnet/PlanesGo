@@ -32,3 +32,8 @@ export function normalizePeer(s: string): string {
   const alias = t.toLowerCase();
   return /^[a-z0-9][a-z0-9._-]{0,62}@[a-z0-9][a-z0-9_-]{0,31}$/.test(alias) ? alias : '';
 }
+
+// ipcError: the error of a call to the desktop app (Electron adds «Error invoking remote method '…': Error: » to the
+// message), with only what the person has to read.
+export const ipcError = (e: unknown): Error =>
+  new Error(String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, ''));

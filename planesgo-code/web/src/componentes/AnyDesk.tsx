@@ -1,36 +1,38 @@
 // AnyDesk in pgocode: the form that opens the installed client on a project (AnyDesk asks for the password itself:
 // pgocode never sees it) and the dialog that gives a project to the sessions without one (incoming ones, or opened
-// from AnyDesk itself): their time is not logged until then. The backend follows AnyDesk's traces
-// (internal/anydesk) to know when each session starts and ends.
+// from AnyDesk itself): their time is not logged until then. The desktop app's helper (internal/desktop) opens AnyDesk
+// and follows its traces to know when each session starts and ends; the server keeps the sessions and their projects.
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { escuchaAvisos, get, post, type Proyecto, type Usuario } from '../api';
+import { escuchaAvisos, get, post, remoteOrder, type Proyecto, type RemoteSession, type Usuario } from '../api';
 import { Modal, showMessage } from './Modal';
 import { BuscaProyecto } from './Proyectos';
 import ProjectField from './ProjectField';
 import { formatPeer, normalizePeer, readSaved, remember, writeSaved } from '../remoteConnections';
 
-export interface AnyDeskSession {
-  id: string; direction: 'outgoing' | 'incoming'; peer: string; peer_name?: string; project: number; project_name?: string; started: string;
-}
-export interface AnyDeskState { available: boolean; sessions: AnyDeskSession[]; default_project: number; default_project_name: string }
+// available: AnyDesk is installed on this computer (only known in the desktop app).
+export interface AnyDeskState { available: boolean; sessions: RemoteSession[]; default_project: number; default_project_name: string }
 interface SavedPeer { peer: string; project: number }
 
 const TITLE = 'AnyDesk';
 
-// useAnyDesk: the backend's AnyDesk state, up to date with its notices (and every 15 s, in case one is lost).
+// useAnyDesk: the AnyDesk sessions and settings, up to date with the server's notices (and every 15 s, in case one is
+// lost), and whether this computer has AnyDesk.
 export function useAnyDesk(): [AnyDeskState | null, () => void] {
   const [state, setState] = useState<AnyDeskState | null>(null);
-  const load = useCallback(() => { get<AnyDeskState>('/api/anydesk').then(setState).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    Promise.all([get<Omit<AnyDeskState, 'available'>>('/api/anydesk'), window.psf?.visores?.().catch(() => null)])
+      .then(([s, v]) => setState({ ...s, available: Boolean(v?.anydesk) })).catch(() => {});
+  }, []);
   useEffect(() => {
     load();
-    const off = escuchaAvisos(a => { if (a.tipo === 'anydesk') load(); });
+    const off = escuchaAvisos(a => { if (a.tipo === 'remoto') load(); });
     const t = setInterval(load, 15000);
     return () => { clearInterval(t); off(); };
   }, [load]);
   return [state, load];
 }
 
-const peerLabel = (s: AnyDeskSession) => {
+const peerLabel = (s: RemoteSession) => {
   const id = s.peer ? formatPeer(s.peer) : 'un equipo desconocido';
   return s.peer_name ? `${s.peer_name} (${id})` : id;
 };
@@ -53,7 +55,7 @@ export function AnyDeskForm({ user, projects, state, reload }: { user: Usuario; 
     if (!peer) { showMessage('El ID de AnyDesk son solo cifras (p. ej. 123 456 789) o un alias como equipo@ad.', { level: 'error', title: TITLE }); return; }
     setSending(true);
     try {
-      await post('/api/anydesk/connect', { project: c.project, peer });
+      await remoteOrder({ op: 'anydesk', project: c.project, peer });
       const l = remember(saved, { peer, project: c.project }, (a, b) => a.peer === b.peer);
       setSaved(l);
       writeSaved('anydesk', user.login, l);
@@ -78,7 +80,7 @@ export function AnyDeskForm({ user, projects, state, reload }: { user: Usuario; 
       {state?.default_project ? (
         <p className="rdp-nota">Entrantes: <b>{state.default_project_name}</b><button type="button" className="enlace" onClick={clearDefault}>Quitar</button></p>
       ) : null}
-      <button className="primario" disabled={sending || unavailable} title={unavailable ? 'AnyDesk no está instalado en este equipo' : undefined}>
+      <button className="primario" disabled={sending || unavailable} title={unavailable && window.psf ? 'AnyDesk no está instalado en este equipo' : undefined}>
         {sending ? 'Abriendo AnyDesk…' : 'Conectar'}
       </button>
     </form>

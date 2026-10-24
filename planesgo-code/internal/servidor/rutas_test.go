@@ -46,7 +46,9 @@ func TestRutasSinSesion(t *testing.T) {
 	// Public on purpose: a client pairs and checks its token before anybody logs in (clients.go).
 	publicas := map[string]bool{"POST /api/login": true, "GET /api/version": true, "POST /api/clientes/emparejar": true, "GET /api/clientes/yo": true}
 	// Las del canal de Google con Electron: sin sesión de usuario, pero solo con el secreto de la app de escritorio.
-	soloElectron := map[string]bool{"GET /api/escritorio/google/trabajo": true, "POST /api/escritorio/google/resultado": true}
+	// And the remote sessions the desktop helper of a client reports (remotesessions.go): only with a client's token.
+	soloElectron := map[string]bool{"GET /api/escritorio/google/trabajo": true, "POST /api/escritorio/google/resultado": true,
+		"POST /api/remote/sessions": true, "POST /api/remote/sessions/{id}/beat": true, "POST /api/remote/sessions/{id}/end": true}
 	s := &Servidor{Puerto: "7801", PermitirNavegador: true, TokenAgente: "agente", Sesiones: sesiones.NuevoAlmacen()}
 	h := s.Handler()
 	for _, x := range rutasAPI(t) {

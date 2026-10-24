@@ -1,5 +1,5 @@
 import { createElement, useEffect, useRef, useState, type FormEvent } from 'react';
-import { enEscritorio, post, type Proyecto } from '../api';
+import { enEscritorio, openOutside, type Proyecto } from '../api';
 import * as L from '../lanzador';
 import Icono from './Icono';
 import { SelectorFormato } from './Lanzador';
@@ -148,8 +148,7 @@ export default function Navegador({ proyecto, pedido }: { proyecto: Proyecto; pe
   const fuera = async () => {
     if (!actual.url) return;
     try {
-      if (window.psf) await window.psf.abrirFuera(actual.url);
-      else await post('/api/abrir', { proyecto: proyecto.id, url: actual.url });
+      await openOutside(actual.url);
     } catch { /* sin navegador del sistema */ }
   };
 

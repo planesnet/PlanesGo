@@ -45,15 +45,17 @@ código y fuera de la carpeta de datos de pgocode (sus agentes no la pueden leer
 
 Es parte de pgocode, no de esta carpeta: `pgocode --rdp` abre la app en modo escritorio remoto (con pgocode ya abierto,
 la misma instancia y la misma sesión; si no, el acceso de siempre). Código: `electron/main.js` (instancia única y
-ventana), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo de pgocode) e
-`internal/servidor/rdp.go` (abre FreeRDP e imputa; lo común con el escritorio del agente, en `internal/freerdp`). La
-ventana pide:
+ventana; lanza el ayudante de escritorio), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo de
+pgocode), `internal/desktop` (el ayudante de escritorio del cliente: abre FreeRDP en el equipo de la persona; lo común
+con el escritorio del agente, en `internal/freerdp`) e `internal/servidor/remotesessions.go` (el servidor solo lleva
+las sesiones y su tiempo). La ventana pide:
 
 1. **Proyecto** (obligatorio), con el buscador de la barra de proyectos: el tiempo se imputa en él con el servicio
-   de imputación de pgocode, mientras la sesión está conectada y hay uso del teclado o el ratón (inactividad de
-   GNOME); tras 10 minutos sin uso, nada. Se rige por las reglas del servicio (tramos y bloques de 15 minutos).
+   de imputación de pgocode, mientras la sesión está conectada y hay uso del teclado o el ratón (la inactividad del
+   sistema la mide Electron con `powerMonitor`, en Linux, Windows y macOS); tras 10 minutos sin uso, nada. Se rige por las reglas del servicio (tramos y bloques de 15 minutos).
 2. **Conexión**: nombre, equipo y usuario de Windows (`DOMINIO\usuario` o `usuario`).
-3. **Contraseña**: va del backend a FreeRDP por su entrada y no se guarda.
+3. **Contraseña**: va de la ventana al ayudante (IPC de Electron y su entrada estándar) y de él a FreeRDP por su
+   entrada; no pasa por el servidor ni se guarda.
 4. **Opciones**: sonido y micrófono (sí, salvo que se quiten) e impresoras de este equipo (ninguna salvo que se pidan).
    Siempre: portapapeles y carpeta compartida «Intercambio». Pantalla completa: Ctrl+Alt+Intro.
 
@@ -62,14 +64,34 @@ resto de pgocode). La entrada estándar de FreeRDP se cierra tras la contraseña
 
 La ventana de Windows es la nativa de FreeRDP (SDL3), con solo seguridad moderna: NLA, nivel 2 de OpenSSL,
 certificado aceptado la primera vez y aviso si cambia, y gráficos H.264 4:4:4. Mientras haya un escritorio abierto,
-pgocode no se actualiza. Las conexiones (sin contraseña) se guardan en el navegador de la app.
+pgocode no se actualiza. Las conexiones (sin contraseña) se guardan en el navegador de la app. Al cerrar la app, sus
+ventanas de RDP se cierran con ella. En el navegador (sin la app de escritorio) no hay visores: la ventana lo avisa.
+
+### Ayudante de escritorio y contrato con el servidor
+
+La app de escritorio arranca el ayudante (`pgocode-backend cliente`, el mismo binario) como hijo suyo tras
+emparejarse, con la dirección del servidor y el token del cliente por entorno (`PGO_SERVIDOR`, `PGO_TOKEN_CLIENTE`;
+nunca como argumentos). Hablan en líneas JSON: órdenes por su entrada (`rdp`, `anydesk`, `disconnect` e `idle` cada
+5 s con la inactividad del sistema) y eventos por su salida (`ready` con los visores instalados, `reply`, `state` y
+`error`). El ayudante cuenta al servidor cada sesión con la cookie del cliente:
+
+- `POST /api/remote/sessions` {kind, direction, project, name, host, user, peer, peer_name} → la sesión (su id). El
+  servidor valida el proyecto con la sesión de pgocode abierta en ese cliente (la cookie de la petición o la última
+  sesión de usuario vista desde ese cliente).
+- `POST /api/remote/sessions/{id}/beat` {active} cada 20 s: imputa si hay alguien al teclado (tras los primeros 10 s).
+- `POST /api/remote/sessions/{id}/end` {error}: cierra el periodo; el error, explicado, lo ve la ventana.
+- Sin latidos durante 60 s (app cerrada o caída, equipo dormido), el servidor cierra el periodo; si el ayudante
+  sigue, la vuelve a dar de alta. Solo el cliente que abrió una sesión la puede latir o cerrar.
+- `GET /api/remote/sessions` (interfaz): las sesiones abiertas y las terminadas hace poco, sin contraseñas.
 
 ### AnyDesk (misma ventana, pestaña «AnyDesk»)
 
 Sin la API REST de AnyDesk. La ventana pide el **proyecto** (obligatorio) y el **ID de AnyDesk** (cifras o un alias
-`equipo@ad`, validado en la web y en el backend) y abre el cliente instalado (`anydesk <ID>`, sin shell y sin nada de
-pgocode en su entorno); AnyDesk pide la contraseña él mismo. Código: `internal/anydesk` (lector de sus registros),
-`internal/servidor/anydesk.go` (lanza, sigue los registros e imputa) y `web/src/componentes/AnyDesk.tsx`.
+`equipo@ad`, validado en la web y en el ayudante) y el ayudante abre el cliente instalado (`anydesk <ID>`, sin shell y
+sin nada de pgocode en su entorno); AnyDesk pide la contraseña él mismo. Código: `internal/anydesk` (lector de sus
+registros), `internal/desktop` (lanza y sigue los registros en el equipo de la persona),
+`internal/servidor/anydesk.go` (proyecto de cada equipo, el de las entrantes y la asignación) y
+`web/src/componentes/AnyDesk.tsx`.
 
 El inicio y el fin de cada sesión salen de los registros de AnyDesk, seguidos como `tail -F` (también cuando AnyDesk
 los recorta): en Linux `~/.anydesk/anydesk.trace` (y `/var/log/anydesk.trace` si se puede leer); en Windows
