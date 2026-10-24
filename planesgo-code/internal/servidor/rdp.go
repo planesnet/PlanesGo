@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -35,16 +34,15 @@ const (
 
 // rdpConn: an open remote desktop.
 type rdpConn struct {
-	ID       string         `json:"id"`
-	Project  int            `json:"proyecto"`
-	Name     string         `json:"nombre"`
-	Host     string         `json:"equipo"`
-	User     string         `json:"usuario"`
-	Started  time.Time      `json:"inicio"`
-	State    string         `json:"estado"` // conectando, conectado, terminado
-	Error    string         `json:"error,omitempty"`
-	closed   bool           // the person disconnected it from pgocode: not an error
-	title    io.WriteCloser // descriptor 3 of FreeRDP: one line per window title (connectors/freerdp); nil on Windows
+	ID       string    `json:"id"`
+	Project  int       `json:"proyecto"`
+	Name     string    `json:"nombre"`
+	Host     string    `json:"equipo"`
+	User     string    `json:"usuario"`
+	Started  time.Time `json:"inicio"`
+	State    string    `json:"estado"` // conectando, conectado, terminado
+	Error    string    `json:"error,omitempty"`
+	closed   bool      // the person disconnected it from pgocode: not an error
 	cancel   context.CancelFunc
 	finished chan struct{}
 }
@@ -252,22 +250,7 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	c.cancel = cancel
 	cmd := exec.CommandContext(ctx, bin, rdpArgs(p.Name, p.Host, p.User)...)
 	proceso.GrupoPropio(cmd)
-	// Nothing of pgocode's (tokens, desktop secret) reaches FreeRDP. Its title (the logged time) goes through its
-	// descriptor 3 (PGO_TITULO_FD, the patch in connectors/freerdp), not its input: a new credentials prompt would
-	// read a title as the password. ExtraFiles does not exist on Windows.
-	cmd.Env = proceso.CleanEnviron()
-	if runtime.GOOS != "windows" {
-		pr, pw, err := os.Pipe()
-		if err != nil {
-			cancel()
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		defer pr.Close() // the child has its own copy once started
-		cmd.ExtraFiles = []*os.File{pr}
-		cmd.Env = append(cmd.Env, "PGO_TITULO_FD=3")
-		c.title = pw
-	}
+	cmd.Env = proceso.CleanEnviron() // nothing of pgocode's (tokens, desktop secret) reaches FreeRDP
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	stdin, err := cmd.StdinPipe()
@@ -307,9 +290,6 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 		}
 		s.escritorios.mu.Unlock()
 		close(c.finished)
-		if c.title != nil {
-			c.title.Close()
-		}
 		cancel()
 		if s.Imputacion != nil {
 			s.Imputacion.Cierra(work.Sesion, "escritorio remoto cerrado")
@@ -322,44 +302,10 @@ func (s *Servidor) rdpConnect(w http.ResponseWriter, r *http.Request, ses *sesio
 	jsonOK(w, snap)
 }
 
-// rdpTitle: the window title with the logged time, as pgocode's bar shows it: this session, the project today and
-// everything today.
-func (s *Servidor) rdpTitle(c *rdpConn, work imputacion.Trabajo) string {
-	title := c.Name
-	if work.NombreProy != "" {
-		title += " · " + work.NombreProy
-	}
-	if s.Imputacion == nil {
-		return title
-	}
-	hoy, abiertos := s.Imputacion.Estado()
-	var session, project, total float64
-	for _, a := range abiertos {
-		if a.Sesion == work.Sesion {
-			session = a.Horas
-		}
-	}
-	for _, l := range hoy {
-		total += l.Horas
-		if l.Proyecto == c.Project {
-			project += l.Horas
-		}
-	}
-	hm := func(h float64) string { m := int(h*60 + 0.5); return fmt.Sprintf("%d:%02d", m/60, m%60) }
-	return fmt.Sprintf("%s · sesión %s · proyecto hoy %s · total hoy %s", title, hm(session), hm(project), hm(total))
-}
-
-// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use, and
-// shows the logged time in the window title.
+// rdpTime reports the remote desktop's activity to the imputation service while it is connected and in use.
 func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 	t := time.NewTicker(rdpBeat)
 	defer t.Stop()
-	show := func() {
-		if c.title != nil {
-			fmt.Fprintln(c.title, s.rdpTitle(c, work))
-		}
-	}
-	show()
 	for {
 		select {
 		case <-c.finished:
@@ -380,7 +326,6 @@ func (s *Servidor) rdpTime(c *rdpConn, work imputacion.Trabajo) {
 		if s.Imputacion != nil {
 			s.Imputacion.Actividad(work)
 		}
-		show()
 	}
 }
 

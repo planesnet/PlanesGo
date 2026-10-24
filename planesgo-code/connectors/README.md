@@ -5,7 +5,6 @@ Conectores de pgocode para entrar en servidores remotos, la persona y el agente.
 ```
 connectors/
 ├── instala.sh        instala sin root lo que necesitan (Linux)
-├── freerdp/          parches propios de FreeRDP (se aplican al compilarlo)
 ├── rdp/
 │   └── rdp.py        escritorio remoto para el agente (pantalla virtual: capturas, ratón, teclado, vídeo)
 └── winrm/
@@ -30,8 +29,8 @@ connectors/instala.sh
 
 Todo va en `~/.local/opt/rdp-agente`, sin `sudo` (no funciona dentro de la app):
 
-- **FreeRDP** compilado desde la última versión publicada (`FREERDP_VERSION` y su SHA-256 en el script) con los
-  parches de `freerdp/`. Se compila una vez: solo se recompila si cambian la versión o los parches (su huella se
+- **FreeRDP** compilado desde la última versión publicada (`FREERDP_VERSION` y su SHA-256 en el script) y, si los hay,
+  los parches de `freerdp/*.patch`. Se compila una vez: solo se recompila si cambian la versión o los parches (su huella se
   guarda junto al binario):
   cliente SDL3 para la persona (Wayland nativo), cliente X11 para el agente, H.264 (AVC444) por ffmpeg, sonido por
   PulseAudio/PipeWire, impresoras CUPS, portapapeles con ficheros (FUSE) y Kerberos. Sin ALSA ni OSS, servidor,
@@ -57,10 +56,8 @@ ventana), `web/src/componentes/EscritorioRemoto.tsx` (la ventana, con el estilo 
 4. **Opciones**: sonido y micrófono (sí, salvo que se quiten) e impresoras de este equipo (ninguna salvo que se pidan).
    Siempre: portapapeles y carpeta compartida «Intercambio». Pantalla completa: Ctrl+Alt+Intro.
 
-El tiempo imputado se ve en el **título de la ventana de Windows** (`nombre · proyecto · sesión 0:12 · proyecto hoy
-2:35 · total hoy 4:10`), actualizado cada 20 s: el backend se lo manda a FreeRDP por su descriptor 3 gracias al
-parche `freerdp/titulo-por-descriptor.patch` (solo actúa con `PGO_TITULO_FD`). No por la entrada estándar, que se
-cierra tras la contraseña: una nueva petición de credenciales leería un título como contraseña.
+El tiempo se imputa en el proyecto elegido mientras la sesión está abierta y se usa el teclado o el ratón (como el
+resto de pgocode). La entrada estándar de FreeRDP se cierra tras la contraseña: no lee nada más.
 
 La ventana de Windows es la nativa de FreeRDP (SDL3), con solo seguridad moderna: NLA, nivel 2 de OpenSSL,
 certificado aceptado la primera vez y aviso si cambia, y gráficos H.264 4:4:4. Mientras haya un escritorio abierto,
